@@ -22,7 +22,7 @@ class EntryPresentationTest(unittest.TestCase):
             human=run_python(vault/'beyin.py',['doctor','--human'],vault,env)
             self.assertEqual(human.returncode,0,human.stderr)
             text=human.stdout.decode('utf-8')
-            self.assertIn('3.0.0',text)
+            self.assertIn('0.0.0',text)
             self.assertIn('oturum',text.lower())
             self.assertNotIn('"hook-health.json"',text)
             self.assertNotIn(str(state),text)

@@ -40,7 +40,7 @@ class OfflineUpdateTest(unittest.TestCase):
         self.env = isolated_env(self.base / 'home')
         result = install(self.vault, self.state, self.env)
         self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
         self.note = self.vault / 'user-note.md';self.note.write_text('Synthetic original user note.\n')
         self.package = build_package(self.base / 'release.zip', '3.0.1', self.env)
         def changed_runtime(files):
@@ -69,7 +69,7 @@ class OfflineUpdateTest(unittest.TestCase):
         self.assertEqual(json.loads((self.state / 'update-journal.json').read_text())['direction'], 'rollback')
         result = self.module.rollback(self.vault, self.state)
         self.assertEqual(result['status'], 'rolled_back')
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
         self.assertEqual(core.read_bytes(), original)
         self.assertEqual(user_note.read_text(), 'Synthetic note survives rollback retry.')
         self.assertFalse((self.state / 'update-journal.json').exists())
@@ -81,7 +81,7 @@ class OfflineUpdateTest(unittest.TestCase):
         self.assertEqual(report['status'], 'available')
         self.assertEqual(snapshot(self.vault), before_vault)
         self.assertEqual(snapshot(self.state), before_state)
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
 
     def test_update_idempotent_and_rollback_preserves_new_user_note(self):
         core = self.vault / '.claude/scripts/beyin_v3.py'
@@ -96,7 +96,7 @@ class OfflineUpdateTest(unittest.TestCase):
         self.note.write_text('User edit after system update.\n')
         rolled = self.module.rollback(self.vault, self.state)
         self.assertEqual(rolled['status'], 'rolled_back')
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
         self.assertEqual(core.read_bytes(), original)
         self.assertEqual(self.note.read_text(), 'User edit after system update.\n')
 
@@ -134,7 +134,7 @@ class OfflineUpdateTest(unittest.TestCase):
         self.module.update(self.vault, self.state, self.package)
         self.assertEqual(self.version(), '3.0.1')
         self.module.rollback(self.vault, self.state)
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
         self.assertEqual(core.stat().st_mtime, old_time)
 
     def test_rollback_keeps_new_mtime_of_merged_settings(self):
@@ -159,7 +159,7 @@ class OfflineUpdateTest(unittest.TestCase):
         with patch.object(self.module, 'transaction_hook', side_effect=crash):
             with self.assertRaises(OSError):
                 self.module.update(self.vault, self.state, self.package)
-        self.assertEqual(self.version(), '3.0.0', 'Version stamp must be the last successful step')
+        self.assertEqual(self.version(), '0.0.0', 'Version stamp must be the last successful step')
         self.assertEqual(self.note.read_text(), 'Synthetic original user note.\n')
         recovered = self.module.recover(self.vault, self.state)
         self.assertEqual(recovered['status'], 'recovered')
@@ -220,7 +220,7 @@ class OfflineUpdateTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'package checksum mismatch'):
             self.module.update(self.vault, self.state, bad2)
         self.assertEqual(snapshot(self.vault), before)
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
 
     def test_path_traversal_and_nonallowlisted_paths_rejected(self):
         for name in ('../escaped.txt', '/absolute.txt', 'notes/user-note.md'):
@@ -244,7 +244,7 @@ class OfflineUpdateTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.module.update(self.vault, self.state, self.package)
         self.assertEqual(core.read_bytes(), modified)
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
         self.assertEqual(self.note.read_text(), 'Synthetic original user note.\n')
 
     def test_unrelated_config_addition_survives_update_and_rollback(self):
@@ -293,7 +293,7 @@ class OfflineUpdateTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.module.recover(self.vault, self.state)
         self.assertEqual(core.read_bytes(), modified)
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
 
 
     def test_installed_entrypoint_check_apply_and_rollback(self):
@@ -305,7 +305,7 @@ class OfflineUpdateTest(unittest.TestCase):
             result = run_python(entry, arguments, self.vault, self.env)
             self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
             self.assertEqual(json.loads(result.stdout)['status'], status)
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
 
 
     def test_truncated_download_artifact_cannot_apply_or_stamp_version(self):
@@ -316,7 +316,7 @@ class OfflineUpdateTest(unittest.TestCase):
         with self.assertRaises((ValueError, zipfile.BadZipFile)):
             self.module.update(self.vault, self.state, truncated)
         self.assertEqual(snapshot(self.vault), before)
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
 
 
     def test_checksum_valid_broken_runtime_fails_preflight_before_target_writes(self):
@@ -334,7 +334,7 @@ class OfflineUpdateTest(unittest.TestCase):
                 with self.assertRaises((ValueError, SyntaxError, RuntimeError)):
                     self.module.update(self.vault, self.state, package)
                 self.assertEqual(snapshot(self.vault), before)
-                self.assertEqual(self.version(), '3.0.0')
+                self.assertEqual(self.version(), '0.0.0')
 
 
     @unittest.skipIf(os.name == 'nt', 'POSIX permission bits; native Windows mode semantics differ')
@@ -351,7 +351,7 @@ class OfflineUpdateTest(unittest.TestCase):
                 self.module.update(self.vault, self.state, self.package)
         self.assertEqual(len(failed_target), 1)
         path, intended_mode = failed_target[0]
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
         self.assertEqual(self.module.recover(self.vault, self.state)['status'], 'recovered')
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), intended_mode)
         self.assertEqual(self.version(), '3.0.1')
@@ -505,7 +505,7 @@ class OfflineUpdateTest(unittest.TestCase):
             self.assertEqual(self.version(), '3.0.1')
             self.assertFalse(os.access(version, os.W_OK))
             self.module.rollback(self.vault, self.state)
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
         self.assertFalse(os.access(version, os.W_OK))
 
 

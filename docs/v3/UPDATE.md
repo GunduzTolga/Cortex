@@ -213,7 +213,7 @@ Kullanıcı gereksinim duymadığı bileşenleri (`skills/<ad>`, `adapters/<ad>`
 Repo kökünde:
 
 ```sh
-python3 scripts/build_v3_release.py --output "/tmp/beyin-v3-3.10.0.zip" --version 3.10.0
+python3 scripts/build_v3_release.py --output "/tmp/beyin-v3-1.0.0.zip" --version 1.0.0
 ```
 
 Bu komut yalnız yerel ZIP oluşturur, GitHub'a yayınlamaz. Paket `manifest.json`, izin verilen installer/giriş dosyaları, runtime modülleri ve üç skill'i içerir. Manifest sürüm, schema/runtime schema, minimum Python, dosya hashleri ve tanınan legacy hashlerini taşır. Release yayınlama ve final platform CI ayrı işlemlerdir.
@@ -230,6 +230,6 @@ Online ZIP indirmesinde GitHub asset SHA-256 ve varsa resmi checksum dosyası, h
 
 ## Bakımcı için yayın
 
-`VERSION` ve `docs/v3/releases/X.Y.Z.md` aynı sürümü tanımlar. `Verified V3 release package` workflow'u ZIP'i bir kez build eder; altı OS/Python kombinasyonu bu aynı ZIP'i temiz kurulum, devralınan 3.9.0 paketinden geçiş (deponun ilk commit'i `7177077`'den build edilir; bu commit yeniden yazılmamalı), no-op, rollback ve kesinti/recover ile doğrular. PR çalışmaları yayın yapmaz.
+`VERSION` ve `docs/v3/releases/X.Y.Z.md` aynı sürümü tanımlar. `Verified V3 release package` workflow'u ZIP'i bir kez build eder; altı OS/Python kombinasyonu bu aynı ZIP'i temiz kurulum, devralınan koddan geçiş (deponun ilk commit'i `7177077`'den `0.9.0` etiketiyle build edilir; bu commit yeniden yazılmamalı), no-op, rollback ve kesinti/recover ile doğrular. PR çalışmaları yayın yapmaz.
 
 Main üzerinde manuel `workflow_dispatch` ve `publish=true`, testler yeşilse aynı bytes'ı önce draft olarak yükler, sonra stable/latest yayınlar ve yayınlanmış asset'i tekrar indirip doğrular. Var olan release'in üzerine yazılmaz; yeni sürüm numarası gerekir. Opsiyonel global köprü (#41) V3.2.0 ile pakete girdi; kurulum ve güncelleme global ayarları değiştirmez ([GLOBAL-BRIDGE.md](GLOBAL-BRIDGE.md)).

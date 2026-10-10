@@ -55,12 +55,12 @@ jobs:
         run: python scripts/build_v3_release.py --version "$VERSION" --output "dist/beyin-v3-$VERSION.zip"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # Cortex's first commit: the inherited 3.9.0 runtime every existing vault upgrades from.
+          # Cortex's first commit: the inherited runtime, labelled 0.9.0 so 1.0.0 and later are upgrades.
           ref: 7177077c57977a5959e641e767b7de39b9f2270c
           path: baseline-source
           persist-credentials: false
-      - name: Build the 3.9.0 installation baseline
-        run: python baseline-source/scripts/build_v3_release.py --version 3.9.0 --output baseline/beyin-v3-3.9.0.zip
+      - name: Build the inherited 0.9.0 installation baseline
+        run: python baseline-source/scripts/build_v3_release.py --version 0.9.0 --output baseline/beyin-v3-0.9.0.zip
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: v3-release-bundle
@@ -98,11 +98,11 @@ jobs:
         run: python -m unittest discover -s tests -p "v3_*test.py"
       - name: Retrieval gates
         run: python scripts/evaluate_v3.py
-      - name: Exact ZIP installation, upgrade from 3.9.0, rollback and recovery
+      - name: Exact ZIP installation, upgrade from 0.9.0, rollback and recovery
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/verify_v3_release.py --package "dist/beyin-v3-$VERSION.zip" --baseline baseline/beyin-v3-3.9.0.zip
+          python scripts/verify_v3_release.py --package "dist/beyin-v3-$VERSION.zip" --baseline baseline/beyin-v3-0.9.0.zip
 
   publish:
     if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
@@ -139,7 +139,7 @@ jobs:
           set -euo pipefail
           gh release download "v$VERSION" --pattern 'beyin-v3-*.zip*' --dir published
           cmp "dist/beyin-v3-$VERSION.zip" "published/beyin-v3-$VERSION.zip"
-          python scripts/verify_v3_release.py --package "published/beyin-v3-$VERSION.zip" --baseline baseline/beyin-v3-3.9.0.zip
+          python scripts/verify_v3_release.py --package "published/beyin-v3-$VERSION.zip" --baseline baseline/beyin-v3-0.9.0.zip
           python - <<'PY'
           import os, sys, tempfile
           from pathlib import Path

@@ -123,7 +123,7 @@ class RedirectedChildrenTest(unittest.TestCase):
         with patch.object(self.updater, '_apply', apply), patch.object(self.updater, 'transaction_hook', crash):
             with self.assertRaises(OSError):
                 self.updater.update(self.vault, self.state, package)
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
         self.assertTrue((self.state / 'update-journal.json').exists())
         with self.redirected():
             self.assert_view_is_faked()
@@ -134,7 +134,7 @@ class RedirectedChildrenTest(unittest.TestCase):
         with self.redirected():
             rolled = self.updater.rollback(self.vault, self.state)
         self.assertEqual(rolled['status'], 'rolled_back')
-        self.assertEqual(self.version(), '3.0.0')
+        self.assertEqual(self.version(), '0.0.0')
 
     def test_installer_resume_recovers_through_the_same_check(self):
         # install_v3.py hands a pending journal to recover(); that path must not be a closed loop.

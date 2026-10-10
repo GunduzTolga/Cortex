@@ -79,20 +79,20 @@ jobs:
           python-version: ${{ matrix.python }}
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # Cortex's first commit: the inherited 3.9.0 runtime every existing vault upgrades from.
+          # Cortex's first commit: the inherited runtime, labelled 0.9.0 so 1.0.0 and later are upgrades.
           ref: 7177077c57977a5959e641e767b7de39b9f2270c
           path: baseline-source
           persist-credentials: false
-      - name: Build the 3.9.0 baseline and a local test candidate (never publish)
+      - name: Build the inherited 0.9.0 baseline and a local test candidate (never publish)
         shell: bash
         run: |
-          python baseline-source/scripts/build_v3_release.py --version 3.9.0 --output baseline/beyin-v3-3.9.0.zip
-          python scripts/build_v3_release.py --version 3.10.1 --output candidate/beyin-v3-3.10.1.zip
+          python baseline-source/scripts/build_v3_release.py --version 0.9.0 --output baseline/beyin-v3-0.9.0.zip
+          python scripts/build_v3_release.py --version 1.0.1 --output candidate/beyin-v3-1.0.1.zip
       - name: Clean install, all saved Jev modes, disable, rollback, interrupted recovery
         shell: bash
         run: |
           set -o pipefail
-          python scripts/verify_v3_jev_package.py --package candidate/beyin-v3-3.10.1.zip --baseline baseline/beyin-v3-3.9.0.zip | tee installed-proof.json
+          python scripts/verify_v3_jev_package.py --package candidate/beyin-v3-1.0.1.zip --baseline baseline/beyin-v3-0.9.0.zip | tee installed-proof.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

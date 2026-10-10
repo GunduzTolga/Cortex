@@ -4,7 +4,7 @@ Cortex, Claude Code, Codex veya Google Antigravity ile kullanabileceğin yerel i
 
 Python **3.11 veya üzeri** yeterli. Git, pip, Mem0 hesabı, API anahtarı veya sürekli açık sunucu gerekmez. Kullandığın AI istemcisinin kendi kurulumu ve hesabı ayrı olarak gerekir.
 
-> **V3.10.0, ilk Cortex sürümü:** Obsidian için isteğe bağlı **Ananas** görsel teması, maskot **Pyn** ve güncellemelerin artık Cortex'in kendi GitHub sürümlerinden gelmesi. İsteğe bağlı **yakala** aracı da yerinde: gördüğün yerde tek tuşla video, tweet, makale, mail ya da dosya yakala (`python3 beyin.py yakala kur`). 3.9.0 kurulu bir vault'u Cortex'e bir kez elle taşı (aşağıdaki **Manuel kurulum**, notların korunur); eski sürümün güncelleyicisi hâlâ eski adrese baktığı için ilk geçişte `update` işe yaramaz, sonraki güncellemeler Cortex'ten gelir. [Sürüm notları](docs/v3/releases/3.10.0.md) · [Ananas teması](#ananas-teması) · [Yakala](docs/v3/YAKALA.md) · [Güncelleme rehberi](docs/v3/UPDATE.md).
+> **Cortex 1.0.0, ilk sürüm:** Obsidian için isteğe bağlı **Ananas** görsel teması, maskot **Pyn** ve güncellemelerin artık Cortex'in kendi GitHub sürümlerinden gelmesi. İsteğe bağlı **yakala** aracı da yerinde: gördüğün yerde tek tuşla video, tweet, makale, mail ya da dosya yakala (`python3 beyin.py yakala kur`). 3.9.0 kurulu bir vault'u Cortex'e bir kez elle taşı (aşağıdaki **Manuel kurulum**, notların korunur); eski sürümün güncelleyicisi hâlâ eski adrese baktığı için ilk geçişte `update` işe yaramaz, sonraki güncellemeler Cortex'ten gelir. [Sürüm notları](docs/v3/releases/1.0.0.md) · [Ananas teması](#ananas-teması) · [Yakala](docs/v3/YAKALA.md) · [Güncelleme rehberi](docs/v3/UPDATE.md).
 
 ## En kolay kurulum: bir klasör, bir mesaj
 

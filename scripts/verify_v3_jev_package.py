@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Installed-ZIP optionality proof, with a verified real Jev-capable (>= 3.1.0) baseline. No provider I/O."""
+"""Installed-ZIP optionality proof, with a verified real Jev-capable baseline. No provider I/O."""
 import argparse
 import hashlib
 import json
@@ -16,8 +16,13 @@ def check(candidate, baseline):
     candidate, baseline = Path(candidate).resolve(), Path(baseline).resolve()
     new, old = verified(candidate), verified(baseline)
     as_tuple = lambda value: tuple(int(part) for part in value.split('.'))
-    if not (3, 1, 0) <= as_tuple(old['version']) < as_tuple(new['version']):
-        raise ValueError('This regression requires a Jev-capable (>= 3.1.0) baseline older than the candidate')
+    # Capability is read from the baseline's files, not its number: Cortex renumbered at 1.0.0.
+    with zipfile.ZipFile(baseline) as archive:
+        shipped = set(archive.namelist())
+    has_jev = 'template/.claude/scripts/beyin_v3_jev.py' in shipped
+    predates_laya = 'template/.claude/scripts/beyin_v3_laya.py' not in shipped
+    if not has_jev or not as_tuple(old['version']) < as_tuple(new['version']):
+        raise ValueError('This regression requires a Jev-capable baseline older than the candidate')
     lifecycle = verify(candidate, baseline)  # Same bytes: install, update, rollback, interrupted recovery.
     checks = []
     with tempfile.TemporaryDirectory(prefix='beyin-jev-package-') as tmp:
@@ -72,7 +77,7 @@ def check(candidate, baseline):
                                advanced_config_preserved=True, installed_memory_command=True,
                                markdown_alias_policy_roundtrip=True, provider_cache_created=False))
         # The optional local Laya provider lives in a nested `laya` block. A released client
-        # that predates it (< 3.4.0) rejects the unknown key, so after a rollback the advisor is
+        # that predates it rejects the unknown key, so after a rollback the advisor is
         # off (config_invalid) instead of treating the file as TypeSafe and sending the key to a
         # local port; a Laya-aware baseline keeps it shadow-only. Either way nothing listens on
         # the Laya port here and no provider call is made.
@@ -102,7 +107,6 @@ def check(candidate, baseline):
         old_status = cli('jev', 'status')
         assert not old_status['automatic_model_calls'], old_status
         found = cli('context', 'laya-proof-alias', '--project', 'demo', '--jev')
-        predates_laya = as_tuple(old['version']) < (3, 4, 0)
         if predates_laya:
             assert old_status['config_valid'] is False and old_status['mode'] == 'off', old_status
             assert found['jev']['mode'] == 'off' and found['jev']['diagnostics'] == ['config_invalid'], found['jev']

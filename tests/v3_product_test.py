@@ -72,7 +72,7 @@ class ProductInstallationTest(unittest.TestCase):
         note = self.vault / 'user-after-interruption.md'
         note.write_text('Synthetic note created while installation was interrupted.')
         installer.install(self.vault, self.state)
-        self.assertEqual((self.vault / '.beyin-version').read_text().strip(), '3.0.0')
+        self.assertEqual((self.vault / '.beyin-version').read_text().strip(), '0.0.0')
         self.assertTrue((self.vault / 'beyin.py').is_file())
         self.assertFalse((self.state / 'update-journal.json').exists())
         self.assertEqual(note.read_text(), 'Synthetic note created while installation was interrupted.')
@@ -133,7 +133,7 @@ class ProductInstallationTest(unittest.TestCase):
     def test_clean_install_entrypoint_version_skills_and_doctor(self):
         self.installed()
         self.assertTrue((self.vault / 'beyin.py').is_file())
-        self.assertEqual((self.vault / '.beyin-version').read_text(encoding='utf-8').strip(), '3.0.0')
+        self.assertEqual((self.vault / '.beyin-version').read_text(encoding='utf-8').strip(), '0.0.0')
         for name in ('beyin', 'beyin-doktor', 'beyin-guncelle'):
             canonical = self.vault / '.agents/skills' / name / 'SKILL.md'
             mirror = self.vault / '.claude/skills' / name / 'SKILL.md'

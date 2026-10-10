@@ -45,7 +45,7 @@ STOCK_DOCTOR_HASH = "fd7919c86d140314de82660b2b6f428e2804c4e4d5df35e68d9904dc0ab
 # scripts/skill.beyin-doktor.windows.md: from v3.0.2 on, install.ps1 swaps this edition in at
 # .claude before copying .claude\skills\* to .agents\skills, so a Windows V2 vault holds it twice.
 WINDOWS_STOCK_DOCTOR_HASH = "4b0e9aeae1067ae084380f7f179f12b9090213f3990c2973adbef999321e9a87"  # v3.0.2-v3.4.0
-# The same edition after the V2 hooks key became "cortex-beyin" (3.10.0).
+# The same edition after the V2 hooks key became "cortex-beyin" (1.0.0).
 CORTEX_WINDOWS_DOCTOR_HASH = "7c7a5c41f8c77790fc9a7c7b8b711f571981a841ece712fbcd940fedeb0639d8"
 RETIRED_STUB = b"# BEYIN_V3_LEGACY_RETIRED: canonical source runtime owns new outcomes.\n"
 
@@ -223,7 +223,7 @@ def semantic_unchanged(name, baseline, current, previous, kept=(), user_excluded
     return False
 
 
-def _install(vault, state, uninstall=False, plan_only=False, version="3.0.0", legacy_hashes=None,
+def _install(vault, state, uninstall=False, plan_only=False, version="0.0.0", legacy_hashes=None,
              legacy_skill_hashes=None, migration=None, migration_plan=None, accept_customized=(),
              keep_customized=(), exclude_components=(), include_components=()):
     vault, state = vault.resolve(), state.resolve()
@@ -687,7 +687,9 @@ def install(vault, state, uninstall=False, plan_only=False, version=None, legacy
         legacy_hashes = package.get('legacy_hashes', {})
         legacy_skill_hashes = package.get('legacy_skill_hashes', {})
     else:
-        version = version or '3.0.0'
+        # A source-tree install is a development build: stamped below every release so the
+        # first released package is always an update, never a refused downgrade.
+        version = version or '0.0.0'
     if plan_only or uninstall:
         return _install(vault, state, uninstall, plan_only, version, legacy_hashes, legacy_skill_hashes,
                         accept_customized=accept_customized, keep_customized=keep_customized,
