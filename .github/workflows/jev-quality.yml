@@ -39,7 +39,8 @@ jobs:
           python-version: '3.13'
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: e112d8af8ec3cc205a2f5aa4994ec337a1460ec8
+          # Cortex's first commit: the inherited 3.9.0 runtime, before any Cortex change.
+          ref: 7177077c57977a5959e641e767b7de39b9f2270c
           path: comparison-baseline
           persist-credentials: false
       - name: Public baseline, then changed runtime and permanent delivery gates
@@ -76,18 +77,22 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Fetch actual released baseline and build local test candidate (never publish)
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Cortex's first commit: the inherited 3.9.0 runtime every existing vault upgrades from.
+          ref: 7177077c57977a5959e641e767b7de39b9f2270c
+          path: baseline-source
+          persist-credentials: false
+      - name: Build the 3.9.0 baseline and a local test candidate (never publish)
         shell: bash
         run: |
-          gh release download v3.1.0 --repo avenoxai/avenoxbeyin --pattern 'beyin-v3-3.1.0.zip*' --dir baseline
-          python scripts/build_v3_release.py --version 3.1.1 --output candidate/beyin-v3-3.1.1.zip
+          python baseline-source/scripts/build_v3_release.py --version 3.9.0 --output baseline/beyin-v3-3.9.0.zip
+          python scripts/build_v3_release.py --version 3.10.1 --output candidate/beyin-v3-3.10.1.zip
       - name: Clean install, all saved Jev modes, disable, rollback, interrupted recovery
         shell: bash
         run: |
           set -o pipefail
-          python scripts/verify_v3_jev_package.py --package candidate/beyin-v3-3.1.1.zip --baseline baseline/beyin-v3-3.1.0.zip | tee installed-proof.json
+          python scripts/verify_v3_jev_package.py --package candidate/beyin-v3-3.10.1.zip --baseline baseline/beyin-v3-3.9.0.zip | tee installed-proof.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

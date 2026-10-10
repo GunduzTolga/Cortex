@@ -10,7 +10,7 @@ V3'te Markdown kaynak, SQLite yerel indeks, Codex/Claude Code/Antigravity, [Herm
 
 Kurucu ortak motoru, `beyin`, `beyin-doktor`, `beyin-guncelle` skill'lerini, kurulu `beyin.py` girişini ve işletim sistemine uygun güncelleme kısayolunu dağıtır. Paket ZIP olarak açılıp kullanılabilir; Git gerekmez. Kurulu vault kaynak repo klasöründen bağımsız çalışır.
 
-[Son kararlı release](https://github.com/avenoxai/avenoxbeyin/releases/latest) ve içindeki `beyin-v3-X.Y.Z.zip` paketi stable dağıtım noktasıdır. V3.9.0 turunda 1050 test ile 10/10 development ve 6/6 holdout semantik senaryosu geçti; CI aynı paketi Windows, macOS ve Linux'ta doğrular.
+[Son kararlı release](https://github.com/GunduzTolga/Cortex/releases/latest) ve içindeki `beyin-v3-X.Y.Z.zip` paketi stable dağıtım noktasıdır. V3.9.0 turunda 1050 test ile 10/10 development ve 6/6 holdout semantik senaryosu geçti; CI aynı paketi Windows, macOS ve Linux'ta doğrular.
 
 ## Davranış
 
@@ -39,4 +39,4 @@ Gerçek kullanımda kancanın enjekte ettiği kaynakların sonradan açılıp a�
 
 [Ürünleştirme durumu](PRODUCTIZATION-PLAN.md) · [Komut detayları](QUICKSTART.md) · [Serai desenleri](SERAI-PATTERNS.md).
 
-İlk incelenen public taban `2e074cc` idi. [Public mimari](public-architecture.md), [yerel mimari](local-runtime-architecture.md), [eşitlik/migration değerlendirmesi](parity-and-migration.md) ve [sorun incelemeleri](issue-validation.md) tasarım geçmişidir; mevcut uygulamanın yerine kullanılmaz.
+İlk incelenen public taban `2e074cc` idi. [Public mimari](public-architecture.md), [yerel mimari](local-runtime-architecture.md) ve [eşitlik/migration değerlendirmesi](parity-and-migration.md) tasarım geçmişidir; mevcut uygulamanın yerine kullanılmaz.

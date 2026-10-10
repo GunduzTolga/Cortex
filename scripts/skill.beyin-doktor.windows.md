@@ -127,7 +127,7 @@ içinde `/hooks` ekranından değişen proje kancalarını onayla. Güven hash'i
 
 ```powershell
 try {
-  $a = (Get-Content .agents\hooks.json -Raw | ConvertFrom-Json).'avenox-beyin'
+  $a = (Get-Content .agents\hooks.json -Raw | ConvertFrom-Json).'cortex-beyin'
   if (@($a.PreInvocation).Count -eq 1 -and @($a.Stop).Count -eq 1) { 'antigravity: ok' }
   else { 'antigravity: BOZUK' }
 } catch { 'antigravity: BOZUK/YOK' }

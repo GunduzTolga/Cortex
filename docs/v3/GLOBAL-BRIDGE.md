@@ -1,7 +1,7 @@
 # Vault dışındaki oturumlar için opsiyonel köprü
 
 Normal V3 kurulumu yalnız vault içindeki hook ayarlarını yönetir. Başka proje
-klasörlerindeki oturumları göremez. [Issue #41](https://github.com/avenoxai/avenoxbeyin/issues/41)
+klasörlerindeki oturumları göremez. Upstream #41 sorun kaydı
 bu sınırı ve eksik proje kökenini bildirdi. Paketle gelen bu sarmalayıcı açıkça
 seçilen proje klasörleri için bağlantı sağlar; varsayılan kurulum değişmez.
 

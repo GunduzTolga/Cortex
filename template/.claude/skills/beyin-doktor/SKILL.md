@@ -63,7 +63,7 @@ Codex içinde `/hooks` ekranından değişen proje kancalarını onayla. Güven 
 ### 3c. Antigravity kanca adaptörü
 
 ```bash
-python3 -c "import json;d=json.load(open('.agents/hooks.json'));h=d.get('avenox-beyin',{});print('antigravity:', 'ok' if len(h.get('PreInvocation',[]))==1 and len(h.get('Stop',[]))==1 else 'BOZUK')" 2>/dev/null || echo "antigravity: BOZUK/YOK"
+python3 -c "import json;d=json.load(open('.agents/hooks.json'));h=d.get('cortex-beyin',{});print('antigravity:', 'ok' if len(h.get('PreInvocation',[]))==1 and len(h.get('Stop',[]))==1 else 'BOZUK')" 2>/dev/null || echo "antigravity: BOZUK/YOK"
 ```
 
 🟢 `ok`. 🔴 ise Antigravity hafızayı enjekte etmiyor veya son turu günlüğe taşımıyor.

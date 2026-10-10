@@ -2,16 +2,16 @@
 
 ## Final V3.0.0 native verification
 
-**Windows, macOS and Ubuntu × Python 3.11/3.13: all six jobs passed, each with 114 V3 tests, development 10/10 and holdout 6/6.** [Final run](https://github.com/avenoxai/avenoxbeyin/actions/runs/35029453887), source `5b99e4bb96729c663eae76f1383b9675c6e7419c`. [Machine evidence](evidence/product-native-ci.json).
+**Windows, macOS and Ubuntu × Python 3.11/3.13: all six jobs passed, each with 114 V3 tests, development 10/10 and holdout 6/6.** Final run source: `5b99e4bb96729c663eae76f1383b9675c6e7419c`.
 
-This final run includes direct ZIP/V2 installation, interrupted install and rollback retries, Windows manifest and launcher paths, and direct context refresh without hooks. Earlier local Mac/Linux runs also passed the 47 legacy regressions. The exact release ZIP was installed, its extracted directory removed, then its CLI used to verify source freshness and same-version update checks. [Asset evidence](evidence/release-asset.json). Live model and Desktop app-host workflows are [separate](LIVE-CLIENTS.md).
+This final run includes direct ZIP/V2 installation, interrupted install and rollback retries, Windows manifest and launcher paths, and direct context refresh without hooks. Earlier local Mac/Linux runs also passed the 47 legacy regressions. The exact release ZIP was installed, its extracted directory removed, then its CLI used to verify source freshness and same-version update checks. Live model and Desktop app-host workflows are [separate](LIVE-CLIENTS.md).
 
 Everything below is a historical source snapshot; its pending statements are superseded by the final native result above.
 
 
 ## Release candidate repair verification, 16 September 2026
 
-After the extracted-ZIP installation and interrupted-rollback repairs, independent macOS Python 3.14.2 and network-disabled Linux Python 3.13.15 runs each passed **47/47 legacy + 111/111 V3 tests**. Development 10/10 and holdout 6/6 remain unchanged. The 12 product and 17 updater cases include tests-first failures for manifest-derived package version, stock V2 writer retirement from an extracted release, retry before the root entrypoint exists, and retry of an already-started rollback. All now pass. [Frozen source hashes and run evidence](evidence/product-release-fixes-final.json).
+After the extracted-ZIP installation and interrupted-rollback repairs, independent macOS Python 3.14.2 and network-disabled Linux Python 3.13.15 runs each passed **47/47 legacy + 111/111 V3 tests**. Development 10/10 and holdout 6/6 remain unchanged. The 12 product and 17 updater cases include tests-first failures for manifest-derived package version, stock V2 writer retirement from an extracted release, retry before the root entrypoint exists, and retry of an already-started rollback. All now pass.
 
 The prior six-job native CI success at `ea215a8` covered 107 tests. It does not cover these latest installer/rollback changes; a new native run is required. Earlier sections below are historical source snapshots.
 
@@ -20,7 +20,7 @@ The prior six-job native CI success at `ea215a8` covered 107 tests. It does not 
 
 The current productization source passed **47/47 legacy regressions + 106/106 V3 tests** independently on **macOS Python 3.14.2** and **Linux container Python 3.13.15**. Linux ran with network disabled, a read-only repository/root filesystem and temporary writable state. The 24 product/update acceptance cases cover package validation and preflight, initial V2 rollback, interrupted-update recovery, user-edit conflicts and bundled skill copy rollback. The full suite also covers structured task creation and quarantine of ambiguous double frontmatter.
 
-The frozen semantic evaluation passed development **10/10** and holdout **6/6** on both platforms. Recall, abstention and fact retention are 1.0; forbidden results and privacy leaks are zero. Diagnostic precision is 0.95 development and 1.0 holdout. No holdout expectations changed. [Exact source/test hashes and sanitized run evidence](evidence/product-offline-final.json) and [tests-first product contract](evidence/product-acceptance-contract.json) are recorded separately from earlier measurements.
+The frozen semantic evaluation passed development **10/10** and holdout **6/6** on both platforms. Recall, abstention and fact retention are 1.0; forbidden results and privacy leaks are zero. Diagnostic precision is 0.95 development and 1.0 holdout. No holdout expectations changed.
 
 The legacy README regression initially failed after the intentional V3 root README rewrite. Its input now points to the archived `docs/V2-README.md`; all five original assertions remain intact and passed on both platforms. Only that affected subset was rerun after the test-path correction.
 
@@ -31,7 +31,7 @@ The legacy README regression initially failed after the intentional V3 root READ
 
 **All six hosted jobs passed** on Windows, macOS and Ubuntu, each with Python 3.11 and 3.13. Every job ran **62 V3 tests** and the frozen development/holdout evaluation. This is real Windows runner execution, including the installed encoded PowerShell hook command under a minimal PATH.
 
-[Successful GitHub run](https://github.com/avenoxai/avenoxbeyin/actions/runs/35025071466), tested code commit `89c9f37d6e4e4650edd71b1d52493b4ed84ed6f2`. [Machine evidence and hashes](evidence/native-ci.json).
+Tested code commit: `89c9f37d6e4e4650edd71b1d52493b4ed84ed6f2`.
 
 The first native Windows run failed on path separators in citations, regex replacement of backslashes during reinstall, and PowerShell discovery under a minimal PATH. The implementation now persists forward-slash source references, inserts instruction text literally and resolves built-in PowerShell from the system directory. A reinstall path regression was added; expectations were not relaxed. The failed run is retained in the evidence.
 
@@ -121,4 +121,4 @@ The final audit added regression coverage for native Windows launcher inspection
 
 These encoding and fallback injections are portable simulations, **not native Windows execution**. At the time of that earlier offline run, Windows CI was pending; the native result above supersedes it. No push, public CI trigger, real vault access or model/provider call was performed by this test lane.
 
-[Final machine evidence](evidence/offline-final.json) binds source/test hashes, per-suite exit codes and output hashes, image identity, aggregate semantic metrics and the documentation smoke. Earlier counts/hashes in this document are historical checkpoints. Actual hosted client delivery is recorded separately in the live-client report.
+Earlier counts/hashes in this document are historical checkpoints. Actual hosted client delivery is recorded separately in the live-client report.

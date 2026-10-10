@@ -1,6 +1,6 @@
 # SETUP-WINDOWS.md: Activate this second brain on native Windows
 
-> You are Claude Code or Google Antigravity, run from inside a freshly cloned `avenoxbeyin` repo on
+> You are Claude Code or Google Antigravity, run from inside a freshly cloned `Cortex` repo on
 > **native Windows** — not WSL. The user wants their own AI second brain.
 > The scaffold lives in `./template/`; the mechanical work lives in
 > `./scripts/install.ps1`. Speak **Turkish** to the user. This runbook is in

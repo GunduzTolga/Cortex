@@ -4,7 +4,7 @@ Vault içindeki `beyin.py` tek giriş noktasıdır. Komutları vault klasöründ
 
 ## Git kullanmadan ilk kurulum
 
-[Son kararlı release sayfasından](https://github.com/avenoxai/avenoxbeyin/releases/latest) `beyin-v3-X.Y.Z.zip` paketini indirip aç (`X.Y.Z` sayfadaki sürüm numarasıdır). Paket ve minimum gereksinimler sürüm sayfasında belirtilir. GitHub'ın otomatik kaynak arşivi ile ürün paketi farklıdır.
+[Son kararlı release sayfasından](https://github.com/GunduzTolga/Cortex/releases/latest) `beyin-v3-X.Y.Z.zip` paketini indirip aç (`X.Y.Z` sayfadaki sürüm numarasıdır). Paket ve minimum gereksinimler sürüm sayfasında belirtilir. GitHub'ın otomatik kaynak arşivi ile ürün paketi farklıdır.
 
 Bir vault klasörü seç veya oluştur. Açılan paketin içinde:
 
@@ -34,7 +34,7 @@ python3 beyin.py update
 
 `update --check` resmi stable release'i inceler ve paketi geçici alanda doğrular. Vault ve mevcut runtime dosyalarını değiştirmez. Paket verilmezse ağ erişimi gerekir. `update` aynı doğrulamadan sonra yeni sürümü uygular. Aynı sürüme ikinci güncelleme no-op'tur; sayısal sürüm sırası kullanılır. Eski bir paketi yükleyerek downgrade yapılmaz; geri dönüş için `rollback` kullanılır.
 
-Varsayılan indirme kaynağı `avenoxai/avenoxbeyin` deposunun resmi GitHub stable release'idir. Preview, hareket eden geliştirme dalı veya üçüncü taraf paket kaynağı otomatik seçilmez. Stable release ya da beklenen ZIP yoksa bunu hata olarak bildirir; yayın varmış gibi sonuç vermez.
+Varsayılan indirme kaynağı `GunduzTolga/Cortex` deposunun resmi GitHub stable release'idir. Preview, hareket eden geliştirme dalı veya üçüncü taraf paket kaynağı otomatik seçilmez. Stable release ya da beklenen ZIP yoksa bunu hata olarak bildirir; yayın varmış gibi sonuç vermez.
 
 Yerel, önceden indirilmiş ZIP ile ağ gerekmez:
 
@@ -187,47 +187,6 @@ py -3 scripts/install_v3.py --vault "C:\Notlar\Beynim" --state "<.beyin-runtime.
 çalıştır; bu sefer yeni sürüm kurulur ve vault düzeltilmiş güncelleyiciyi alır. Sonra
 `beyin.py doctor` ile doğrula. Sabitleme dosyasını elle değiştirme.
 
-## `invalid legacy skill hashes` (#73)
-
-17–19 Eylül 2026 arasında `cad7953` (#35) sonrası `main` üzerinden kurulan
-bazı vault'lar `3.0.2` damgası taşısa da resmi V3.0.2 etiketinden farklı bir
-paket doğrulayıcı kullanır. Bu doğrulayıcı V3.1.0/V3.2.0 manifestindeki yeni
-skill yollarını reddeder; `update --check` de aynı hatayı verir. Resmi V3.0.2
-paketinden yapılan geçiş bu özel durumu temsil etmez.
-
-V3.2.1 için hazırlanan paket biçimi bu eski doğrulayıcıyla uyumludur; stable
-olarak yayımlandıktan sonra normal `update` yeterlidir. Henüz yayımlanmamış
-bir düzeltmenin kurulu olduğunu varsayma. Mevcut V3.2.0'a hemen geçmek için:
-
-1. [Resmi V3.2.0 sayfasından](https://github.com/avenoxai/avenoxbeyin/releases/tag/v3.2.0)
-   `beyin-v3-3.2.0.zip` ve yanındaki `.sha256` dosyasını indir. ZIP'i açmadan
-   ve içindeki kodu çalıştırmadan önce SHA-256 değerini karşılaştır. macOS/Linux
-   için `shasum -a 256 beyin-v3-3.2.0.zip`, Windows için
-   `Get-FileHash beyin-v3-3.2.0.zip -Algorithm SHA256` kullan; sonuç resmi
-   `.sha256` dosyasının ilk alanıyla aynı olmalı.
-2. Ajan oturumlarını kapat. ZIP'i vault dışında ayrı bir klasöre aç. Mevcut
-   vault'un `.beyin-runtime.json` dosyasındaki `state` yolunu oku; özel state
-   kullandıysan varsayılan yeni bir state yaratma. Bu dosyayı değiştirme.
-3. Açılan paket klasöründe, gerçek vault ve mevcut state yollarıyla planı incele:
-
-   ```sh
-   python3 scripts/install_v3.py --vault "/tam/yol/Beynim" --state "/mevcut/state" --plan
-   ```
-
-4. Plan başarılıysa aynı komutu `--plan` olmadan çalıştır. Installer paket
-   hashlerini doğrular, mevcut kullanıcı düzenlemelerinde conflict ile durur
-   ve güncelleme journal'ı/yedeği oluşturur. Conflict varsa dosyaları ezme,
-   önce değişikliği incele. `.beyin-version` veya kurulu Python dosyalarını
-   elle değiştirme.
-5. Vault içinde `python3 beyin.py doctor` ile sonucu kontrol et. Hook
-   tanımları değiştiyse Codex `/hooks` incelemesini tamamla ve yeni oturum aç.
-   Sonraki güncellemeler yine normal `update` komutunu kullanır; gerekirse
-   `rollback` önceki kurulumu geri getirir.
-
-Windows'ta Python komutları için `py -3` kullan. Bu yol kurulu eski
-paket doğrulayıcısını çağırmak yerine doğrulanmış resmi paketin installer'ını
-kullanır; kullanıcı notları ve mevcut state dizini korunur.
-
 ## Neler değişir?
 
 Paket yalnız yönetilen motor dosyaları, kurulu giriş/başlatıcılar, üç çekirdek skill ve istemci bağlantılarını günceller. Aynı adlı özel skill veya değiştirilmiş yönetilen script sessizce ezilmez. İlgisiz kullanıcı ayarları desteklenen birleştirme kurallarıyla korunur. Markdown notlar, Companion metinleri ve eski günlük/bilgi kaynakları paket içeriğiyle değiştirilmez.
@@ -254,14 +213,14 @@ Kullanıcı gereksinim duymadığı bileşenleri (`skills/<ad>`, `adapters/<ad>`
 Repo kökünde:
 
 ```sh
-python3 scripts/build_v3_release.py --output "/tmp/beyin-v3-3.9.0.zip" --version 3.9.0
+python3 scripts/build_v3_release.py --output "/tmp/beyin-v3-3.10.0.zip" --version 3.10.0
 ```
 
 Bu komut yalnız yerel ZIP oluşturur, GitHub'a yayınlamaz. Paket `manifest.json`, izin verilen installer/giriş dosyaları, runtime modülleri ve üç skill'i içerir. Manifest sürüm, schema/runtime schema, minimum Python, dosya hashleri ve tanınan legacy hashlerini taşır. Release yayınlama ve final platform CI ayrı işlemlerdir.
 
-## V3.1 sürüm bildirimleri
+## Sürüm bildirimleri
 
-V3.0.2 kurulumunu bir kere `python3 beyin.py update` ile güncelle. Yeni bildirim kodu bu ilk geçişten sonra çalışır. Windows'ta `py -3` kullan. Oturum açılışı ağ beklemez; kısa ömürlü worker yalnız resmi GitHub metadata'sını günde en fazla bir kez kontrol eder. İlk kontrolün sonucu sonraki oturum veya `doctor` çağrısında görünür. Aynı sürüm her prompt'ta tekrar gösterilmez. Notlar ve prompt'lar bu kontrol için gönderilmez, model çağrısı veya otomatik kurulum yapılmaz.
+3.9.0 kurulu bir vault'u Cortex'e bir kez elle kur (`install_v3.py --vault`); eski sürümün bildirim kodu eski adrese baktığı için Cortex sürümlerini ancak bu ilk geçişten sonra görürsün. Windows'ta `py -3` kullan. Oturum açılışı ağ beklemez; kısa ömürlü worker yalnız resmi GitHub metadata'sını günde en fazla bir kez kontrol eder. İlk kontrolün sonucu sonraki oturum veya `doctor` çağrısında görünür. Aynı sürüm her prompt'ta tekrar gösterilmez. Notlar ve prompt'lar bu kontrol için gönderilmez, model çağrısı veya otomatik kurulum yapılmaz.
 
 `update --check --metadata-only` yalnız sürüm bilgisini okur: ZIP indirmez, paket kodu çalıştırmaz ve vault/runtime/cache yazmaz. Tam `update --check` mevcut paket doğrulamasını ve geçici sentetik kurulumu çalıştırmaya devam eder. Metadata sonucu paketin kurulabilirlik kanıtı değildir. Ağ hatası “güncelsin” anlamına gelmez; doctor son başarılı kontrol tarihini ve durumu gösterir.
 
@@ -271,6 +230,6 @@ Online ZIP indirmesinde GitHub asset SHA-256 ve varsa resmi checksum dosyası, h
 
 ## Bakımcı için yayın
 
-`VERSION` ve `docs/v3/releases/X.Y.Z.md` aynı sürümü tanımlar. `Verified V3 release package` workflow'u ZIP'i bir kez build eder; altı OS/Python kombinasyonu bu aynı ZIP'i temiz kurulum, yayınlanmış gerçek V3.0.2 ve V3.1.0 paketlerinden ve `cad7953` ara kurulumundan geçiş, no-op, rollback ve kesinti/recover ile doğrular. PR çalışmaları yayın yapmaz.
+`VERSION` ve `docs/v3/releases/X.Y.Z.md` aynı sürümü tanımlar. `Verified V3 release package` workflow'u ZIP'i bir kez build eder; altı OS/Python kombinasyonu bu aynı ZIP'i temiz kurulum, devralınan 3.9.0 paketinden geçiş (deponun ilk commit'i `7177077`'den build edilir; bu commit yeniden yazılmamalı), no-op, rollback ve kesinti/recover ile doğrular. PR çalışmaları yayın yapmaz.
 
 Main üzerinde manuel `workflow_dispatch` ve `publish=true`, testler yeşilse aynı bytes'ı önce draft olarak yükler, sonra stable/latest yayınlar ve yayınlanmış asset'i tekrar indirip doğrular. Var olan release'in üzerine yazılmaz; yeni sürüm numarası gerekir. Opsiyonel global köprü (#41) V3.2.0 ile pakete girdi; kurulum ve güncelleme global ayarları değiştirmez ([GLOBAL-BRIDGE.md](GLOBAL-BRIDGE.md)).

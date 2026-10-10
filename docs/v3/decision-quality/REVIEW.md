@@ -108,7 +108,7 @@ The unchanged existing frozen retrieval benchmark passed all 16 development and
 holdout cases: [result](evidence/review-frozen-retrieval.json). Initial submitted
 code passed 373 V3 tests locally; the reviewed code adds two regressions.
 CI runs the V3 suite and installed ZIP checks on Linux, macOS and Windows with
-Python 3.11 and 3.13. Consult the [PR checks](https://github.com/avenoxai/avenoxbeyin/pull/69/checks)
+Python 3.11 and 3.13. Consult the PR checks
 for the final commit's status; an earlier green run is not proof for a later head.
 
 ```sh

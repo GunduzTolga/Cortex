@@ -1,6 +1,6 @@
 # SETUP.md v2.3: Activate this second brain (Claude Code or Codex runbook)
 
-> You are Claude Code or Codex, run from inside a freshly cloned `avenoxbeyin` repo. The user wants their
+> You are Claude Code or Codex, run from inside a freshly cloned `Cortex` repo. The user wants their
 > own AI second brain, or wants to upgrade the one they already have. The scaffold lives in
 > `./template/`. Your job: decide the mode, interview the user, install or upgrade, verify.
 > Execute phase by phase. Speak **Turkish** to the user (the audience is Turkish). This runbook is
@@ -660,11 +660,10 @@ log, and be precise about when the rest arrives.
 - 💸 **Maliyet:** Ekstra ücret yok; arka plan özetleyici ve derleyici mevcut Claude aboneliğinin
   günlük limitinden küçük bir pay kullanır (özet: her oturum sonunda küçük bir Haiku çağrısı;
   derleme: günde bir Sonnet çağrısı).
-- 🔗 **Sen de kurdun mu?** Bir arkadaşına gönder: `avenox.lol/beyin.md`
+- 🔗 **Sen de kurdun mu?** Bir arkadaşına gönder: `https://raw.githubusercontent.com/GunduzTolga/Cortex/main/beyin.md`
 
 Do not end the session by saying "kuruldu" alone. Show the pipeline once, with the user watching.
 
 ---
 
 Done. You just gave someone a second brain that remembers without being asked.
-Avenox · https://avenox.lol

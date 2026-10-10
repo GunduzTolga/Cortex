@@ -16,7 +16,7 @@ import time
 import urllib.request
 import zipfile
 
-OFFICIAL = 'https://api.github.com/repos/avenoxai/avenoxbeyin/releases/latest'
+OFFICIAL = 'https://api.github.com/repos/GunduzTolga/Cortex/releases/latest'
 MAX_PACKAGE = 32 * 1024 * 1024
 # The installer mirrors each starter skill into both roots, so a package may carry an
 # exemption for either copy. Mirrors install_v3.MANAGED_SKILL_PATHS.

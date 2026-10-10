@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Windows uyarlaması: upstream avenox tests/scripts_test.py.
+"""Windows uyarlaması: upstream tests/scripts_test.py.
 
 Değişen üç şey: kaynak yolu .claude/scripts, kendi fcntl kullanımı _portalock,
 ve sys.path'e script dizini eklenir. Test gövdesi upstream ile aynıdır —

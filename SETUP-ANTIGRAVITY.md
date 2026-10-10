@@ -1,6 +1,6 @@
-# Antigravity ile Avenox Beyin v2.3 kurulumu
+# Antigravity ile Cortex v2.3 kurulumu
 
-Bu dosyayı Google Antigravity içinde, klonlanmış `avenoxbeyin` deposunun kökünde uygula.
+Bu dosyayı Google Antigravity içinde, klonlanmış `Cortex` deposunun kökünde uygula.
 Ana kurulum sözleşmesi `SETUP.md` dosyasındadır; onu baştan sona oku ve aynen uygula, yalnızca
 aşağıdaki Antigravity farklarını kullan.
 
@@ -17,7 +17,7 @@ aşağıdaki Antigravity farklarını kullan.
 5. macOS, Linux veya WSL'deki mevcut v1, v2.0, v2.1 veya v2.2 vault için `scripts/upgrade.sh` v2.3
    yükseltmesini kullan. Yerel Windows'ta mevcut vault yükseltmesi hâlâ destek dışıdır; sıfırdan
    `install.ps1 -Harness Antigravity` kurulumu desteklenir.
-6. Final raporunda `.agents/hooks.json` içindeki `avenox-beyin` kaydını, mutlak komutları ve
+6. Final raporunda `.agents/hooks.json` içindeki `cortex-beyin` kaydını, mutlak komutları ve
    `.beyin-version = 2.3.0` değerini doğrula.
 
 ## Davranış sınırı

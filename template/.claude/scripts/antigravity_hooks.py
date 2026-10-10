@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Translate Antigravity hook events to the canonical Avenox Beyin engine."""
+"""Translate Antigravity hook events to the canonical Cortex engine."""
 
 from __future__ import annotations
 

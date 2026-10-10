@@ -1,6 +1,6 @@
 {
   "version": "decision-quality-v1",
-  "provenance": "Synthetic development/regression inputs. Adapted from supplied AvenoxOS fixtures; NOT that runtime or a blind holdout. Frozen before production edits.",
+  "provenance": "Synthetic development/regression inputs. Adapted from supplied upstream fixtures; NOT that runtime or a blind holdout. Frozen before production edits.",
   "base_commit": "e112d8af8ec3cc205a2f5aa4994ec337a1460ec8",
   "records": [
     {

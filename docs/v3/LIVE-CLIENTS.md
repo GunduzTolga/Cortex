@@ -1,14 +1,14 @@
 # Real client checks, 16 September 2026
 
-These checks launch the installed clients against a temporary, synthetic vault. They do not read the operator's real notes or copy account settings into the repository. Raw CLI output remains in private temporary files. [Sanitized machine evidence](evidence/live-clients.json).
+These checks launch the installed clients against a temporary, synthetic vault. They do not read the operator's real notes or copy account settings into the repository. Raw CLI output remains in private temporary files.
 
 ## Final product workflows
 
-Real Claude Sonnet and Codex Sol sessions used the beyin skill from the three installed starter skills, plus the shared CLI to create an active task with its source-backed owner, store a CSV decision note and submit a receipt. Source fields and preserved notes were checked after execution. Antigravity Sonnet completed the same artifact workflow interactively, with normal command permission prompts; its receipt was completed in a follow-up session after the first time bound. [Product evidence](evidence/product-live-clients.json).
+Real Claude Sonnet and Codex Sol sessions used the beyin skill from the three installed starter skills, plus the shared CLI to create an active task with its source-backed owner, store a CSV decision note and submit a receipt. Source fields and preserved notes were checked after execution. Antigravity Sonnet completed the same artifact workflow interactively, with normal command permission prompts; its receipt was completed in a follow-up session after the first time bound.
 
 Two failed attempts matter: Claude initially nested task frontmatter inside note-create. A dedicated task-create command, exact skill recipe and six regression cases fixed that; fresh Claude and Codex trials passed. Headless Antigravity returned SUCCESS while denying writes, so that attempt is recorded as failed. Inspect denied_actions and resulting files, not only the process exit code. Its generated prose also added inferred scope; these narrow tests validate requested fields and are not a general semantic-accuracy guarantee.
 
-**Codex Desktop uses the same runtime and skills.** Actual app-host execution retrieved a newly edited source marker, created the correct active task and stored a Codex receipt. However, automatic hook context was not delivered in this app-host test, even after normal project trust review and a cold reload. A normal CLI control delivered its marker. The installed context command now refreshes sources directly and refuses conflict/degraded results, so the skill workflow works without that automatic delivery. Do not describe this as verified Desktop hook parity. [Desktop workflow evidence](evidence/desktop-workflow.json).
+**Codex Desktop uses the same runtime and skills.** Actual app-host execution retrieved a newly edited source marker, created the correct active task and stored a Codex receipt. However, automatic hook context was not delivered in this app-host test, even after normal project trust review and a cold reload. A normal CLI control delivered its marker. The installed context command now refreshes sources directly and refuses conflict/degraded results, so the skill workflow works without that automatic delivery. Do not describe this as verified Desktop hook parity.
 
 The following original canaries used earlier installed bytes; their hashes and narrow scope remain historical evidence. Native CI is reported separately.
 

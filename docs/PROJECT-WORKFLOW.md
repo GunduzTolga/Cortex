@@ -1,4 +1,4 @@
-# Avenox Beyin ile kod ve içerik projeleri
+# Cortex ile kod ve içerik projeleri
 
 `🏰 300-Projects/` bir proje **hafıza alanıdır**; kod deposu veya medya arşivi değildir. Projenin
 amacını, kararlarını, bağlantılarını, mevcut durumunu ve sonraki işini burada tut. Git reposu,
@@ -23,7 +23,7 @@ amacını, kararlarını, bağlantılarını, mevcut durumunu ve sonraki işini 
 - İş bittiğinde vault'taki proje notuna yalnız kalıcı sonucu yaz: commit/PR bağlantısı, alınan
   karar, doğrulanan durum ve sıradaki adım. Kaynak kodu vault'a kopyalama.
 
-Bu ayrım sandbox değildir. Avenox Beyin'in derleyicisi model değişikliklerini vault dışında geçici
+Bu ayrım sandbox değildir. Cortex'in derleyicisi model değişikliklerini vault dışında geçici
 bir sahnede üretip yalnız `knowledge/` altındaki izinli Markdown dosyalarını geri taşır. Etkileşimli
 agent'ın kod reposunda ne okuyup yazabileceğini ise Claude Code, Codex veya Antigravity'nin kendi
 izin/sandbox ayarları belirler.

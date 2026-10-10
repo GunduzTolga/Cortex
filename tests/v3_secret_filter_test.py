@@ -146,7 +146,7 @@ class SecretFilterTest(unittest.TestCase):
             'id 123e4567-e89b-12d3-a456-426614174000 and 00000000-0000-0000-0000-000000000000',
             png,
             'eyJhbGciOiJIUzI1NiJ9 alone is only a header, not a token',
-            '[Kurulum rehberi](https://github.com/avenoxai/avenoxbeyin/blob/main/docs/v3/INSTALL.md#windows-kurulumu)',
+            '[Kurulum rehberi](https://github.com/GunduzTolga/Cortex/blob/main/docs/v3/INSTALL.md#windows-kurulumu)',
             '![diagram](assets/Mxxxxxxxxxxxxxxxxxxxxxxxxx.abcdef.png)',
             'com.Mycompanyinternalservicesxx.abcdef.somethingveryverylongidentifier.Main',
             'npm_config_registry=https://registry.npmjs.org/ and npm_package_version',

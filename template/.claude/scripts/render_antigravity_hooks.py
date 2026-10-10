@@ -13,7 +13,7 @@ import tempfile
 from typing import Any
 
 
-MANAGED_KEY = "avenox-beyin"
+MANAGED_KEY = "cortex-beyin"
 
 
 def _quote(value: str, platform: str) -> str:

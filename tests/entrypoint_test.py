@@ -52,7 +52,7 @@ class EntrypointRoutingTest(unittest.TestCase):
 
     def test_existing_macos_fast_path_remains_intact(self) -> None:
         self.assertIn(
-            "git clone https://github.com/avenoxai/avenoxbeyin.git /tmp/avenoxbeyin && cd /tmp/avenoxbeyin",
+            "git clone https://github.com/GunduzTolga/Cortex.git /tmp/cortex && cd /tmp/cortex",
             ENTRYPOINT,
         )
         self.assertIn("Then read and follow `SETUP.md` in that repo", ENTRYPOINT)

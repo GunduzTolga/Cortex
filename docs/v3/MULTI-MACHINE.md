@@ -3,7 +3,7 @@
 Beyin yerel önceliklidir: makineler arasında senkron kodu yoktur ve Beyin git kurmaz
 ([UPDATE](UPDATE.md)). Aynı vault'u iki bilgisayarda (ör. iş ve ev) git gibi bir araçla
 eşitliyorsan bu belge hangi dosyaların eşitleneceğini ve iki makinenin aynı gün nasıl
-çalışacağını anlatır ([#112](https://github.com/avenoxai/avenoxbeyin/issues/112)).
+çalışacağını anlatır (upstream #112).
 
 Her makine Beyin'i kendisi kurar ve günceller. Runtime (SQLite veritabanı) vault dışında,
 makineye özeldir ve eşitlenmez; her makine onu vault'taki Markdown'dan kendisi kurar.
@@ -54,7 +54,7 @@ Kontrol: kurulumdan ya da güncellemeden hemen sonra `git status --short` boş o
 macOS ya da Linux'ta `/...` yolu) bu makinede mutlak bir yol değildir. `beyin.py` o zaman bu
 makinenin varsayılan state dizinini kullanır ve `doctor` bunu `pinned_state_not_absolute`
 olarak gösterir. Kurucu da böyle bir yolu değişmiş dosya saymaz, bu makinenin yoluyla yeniden
-yazar ([#249](https://github.com/avenoxai/avenoxbeyin/issues/249)). 3.8.1 ve öncesinin
+yazar (upstream #249). 3.8.1 ve öncesinin
 `beyin.py`'si bu yolu okuyamadığı için `beyin.py update` çalışmaz; bir kez yeni paketin
 kurucusunu çalıştır (`python3 scripts/install_v3.py --vault "<vault>"`; bu makinede özel
 state kullandıysan `--state` ile onu ver), sonra dosyayı `.gitignore`'a ekle.
@@ -116,7 +116,7 @@ göre sıralar, en yenisini korur.
 - **Çakışma çözülmeden oturum açma:** `pull --rebase` çakışmada durduğunda dosyada
   `<<<<<<<`, `=======`, `>>>>>>>` işaretleri kalır. `sync` bu üç işareti sırayla taşıyan
   dosyayı (receipt dahil) indekslemez ve `unresolved git conflict markers` uyarısıyla `degraded`
-  döner; dosya çözülene kadar bağlamdan çıkar ([#205](https://github.com/avenoxai/avenoxbeyin/issues/205)).
+  döner; dosya çözülene kadar bağlamdan çıkar (upstream #205).
   Kod bloğundaki işaretler de sayılır: notta alıntılanmış bir çakışma örneği de uyarı verir. Önce çakışmayı çöz (`git status` temiz olmalı), sonra
   oturum aç.
 - **Receipt `event_id`'sini makineler arasında tekil tut:** `event_id`'yi ajan seçer ve dosya
@@ -133,7 +133,7 @@ Hook dosyaları kurulumun mutlak yollarını taşır (Python, `beyin_v3_hook.py`
 `--state`). Kurulu bir vault başka bir klasöre ya da başka bir Windows hesabına taşınınca
 (`C:\Users\<eski>\...`) her yaşam döngüsü hook'u genel bir hatayla düşer. `doctor` bunu
 `hook_paths: stale` ve `needs_attention` olarak gösterir; her satır dosyayı, olayı ve eski
-yolu (`hook_script_missing`, `other_vault`, `python_missing`) verir ([#204](https://github.com/avenoxai/avenoxbeyin/issues/204)).
+yolu (`hook_script_missing`, `other_vault`, `python_missing`) verir (upstream #204).
 
 Çözüm, kurucuyu bu makinede yeni vault yoluyla yeniden çalıştırmaktır. Eski state klasörünü
 (ya da kopyasını) `--state` ile ver; kurulum kaydı oradadır ve kurucu yolları taşıyan bütün
@@ -174,7 +174,7 @@ depo ve iki vault; Beyin her birine ayrı `--state` ile kuruldu.
 
 ## Satır sonu: `core.autocrlf=true` ve receipt'ler
 
-Bu kontrol [#205](https://github.com/avenoxai/avenoxbeyin/issues/205) için eklendi. Git for Windows
+Bu kontrol upstream #205 için eklendi. Git for Windows
 varsayılanı `core.autocrlf=true`'dur ve `receipts/** -text` satırı yoksa bu makine öbür makineden gelen
 receipt'i CRLF olarak çıkarır. Sonuç sessizdir: `sync` ve `doctor` hata vermez, ama aynı receipt'in
 bayt özeti iki makinede farklı olur ve receipt öbür makineden yeniden gönderilince

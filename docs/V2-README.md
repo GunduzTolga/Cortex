@@ -2,7 +2,7 @@
 
 Bu belge V2 davranışını anlatır. Yeni kurulum ve V3 geçişi için [güncel README](../README.md) kullanılır. Buradaki arka plan model derleyicisi V3 varsayılanı değildir. Eski bağlantılar kendi dönemlerinin kurulumuna aittir.
 
-# 🧠 avenoxbeyin v2.3: hatırlamayı unutmayan ikinci beyin
+# 🧠 Cortex v2.3: hatırlamayı unutmayan ikinci beyin
 
 > **V3 kurulumu üzerinde çalışılıyor.** Mevcut Codex, Claude Code veya Antigravity ajanına
 > “Bu repodaki [SETUP-V3.md](../SETUP-V3.md) dosyasını takip ederek vault'umu kur” diyebilirsin.
@@ -32,7 +32,7 @@ Code'un kendisi yapar.
 Terminalde `claude` çalıştır ve şunu yapıştır:
 
 ```
-Read https://avenox.lol/beyin.md and follow it exactly to build my second brain.
+Read https://raw.githubusercontent.com/GunduzTolga/Cortex/main/beyin.md and follow it exactly to build my second brain.
 ```
 
 Bu tek satırlık giriş önce platformu ayırır: macOS/Linux mevcut `SETUP.md` yolunda kalır, yerel
@@ -42,8 +42,8 @@ içinde kalan POSIX yolunu kullanır. Böylece Windows'ta Bash/macOS komutları 
 Ya da macOS, Linux veya WSL'de repoyu doğrudan klonla, üç komut:
 
 ```bash
-git clone https://github.com/avenoxai/avenoxbeyin.git
-cd avenoxbeyin
+git clone https://github.com/GunduzTolga/Cortex.git
+cd Cortex
 claude "Read SETUP.md and follow it exactly to set up my second brain from this template."
 ```
 
@@ -59,8 +59,8 @@ değiştirilmez. Claude Code ve Codex aynı router, skill ve kanca kodunu okur; 
 Google Antigravity kullanıyorsan:
 
 ```bash
-git clone https://github.com/avenoxai/avenoxbeyin.git
-cd avenoxbeyin
+git clone https://github.com/GunduzTolga/Cortex.git
+cd Cortex
 agy -p "Read SETUP-ANTIGRAVITY.md and follow it exactly to set up my second brain."
 ```
 
@@ -72,8 +72,8 @@ skill'lerin ikinci kopyasını oluşturmaz. Doğrudan Gemini API anahtarı istem
 Yerel Windows için ayrı bir kurulum yolu vardır:
 
 ```powershell
-git clone https://github.com/avenoxai/avenoxbeyin.git
-cd avenoxbeyin
+git clone https://github.com/GunduzTolga/Cortex.git
+cd Cortex
 claude "Read SETUP-WINDOWS.md and follow it exactly to set up my second brain."
 ```
 
@@ -220,9 +220,6 @@ her kırmızı satırın altında düzeltme komutu yazar.
 Bilgi derleme mimarisi Andrej Karpathy'nin LLM bilgi tabanı desenine dayanır:
 https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
 
-Geri kalanı [Avenox](https://avenox.lol) günlük kullandığı sistemden, kişisel veriden arındırılıp
-herkes için genelleştirilerek çıkarıldı.
-
 ## Lisans
 
 MIT, [LICENSE](../LICENSE) dosyasına bak. PR'lar açık.
@@ -231,7 +228,7 @@ MIT, [LICENSE](../LICENSE) dosyasına bak. PR'lar açık.
 
 ## In English (short version)
 
-**avenoxbeyin** is an open-source AI second brain: an Obsidian vault driven by Claude Code,
+**Cortex** is an open-source AI second brain: an Obsidian vault driven by Claude Code,
 Codex, or Google Antigravity, with
 memory that survives across sessions. v1 gave you continuity but depended on the model remembering
 to write its memory files. v2's thesis is that **memory must be a mechanism, not a discipline**: a
@@ -239,8 +236,8 @@ to write its memory files. v2's thesis is that **memory must be a mechanism, not
 a small background Haiku call, and once a day a Sonnet compile pass turns those logs into linked
 articles under `knowledge/`. The next session starts with that knowledge index already in context.
 
-On macOS, Linux, or WSL, install with `git clone https://github.com/avenoxai/avenoxbeyin.git && cd
-avenoxbeyin && claude "Read SETUP.md and follow it exactly to set up my second brain from this
+On macOS, Linux, or WSL, install with `git clone https://github.com/GunduzTolga/Cortex.git && cd
+Cortex && claude "Read SETUP.md and follow it exactly to set up my second brain from this
 template."` Codex can follow the same `SETUP.md`; its project hooks are rendered with absolute
 paths and require one-time approval in `/hooks`. On native Windows, use the same clone but ask
 Claude Code to read `SETUP-WINDOWS.md`; do not run the Bash installer. Already running v1 or v2.0?

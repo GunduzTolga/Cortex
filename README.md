@@ -1,10 +1,10 @@
-# 🧠 avenoxbeyin V3
+# 🧠 Cortex V3
 
-Claude Code, Codex veya Google Antigravity ile kullanabileceğin yerel ikinci beyin. Notların Markdown dosyalarında kalır; bir istemcide kaydettiğin kaynak ve iş sonucu diğerinde de bulunabilir. Obsidian ile açabilir, normal bir metin editörüyle düzenleyebilirsin.
+Cortex, Claude Code, Codex veya Google Antigravity ile kullanabileceğin yerel ikinci beyin; maskotu yapay zekâ destekli ananas **Pyn**. Notların Markdown dosyalarında kalır; bir istemcide kaydettiğin kaynak ve iş sonucu diğerinde de bulunabilir. Obsidian ile açabilir, normal bir metin editörüyle düzenleyebilirsin.
 
 Python **3.11 veya üzeri** yeterli. Git, pip, Mem0 hesabı, API anahtarı veya sürekli açık sunucu gerekmez. Kullandığın AI istemcisinin kendi kurulumu ve hesabı ayrı olarak gerekir.
 
-> **V3.9.0:** Yeni, isteğe bağlı **yakala** aracı: gördüğün yerde tek tuşla (Mac'te `Control+Option+B`, Windows'ta `Ctrl+Alt+B`, değiştirilebilir) video, tweet, makale, mail ya da dosya yakala; ajanın metni çıkarıp dersleri notlarına bağlasın. Kurmak için `python3 beyin.py yakala kur`. Mevcut kurulumda vault içinde `python3 beyin.py update` çalıştır; V3.1.0 ve sonrasında yeni sürümleri oturum başında görürsün. [Sürüm notları](docs/v3/releases/3.9.0.md) · [Yakala](docs/v3/YAKALA.md) · [Güncelleme rehberi](docs/v3/UPDATE.md).
+> **V3.10.0, ilk Cortex sürümü:** Obsidian için isteğe bağlı **Ananas** görsel teması, maskot **Pyn** ve güncellemelerin artık Cortex'in kendi GitHub sürümlerinden gelmesi. İsteğe bağlı **yakala** aracı da yerinde: gördüğün yerde tek tuşla video, tweet, makale, mail ya da dosya yakala (`python3 beyin.py yakala kur`). 3.9.0 kurulu bir vault'u Cortex'e bir kez elle taşı (aşağıdaki **Manuel kurulum**, notların korunur); eski sürümün güncelleyicisi hâlâ eski adrese baktığı için ilk geçişte `update` işe yaramaz, sonraki güncellemeler Cortex'ten gelir. [Sürüm notları](docs/v3/releases/3.10.0.md) · [Ananas teması](#ananas-teması) · [Yakala](docs/v3/YAKALA.md) · [Güncelleme rehberi](docs/v3/UPDATE.md).
 
 ## En kolay kurulum: bir klasör, bir mesaj
 
@@ -12,15 +12,13 @@ Python **3.11 veya üzeri** yeterli. Git, pip, Mem0 hesabı, API anahtarı veya 
 2. Bu klasörü Codex, Claude Code veya Antigravity ile aç.
 3. Aşağıdaki mesajı yapıştır:
 
-> https://avenox.lol/beyin.md adresini oku. Bu klasöre ikinci beynimi kur. Mevcut kurulum varsa notlarımı koruyarak güncelle. Gerekli indirme ve kurulum adımlarını sen yap. Sonunda örnek bir bilgiyi kaydedip yeni oturumda geri okuyarak birlikte doğrulayalım.
+> https://raw.githubusercontent.com/GunduzTolga/Cortex/main/beyin.md adresini oku. Bu klasöre ikinci beynimi kur. Mevcut kurulum varsa notlarımı koruyarak güncelle. Gerekli indirme ve kurulum adımlarını sen yap. Sonunda örnek bir bilgiyi kaydedip yeni oturumda geri okuyarak birlikte doğrulayalım.
 
 Ajan resmi kararlı paketi bulur, checksum ile doğrular, geçici alanda açar, kurulumu yapar ve sağlık kontrolünü çalıştırır. Kullanıcı yalnızca istemcinin gösterdiği normal klasör, workspace veya hook güven incelemesini tamamlar.
 
-Görsel anlatım, kopyalanabilir mesaj ve manuel indirme: **[avenox.lol/ikincibeyin](https://avenox.lol/ikincibeyin)**.
-
 ## Manuel kurulum
 
-1. [Son kararlı sürüm sayfasını](https://github.com/avenoxai/avenoxbeyin/releases/latest) aç. **`beyin-v3-X.Y.Z.zip`** dosyasını ve yanındaki SHA-256 dosyasını indir (`X.Y.Z` sayfadaki sürüm numarasıdır). GitHub'ın otomatik “Source code” arşivi yerine bu paketi seç.
+1. [Son kararlı sürüm sayfasını](https://github.com/GunduzTolga/Cortex/releases/latest) aç. **`beyin-v3-X.Y.Z.zip`** dosyasını ve yanındaki SHA-256 dosyasını indir (`X.Y.Z` sayfadaki sürüm numarasıdır). GitHub'ın otomatik “Source code” arşivi yerine bu paketi seç.
 2. Obsidian'da bir vault oluştur veya mevcut vault klasörünü seç. Notlarını başka yere taşıman gerekmez.
 3. Açtığın paket klasöründe terminal aç ve vault yolunu kendi klasörünle değiştir:
 
@@ -92,6 +90,24 @@ Windows'ta aynı komutun başında `py -3` kullan. Kurulumda özel runtime yolu 
 
 Video, tweet, makale, mail ya da dosyayı gördüğün yerde yakala; ajanın metni çıkarıp dersleri `knowledge/` notlarına bağlasın. Kurulum bir kez: `python3 beyin.py yakala kur` (Windows'ta `py -3`). Sonra her uygulamada Mac'te `Control+Option+B`, Windows'ta `Ctrl+Alt+B`; tarayıcıda Obsidian Web Clipper'ın "Beyne at" şablonu. Tuşu değiştirmek için `beyin.py yakala kisayol 'cmd+"'`. Ajanına "yakalananları işle" demen yeter. YouTube'da önce altyazı, yoksa yalnız ses yerelde yazıya dökülür. Ayrıntı: [docs/v3/YAKALA.md](docs/v3/YAKALA.md).
 
+## Ananas teması
+
+İsteğe bağlı Obsidian görünümü. Açtığın paket klasöründe vault yolunu kendi klasörünle değiştirerek çalıştır:
+
+Windows:
+
+```powershell
+py -3 scripts/ananas_tema.py kur --vault "C:\Notlar\Beynim"
+```
+
+macOS / Linux:
+
+```sh
+python3 scripts/ananas_tema.py kur --vault "/yol/Beynim"
+```
+
+Kaldırmak için aynı komutu `kur` yerine `kaldir` ile çalıştır. Tema yalnız `.obsidian/snippets/ananas.css` dosyasını yazar ve onu `.obsidian/appearance.json` içinde etkinleştirir; notlara, motora ve diğer ayarlara dokunmaz. Kenar çubuğunda klasör adları sade Türkçe etiketlerle görünür (örneğin 850 → Pyn); diskteki klasörlerin adı değişmez.
+
 ## Tüketim ve kontrol sıklığı
 
 Ajanına **“ekonomik moda geç”**, **“otomatik kontrolleri kapat”** veya **“kontrol aralığını 30 dakika yap”** diyebilirsin. Üç istemci aynı vault tercihini kullanır; güncellemeler tercihini korur.
@@ -154,4 +170,4 @@ Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama veya her so
 
 [Kaynak formatı](docs/v3/MARKDOWN.md) · [Runtime](docs/v3/RUNTIME.md) · [Semantik test sözleşmesi](docs/v3/SEMANTIC-TEST-CONTRACT.md) · [Sürüm paketi ve updater](docs/v3/UPDATE.md) · [Birden çok makine](docs/v3/MULTI-MACHINE.md).
 
-Açık kaynak, [MIT lisansı](LICENSE). Avenox tarafından günlük ikinci beyin iş akışlarından geliştirildi. V2 bilgi derleme fikri için [Karpathy'nin bilgi tabanı desenine](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) teşekkürler.
+Açık kaynak, [MIT lisansı](LICENSE). V2 bilgi derleme fikri için [Karpathy'nin bilgi tabanı desenine](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) teşekkürler.

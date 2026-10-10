@@ -5,7 +5,7 @@
 > This file is your complete, self-contained build spec. Read it once, top to bottom, then execute
 > it phase by phase. You need no other context.
 >
-> Source: https://avenox.lol/beyin.md · Repo: https://github.com/avenoxai/avenoxbeyin
+> Source: https://raw.githubusercontent.com/GunduzTolga/Cortex/main/beyin.md · Repo: https://github.com/GunduzTolga/Cortex
 
 ---
 
@@ -96,9 +96,9 @@ When Git works, clone into a fresh system-temp directory so an old checkout is n
 silently reused:
 
 ```powershell
-$BeyinRepo = Join-Path $env:TEMP ("avenoxbeyin-" + [guid]::NewGuid().ToString("N"))
-git clone https://github.com/avenoxai/avenoxbeyin.git $BeyinRepo
-if ($LASTEXITCODE -ne 0) { throw "avenoxbeyin klonlanamadi; kurulum baslatilmadi" }
+$BeyinRepo = Join-Path $env:TEMP ("cortex-" + [guid]::NewGuid().ToString("N"))
+git clone https://github.com/GunduzTolga/Cortex.git $BeyinRepo
+if ($LASTEXITCODE -ne 0) { throw "Cortex klonlanamadi; kurulum baslatilmadi" }
 Set-Location $BeyinRepo
 ```
 
@@ -177,7 +177,7 @@ out loud and getting a yes.
 ## FAST PATH: clone the open-source template (recommended, covers both cases)
 
 ```bash
-git clone https://github.com/avenoxai/avenoxbeyin.git /tmp/avenoxbeyin && cd /tmp/avenoxbeyin
+git clone https://github.com/GunduzTolga/Cortex.git /tmp/cortex && cd /tmp/cortex
 ```
 
 Then read and follow `SETUP.md` in that repo. It decides the mode (fresh install or upgrade from
@@ -215,7 +215,7 @@ Propose `{{OS_NAME}}`, let the user override.
 
 1. **İsmin ne?** → `{{USER_NAME}}`
 2. **Ne iş yapıyorsun, bu beyni en çok ne için kullanacaksın?** (1 veya 2 cümle) → `{{USER_BIO}}`
-3. **AI ortağına ne isim vermek istersin?** (Avenox'unki "Echo") → `{{COMPANION}}`
+3. **AI ortağına ne isim vermek istersin?** → `{{COMPANION}}`
 4. **Kapsam, neye ihtiyacın var?** → `{{SCOPE}}`
    - `core` (herkes): Inbox, Knowledge, Projects, Command-Center, ortağın hafızası, kancalar,
      `daily/`, `knowledge/`
@@ -386,7 +386,7 @@ without drift, so fetch them from the repo. Try this first:
 
 ```bash
 V="{{VAULT_PATH}}"
-RAW="https://raw.githubusercontent.com/avenoxai/avenoxbeyin/main/template/.claude"
+RAW="https://raw.githubusercontent.com/GunduzTolga/Cortex/main/template/.claude"
 mkdir -p "$V/.claude/hooks/.state" "$V/.claude/scripts/.state" "$V/.claude/skills"
 OK=1
 for F in hooks/lib.sh hooks/session-start.sh hooks/prompt-counter.sh hooks/session-end.sh \
@@ -404,7 +404,7 @@ echo "motor: $OK"
 Also fetch the two skills, they are what makes the system diagnosable and importable:
 
 ```bash
-SK="https://raw.githubusercontent.com/avenoxai/avenoxbeyin/main/template/.claude/skills"
+SK="https://raw.githubusercontent.com/GunduzTolga/Cortex/main/template/.claude/skills"
 mkdir -p "$V/.claude/skills/beyin-doktor" "$V/.claude/skills/gecmis-import"
 curl -fsSL "$SK/beyin-doktor/SKILL.md"  -o "$V/.claude/skills/beyin-doktor/SKILL.md"
 curl -fsSL "$SK/gecmis-import/SKILL.md" -o "$V/.claude/skills/gecmis-import/SKILL.md"
@@ -821,7 +821,7 @@ Then give the user this report, in Turkish:
 - 💸 **Maliyet:** Ekstra ücret yok; arka plan özetleyici ve derleyici mevcut Claude aboneliğinin
   günlük limitinden küçük bir pay kullanır (özet: her oturum sonunda küçük bir Haiku çağrısı;
   derleme: günde bir Sonnet çağrısı).
-- 🔗 Bu sistemi sen de kurdun: bir arkadaşına `avenox.lol/beyin.md` gönder.
+- 🔗 Bu sistemi sen de kurdun: bir arkadaşına `https://raw.githubusercontent.com/GunduzTolga/Cortex/main/beyin.md` gönder.
 
 ---
 
@@ -833,4 +833,3 @@ https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
 ### Done.
 
 You just gave someone a second brain that remembers without being asked. That is the whole point.
-Avenox · https://avenox.lol

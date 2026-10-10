@@ -449,11 +449,11 @@ class SourceSyncTest(unittest.TestCase):
                     self.assertEqual(record[key], value)
 
     def test_unicode_property_keys_may_start_with_localized_letters(self):
-        header = ('özet: karar\nşirket: Avenox\nüberblick: bereit\n'
+        header = ('özet: karar\nşirket: Pyn\nüberblick: bereit\n'
                   'étiquette: memoire\nключ: значение\n_internal: true')
         metadata, body = self.module.parse('---\n' + header + '\n---\nLocalized keys.\n')
         self.assertEqual(metadata['özet'], 'karar')
-        self.assertEqual(metadata['şirket'], 'Avenox')
+        self.assertEqual(metadata['şirket'], 'Pyn')
         self.assertEqual(metadata['überblick'], 'bereit')
         self.assertEqual(metadata['étiquette'], 'memoire')
         self.assertEqual(metadata['ключ'], 'значение')

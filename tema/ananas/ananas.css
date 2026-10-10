@@ -269,7 +269,7 @@ button.mod-cta:active {
   box-shadow: 1px 1px 0 0 var(--ananas-hard);
 }
 
-/* Pencereler (ayarlar, komut paleti, hızlı geçiş): Avenox'un birincil
+/* Pencereler (ayarlar, komut paleti, hızlı geçiş): Ananas'ın birincil
    kart gölgesi, sert ofset ve altında yumuşak bir düşüş. */
 .modal,
 .prompt,

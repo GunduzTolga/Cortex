@@ -1,6 +1,6 @@
 """Cross-platform advisory file locking for the machine-memory layer.
 
-Upstream avenox v2 uses ``fcntl.flock`` directly. ``fcntl`` does not exist on
+Upstream v2 uses ``fcntl.flock`` directly. ``fcntl`` does not exist on
 Windows, so importing the engine there fails at module load and the whole
 daily-log / knowledge pipeline is dead before it runs. This module provides the
 two primitives the engine actually needs, with a POSIX path that behaves exactly

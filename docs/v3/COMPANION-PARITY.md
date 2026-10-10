@@ -20,13 +20,13 @@ Kaynaklar: `scripts/install_v3.py`, `template/CLAUDE.md`,
 `template/.claude/hooks/session-start.sh`, `template/.claude/scripts/compile.py`,
 `template/.claude/scripts/beyin_v3_hook.py`, `template/.agents/skills/beyin/SKILL.md`.
 
-[Issue #27](https://github.com/avenoxai/avenoxbeyin/issues/27) boş SessionStart sorgusunda
+Upstream #27 sorun kaydı boş SessionStart sorgusunda
 ilişki kaynaklarının seçilmediğini doğrudan raporladı. Önceki #29 düzeltmesi dört dosyayı
 önceliklendirdi ama Core/Soul ve eksik kurulum/öğrenme protokolünü tamamlamadı.
-[Issue #21](https://github.com/avenoxai/avenoxbeyin/issues/21) ise V2'nin Threads gövdesini
+Upstream #21 sorun kaydı ise V2'nin Threads gövdesini
 kaybettiğini gösterir: V2'nin hatalı satır filtresi geri getirilmedi. Windows hook
 arızaları da algılanan unutkanlığa katkı yapmış olabilir; bunlar V3.0.2'de ayrı olarak
-düzeltildi. Yeni [#32](https://github.com/avenoxai/avenoxbeyin/issues/32) raporu V3.0.1
+düzeltildi. Yeni upstream #32 raporu V3.0.1
 kurulumunu anlatır; V3.0.2'de tekrar üretildiği varsayılmadı.
 
 ## Kurulum ve veri koruması
@@ -47,7 +47,7 @@ bağlamda bütün dosyanın sığacağı iddia edilmez: kırpılan kaynağa okum
 Private/untrusted ve indekslendikten sonra değişmiş kayıtlar otomatik bağlamdan dışlanır.
 `no_memory` olayları bağlam enjekte etmez ve kuyruğa yazılmaz.
 
-Bütçe paylaşımı ([#45](https://github.com/avenoxai/avenoxbeyin/issues/45)): `Kurallar.md`
+Bütçe paylaşımı (upstream #45): `Kurallar.md`
 ve `Last-Session.md` eşit paylaşımdan önce bir taban pay alır; kurallar dosyası sığmadığında
 yalnız sonu değil, başı ve sonu birlikte gelir ve aradaki işaret kaç karakterin atlandığını
 ve dosyayı okumak gerektiğini söyler. Kesme satır sınırındadır, yarım kural gelmez. Bilgi
@@ -56,7 +56,7 @@ bölümlerine geri verilir; sınır hiçbir durumda aşılmaz.
 
 ## Boyut sınırı ve arşivleme (#96)
 
-[Issue #96](https://github.com/avenoxai/avenoxbeyin/issues/96) beş haftalık bir kasada
+Upstream #96 sorun kaydı beş haftalık bir kasada
 `Last-Session.md` dosyasının yaklaşık 94.000, `Threads.md` dosyasının yaklaşık 57.000
 karaktere büyüdüğünü raporladı. Bağlam bütçesi bu dosyaları kırpıyordu, fakat kırpma işareti
 ajanı dosyanın tamamını okumaya yönlendiriyordu ve büyüme hiçbir çıktıda görünmüyordu. Kök

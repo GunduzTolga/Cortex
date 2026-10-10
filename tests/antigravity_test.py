@@ -86,7 +86,7 @@ class AntigravityTest(unittest.TestCase):
 
         self.assertEqual(first_body, second_body)
         self.assertEqual(payload["user-hook"], existing["user-hook"])
-        managed = payload["avenox-beyin"]
+        managed = payload["cortex-beyin"]
         self.assertEqual(set(managed), {"PreInvocation", "Stop"})
         for event, action in (("PreInvocation", "pre-invocation"), ("Stop", "stop")):
             command = managed[event][0]["command"]

@@ -45,6 +45,8 @@ STOCK_DOCTOR_HASH = "fd7919c86d140314de82660b2b6f428e2804c4e4d5df35e68d9904dc0ab
 # scripts/skill.beyin-doktor.windows.md: from v3.0.2 on, install.ps1 swaps this edition in at
 # .claude before copying .claude\skills\* to .agents\skills, so a Windows V2 vault holds it twice.
 WINDOWS_STOCK_DOCTOR_HASH = "4b0e9aeae1067ae084380f7f179f12b9090213f3990c2973adbef999321e9a87"  # v3.0.2-v3.4.0
+# The same edition after the V2 hooks key became "cortex-beyin" (3.10.0).
+CORTEX_WINDOWS_DOCTOR_HASH = "7c7a5c41f8c77790fc9a7c7b8b711f571981a841ece712fbcd940fedeb0639d8"
 RETIRED_STUB = b"# BEYIN_V3_LEGACY_RETIRED: canonical source runtime owns new outcomes.\n"
 
 
@@ -128,7 +130,7 @@ def default_skill_hashes():
     # instead of linking it, so the stock doctor bytes were left at both roots there.
     for root in SKILL_ROOTS:
         hashes[root + "/skills/beyin-doktor/SKILL.md"] += [OLDER_STOCK_DOCTOR_HASH, STOCK_DOCTOR_HASH,
-                                                           WINDOWS_STOCK_DOCTOR_HASH]
+                                                           WINDOWS_STOCK_DOCTOR_HASH, CORTEX_WINDOWS_DOCTOR_HASH]
     source = ROOT / "template/.claude/skills/beyin-doktor/SKILL.md"
     if source.exists():
         hashes[".claude/skills/beyin-doktor/SKILL.md"].append(digest(source.read_bytes()))
@@ -414,7 +416,7 @@ def _install(vault, state, uninstall=False, plan_only=False, version="3.0.0", le
         add(".claude/settings.json", jbytes(data))
     path = vault / ".agents/hooks.json"
     data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    data.pop("avenox-beyin", None)
+    data.pop("cortex-beyin", None)
     if "harnesses/antigravity" in user_excluded:
         data.pop("beyin-v3", None)
         if path.exists():

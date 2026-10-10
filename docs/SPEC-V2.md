@@ -1,4 +1,4 @@
-# avenoxbeyin v2 — Master Specification
+# Cortex v2 — Master Specification
 
 Status: BUILD CONTRACT. Implementation lanes implement EXACTLY this. Where this spec is silent, choose the simplest behavior consistent with the principles. Do NOT consult external repositories or other codebases for implementation reference — this is a clean-room build from this spec only. Do NOT read files outside this repository.
 
@@ -38,12 +38,12 @@ Principles (binding):
 ## 1. Repo layout (v2 target)
 
 ```
-avenoxbeyin/
+Cortex/
 ├── LICENSE                        (MIT, unchanged)
 ├── README.md                      (v2 rewrite — lane D)
 ├── SETUP.md                       (v2 rewrite: fresh install + upgrade — lane D)
 ├── docs/
-│   └── beyin-v2.md                (new public spec for avenox.lol/beyin.md — lane D)
+│   └── beyin-v2.md                (new public beyin.md spec — lane D)
 └── template/
     ├── CLAUDE.md                  (v2 router-style — lane O1)
     ├── .beyin-version             (single line: `2.3.0` — graph-integrity release)
@@ -214,7 +214,7 @@ Turkish skill "geçmiş import", "takeout", "chatgpt geçmişi". Handles ChatGPT
 Two entry modes, decided FIRST: **(A) Fresh install** — v1 flow (interview → copy template → personalize placeholders) + NEW steps: `git init` + first commit in the vault; verify hooks executable; run a first `beyin-doktor`. **(B) Upgrade from v1** — detection: existing vault with `CLAUDE.md` + `🔮 850-Companion/` but no `.beyin-version`. Rules: NEVER touch existing 🔮 850-Companion/*.md, Dashboard, or user content; ADD `daily/`, `knowledge/`, `.claude/scripts/`, skills, Kurallar.md (seed only if absent), `.beyin-version`; REPLACE `.claude/hooks/*.sh` and MERGE `settings.json` hook entries idempotently (if a hook event already has the entry, skip); keep the user's chosen companion name inside file contents (folder stays `850-Companion`); end with doctor run. Both paths end with the same "sihri göster" demo: talk, exit, relaunch, next morning knowledge/ has articles.
 Keep v1's rules (Turkish default, interview first, never destroy, resolve placeholders, verify each phase). Include the "be the demo" narration rule that was dropped from v1's SETUP (restore it).
 
-### 6.2 docs/beyin-v2.md (new avenox.lol/beyin.md)
+### 6.2 docs/beyin-v2.md (new public beyin.md)
 Same self-contained structure as v1's public spec but v2: FAST PATH = clone repo + SETUP.md (unchanged mechanism); adds an early branch: "Mevcut beyin var mı?" → upgrade path; the from-scratch fallback phases updated to include scripts/skills (may reference the repo as required for scripts — from-scratch no longer duplicates the python code inline; instead instruct fallback users to fetch the two script files from the repo raw URLs, or degrade to v1-style hooks-only with a note). Keep: Turkish narration rule, skip-the-video framing, placeholders table, mem0 as optional free add-on (unchanged wording about free tier), final report format. Add honest cost paragraph: "Ekstra ücret yok; arka plan özetleyici ve derleyici mevcut Claude aboneliğinin günlük limitinden küçük bir pay kullanır (özet: her oturum sonunda küçük bir Haiku çağrısı; derleme: günde bir Sonnet çağrısı)."
 
 ### 6.3 README.md v2
@@ -226,7 +226,7 @@ Rewrite: what it is (2 paragraphs, thesis "hafıza rica değil mekanizma"), v1�
 2. `python3 tests/scripts_test.py` green.
 3. `python3 -m py_compile` on both scripts; `bash -n` on all hooks.
 4. Manual smoke: temp vault, synthetic transcript, fake `claude` stub → flush writes daily entry; `BEYIN_FAKE_HOUR=19` triggers compile path.
-5. grep gates: no em/en dashes in any Turkish user-facing text; no absolute paths; no personal data (grep -i 'avenox\|taha\|echo' in template/ must only hit sanctioned mentions in README credits).
+5. grep gates: no em/en dashes in any Turkish user-facing text; no absolute paths; no personal data (a case-insensitive grep in template/ for the original author's personal and companion names must only hit sanctioned mentions in README credits)\|taha\|echo' in template/ must only hit sanctioned mentions in README credits).
 6. Every `{{PLACEHOLDER}}` documented in SETUP.
 
 ## 8. Lane ownership (hard file boundaries)

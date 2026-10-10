@@ -12,7 +12,7 @@ class PublicEntryTest(unittest.TestCase):
         required = (
             'releases/latest', '.zip.sha256', 'install_v3.py --vault',
             'beyin.py doctor --human', 'beyin.py preferences --human',
-            'https://avenox.lol/ikincibeyin', 'notlarini silme',
+            'https://github.com/GunduzTolga/Cortex#readme', 'notlarini silme',
             '.agents/skills/beyin/SKILL.md',
         )
         for phrase in required:
