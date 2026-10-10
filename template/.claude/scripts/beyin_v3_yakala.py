@@ -428,6 +428,10 @@ def extract(vault, card, found, allow_audio=True, info=None):
     """Return (text, method, note). Prefer what is already captured, then the cheapest fetch."""
     meta, body = card['meta'], card['body']
     url, kind = meta.get('url'), meta.get('kaynak_turu') or kind_of(meta.get('url'))
+    if url and urlparse(str(url)).scheme.lower() not in ('http', 'https'):
+        # A card is plain Markdown that anything with write access to the vault can edit:
+        # only web addresses are fetched, never file:// or another local scheme.
+        return None, None, 'Yalniz http(s) adresleri getirilir: ' + str(url)[:80]
     clipped = _section(body, 'Icerik') or _section(body, 'İçerik')
     if clipped and len(clipped) > 200 and kind != 'youtube':
         return clipped, 'web-clipper', None
@@ -455,8 +459,11 @@ def extract(vault, card, found, allow_audio=True, info=None):
         return _section(body, 'Secim') or body, 'metin', None
     if kind == 'dosya':
         parts = []
+        root = Path(vault).resolve()
         for link in re.findall(r'\[\[([^\]]+)\]\]', _section(body, 'Dosyalar')):
-            path = Path(vault) / link
+            path = (root / link).resolve()
+            if not path.is_relative_to(root):
+                continue  # capture copies files into the vault; a link that leaves it is never read
             if path.suffix.lower() in ('.md', '.txt', '.csv', '.json', '.html', '.srt', '.vtt'):
                 parts.append('## ' + path.name + '\n\n' + path.read_text(encoding='utf-8', errors='replace'))
             elif path.suffix.lower() == '.pdf' and found['pdftotext']:

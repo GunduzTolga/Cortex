@@ -9,6 +9,9 @@ import re
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+# A build without --version is the checkout's own version, never a fixed old number: a stale
+# default would stamp vaults above every real release and turn updates into refused downgrades.
+CURRENT = (ROOT / 'VERSION').read_text(encoding='utf-8').strip()
 
 
 def installer():
@@ -17,7 +20,7 @@ def installer():
     return module
 
 
-def build(output, version='3.0.0'):
+def build(output, version=CURRENT):
     if not re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', version):
         raise ValueError('stable version required')
     paths = [ROOT / 'scripts' / name for name in ('install_v3.py', 'beyin_v3.py', 'beyin_entry.py')]
@@ -52,6 +55,6 @@ def build(output, version='3.0.0'):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--version', default='3.0.0')
+    parser.add_argument('--version', default=CURRENT)
     args = parser.parse_args()
     print(json.dumps(build(args.output, args.version)))

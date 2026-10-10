@@ -100,6 +100,28 @@ class YakalaUnitTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             yakala.finish(self.vault, note['id'], ['knowledge/concepts/yok.md'])
 
+    def test_extract_reads_only_inside_the_vault_and_only_web_addresses(self):
+        none = {name: None for name in ('npx', 'yt_dlp', 'whisper', 'pdftotext', 'ffmpeg')}
+        outside = Path(self.tmp.name) / 'disari.txt'
+        outside.write_text('vault disindaki gizli metin', encoding='utf-8')
+        inside = yakala.capture(self.vault, files=[outside], why='kopya')
+        card = yakala.find_card(self.vault, inside['id'])
+        text, method, _ = yakala.extract(self.vault, card, none)
+        self.assertEqual(method, 'dosya')
+        self.assertIn('vault disindaki gizli metin', text)  # the copy inside the vault is read
+        for link in ('../disari.txt', str(outside)):
+            with self.subTest(link=link):
+                forged = {'meta': {'kaynak_turu': 'dosya'}, 'body': '# x\n\n## Dosyalar\n\n- [[' + link + ']]\n'}
+                text, method, _ = yakala.extract(self.vault, forged, none)
+                self.assertIsNone(text)
+                self.assertEqual(method, 'ajan-okusun')
+        local = {'meta': {'kaynak_turu': 'makale', 'url': outside.as_uri()}, 'body': '# x\n'}
+        with patch.object(yakala, 'via_stdlib', side_effect=AssertionError('fetched')), \
+                patch.object(yakala, 'via_defuddle', side_effect=AssertionError('fetched')):
+            text, method, note = yakala.extract(self.vault, local, none)
+        self.assertEqual((text, method), (None, None))
+        self.assertIn('http(s)', note)
+
     def test_vtt_text(self):
         raw = ('WEBVTT\nKind: captions\n\n00:00:00.000 --> 00:00:02.000\nmerhaba <c>dunya</c>\n\n'
                '00:00:02.000 --> 00:00:04.000\nmerhaba dunya\nikinci satir\n\n00:00:40.000 --> 00:00:42.000\nyeni paragraf\n'

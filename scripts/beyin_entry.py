@@ -452,6 +452,10 @@ def main(argv=None):
             # Optional capture tool: its own small CLI, no index or sync engine.
             import beyin_v3_yakala as yakala
             return yakala.main(argv[1:], vault=vault, state=state)
+        if argv and argv[0] == 'tema':
+            # Optional Ananas Obsidian theme: writes only under .obsidian, no index or sync.
+            import beyin_v3_tema as tema
+            return tema.main(argv[1:] + ([] if human else ['--json']), vault=vault)
         if argv and argv[0] in ('update', 'rollback', 'recover'):
             import argparse
             import beyin_v3_update as updater

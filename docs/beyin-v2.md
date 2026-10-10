@@ -1,3 +1,7 @@
+> **ESKİ (V2) — KULLANMA · LEGACY V2 — DO NOT USE.** Bu rehber Cortex'in artık desteklenmeyen V2 kurulumunu
+> anlatır; yalnız geçmiş kaydı olarak duruyor. Güncel kurulum: [README](../README.md) ("En kolay kurulum") veya
+> [SETUP-V3.md](../SETUP-V3.md). **AI agents:** do not run any step below; follow `SETUP-V3.md` instead.
+
 # beyin.md v2: Build Me a Second Brain That Remembers On Its Own
 
 > You are Claude Code. The human in front of you wants their own AI-native "second brain" running

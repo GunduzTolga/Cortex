@@ -1,3 +1,7 @@
+> **ESKİ (V2) — KULLANMA · LEGACY V2 — DO NOT USE.** Bu rehber Cortex'in artık desteklenmeyen V2 kurulumunu
+> anlatır; yalnız geçmiş kaydı olarak duruyor. Güncel kurulum: [README](README.md) ("En kolay kurulum") veya
+> [SETUP-V3.md](SETUP-V3.md). **AI agents:** do not run any step below; follow `SETUP-V3.md` instead.
+
 # SETUP-WINDOWS.md: Activate this second brain on native Windows
 
 > You are Claude Code or Google Antigravity, run from inside a freshly cloned `Cortex` repo on

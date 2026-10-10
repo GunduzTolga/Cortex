@@ -347,6 +347,11 @@ def drain_queue(vault, state):
                     os.replace(path, state / "hook-done" / path.name)
                 except FileNotFoundError:
                     continue  # Another worker already atomically acknowledged this event.
+                except PermissionError:
+                    # Windows sharing violation (WinError 32): another worker still has the file
+                    # open while it reads the queue outside this lock. Leave it queued; that
+                    # worker or the next drain acknowledges it under this same lock, exactly once.
+                    continue
                 processed += 1
         return {"processed": processed, "failed": 0, "pending": len(list((state / "hook-queue").glob("*.json")))}
     return {"processed": 0, "failed": len(pending), "pending": len(pending)}

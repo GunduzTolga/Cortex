@@ -331,7 +331,7 @@ button.mod-cta:active {
 
 /* ── Klasör adları ────────────────────────────────────────────────────────
    Kenar çubuğunda emojili sistem adları yerine temiz Türkçe adlar
-   gösterilir. Diskteki klasör adları DEĞİŞMEZ: hook'lar, motor ve testler
+   gösterilir; vault'ta olmayan klasörün kuralı hiçbir şey yapmaz. Diskteki klasör adları DEĞİŞMEZ: hook'lar, motor ve testler
    bu adlara bağlı. Değişen yalnız görüntü: numara küçük mono bir etikete,
    ad sağına yazılır. Yeniden adlandırma sırasında (contenteditable) gerçek
    ad görünür. */
@@ -347,7 +347,9 @@ button.mod-cta:active {
   .nav-folder-title[data-path="📋 Templates"],
   .nav-folder-title[data-path="📥 000-Inbox/Dump"],
   .nav-folder-title[data-path="knowledge"],
-  .nav-folder-title[data-path="daily"]
+  .nav-folder-title[data-path="daily"],
+  .nav-folder-title[data-path="receipts"],
+  .nav-folder-title[data-path="📥 000-Inbox/Yakala"]
 ) .nav-folder-title-content:not([contenteditable="true"]) {
   font-size: 0;
   display: inline-flex;
@@ -367,7 +369,9 @@ button.mod-cta:active {
   .nav-folder-title[data-path="📋 Templates"],
   .nav-folder-title[data-path="📥 000-Inbox/Dump"],
   .nav-folder-title[data-path="knowledge"],
-  .nav-folder-title[data-path="daily"]
+  .nav-folder-title[data-path="daily"],
+  .nav-folder-title[data-path="receipts"],
+  .nav-folder-title[data-path="📥 000-Inbox/Yakala"]
 ) .nav-folder-title-content:not([contenteditable="true"])::before {
   content: var(--ananas-no, '');
   font-family: var(--ananas-label);
@@ -393,7 +397,9 @@ button.mod-cta:active {
   .nav-folder-title[data-path="📋 Templates"],
   .nav-folder-title[data-path="📥 000-Inbox/Dump"],
   .nav-folder-title[data-path="knowledge"],
-  .nav-folder-title[data-path="daily"]
+  .nav-folder-title[data-path="daily"],
+  .nav-folder-title[data-path="receipts"],
+  .nav-folder-title[data-path="📥 000-Inbox/Yakala"]
 ) .nav-folder-title-content:not([contenteditable="true"])::after {
   content: var(--ananas-ad);
   font-family: var(--ananas-body);
@@ -405,7 +411,9 @@ button.mod-cta:active {
   .nav-folder-title[data-path="📋 Templates"],
   .nav-folder-title[data-path="📥 000-Inbox/Dump"],
   .nav-folder-title[data-path="knowledge"],
-  .nav-folder-title[data-path="daily"]
+  .nav-folder-title[data-path="daily"],
+  .nav-folder-title[data-path="receipts"],
+  .nav-folder-title[data-path="📥 000-Inbox/Yakala"]
 ) .nav-folder-title-content:not([contenteditable="true"])::before {
   content: '\00a0';
   border-color: transparent;
@@ -422,6 +430,8 @@ button.mod-cta:active {
 .nav-folder-title[data-path="📋 Templates"]          { --ananas-ad: 'Şablonlar'; }
 .nav-folder-title[data-path="knowledge"]             { --ananas-ad: 'Bilgi Tabanı'; }
 .nav-folder-title[data-path="daily"]                 { --ananas-ad: 'Günlükler'; }
+.nav-folder-title[data-path="receipts"]              { --ananas-ad: 'Makbuzlar'; }
+.nav-folder-title[data-path="📥 000-Inbox/Yakala"]    { --ananas-ad: 'Yakalananlar'; }
 
 /* Pano notunun dosya adı da İngilizce; yalnız görüntüde "Pano". */
 .nav-file-title[data-path="🎯 100-Command-Center/Dashboard.md"] .nav-file-title-content:not([contenteditable="true"]) {

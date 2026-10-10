@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
-"""Ananas Obsidian temasını bir vault'a kurar veya kaldırır.
+"""Ananas Obsidian temasının veri modülünü kaynaktan üretir (geliştirici aracı).
 
-Yalnız iki şeye dokunur: `.obsidian/snippets/ananas.css` dosyasını yazar ve
-`.obsidian/appearance.json` içindeki `enabledCssSnippets` listesine `ananas`
-ekler. Beyin motoruna, hook'lara, notlara ve diğer Obsidian ayarlarına
-dokunmaz; güncelleyicinin yönettiği hiçbir dosya değişmez.
+Tasarım kaynağı `tema/ananas/`: `ananas.css` ve `fonts/*.woff2`. Bu betik yazı
+tiplerini @font-face olarak CSS'e gömer ve sonucu motorun paketlenen bir modülüne,
+`template/.claude/scripts/beyin_v3_tema_veri.py` dosyasına yazar. Kullanıcı temayı
+vault'ta `beyin.py tema kur` ile kurar; o komut bu veriyi kullanır.
 
-    py -3 scripts/ananas_tema.py kur --vault "C:\\Notlar\\Beynim"
-    py -3 scripts/ananas_tema.py kaldir --vault "C:\\Notlar\\Beynim"
+    py -3 scripts/ananas_tema.py uret      # kaynak değiştiyse veri modülünü yeniden yaz
+    py -3 scripts/ananas_tema.py kontrol   # modül kaynakla aynı mı (CI ve testler)
 """
 import argparse
 import base64
-import json
+import hashlib
 from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMA = ROOT / 'tema' / 'ananas'
-SNIPPET = 'ananas'
-MARKER = '/* ananas-tema: scripts/ananas_tema.py tarafından üretildi */'
+MODULE = ROOT / 'template' / '.claude' / 'scripts' / 'beyin_v3_tema_veri.py'
+MARKER = '/* ananas-tema: Cortex tarafından üretildi; elle düzenleme, beyin.py tema kur yeniden yazar */'
+CHUNK = 96
 
 LATIN = ('U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, '
          'U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD')
@@ -47,85 +48,51 @@ def font_faces():
     return '\n'.join(rules)
 
 
-def build():
+def css():
+    """The snippet exactly as it lands in .obsidian/snippets/ananas.css."""
     source = (TEMA / 'ananas.css').read_text(encoding='utf-8')
     note = ('/* Yazı tipleri: Fraunces, JetBrains Mono, Schibsted Grotesk; SIL Open Font License 1.1.\n'
-            '   Lisans metinleri: tema/ananas/fonts/*-OFL.txt */')
-    return '\n\n'.join((MARKER, note, font_faces(), source))
+            '   Lisans metinleri Cortex deposunda: tema/ananas/fonts/*-OFL.txt */')
+    return '\n\n'.join((MARKER, note, font_faces(), source)) + '\n'
 
 
-def obsidian_dir(vault):
-    vault = Path(vault).expanduser().resolve()
-    if not vault.is_dir():
-        raise SystemExit(f'Vault bulunamadı: {vault}')
-    return vault / '.obsidian'
-
-
-def read_appearance(path):
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding='utf-8'))
-    except ValueError:
-        raise SystemExit(f'{path} okunamadı (geçersiz JSON). Elle düzelt, sonra tekrar dene; dosyaya dokunulmadı.')
-    if not isinstance(data, dict):
-        raise SystemExit(f'{path} beklenen biçimde değil; dosyaya dokunulmadı.')
-    return data
-
-
-def write_appearance(path, data):
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-
-
-def install(vault):
-    obsidian = obsidian_dir(vault)
-    snippet = obsidian / 'snippets' / f'{SNIPPET}.css'
-    if snippet.exists() and MARKER not in snippet.read_text(encoding='utf-8', errors='replace')[:200]:
-        raise SystemExit(f'{snippet} zaten var ve bu betiğin yazdığı dosya değil; üzerine yazılmadı.')
-    appearance = obsidian / 'appearance.json'
-    data = read_appearance(appearance)
-    snippet.parent.mkdir(parents=True, exist_ok=True)
-    snippet.write_text(build(), encoding='utf-8', newline='\n')
-    enabled = data.get('enabledCssSnippets')
-    enabled = list(enabled) if isinstance(enabled, list) else []
-    if SNIPPET not in enabled:
-        data['enabledCssSnippets'] = enabled + [SNIPPET]
-        write_appearance(appearance, data)
-    return snippet
-
-
-def uninstall(vault):
-    obsidian = obsidian_dir(vault)
-    snippet = obsidian / 'snippets' / f'{SNIPPET}.css'
-    if snippet.exists():
-        if MARKER not in snippet.read_text(encoding='utf-8', errors='replace')[:200]:
-            raise SystemExit(f'{snippet} bu betiğin yazdığı dosya değil; silinmedi.')
-        snippet.unlink()
-    appearance = obsidian / 'appearance.json'
-    data = read_appearance(appearance)
-    enabled = data.get('enabledCssSnippets')
-    if isinstance(enabled, list) and SNIPPET in enabled:
-        data['enabledCssSnippets'] = [name for name in enabled if name != SNIPPET]
-        write_appearance(appearance, data)
-    return snippet
+def module_text():
+    text = css()
+    encoded = base64.b64encode(text.encode('utf-8')).decode('ascii')
+    chunks = [encoded[i:i + CHUNK] for i in range(0, len(encoded), CHUNK)]
+    lines = ['"""Ananas temasının CSS verisi. ÜRETİLMİŞ DOSYA, elle düzenleme.',
+             '',
+             'Kaynak: tema/ananas/ (ananas.css ve fonts/). Yeniden üretmek için:',
+             '    py -3 scripts/ananas_tema.py uret',
+             '"""',
+             'MARKER = ' + repr(MARKER),
+             "CSS_SHA256 = '" + hashlib.sha256(text.encode('utf-8')).hexdigest() + "'",
+             'CHUNKS = (']
+    lines += ["    '" + chunk + "'," for chunk in chunks]
+    lines += [')', '']
+    return '\n'.join(lines)
 
 
 def main(argv=None):
-    # A Windows console may be cp1252: an unencodable character prints as '?' instead of failing.
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(errors='replace')
-    parser = argparse.ArgumentParser(description='Ananas Obsidian teması')
-    parser.add_argument('islem', choices=('kur', 'kaldir'))
-    parser.add_argument('--vault', required=True, help='Obsidian vault klasörü')
+    parser = argparse.ArgumentParser(description='Ananas tema verisini üret veya kontrol et')
+    parser.add_argument('islem', choices=('uret', 'kontrol'))
     args = parser.parse_args(argv)
-    if args.islem == 'kur':
-        path = install(args.vault)
-        print(f'Ananas teması kuruldu: {path}')
-        print("Obsidian açıksa: Ayarlar > Görünüm > CSS parçacıkları > yenile.")
-    else:
-        path = uninstall(args.vault)
-        print(f'Ananas teması kaldırıldı: {path}')
+    expected = module_text()
+    current = MODULE.read_text(encoding='utf-8') if MODULE.exists() else None
+    if args.islem == 'kontrol':
+        if current != expected:
+            print('beyin_v3_tema_veri.py kaynakla uyuşmuyor; çalıştır: py -3 scripts/ananas_tema.py uret', file=sys.stderr)
+            return 1
+        print('Tema verisi güncel.')
+        return 0
+    if current == expected:
+        print('Tema verisi zaten güncel: ' + str(MODULE.relative_to(ROOT)))
+        return 0
+    MODULE.write_text(expected, encoding='utf-8', newline='\n')
+    print('Tema verisi yazıldı: ' + str(MODULE.relative_to(ROOT)))
     return 0
 
 

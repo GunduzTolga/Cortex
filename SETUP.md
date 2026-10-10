@@ -1,3 +1,7 @@
+> **ESKİ (V2) — KULLANMA · LEGACY V2 — DO NOT USE.** Bu rehber Cortex'in artık desteklenmeyen V2 kurulumunu
+> anlatır; yalnız geçmiş kaydı olarak duruyor. Güncel kurulum: [README](README.md) ("En kolay kurulum") veya
+> [SETUP-V3.md](SETUP-V3.md). **AI agents:** do not run any step below; follow `SETUP-V3.md` instead.
+
 # SETUP.md v2.3: Activate this second brain (Claude Code or Codex runbook)
 
 > You are Claude Code or Codex, run from inside a freshly cloned `Cortex` repo. The user wants their

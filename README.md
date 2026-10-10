@@ -86,27 +86,39 @@ python3 beyin.py doctor
 
 Windows'ta aynı komutun başında `py -3` kullan. Kurulumda özel runtime yolu seçtiysen kurulu `beyin.py` bunu zaten bilir.
 
+## Gizlilik: notların nereye gider?
+
+Cortex kendi başına notlarını hiçbir yere göndermez ve telemetri toplamaz. Tek otomatik ağ isteği, günde en çok bir kez GitHub'a "yeni sürüm var mı?" sorusudur; not, prompt veya hesap bilgisi taşımaz (`preferences --update-notifications off` kapatır).
+
+Asıl akış şudur: yazdığın mesajla eşleşen notlar asistanının bağlamına eklenir ve böylece **kullandığın yapay zekâ sağlayıcısına** (Anthropic, OpenAI, Google…) gider. Sistemin amacı budur; ama varsayılan olarak vault'taki her not aday sayılır. Kendini korumak için:
+
+- **Tek bir notu dışarıda tut:** notun en başına şu üç satırı koy. Not otomatik bağlama hiç girmez; yalnız açıkça istediğinde okunur.
+
+  ```
+  ---
+  visibility: private
+  ---
+  ```
+- **Hassas notları ayrı tut:** sağlık, finans gibi notlar için Cortex'i kurmadığın ayrı bir vault en temiz yoldur. Nokta ile başlayan klasörler (`.gizli/`) hiç indekslenmez, ama Obsidian bunları kenar çubuğunda göstermez.
+- **Sır süzgeci:** `preferences --secret-filter on` ajanın yazdığı notlarda, makbuzlarda ve görevlerde API anahtarı ve parola gibi sırları maskeler. Varsayılan kapalıdır.
+
+Arama indeksi vault dışında, yalnız senin hesabının okuyabildiği bir klasörde durur (Windows: `%LOCALAPPDATA%eyin-v3\…`, macOS: `~/Library/Application Support/beyin-v3/…`, Linux: `~/.local/state/beyin-v3/…`) ve notlarının bir kopyasını içerir. Vault'u herkese açık bir git deposuna koyacaksan `.beyin-runtime.json` dosyasını dışarıda bırak: bu makinedeki tam yolu, dolayısıyla kullanıcı adını içerir ([birden çok makine](docs/v3/MULTI-MACHINE.md)).
+
 ## İsteğe bağlı: tek tuşla beyne at
 
 Video, tweet, makale, mail ya da dosyayı gördüğün yerde yakala; ajanın metni çıkarıp dersleri `knowledge/` notlarına bağlasın. Kurulum bir kez: `python3 beyin.py yakala kur` (Windows'ta `py -3`). Sonra her uygulamada Mac'te `Control+Option+B`, Windows'ta `Ctrl+Alt+B`; tarayıcıda Obsidian Web Clipper'ın "Beyne at" şablonu. Tuşu değiştirmek için `beyin.py yakala kisayol 'cmd+"'`. Ajanına "yakalananları işle" demen yeter. YouTube'da önce altyazı, yoksa yalnız ses yerelde yazıya dökülür. Ayrıntı: [docs/v3/YAKALA.md](docs/v3/YAKALA.md).
 
 ## Ananas teması
 
-İsteğe bağlı Obsidian görünümü. Açtığın paket klasöründe vault yolunu kendi klasörünle değiştirerek çalıştır:
-
-Windows:
-
-```powershell
-py -3 scripts/ananas_tema.py kur --vault "C:\Notlar\Beynim"
-```
-
-macOS / Linux:
+İsteğe bağlı Obsidian görünümü: fildişi kâğıt, mürekkep kontur, sert gölgeli kartlar, Fraunces başlıklar. Yazı tipleri temanın içinde gelir, internet gerekmez. Vault klasöründe:
 
 ```sh
-python3 scripts/ananas_tema.py kur --vault "/yol/Beynim"
+python3 beyin.py tema kur
 ```
 
-Kaldırmak için aynı komutu `kur` yerine `kaldir` ile çalıştır. Tema yalnız `.obsidian/snippets/ananas.css` dosyasını yazar ve onu `.obsidian/appearance.json` içinde etkinleştirir; notlara, motora ve diğer ayarlara dokunmaz. Kenar çubuğunda klasör adları sade Türkçe etiketlerle görünür (örneğin 850 → Pyn); diskteki klasörlerin adı değişmez.
+Windows'ta `py -3 beyin.py tema kur`. Obsidian açıksa Ayarlar > Görünüm > CSS parçacıkları > yenile. `tema durum` kurulu ve güncel olup olmadığını söyler (Cortex güncellemesinden sonra "eski" derse `tema kur` yeniden yazar); `tema kaldir` geri alır.
+
+Tema yalnız `.obsidian/snippets/ananas.css` dosyasını yazar ve onu `.obsidian/appearance.json` içinde etkinleştirir; notlara, motora ve diğer Obsidian ayarlarına dokunmaz, senin yazdığın bir `ananas.css` dosyasının üzerine yazmaz. Kenar çubuğunda klasörler sade Türkçe etiketlerle görünür (`🔮 850-Companion` → Pyn, `receipts` → Makbuzlar, `📥 000-Inbox/Yakala` → Yakalananlar); diskteki adlar değişmez.
 
 ## Tüketim ve kontrol sıklığı
 

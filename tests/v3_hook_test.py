@@ -212,6 +212,22 @@ class HookInstallerTest(unittest.TestCase):
         self.assertEqual(sum(r['processed'] for r in results), 1)
         self.assertEqual(list((self.state / 'hook-queue').glob('*.json')), [])
 
+    def test_sharing_violation_leaves_event_queued_for_the_next_drain(self):
+        # Windows refuses to move a queue file another worker holds open (WinError 32).
+        self.seed()
+        self.hook.enqueue_event(self.vault, self.state, self.payload, 'codex')
+        real_replace = os.replace
+        def busy(source, target):
+            if Path(target).parent.name == 'hook-done':
+                raise PermissionError(32, 'The process cannot access the file because it is being used by another process')
+            return real_replace(source, target)
+        with patch.object(self.hook.os, 'replace', side_effect=busy):
+            first = self.hook.drain_queue(self.vault, self.state)
+        self.assertEqual((first['processed'], first['failed'], first['pending']), (0, 0, 1))
+        second = self.hook.drain_queue(self.vault, self.state)
+        self.assertEqual((second['processed'], second['pending']), (1, 0))
+        self.assertEqual(list((self.state / 'hook-queue').glob('*.json')), [])
+
     def test_codex_claude_stdin_contexts_equal(self):
         self.seed()
         payload = dict(self.payload, hook_event_name='SessionStart', prompt='Nebula calibration')
