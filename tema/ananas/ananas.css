@@ -69,6 +69,14 @@ body {
   --ananas-border: 1.5px solid var(--ananas-outline);
   --ananas-shadow: 5px 5px 0 0 var(--ananas-hard);
 
+  /* Klasör ikonlarının tonları: kâğıt üstünde toprak renkleri olduğu gibi. */
+  --ananas-ton-arduvaz: var(--ananas-arduvaz);
+  --ananas-ton-yosun: var(--ananas-yosun);
+  --ananas-ton-menekse: var(--ananas-menekse);
+  --ananas-ton-koyu-altin: var(--ananas-koyu-altin);
+  --ananas-ton-tugla: var(--ananas-tugla);
+  --ananas-ton-soluk: #a5a198;
+
   --background-primary: var(--ananas-paper);
   --background-primary-alt: var(--ananas-paper-3);
   --background-secondary: var(--ananas-paper-3);
@@ -114,23 +122,41 @@ body {
   --checkbox-border-color: var(--ananas-ink);
   --checkbox-marker-color: var(--ananas-ink);
 
-  --titlebar-background: var(--ananas-paper-3);
-  --titlebar-background-focused: var(--ananas-paper-3);
+  --titlebar-background: #e4ddcc;
+  --titlebar-background-focused: #e4ddcc;
+  --ribbon-background: #e4ddcc;
+  --ribbon-background-collapsed: #e4ddcc;
+  --tab-container-background: var(--ananas-paper-3);
+  --divider-color: #cfc7b4;
 }
 
 /* Koyu mod: mürekkep zemin, kâğıt yazı, altın vurgu. Sert gölge
    kaybolmasın diye mürekkebin bir ton koyusu. */
 .theme-dark {
-  --ananas-outline: #75716a;
-  --ananas-hard: #0d0904;
+  --ananas-outline: #4a443a;
+  --ananas-hard: #0a0805;
   --ananas-border: 1.5px solid var(--ananas-outline);
   --ananas-shadow: 5px 5px 0 0 var(--ananas-hard);
 
-  --background-primary: var(--ananas-ink);
-  --background-primary-alt: #221e18;
-  --background-secondary: #141109;
-  --background-secondary-alt: #0d0904;
-  --background-modifier-border: #433f39;
+  /* Aynı tonların mürekkep zeminde okunan açık hâlleri. */
+  --ananas-ton-arduvaz: #7fa6b0;
+  --ananas-ton-yosun: #a3b48a;
+  --ananas-ton-menekse: #b6a7dc;
+  --ananas-ton-koyu-altin: #e8b23a;
+  --ananas-ton-tugla: #de8467;
+  --ananas-ton-soluk: #8a847a;
+
+  --background-primary: #1f1b15;
+  --background-primary-alt: #29241c;
+  --background-secondary: #15120d;
+  --background-secondary-alt: #100d09;
+  --background-modifier-border: #3a342b;
+  --titlebar-background: #100d09;
+  --titlebar-background-focused: #100d09;
+  --ribbon-background: #100d09;
+  --ribbon-background-collapsed: #100d09;
+  --tab-container-background: #15120d;
+  --divider-color: #3a342b;
   --background-modifier-border-hover: #75716a;
   --background-modifier-border-focus: var(--ananas-gold);
   --background-modifier-hover: rgba(243, 239, 228, 0.06);
@@ -303,137 +329,164 @@ button.mod-cta:active {
   font-size: 0.78em;
 }
 
-/* Seçili dosya: koyu mürekkep kart, altın çerçeve. */
-.nav-file-title.is-active,
-.tree-item-self.is-active {
+/* Seçili dosya. Açıkta mürekkep kart ve altın çerçeve, koyuda altın kart ve
+   mürekkep yazı: iki modda da "burası" diye bağırır. */
+.theme-light .nav-file-title.is-active,
+.theme-light .tree-item-self.is-active {
   background-color: var(--ananas-ink);
   color: var(--ananas-paper-2);
   box-shadow: inset 0 0 0 1.5px var(--ananas-gold);
   border-radius: 4px;
 }
 
-/* ── Klasör renkleri ──────────────────────────────────────────────────────
-   Vault'un numaralı klasörlerini beş çalışma alanı tonuyla ayırır. Renk,
-   klasör adının solundaki ince bir şerit olarak görünür. Örnek:
-
-   .nav-folder-title[data-path^="📥 000-Inbox"] { --ananas-alan: var(--ananas-arduvaz); }
-
-   Eşleşmeyen klasör şerit almaz. */
-
-.nav-folder-title[data-path] {
-  border-left: 3px solid var(--ananas-alan, transparent);
+.theme-dark .nav-file-title.is-active,
+.theme-dark .tree-item-self.is-active {
+  background-color: var(--ananas-gold);
+  color: var(--ananas-ink);
+  border-radius: 4px;
 }
 
-/* TODO(sen): klasör → ton eşlemesi. Beş ton, yedi numaralı klasör:
-   000-Inbox, 100-Command-Center, 300-Projects, 500-Knowledge,
-   600-Arsenal, 850-Companion, 900-Archive (ve knowledge/, daily/). */
+.nav-folder-title:hover,
+.nav-file-title:hover {
+  background-color: var(--background-modifier-hover);
+}
 
+/* ── Klasörler: ikon ve Türkçe ad ────────────────────────────────────────
+   Kenar çubuğunda emojili sistem adlarının yerine kendi ikonu ve sade
+   Türkçe adı görünür. Diskteki klasör adları DEĞİŞMEZ: hook'lar, motor ve
+   testler bu adlara bağlı; değişen yalnız görüntü. Vault'ta olmayan
+   klasörün kuralı hiçbir şey yapmaz. Yeniden adlandırma sırasında
+   (contenteditable) gerçek ad görünür.
 
-/* ── Klasör adları ────────────────────────────────────────────────────────
-   Kenar çubuğunda emojili sistem adları yerine temiz Türkçe adlar
-   gösterilir; vault'ta olmayan klasörün kuralı hiçbir şey yapmaz. Diskteki klasör adları DEĞİŞMEZ: hook'lar, motor ve testler
-   bu adlara bağlı. Değişen yalnız görüntü: numara küçük mono bir etikete,
-   ad sağına yazılır. Yeniden adlandırma sırasında (contenteditable) gerçek
-   ad görünür. */
+   Renk eşlemesi: gelen kutusu arduvaz, yakalananlar ve makbuzlar koyu altın,
+   proje ve bilgi menekşe, araç ve günlük yosun, görev ve pano tuğla, arşiv ile
+   şablonlar soluk. Değiştirmek için aşağıdaki satırlarda --ananas-ton-*. */
 
 :is(
   .nav-folder-title[data-path="📥 000-Inbox"],
+  .nav-folder-title[data-path="📥 000-Inbox/Yakala"],
+  .nav-folder-title[data-path="📥 000-Inbox/Dump"],
   .nav-folder-title[data-path="🎯 100-Command-Center"],
   .nav-folder-title[data-path="🏰 300-Projects"],
   .nav-folder-title[data-path="🧠 500-Knowledge"],
   .nav-folder-title[data-path="🛠️ 600-Arsenal"],
   .nav-folder-title[data-path="🔮 850-Companion"],
+  .nav-folder-title[data-path="🔮 850-Companion/Arşiv"],
   .nav-folder-title[data-path="📦 900-Archive"],
   .nav-folder-title[data-path="📋 Templates"],
-  .nav-folder-title[data-path="📥 000-Inbox/Dump"],
   .nav-folder-title[data-path="knowledge"],
   .nav-folder-title[data-path="daily"],
   .nav-folder-title[data-path="receipts"],
-  .nav-folder-title[data-path="📥 000-Inbox/Yakala"]
+  .nav-folder-title[data-path="tasks"]
 ) .nav-folder-title-content:not([contenteditable="true"]) {
   font-size: 0;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   white-space: nowrap;
 }
 
 :is(
   .nav-folder-title[data-path="📥 000-Inbox"],
+  .nav-folder-title[data-path="📥 000-Inbox/Yakala"],
+  .nav-folder-title[data-path="📥 000-Inbox/Dump"],
   .nav-folder-title[data-path="🎯 100-Command-Center"],
   .nav-folder-title[data-path="🏰 300-Projects"],
   .nav-folder-title[data-path="🧠 500-Knowledge"],
   .nav-folder-title[data-path="🛠️ 600-Arsenal"],
   .nav-folder-title[data-path="🔮 850-Companion"],
+  .nav-folder-title[data-path="🔮 850-Companion/Arşiv"],
   .nav-folder-title[data-path="📦 900-Archive"],
   .nav-folder-title[data-path="📋 Templates"],
-  .nav-folder-title[data-path="📥 000-Inbox/Dump"],
   .nav-folder-title[data-path="knowledge"],
   .nav-folder-title[data-path="daily"],
   .nav-folder-title[data-path="receipts"],
-  .nav-folder-title[data-path="📥 000-Inbox/Yakala"]
+  .nav-folder-title[data-path="tasks"]
 ) .nav-folder-title-content:not([contenteditable="true"])::before {
-  content: var(--ananas-no, '');
-  font-family: var(--ananas-label);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  min-width: 30px;
-  padding: 1px 0;
-  text-align: center;
-  border: 1.5px solid var(--ananas-outline);
-  border-radius: 4px;
-  color: var(--text-muted);
+  content: '';
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px; /* not gap: the hidden folder name is a flex item too and would double it */
+  background-color: var(--ananas-ikon-renk, var(--text-muted));
+  -webkit-mask: var(--ananas-ikon) center / contain no-repeat;
+  mask: var(--ananas-ikon) center / contain no-repeat;
 }
 
 :is(
   .nav-folder-title[data-path="📥 000-Inbox"],
+  .nav-folder-title[data-path="📥 000-Inbox/Yakala"],
+  .nav-folder-title[data-path="📥 000-Inbox/Dump"],
   .nav-folder-title[data-path="🎯 100-Command-Center"],
   .nav-folder-title[data-path="🏰 300-Projects"],
   .nav-folder-title[data-path="🧠 500-Knowledge"],
   .nav-folder-title[data-path="🛠️ 600-Arsenal"],
   .nav-folder-title[data-path="🔮 850-Companion"],
+  .nav-folder-title[data-path="🔮 850-Companion/Arşiv"],
   .nav-folder-title[data-path="📦 900-Archive"],
   .nav-folder-title[data-path="📋 Templates"],
-  .nav-folder-title[data-path="📥 000-Inbox/Dump"],
   .nav-folder-title[data-path="knowledge"],
   .nav-folder-title[data-path="daily"],
   .nav-folder-title[data-path="receipts"],
-  .nav-folder-title[data-path="📥 000-Inbox/Yakala"]
+  .nav-folder-title[data-path="tasks"]
 ) .nav-folder-title-content:not([contenteditable="true"])::after {
   content: var(--ananas-ad);
   font-family: var(--ananas-body);
   font-size: var(--nav-item-size, 13px);
 }
 
-/* Numarası olmayan klasörlerde etiket görünmez ama yerini tutar: adlar hizada kalır. */
-:is(
-  .nav-folder-title[data-path="📋 Templates"],
-  .nav-folder-title[data-path="📥 000-Inbox/Dump"],
-  .nav-folder-title[data-path="knowledge"],
-  .nav-folder-title[data-path="daily"],
-  .nav-folder-title[data-path="receipts"],
-  .nav-folder-title[data-path="📥 000-Inbox/Yakala"]
-) .nav-folder-title-content:not([contenteditable="true"])::before {
-  content: '\00a0';
-  border-color: transparent;
+/* Pyn'in klasörü maske değil, kendi renkli mührünü taşır. */
+.nav-folder-title[data-path="🔮 850-Companion"] .nav-folder-title-content:not([contenteditable="true"])::before {
+  width: 18px;
+  height: 18px;
+  background: var(--ananas-logo) center / contain no-repeat;
+  -webkit-mask: none;
+  mask: none;
 }
 
-.nav-folder-title[data-path="📥 000-Inbox"]          { --ananas-no: '000'; --ananas-ad: 'Gelen Kutusu'; }
-.nav-folder-title[data-path="📥 000-Inbox/Dump"]     { --ananas-ad: 'Hızlı Notlar'; }
-.nav-folder-title[data-path="🎯 100-Command-Center"] { --ananas-no: '100'; --ananas-ad: 'Komuta Merkezi'; }
-.nav-folder-title[data-path="🏰 300-Projects"]       { --ananas-no: '300'; --ananas-ad: 'Projeler'; }
-.nav-folder-title[data-path="🧠 500-Knowledge"]      { --ananas-no: '500'; --ananas-ad: 'Bilgi'; }
-.nav-folder-title[data-path="🛠️ 600-Arsenal"]        { --ananas-no: '600'; --ananas-ad: 'Araçlar'; }
-.nav-folder-title[data-path="🔮 850-Companion"]      { --ananas-no: '850'; --ananas-ad: 'Pyn'; }
-.nav-folder-title[data-path="📦 900-Archive"]        { --ananas-no: '900'; --ananas-ad: 'Arşiv'; }
-.nav-folder-title[data-path="📋 Templates"]          { --ananas-ad: 'Şablonlar'; }
-.nav-folder-title[data-path="knowledge"]             { --ananas-ad: 'Bilgi Tabanı'; }
-.nav-folder-title[data-path="daily"]                 { --ananas-ad: 'Günlükler'; }
-.nav-folder-title[data-path="receipts"]              { --ananas-ad: 'Makbuzlar'; }
-.nav-folder-title[data-path="📥 000-Inbox/Yakala"]    { --ananas-ad: 'Yakalananlar'; }
+.nav-folder-title[data-path="🔮 850-Companion"] .nav-folder-title-content:not([contenteditable="true"])::after {
+  font-weight: 700;
+}
 
-/* Pano notunun dosya adı da İngilizce; yalnız görüntüde "Pano". */
+.nav-folder-title[data-path="📥 000-Inbox"]           { --ananas-ad: 'Gelen Kutusu'; --ananas-ikon: var(--ananas-ikon-gelen); --ananas-ikon-renk: var(--ananas-ton-arduvaz); }
+.nav-folder-title[data-path="📥 000-Inbox/Yakala"]    { --ananas-ad: 'Yakalananlar'; --ananas-ikon: var(--ananas-ikon-yakala); --ananas-ikon-renk: var(--ananas-ton-koyu-altin); }
+.nav-folder-title[data-path="📥 000-Inbox/Dump"]      { --ananas-ad: 'Hızlı Notlar'; --ananas-ikon: var(--ananas-ikon-notlar); --ananas-ikon-renk: var(--ananas-ton-arduvaz); }
+.nav-folder-title[data-path="🎯 100-Command-Center"]  { --ananas-ad: 'Komuta Merkezi'; --ananas-ikon: var(--ananas-ikon-pano); --ananas-ikon-renk: var(--ananas-ton-tugla); }
+.nav-folder-title[data-path="🏰 300-Projects"]        { --ananas-ad: 'Projeler'; --ananas-ikon: var(--ananas-ikon-projeler); --ananas-ikon-renk: var(--ananas-ton-menekse); }
+.nav-folder-title[data-path="🧠 500-Knowledge"]       { --ananas-ad: 'Bilgi'; --ananas-ikon: var(--ananas-ikon-bilgi); --ananas-ikon-renk: var(--ananas-ton-menekse); }
+.nav-folder-title[data-path="🛠️ 600-Arsenal"]        { --ananas-ad: 'Araçlar'; --ananas-ikon: var(--ananas-ikon-araclar); --ananas-ikon-renk: var(--ananas-ton-yosun); }
+.nav-folder-title[data-path="🔮 850-Companion"]       { --ananas-ad: 'Pyn'; }
+.nav-folder-title[data-path="🔮 850-Companion/Arşiv"] { --ananas-ad: 'Arşiv'; --ananas-ikon: var(--ananas-ikon-arsiv); --ananas-ikon-renk: var(--ananas-ton-soluk); }
+.nav-folder-title[data-path="📦 900-Archive"]         { --ananas-ad: 'Arşiv'; --ananas-ikon: var(--ananas-ikon-arsiv); --ananas-ikon-renk: var(--ananas-ton-soluk); }
+.nav-folder-title[data-path="📋 Templates"]           { --ananas-ad: 'Şablonlar'; --ananas-ikon: var(--ananas-ikon-sablonlar); --ananas-ikon-renk: var(--ananas-ton-soluk); }
+.nav-folder-title[data-path="knowledge"]             { --ananas-ad: 'Bilgi Tabanı'; --ananas-ikon: var(--ananas-ikon-bilgi); --ananas-ikon-renk: var(--ananas-ton-menekse); }
+.nav-folder-title[data-path="daily"]                 { --ananas-ad: 'Günlükler'; --ananas-ikon: var(--ananas-ikon-gunlukler); --ananas-ikon-renk: var(--ananas-ton-yosun); }
+.nav-folder-title[data-path="receipts"]              { --ananas-ad: 'Makbuzlar'; --ananas-ikon: var(--ananas-ikon-makbuzlar); --ananas-ikon-renk: var(--ananas-ton-koyu-altin); }
+.nav-folder-title[data-path="tasks"]                 { --ananas-ad: 'Görevler'; --ananas-ikon: var(--ananas-ikon-gorevler); --ananas-ikon-renk: var(--ananas-ton-tugla); }
+
+/* Ajanların talimat dosyaları notların arasında soluk durur: orada ama göze girmez. */
+.nav-file-title:is([data-path="AGENTS.md"], [data-path="CLAUDE.md"]) {
+  opacity: 0.5;
+}
+
+.nav-file-title:is([data-path="AGENTS.md"], [data-path="CLAUDE.md"]) .nav-file-title-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--ananas-label);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.nav-file-title:is([data-path="AGENTS.md"], [data-path="CLAUDE.md"]) .nav-file-title-content::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  background-color: var(--text-muted);
+  -webkit-mask: var(--ananas-ikon-sistem) center / contain no-repeat;
+  mask: var(--ananas-ikon-sistem) center / contain no-repeat;
+}
+
+/* Pano notunun dosya adı İngilizce; yalnız görüntüde "Pano". */
 .nav-file-title[data-path="🎯 100-Command-Center/Dashboard.md"] .nav-file-title-content:not([contenteditable="true"]) {
   font-size: 0;
 }
@@ -442,6 +495,62 @@ button.mod-cta:active {
   font-size: var(--nav-item-size, 13px);
 }
 
+/* ── Pyn: logo ve boş sekme ───────────────────────────────────────────────
+   Kenar çubuğunun altındaki vault adının yanında mühür, boş sekmede Pyn'in
+   kendisi. */
+
+.workspace-drawer-vault-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-drawer-vault-name::before {
+  content: '';
+  flex: none;
+  width: 22px;
+  height: 22px;
+  background: var(--ananas-logo) center / contain no-repeat;
+}
+
+.workspace-leaf-content[data-type="empty"] .empty-state-container::before {
+  content: '';
+  display: block;
+  width: 136px;
+  height: 136px;
+  margin: 0 auto 6px;
+  background: var(--ananas-pyn-yuz) center / contain no-repeat;
+}
+
+.workspace-leaf-content[data-type="empty"] .empty-state-action-list::before {
+  content: 'Pyn burada.';
+  display: block;
+  margin-bottom: 14px;
+  text-align: center;
+  font-family: var(--ananas-display);
+  font-weight: 900;
+  font-size: 22px;
+  letter-spacing: -0.035em;
+  color: var(--text-normal);
+}
+
+.workspace-leaf-content[data-type="empty"] .empty-state-action {
+  border: var(--ananas-border);
+  border-radius: 8px;
+  background-color: var(--background-primary-alt);
+  box-shadow: 3px 3px 0 0 var(--ananas-hard);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.workspace-leaf-content[data-type="empty"] .empty-state-action:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 0 var(--ananas-hard);
+}
+
+/* Etkin sekme: altın bir kalem çizgisiyle işaretli. */
+.workspace-tab-header.is-active {
+  box-shadow: inset 0 2px 0 0 var(--ananas-gold);
+}
 
 /* ── Pano (Dashboard) ─────────────────────────────────────────────────────
    Notun özelliklerine `cssclasses: [ananas-pano]` yazınca açılır. */

@@ -279,9 +279,11 @@ class YakalaInstalledTest(unittest.TestCase):
         start = appdata / 'Microsoft/Windows/Start Menu/Programs/Beyne At.lnk'
         sendto = appdata / 'Microsoft/Windows/SendTo/Beyne At.lnk'
         self.assertTrue(start.is_file() and sendto.is_file())
+        icon = self.state / yakala.ICON_NAME
+        self.assertEqual(icon.read_bytes()[:4], b'\x00\x00\x01\x00')  # Pyn's icon for both shortcuts
         self.assertIsInstance(yakala.windows_context(), dict)
         self.entry('kaldir')
-        self.assertFalse(start.exists() or sendto.exists())
+        self.assertFalse(start.exists() or sendto.exists() or icon.exists())
 
     def test_user_skill_with_same_name_is_kept(self):
         own = self.vault / '.agents/skills/beyin-yakala/SKILL.md'

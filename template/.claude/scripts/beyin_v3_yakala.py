@@ -709,6 +709,18 @@ def _font(size, weight='normal', role='body'):
     return (family, size, weight)
 
 
+def _logo(root):
+    """Pyn's seal for the popup header at the size nearest the screen scale, or None."""
+    try:
+        import tkinter as tk
+        import beyin_v3_marka as marka
+        scale = root.winfo_fpixels('1i') / 96
+        size = 56 if scale >= 1.75 else 42 if scale >= 1.25 else 28
+        return tk.PhotoImage(master=root, data=''.join(getattr(marka, 'MUHUR_%d' % size)))
+    except Exception:
+        return None  # a missing or unreadable mark costs the logo, never the capture
+
+
 def _nsstring(objc, send, text):
     import ctypes
     return send(objc.objc_getClass(b'NSString'), b'stringWithUTF8String:', ctypes.c_void_p, ctypes.c_char_p(text.encode('utf-8')))
@@ -819,10 +831,17 @@ def popup(vault, context=None):
     canvas = tk.Canvas(root, width=W, highlightthickness=0, bd=0, bg=P['bg'])
     canvas.pack(fill='both', expand=True)
 
-    # Header: brand mark, name, where it came from.
+    # Header: Pyn's seal, name, where it came from.
     y = 30
-    canvas.create_oval(pad, y - 7, pad + 14, y + 7, fill=P['accent'], outline=P['card_line'], width=1.5)
-    canvas.create_text(pad + 24, y, text='Beyne at', anchor='w', fill=P['text'], font=_font(16, 'bold', 'display'))
+    logo = _logo(root)
+    if logo is not None:
+        canvas.logo = logo  # Tk drops an image nobody references
+        canvas.create_image(pad, y, image=logo, anchor='w')
+        title_x = pad + logo.width() + 12
+    else:
+        canvas.create_oval(pad, y - 7, pad + 14, y + 7, fill=P['accent'], outline=P['card_line'], width=1.5)
+        title_x = pad + 24
+    canvas.create_text(title_x, y, text='Beyne at', anchor='w', fill=P['text'], font=_font(16, 'bold', 'display'))
     source = context.get('uygulama') or ''
     if source:
         canvas.create_text(W - pad, y, text=_fit(canvas, source.upper(), _font(10, 'bold', 'label'), 260), anchor='e',
@@ -984,10 +1003,11 @@ def popup(vault, context=None):
     top = max(80, int(root.winfo_screenheight() * 0.22))
     root.geometry('%dx%d+%d+%d' % (W, height, x, top))
     try:
-        root.attributes('-alpha', 0.0)
         root.attributes('-topmost', True)
     except tk.TclError:
         pass
+    # Shown at full opacity at once: the layout is already complete here, and a fade-in only
+    # added ~80 ms between the hotkey and a window you can type into.
     root.deiconify()
     if sys.platform == 'darwin':
         _style_mac(focus=not snapshot)
@@ -996,15 +1016,6 @@ def popup(vault, context=None):
         root.focus_force()
         entry.focus_set()
 
-    def fade_in(alpha=0.0):
-        alpha = min(1.0, alpha + 0.2)
-        try:
-            root.attributes('-alpha', alpha)
-        except tk.TclError:
-            return
-        if alpha < 1.0:
-            root.after(14, fade_in, alpha)
-    fade_in()
     if snapshot and sys.platform == 'darwin':
         # Development aid: capture only this window's rectangle without taking focus, then close.
         def shoot():
@@ -1313,7 +1324,7 @@ def _ps_quote(value):
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _windows_shortcut(path, target, arguments, hotkey=None):
+def _windows_shortcut(path, target, arguments, hotkey=None, icon=None):
     import base64
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     lines = ['$s = (New-Object -ComObject WScript.Shell).CreateShortcut(' + _ps_quote(path) + ')',
@@ -1321,10 +1332,28 @@ def _windows_shortcut(path, target, arguments, hotkey=None):
              '$s.Description = ' + _ps_quote('Beyne at: ikinci beyne kaynak yakala'), '$s.WindowStyle = 7']
     if hotkey:
         lines.append('$s.Hotkey = ' + _ps_quote(hotkey))
+    if icon:
+        lines.append('$s.IconLocation = ' + _ps_quote(str(icon) + ',0'))
     lines.append('$s.Save()')
     encoded = base64.b64encode('\n'.join(lines).encode('utf-16le')).decode('ascii')
     subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
                    check=True, capture_output=True, timeout=60, creationflags=NO_WINDOW)
+
+
+ICON_NAME = 'pyn.ico'
+
+
+def _windows_icon(state):
+    """Write Pyn's icon next to this machine's state for the shortcuts; None if it cannot be had."""
+    try:
+        import base64
+        import beyin_v3_marka as marka
+        state.mkdir(parents=True, exist_ok=True)
+        icon = state / ICON_NAME
+        icon.write_bytes(base64.b64decode(''.join(marka.ICO)))
+        return icon
+    except (ImportError, OSError, ValueError):
+        return None  # a shortcut with the default icon still works
 
 
 def _argline(values):
@@ -1395,8 +1424,10 @@ def install(vault, state, hotkey=True, spec=None):
         pythonw = Path(sys.executable).with_name('pythonw.exe')
         target = pythonw if pythonw.is_file() else Path(sys.executable)
         programs, sendto = _windows_dirs()
-        _windows_shortcut(programs / 'Beyne At.lnk', target, _argline([script, 'pencere', '--vault', vault]), win_value)
-        _windows_shortcut(sendto / 'Beyne At.lnk', target, _argline([script, 'ekle', '--vault', vault, '--arac', 'gonder-menusu']))
+        icon = _windows_icon(state)
+        _windows_shortcut(programs / 'Beyne At.lnk', target, _argline([script, 'pencere', '--vault', vault]), win_value, icon)
+        _windows_shortcut(sendto / 'Beyne At.lnk', target, _argline([script, 'ekle', '--vault', vault, '--arac', 'gonder-menusu']),
+                          icon=icon)
         done.update(kisayol=label, gonder_menusu=True)
     state.mkdir(parents=True, exist_ok=True)
     _state_path(state).write_text(json.dumps({'schema': 1, 'session_notice': True, 'kisayol': done['kisayol'],
@@ -1420,6 +1451,7 @@ def uninstall(vault, state):
             if link.exists():
                 link.unlink()
                 removed.append(str(link.name))
+        (state / ICON_NAME).unlink(missing_ok=True)
     link = Path(vault) / '.claude/skills/beyin-yakala'
     if link.is_symlink() and os.readlink(link).replace('\\', '/').endswith('.agents/skills/beyin-yakala'):
         link.unlink()

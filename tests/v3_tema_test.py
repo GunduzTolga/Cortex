@@ -28,7 +28,20 @@ class TemaDataTest(unittest.TestCase):
         gen = generator()
         self.assertEqual(gen.MODULE.read_text(encoding='utf-8'), gen.module_text(),
                          'Run: py -3 scripts/ananas_tema.py uret')
+        self.assertEqual(gen.BRAND_MODULE.read_text(encoding='utf-8'), gen.brand_text(),
+                         'Run: py -3 scripts/ananas_tema.py uret')
         self.assertEqual(tema.css(), gen.css())
+
+    def test_brand_marks_are_real_images(self):
+        import base64
+        import beyin_v3_marka as marka
+        for size in (28, 42, 56):
+            png = base64.b64decode(''.join(getattr(marka, 'MUHUR_%d' % size)))
+            self.assertEqual(png[:8], b'\x89PNG\r\n\x1a\n')
+            self.assertEqual(int.from_bytes(png[16:20], 'big'), size)  # IHDR width
+        ico = base64.b64decode(''.join(marka.ICO))
+        self.assertEqual(ico[:4], b'\x00\x00\x01\x00')
+        self.assertGreaterEqual(int.from_bytes(ico[4:6], 'little'), 4)  # several sizes for every DPI
 
     def test_css_embeds_turkish_capable_fonts_and_labels_runtime_folders(self):
         text = tema.css()
@@ -36,8 +49,13 @@ class TemaDataTest(unittest.TestCase):
         self.assertEqual(text.count('@font-face {'), 8)  # three faces (+ italic), latin and latin-ext each
         import beyin_v3_companion as companion
         import beyin_v3_yakala as yakala
-        for folder in (companion.DEFAULT_DIRECTORY, yakala.INBOX, 'receipts'):
+        for folder in (companion.DEFAULT_DIRECTORY, yakala.INBOX, 'receipts', 'tasks', 'daily', 'knowledge'):
             self.assertIn('data-path="' + folder + '"', text)
+        for icon in (Path(SCRIPTS).parents[2] / 'tema/ananas/ikonlar').glob('*.svg'):
+            self.assertIn('--ananas-ikon-' + icon.stem + ':', text)  # every icon the CSS can name exists
+        import re
+        for used in set(re.findall(r'var\(--ananas-ikon-([a-z-]+)\)', text)):
+            self.assertIn('--ananas-ikon-' + used + ':', text)
 
 
 class TemaInstallTest(unittest.TestCase):
