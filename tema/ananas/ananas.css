@@ -1,0 +1,474 @@
+/*
+  Ananas: Obsidian teması (CSS snippet)
+
+  Kâğıt ve mürekkep. Fildişi zemin, mürekkep kontur, bulanıksız sert ofset
+  gölge, tek ana vurgu olarak altın. Başlıklar Fraunces, büyük harfli
+  etiketler JetBrains Mono, geri kalan Schibsted Grotesk.
+
+  Bu dosya kaynak. Vault'a doğrudan kopyalanmaz: scripts/ananas_tema.py
+  yazı tiplerini @font-face olarak başa gömer ve sonucu
+  .obsidian/snippets/ananas.css olarak yazar. Burada değişiklik yaptıysan
+  betiği yeniden çalıştır.
+
+  Cortex'in görsel dili; maskotu Pyn (ananas).
+*/
+
+/* ── Tokenlar ─────────────────────────────────────────────────────────── */
+
+body {
+  --ananas-paper: #f3efe4;
+  --ananas-paper-2: #fffaf0;
+  --ananas-paper-3: #eae4d6;
+  --ananas-ink: #1b1712;
+  --ananas-ink-2: #2b2721;
+  --ananas-gold: #e8b23a;
+  --ananas-signal: #ffd23e;
+  --ananas-sand: #cdbfa3;
+  --ananas-line: #d5d1c7;
+
+  /* Çalışma alanı tonları: klasörleri ve callout'ları ayırır. */
+  --ananas-tugla: #b4472f;
+  --ananas-yosun: #5c6b4a;
+  --ananas-menekse: #7a6a9e;
+  --ananas-koyu-altin: #c98a2e;
+  --ananas-arduvaz: #3f6670;
+
+  --ananas-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --ananas-label: 'JetBrains Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+  --ananas-body: 'Schibsted Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Obsidian'ın kendi değişkenleri: kullanıcının Görünüm ayarlarındaki
+     yazı tipi seçimleri (…-override) bunların önüne geçer. */
+  --font-text-theme: var(--ananas-body);
+  --font-interface-theme: var(--ananas-body);
+  --font-monospace-theme: var(--ananas-label);
+
+  --h1-font: var(--ananas-display);
+  --h2-font: var(--ananas-display);
+  --h3-font: var(--ananas-display);
+  --h1-weight: 900;
+  --h2-weight: 800;
+  --h3-weight: 700;
+  --inline-title-font: var(--ananas-display);
+  --inline-title-weight: 900;
+
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --radius-l: 8px;
+  --callout-radius: 8px;
+  --callout-border-width: 1.5px;
+  --tag-radius: 4px;
+  --tag-border-width: 1.5px;
+  --table-border-width: 1.5px;
+  --checkbox-radius: 4px;
+}
+
+.theme-light {
+  --ananas-outline: var(--ananas-ink);
+  --ananas-hard: var(--ananas-ink);
+  --ananas-border: 1.5px solid var(--ananas-outline);
+  --ananas-shadow: 5px 5px 0 0 var(--ananas-hard);
+
+  --background-primary: var(--ananas-paper);
+  --background-primary-alt: var(--ananas-paper-3);
+  --background-secondary: var(--ananas-paper-3);
+  --background-secondary-alt: #e4e0d5;
+  --background-modifier-border: var(--ananas-line);
+  --background-modifier-border-hover: #a5a198;
+  --background-modifier-border-focus: var(--ananas-ink);
+  --background-modifier-hover: rgba(27, 23, 18, 0.06);
+  --background-modifier-active-hover: rgba(232, 178, 58, 0.22);
+
+  --text-normal: var(--ananas-ink);
+  --text-muted: #75716a;
+  --text-faint: #a5a198;
+  --text-accent: var(--ananas-arduvaz);
+  --text-accent-hover: var(--ananas-ink);
+  --text-on-accent: var(--ananas-ink);
+  --text-selection: rgba(255, 210, 62, 0.45);
+  --text-highlight-bg: rgba(255, 210, 62, 0.55);
+
+  --interactive-normal: var(--ananas-paper-2);
+  --interactive-hover: #fff4dc;
+  --interactive-accent: var(--ananas-gold);
+  --interactive-accent-hover: var(--ananas-signal);
+
+  --link-color: var(--ananas-arduvaz);
+  --link-color-hover: var(--ananas-ink);
+  --link-external-color: var(--ananas-arduvaz);
+
+  --code-background: var(--ananas-paper-2);
+  --code-normal: var(--ananas-ink);
+  --blockquote-border-color: var(--ananas-arduvaz);
+  --hr-color: var(--ananas-ink);
+  --table-border-color: var(--ananas-ink);
+  --table-header-background: var(--ananas-paper-3);
+
+  --tag-color: var(--ananas-ink);
+  --tag-background: var(--ananas-gold);
+  --tag-background-hover: var(--ananas-signal);
+  --tag-border-color: var(--ananas-ink);
+
+  --checkbox-color: var(--ananas-gold);
+  --checkbox-color-hover: var(--ananas-signal);
+  --checkbox-border-color: var(--ananas-ink);
+  --checkbox-marker-color: var(--ananas-ink);
+
+  --titlebar-background: var(--ananas-paper-3);
+  --titlebar-background-focused: var(--ananas-paper-3);
+}
+
+/* Koyu mod: mürekkep zemin, kâğıt yazı, altın vurgu. Sert gölge
+   kaybolmasın diye mürekkebin bir ton koyusu. */
+.theme-dark {
+  --ananas-outline: #75716a;
+  --ananas-hard: #0d0904;
+  --ananas-border: 1.5px solid var(--ananas-outline);
+  --ananas-shadow: 5px 5px 0 0 var(--ananas-hard);
+
+  --background-primary: var(--ananas-ink);
+  --background-primary-alt: #221e18;
+  --background-secondary: #141109;
+  --background-secondary-alt: #0d0904;
+  --background-modifier-border: #433f39;
+  --background-modifier-border-hover: #75716a;
+  --background-modifier-border-focus: var(--ananas-gold);
+  --background-modifier-hover: rgba(243, 239, 228, 0.06);
+  --background-modifier-active-hover: rgba(232, 178, 58, 0.2);
+
+  --text-normal: var(--ananas-paper);
+  --text-muted: #a5a198;
+  --text-faint: #75716a;
+  --text-accent: var(--ananas-gold);
+  --text-accent-hover: var(--ananas-signal);
+  --text-on-accent: var(--ananas-ink);
+  --text-selection: rgba(232, 178, 58, 0.35);
+  --text-highlight-bg: rgba(232, 178, 58, 0.4);
+
+  --interactive-normal: var(--ananas-ink-2);
+  --interactive-hover: #3a352d;
+  --interactive-accent: var(--ananas-gold);
+  --interactive-accent-hover: var(--ananas-signal);
+
+  --link-color: var(--ananas-gold);
+  --link-color-hover: var(--ananas-signal);
+  --link-external-color: var(--ananas-gold);
+
+  --code-background: #221e18;
+  --code-normal: var(--ananas-paper);
+  --blockquote-border-color: var(--ananas-gold);
+  --hr-color: #433f39;
+  --table-border-color: #433f39;
+  --table-header-background: #221e18;
+
+  --tag-color: var(--ananas-ink);
+  --tag-background: var(--ananas-gold);
+  --tag-background-hover: var(--ananas-signal);
+  --tag-border-color: var(--ananas-gold);
+
+  --checkbox-color: var(--ananas-gold);
+  --checkbox-color-hover: var(--ananas-signal);
+  --checkbox-border-color: #a5a198;
+  --checkbox-marker-color: var(--ananas-ink);
+}
+
+/* ── Başlıklar ────────────────────────────────────────────────────────── */
+
+.inline-title,
+.markdown-rendered h1,
+.markdown-rendered h2,
+.markdown-rendered h3,
+.HyperMD-header-1 .cm-header,
+.HyperMD-header-2 .cm-header,
+.HyperMD-header-3 .cm-header {
+  letter-spacing: -0.035em;
+}
+
+/* h4 ve aşağısı etiket gibi okunur: büyük harf, mono, geniş aralık. */
+.markdown-rendered h4,
+.markdown-rendered h5,
+.markdown-rendered h6,
+.HyperMD-header-4 .cm-header,
+.HyperMD-header-5 .cm-header,
+.HyperMD-header-6 .cm-header {
+  font-family: var(--ananas-label);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.82em;
+}
+
+/* ── Kart dili ────────────────────────────────────────────────────────────
+   Çizilmiş bir nesne, havada süzülen değil: mürekkep kontur ve bulanıksız
+   sert gölge. Callout, kod bloğu, tablo ve gömülü not aynı kartı giyer. */
+
+.callout,
+.markdown-rendered pre,
+.markdown-rendered table,
+.markdown-embed {
+  border: var(--ananas-border);
+  border-radius: 8px;
+  box-shadow: var(--ananas-shadow);
+}
+
+.callout {
+  background-color: var(--background-primary-alt);
+}
+
+.callout-title {
+  font-family: var(--ananas-label);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.8em;
+}
+
+.markdown-rendered table {
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+}
+
+.markdown-rendered th {
+  font-family: var(--ananas-label);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.8em;
+}
+
+.markdown-rendered pre {
+  margin-right: 5px;
+}
+
+.markdown-rendered :not(pre) > code {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+/* Etiketler: altın zemin, mürekkep kontur, mono büyük harf. */
+a.tag,
+.cm-hashtag {
+  font-family: var(--ananas-label);
+  font-weight: 600;
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Ana buton: altın zemin, mürekkep kontur, basıldığında gölgesine gömülür. */
+button.mod-cta {
+  color: var(--ananas-ink);
+  border: var(--ananas-border);
+  box-shadow: 3px 3px 0 0 var(--ananas-hard);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+button.mod-cta:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 0 var(--ananas-hard);
+}
+
+/* Pencereler (ayarlar, komut paleti, hızlı geçiş): Avenox'un birincil
+   kart gölgesi, sert ofset ve altında yumuşak bir düşüş. */
+.modal,
+.prompt,
+.menu {
+  border: 1.7px solid var(--ananas-outline);
+  border-radius: 8px;
+  box-shadow:
+    8px 8px 0 0 var(--ananas-hard),
+    0 14px 30px 0 rgba(27, 23, 18, 0.18);
+}
+
+.menu {
+  box-shadow: 5px 5px 0 0 var(--ananas-hard);
+}
+
+/* ── Arayüz ───────────────────────────────────────────────────────────── */
+
+.workspace-tab-header-inner-title,
+.nav-folder-title-content,
+.nav-file-title-content {
+  font-family: var(--ananas-body);
+}
+
+.metadata-property-key,
+.setting-item-heading .setting-item-name,
+.vertical-tab-header-group-title,
+.workspace-sidedock-vault-profile {
+  font-family: var(--ananas-label);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.78em;
+}
+
+/* Seçili dosya: koyu mürekkep kart, altın çerçeve. */
+.nav-file-title.is-active,
+.tree-item-self.is-active {
+  background-color: var(--ananas-ink);
+  color: var(--ananas-paper-2);
+  box-shadow: inset 0 0 0 1.5px var(--ananas-gold);
+  border-radius: 4px;
+}
+
+/* ── Klasör renkleri ──────────────────────────────────────────────────────
+   Vault'un numaralı klasörlerini beş çalışma alanı tonuyla ayırır. Renk,
+   klasör adının solundaki ince bir şerit olarak görünür. Örnek:
+
+   .nav-folder-title[data-path^="📥 000-Inbox"] { --ananas-alan: var(--ananas-arduvaz); }
+
+   Eşleşmeyen klasör şerit almaz. */
+
+.nav-folder-title[data-path] {
+  border-left: 3px solid var(--ananas-alan, transparent);
+}
+
+/* TODO(sen): klasör → ton eşlemesi. Beş ton, yedi numaralı klasör:
+   000-Inbox, 100-Command-Center, 300-Projects, 500-Knowledge,
+   600-Arsenal, 850-Companion, 900-Archive (ve knowledge/, daily/). */
+
+
+/* ── Klasör adları ────────────────────────────────────────────────────────
+   Kenar çubuğunda emojili sistem adları yerine temiz Türkçe adlar
+   gösterilir. Diskteki klasör adları DEĞİŞMEZ: hook'lar, motor ve testler
+   bu adlara bağlı. Değişen yalnız görüntü: numara küçük mono bir etikete,
+   ad sağına yazılır. Yeniden adlandırma sırasında (contenteditable) gerçek
+   ad görünür. */
+
+:is(
+  .nav-folder-title[data-path="📥 000-Inbox"],
+  .nav-folder-title[data-path="🎯 100-Command-Center"],
+  .nav-folder-title[data-path="🏰 300-Projects"],
+  .nav-folder-title[data-path="🧠 500-Knowledge"],
+  .nav-folder-title[data-path="🛠️ 600-Arsenal"],
+  .nav-folder-title[data-path="🔮 850-Companion"],
+  .nav-folder-title[data-path="📦 900-Archive"],
+  .nav-folder-title[data-path="📋 Templates"],
+  .nav-folder-title[data-path="📥 000-Inbox/Dump"],
+  .nav-folder-title[data-path="knowledge"],
+  .nav-folder-title[data-path="daily"]
+) .nav-folder-title-content:not([contenteditable="true"]) {
+  font-size: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+:is(
+  .nav-folder-title[data-path="📥 000-Inbox"],
+  .nav-folder-title[data-path="🎯 100-Command-Center"],
+  .nav-folder-title[data-path="🏰 300-Projects"],
+  .nav-folder-title[data-path="🧠 500-Knowledge"],
+  .nav-folder-title[data-path="🛠️ 600-Arsenal"],
+  .nav-folder-title[data-path="🔮 850-Companion"],
+  .nav-folder-title[data-path="📦 900-Archive"],
+  .nav-folder-title[data-path="📋 Templates"],
+  .nav-folder-title[data-path="📥 000-Inbox/Dump"],
+  .nav-folder-title[data-path="knowledge"],
+  .nav-folder-title[data-path="daily"]
+) .nav-folder-title-content:not([contenteditable="true"])::before {
+  content: var(--ananas-no, '');
+  font-family: var(--ananas-label);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  min-width: 30px;
+  padding: 1px 0;
+  text-align: center;
+  border: 1.5px solid var(--ananas-outline);
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+:is(
+  .nav-folder-title[data-path="📥 000-Inbox"],
+  .nav-folder-title[data-path="🎯 100-Command-Center"],
+  .nav-folder-title[data-path="🏰 300-Projects"],
+  .nav-folder-title[data-path="🧠 500-Knowledge"],
+  .nav-folder-title[data-path="🛠️ 600-Arsenal"],
+  .nav-folder-title[data-path="🔮 850-Companion"],
+  .nav-folder-title[data-path="📦 900-Archive"],
+  .nav-folder-title[data-path="📋 Templates"],
+  .nav-folder-title[data-path="📥 000-Inbox/Dump"],
+  .nav-folder-title[data-path="knowledge"],
+  .nav-folder-title[data-path="daily"]
+) .nav-folder-title-content:not([contenteditable="true"])::after {
+  content: var(--ananas-ad);
+  font-family: var(--ananas-body);
+  font-size: var(--nav-item-size, 13px);
+}
+
+/* Numarası olmayan klasörlerde etiket görünmez ama yerini tutar: adlar hizada kalır. */
+:is(
+  .nav-folder-title[data-path="📋 Templates"],
+  .nav-folder-title[data-path="📥 000-Inbox/Dump"],
+  .nav-folder-title[data-path="knowledge"],
+  .nav-folder-title[data-path="daily"]
+) .nav-folder-title-content:not([contenteditable="true"])::before {
+  content: '\00a0';
+  border-color: transparent;
+}
+
+.nav-folder-title[data-path="📥 000-Inbox"]          { --ananas-no: '000'; --ananas-ad: 'Gelen Kutusu'; }
+.nav-folder-title[data-path="📥 000-Inbox/Dump"]     { --ananas-ad: 'Hızlı Notlar'; }
+.nav-folder-title[data-path="🎯 100-Command-Center"] { --ananas-no: '100'; --ananas-ad: 'Komuta Merkezi'; }
+.nav-folder-title[data-path="🏰 300-Projects"]       { --ananas-no: '300'; --ananas-ad: 'Projeler'; }
+.nav-folder-title[data-path="🧠 500-Knowledge"]      { --ananas-no: '500'; --ananas-ad: 'Bilgi'; }
+.nav-folder-title[data-path="🛠️ 600-Arsenal"]        { --ananas-no: '600'; --ananas-ad: 'Araçlar'; }
+.nav-folder-title[data-path="🔮 850-Companion"]      { --ananas-no: '850'; --ananas-ad: 'Pyn'; }
+.nav-folder-title[data-path="📦 900-Archive"]        { --ananas-no: '900'; --ananas-ad: 'Arşiv'; }
+.nav-folder-title[data-path="📋 Templates"]          { --ananas-ad: 'Şablonlar'; }
+.nav-folder-title[data-path="knowledge"]             { --ananas-ad: 'Bilgi Tabanı'; }
+.nav-folder-title[data-path="daily"]                 { --ananas-ad: 'Günlükler'; }
+
+/* Pano notunun dosya adı da İngilizce; yalnız görüntüde "Pano". */
+.nav-file-title[data-path="🎯 100-Command-Center/Dashboard.md"] .nav-file-title-content:not([contenteditable="true"]) {
+  font-size: 0;
+}
+.nav-file-title[data-path="🎯 100-Command-Center/Dashboard.md"] .nav-file-title-content:not([contenteditable="true"])::after {
+  content: 'Pano';
+  font-size: var(--nav-item-size, 13px);
+}
+
+
+/* ── Pano (Dashboard) ─────────────────────────────────────────────────────
+   Notun özelliklerine `cssclasses: [ananas-pano]` yazınca açılır. */
+
+.ananas-pano .inline-title,
+.ananas-pano.markdown-rendered h1,
+.ananas-pano .markdown-rendered h1 {
+  font-size: 2.6em;
+  line-height: 1.05;
+}
+
+.ananas-pano .markdown-rendered h2,
+.ananas-pano.markdown-rendered h2 {
+  font-family: var(--ananas-label);
+  font-weight: 600;
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border-bottom: 1.5px solid var(--ananas-outline);
+  padding-bottom: 0.3em;
+}
+
+.ananas-pano .markdown-rendered ul > li,
+.ananas-pano.markdown-rendered ul > li {
+  list-style: none;
+  margin: 0 0 10px -1.4em;
+  padding: 8px 12px;
+  background: var(--background-primary-alt);
+  border: var(--ananas-border);
+  border-radius: 8px;
+  box-shadow: 3px 3px 0 0 var(--ananas-hard);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button.mod-cta,
+  button.mod-cta:active {
+    transition: none;
+    transform: none;
+  }
+}
