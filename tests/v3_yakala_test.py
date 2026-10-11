@@ -4,6 +4,7 @@ Offline: `isle` runs with every helper tool hidden, so nothing reaches the netwo
 popup/hotkey paths are never started.
 """
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -121,6 +122,52 @@ class YakalaUnitTest(unittest.TestCase):
             text, method, note = yakala.extract(self.vault, local, none)
         self.assertEqual((text, method), (None, None))
         self.assertIn('http(s)', note)
+
+    def test_windows_virtual_keys(self):
+        self.assertEqual(yakala.windows_virtual_key('ctrl+alt+b'), (0x3, ord('B')))
+        self.assertEqual(yakala.windows_virtual_key('ctrl+shift+f12'), (0x6, 0x7B))
+        with self.assertRaises(ValueError):
+            yakala.windows_virtual_key('win+b')
+
+    @unittest.skipUnless(sys.platform == 'win32', 'Windows resident listener')
+    def test_windows_listener_opens_warm_window_and_stops_on_request(self):
+        import ctypes
+        import time
+        try:
+            import tkinter
+            tkinter.Tk().destroy()
+        except Exception as exc:
+            self.skipTest('no Tk display: ' + type(exc).__name__)
+        state = Path(self.tmp.name) / 'state'
+        names = ('Local\\CortexTestKilit-' + str(os.getpid()), 'Local\\CortexTestDur-' + str(os.getpid()))
+        code = ('import sys; sys.path.insert(0, %r); import beyin_v3_yakala as y; '
+                'sys.exit(y.listen_windows(%r, %r, spec="ctrl+alt+shift+f11", mutex_name=%r, stop_name=%r))'
+                % (str(SCRIPTS), str(self.vault), str(state), *names))
+        listener = subprocess.Popen([sys.executable, '-c', code])
+        self.addCleanup(lambda: listener.poll() is None and listener.kill())
+
+        def info():
+            try:
+                return json.loads((state / yakala.LISTENER_STATE).read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                return {}
+        deadline = time.monotonic() + 20
+        while 'kisayol_calisiyor' not in info() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if not info().get('kisayol_calisiyor'):
+            self.skipTest('the test hotkey is held elsewhere on this machine')
+        twin = subprocess.run([sys.executable, '-c', code], timeout=60)
+        self.assertEqual(twin.returncode, 0)  # one listener per user: the second steps aside
+        user32 = ctypes.windll.user32
+        user32.PostThreadMessageW.argtypes = [ctypes.c_ulong, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+        pressed = time.time()
+        user32.PostThreadMessageW(info()['tid'], 0x0312, 1, 0)  # WM_HOTKEY, exactly what the key sends
+        deadline = time.monotonic() + 10
+        while info().get('son_pencere', 0) < pressed and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertGreaterEqual(info().get('son_pencere', 0), pressed)
+        self.assertTrue(yakala.stop_windows_listener(stop_name=names[1], mutex_name=names[0], wait=10))
+        self.assertEqual(listener.wait(timeout=10), 0)
 
     def test_vtt_text(self):
         raw = ('WEBVTT\nKind: captions\n\n00:00:00.000 --> 00:00:02.000\nmerhaba <c>dunya</c>\n\n'

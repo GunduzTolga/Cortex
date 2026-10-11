@@ -994,3 +994,4 @@ ICO = (
     'yGZjZJMEplPE3+gHXrvEvQ5jku0jI/GuDRs29GZ5hnRXZ7oBcMcoorGDAZTOyGQI3MqesA1GeujzWAPgjlHkYwcDmBljrCEw',
     'S6rPKAPe2Guk/zv2d/edsQbAHWPH2DF2jB1DSnD8f2EkExUhWaukAAAAAElFTkSuQmCC',
 )
+FONT_SIZES = {'Fraunces-Bold.ttf': 76440, 'JetBrainsMono-Bold.ttf': 75772, 'JetBrainsMono-Regular.ttf': 75744, 'SchibstedGrotesk-Bold.ttf': 81368, 'SchibstedGrotesk-Regular.ttf': 80816}

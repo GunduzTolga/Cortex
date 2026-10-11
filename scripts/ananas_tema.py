@@ -25,6 +25,8 @@ TEMA = ROOT / 'tema' / 'ananas'
 MARKA = TEMA / 'marka'
 MODULE = ROOT / 'template' / '.claude' / 'scripts' / 'beyin_v3_tema_veri.py'
 BRAND_MODULE = ROOT / 'template' / '.claude' / 'scripts' / 'beyin_v3_marka.py'
+FONT_MODULE = ROOT / 'template' / '.claude' / 'scripts' / 'beyin_v3_yazitipi.py'
+TTF = TEMA / 'fonts-ttf'
 MARKER = '/* ananas-tema: Cortex tarafından üretildi; elle düzenleme, beyin.py tema kur yeniden yazar */'
 CHUNK = 96
 
@@ -108,7 +110,26 @@ def brand_text():
              '"""']
     for size in (28, 42, 56):
         lines += [f'MUHUR_{size} = (', *_chunked((MARKA / f'pyn-muhur-{size}.png').read_bytes()), ')']
-    lines += ['ICO = (', *_chunked((MARKA / 'pyn.ico').read_bytes()), ')', '']
+    lines += ['ICO = (', *_chunked((MARKA / 'pyn.ico').read_bytes()), ')']
+    # Only names and sizes here: the font bytes live in beyin_v3_yazitipi.py, which the popup
+    # imports just once per machine to write them into the state folder.
+    sizes = {path.name: path.stat().st_size for path in sorted(TTF.glob('*.ttf'))}
+    lines += ['FONT_SIZES = ' + repr(sizes), '']
+    return '\n'.join(lines)
+
+
+def font_text():
+    """The yakala popup's Ananas faces as TTF (Windows GDI cannot read WOFF2)."""
+    lines = ['"""Ananas yazı tiplerinin TTF kopyaları (yakala penceresi). ÜRETİLMİŞ DOSYA, elle düzenleme.',
+             '',
+             'Kaynak: tema/ananas/fonts-ttf/ (scripts/yazitipi_uret.py). Yeniden üretmek için:',
+             '    py -3 scripts/ananas_tema.py uret',
+             'Lisans: SIL Open Font License 1.1; metinler Cortex deposunda tema/ananas/fonts/*-OFL.txt',
+             '"""',
+             'FONTS = {']
+    for path in sorted(TTF.glob('*.ttf')):
+        lines += ['    ' + repr(path.name) + ': (', *['    ' + line for line in _chunked(path.read_bytes())], '    ),']
+    lines += ['}', '']
     return '\n'.join(lines)
 
 
@@ -119,7 +140,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Ananas tema ve Pyn marka verisini üret veya kontrol et')
     parser.add_argument('islem', choices=('uret', 'kontrol'))
     args = parser.parse_args(argv)
-    targets = ((MODULE, module_text()), (BRAND_MODULE, brand_text()))
+    targets = ((MODULE, module_text()), (BRAND_MODULE, brand_text()), (FONT_MODULE, font_text()))
     stale = [path for path, text in targets if not path.exists() or path.read_text(encoding='utf-8') != text]
     if args.islem == 'kontrol':
         if stale:

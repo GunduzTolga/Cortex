@@ -31,6 +31,7 @@ MAC_HOTKEY = 'Control+Option+B'  # Option+Command+B is the bookmarks key in Chro
 WIN_HOTKEY = 'CTRL+ALT+B'
 STATUSES = ('bekliyor', 'cikarildi', 'islendi', 'hata')
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+DETACHED = getattr(subprocess, 'DETACHED_PROCESS', 0)
 
 
 # ---------------------------------------------------------------- cards
@@ -721,6 +722,41 @@ def _logo(root):
         return None  # a missing or unreadable mark costs the logo, never the capture
 
 
+FONT_DIR = 'yazitipleri'
+_fonts_loaded = False
+
+
+def _load_fonts(state):
+    """Windows: make the Ananas faces visible to this process only (FR_PRIVATE); nothing is installed.
+
+    GDI cannot read the theme's WOFF2, so TTF copies are written once into the machine's state
+    folder; later launches only compare sizes. Any failure leaves the system faces in place.
+    """
+    global _fonts_loaded, _installed_families
+    if _fonts_loaded or os.name != 'nt' or state is None:
+        return _fonts_loaded
+    try:
+        import ctypes
+        import beyin_v3_marka as marka
+        folder = Path(state) / FONT_DIR
+        missing = [name for name, size in marka.FONT_SIZES.items()
+                   if not (folder / name).is_file() or (folder / name).stat().st_size != size]
+        if missing:
+            import base64
+            import beyin_v3_yazitipi as yazitipi
+            folder.mkdir(parents=True, exist_ok=True)
+            for name in missing:
+                (folder / name).write_bytes(base64.b64decode(''.join(yazitipi.FONTS[name])))
+        add = ctypes.windll.gdi32.AddFontResourceExW
+        add.argtypes = [ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_void_p]
+        loaded = [name for name in marka.FONT_SIZES if add(str(folder / name), 0x10, None)]  # 0x10: FR_PRIVATE
+        _fonts_loaded = len(loaded) == len(marka.FONT_SIZES)
+        _installed_families = None  # the next _font call sees the faces just added
+    except Exception:
+        _fonts_loaded = False
+    return _fonts_loaded
+
+
 def _nsstring(objc, send, text):
     import ctypes
     return send(objc.objc_getClass(b'NSString'), b'stringWithUTF8String:', ctypes.c_void_p, ctypes.c_char_p(text.encode('utf-8')))
@@ -805,15 +841,27 @@ def _hotkey_hint(vault):
     return (label + ' ile her yerden açılır') if label else 'İkinci beynine kaydedilir'
 
 
-def popup(vault, context=None):
-    """Command-palette window: what will be saved, one line for why, Enter saves, Esc closes."""
+def popup(vault, context=None, master=None, state=None):
+    """Command-palette window: what will be saved, one line for why, Enter saves, Esc closes.
+
+    Alone it owns a Tk root and returns the capture result when the window closes. With
+    `master` (the resident Windows listener's warm root) it opens a Toplevel on it and
+    returns that window at once; the listener's own loop keeps it running.
+    """
     context = dict(context or {})
     try:
         import tkinter as tk
     except ImportError:
         return _popup_fallback(vault, context)
+    if state is None:
+        try:
+            state = resolve_state(Path(vault))
+        except Exception:
+            state = None
+    _load_fonts(state)
     snapshot = os.environ.get('BEYIN_YAKALA_SNAPSHOT')
-    root = tk.Tk()
+    owner = master is None
+    root = tk.Tk() if owner else tk.Toplevel(master)
     root.withdraw()
     clip = _clipboard(root).strip()
     clip_is_url = bool(re.match(r'^https?://\S+$', clip))
@@ -1023,6 +1071,8 @@ def popup(vault, context=None):
             subprocess.run(['screencapture', '-x', '-o', '-R', region, snapshot], capture_output=True)
             root.destroy()
         root.after(700, shoot)
+    if not owner:
+        return root
     root.mainloop()
     return result or {'status': 'vazgecildi'}
 
@@ -1208,6 +1258,180 @@ def listen_mac(vault, script, keycode=11, modifiers=0x1000 | 0x800):
     if carbon.RegisterEventHotKey(keycode, modifiers, HotKeyID(fourcc('BYKL'), 1), target, 0, byref(hotkey_ref)):
         raise SystemExit('Kisayol baska bir uygulamada kayitli; beyin.py yakala kisayol ile degistir')
     carbon.RunApplicationEventLoop()
+
+
+# ---------------------------------------------------------------- hotkey listener (Windows)
+
+LISTENER_MUTEX = 'Local\\CortexPynYakalaDinleyici'
+LISTENER_STOP = 'Local\\CortexPynYakalaDur'
+LISTENER_STATE = 'yakala-dinleyici.json'
+WIN_MODS = {'alt': 0x1, 'ctrl': 0x2, 'shift': 0x4}
+
+
+def windows_virtual_key(spec):
+    """RegisterHotKey's modifier bits and virtual-key code, for the specs windows_hotkey accepts."""
+    windows_hotkey(spec)  # one validation and one error message for both paths
+    mods, key = parse_hotkey(spec)
+    key = key.lower()
+    vk = 0x70 + int(key[1:]) - 1 if re.fullmatch(r'f\d{1,2}', key) else ord(key.upper())
+    return sum(WIN_MODS[m] for m in mods), vk
+
+
+def _listener_state(state):
+    try:
+        return json.loads((Path(state) / LISTENER_STATE).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_listener_state(state, **values):
+    path = Path(state) / LISTENER_STATE
+    data = dict(_listener_state(state), schema=1, pid=os.getpid(), **values)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data) + '\n', encoding='utf-8')
+
+
+def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name=LISTENER_STOP):
+    """Resident hotkey on Windows: Tk is warm before the key, so the window opens at once.
+
+    A small thread owns RegisterHotKey and reads the foreground window the moment the key
+    arrives; the popup opens as a Toplevel on this process's waiting Tk root. One listener per
+    user (a named mutex). `yakala kur` and `kaldir` stop it through a named event, never by
+    killing a process. When an update replaces this script, the listener restarts itself on the
+    new code once no window is open.
+    """
+    import ctypes
+    import queue
+    import threading
+    from ctypes import wintypes
+    user32 = ctypes.WinDLL('user32', use_last_error=True)
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.CreateMutexW.restype = kernel32.CreateEventW.restype = wintypes.HANDLE
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+    vault, state = Path(vault), Path(state)
+    lock = kernel32.CreateMutexW(None, False, mutex_name)
+    if not lock or ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS: another listener serves this user
+        return 0
+    stop = kernel32.CreateEventW(None, True, False, stop_name)
+    # A listener that is still on its way out may keep the event alive, signalled: that request
+    # was for it, not for us.
+    kernel32.ResetEvent.argtypes = [wintypes.HANDLE]
+    kernel32.ResetEvent(stop)
+    mods, vk = windows_virtual_key(spec or saved_hotkey(state))
+    _load_fonts(state)
+    import tkinter as tk
+    root = tk.Tk()
+    root.withdraw()
+    _font(12)  # resolve the faces now, not when the key is pressed
+    pressed, ready, started = queue.Queue(), {}, threading.Event()
+
+    def watch():
+        import time
+        msg = wintypes.MSG()
+        user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)  # create this thread's message queue
+        ready['tid'] = kernel32.GetCurrentThreadId()
+        # A listener that just restarted, or a Start-menu key Explorer is still releasing, can
+        # hold the key for a moment: retry briefly before calling it taken.
+        for _attempt in range(30):
+            ready['ok'] = bool(user32.RegisterHotKey(None, 1, mods | 0x4000, vk))  # 0x4000: MOD_NOREPEAT
+            if ready['ok']:
+                break
+            time.sleep(0.1)
+        started.set()
+        if not ready['ok']:
+            return
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            if msg.message == 0x0312:  # WM_HOTKEY: read the foreground window before ours appears
+                pressed.put(windows_context())
+        user32.UnregisterHotKey(None, 1)
+
+    threading.Thread(target=watch, daemon=True).start()
+    started.wait(10)
+    ok = ready.get('ok', False)
+    _write_listener_state(state, kisayol_calisiyor=ok, tid=ready.get('tid'), at=time_now())
+    if not ok:
+        root.destroy()
+        kernel32.CloseHandle(lock)
+        return 1
+    script = Path(__file__).resolve()
+    stamp = script.stat().st_mtime
+    windows, ticks = [], [0]
+
+    def finish(restart=False):
+        user32.PostThreadMessageW(ready['tid'], 0x0012, 0, 0)  # WM_QUIT ends the hotkey thread
+        kernel32.CloseHandle(lock)
+        kernel32.CloseHandle(stop)
+        if restart:
+            subprocess.Popen([sys.executable, str(script), 'dinle', '--vault', str(vault)], close_fds=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=DETACHED | NO_WINDOW)
+        root.destroy()
+
+    def poll():
+        if kernel32.WaitForSingleObject(stop, 0) == 0:  # WAIT_OBJECT_0: kur or kaldir asked us to go
+            return finish()
+        windows[:] = [window for window in windows if window.winfo_exists()]
+        ticks[0] += 1
+        if ticks[0] % 80 == 0 and not windows:  # about every two seconds
+            try:
+                if script.stat().st_mtime != stamp:
+                    return finish(restart=True)
+            except OSError:
+                pass
+        try:
+            context = pressed.get_nowait()
+        except queue.Empty:
+            context = None
+        if context is not None:
+            if windows:  # a second press brings the open window back instead of stacking another
+                windows[-1].lift()
+                windows[-1].focus_force()
+            else:
+                opened = popup(vault, context, master=root, state=state)
+                if opened is not None and not isinstance(opened, dict):
+                    windows.append(opened)
+                _write_listener_state(state, son_pencere=time_now())
+        root.after(25, poll)
+
+    root.after(25, poll)
+    root.mainloop()
+    return 0
+
+
+def stop_windows_listener(stop_name=LISTENER_STOP, mutex_name=LISTENER_MUTEX, wait=3.0):
+    """Ask a running listener to leave and wait until its mutex is gone; True if none remains."""
+    if os.name != 'nt':
+        return True
+    import ctypes
+    import time
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.OpenEventW.restype = kernel32.OpenMutexW.restype = wintypes.HANDLE
+    kernel32.OpenEventW.argtypes = kernel32.OpenMutexW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.SetEvent.argtypes = kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    event = kernel32.OpenEventW(0x0002, False, stop_name)  # EVENT_MODIFY_STATE
+    if event:
+        kernel32.SetEvent(event)
+        kernel32.CloseHandle(event)
+    deadline = time.monotonic() + wait
+    while True:
+        mutex = kernel32.OpenMutexW(0x00100000, False, mutex_name)  # SYNCHRONIZE
+        if not mutex:
+            return True
+        kernel32.CloseHandle(mutex)
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.05)
+
+
+def time_now():
+    import time
+    return round(time.time(), 3)
 
 
 # ---------------------------------------------------------------- install / remove
@@ -1425,7 +1649,11 @@ def install(vault, state, hotkey=True, spec=None):
         target = pythonw if pythonw.is_file() else Path(sys.executable)
         programs, sendto = _windows_dirs()
         icon = _windows_icon(state)
-        _windows_shortcut(programs / 'Beyne At.lnk', target, _argline([script, 'pencere', '--vault', vault]), win_value, icon)
+        stop_windows_listener()  # an earlier listener, perhaps another vault's, lets the key go: it moves here
+        # The Start-menu entry opens the popup directly. It carries the key only when no
+        # listener can hold it: Explorer and the listener cannot both own Ctrl+Alt+B.
+        start_menu = (programs / 'Beyne At.lnk', target, _argline([script, 'pencere', '--vault', vault]))
+        _windows_shortcut(*start_menu, None, icon)
         _windows_shortcut(sendto / 'Beyne At.lnk', target, _argline([script, 'ekle', '--vault', vault, '--arac', 'gonder-menusu']),
                           icon=icon)
         done.update(kisayol=label, gonder_menusu=True)
@@ -1433,8 +1661,42 @@ def install(vault, state, hotkey=True, spec=None):
     _state_path(state).write_text(json.dumps({'schema': 1, 'session_notice': True, 'kisayol': done['kisayol'],
                                               'tus': spec if done['kisayol'] else saved_hotkey(state)}, ensure_ascii=False) + '\n',
                                   encoding='utf-8')
+    if hotkey and os.name == 'nt':
+        # Started only now, after the key is saved: the listener reads it from the state above.
+        done['dinleyici'] = _start_windows_listener(target, script, vault, state, programs, icon)
+        if not done['dinleyici']:
+            _windows_shortcut(*start_menu, win_value, icon)  # Explorer's slower key, but a working one
     done['araclar'] = {name: bool(path) for name, path in tools().items()}
     return done
+
+
+STARTUP_NAME = 'Pyn Yakala.lnk'
+
+
+def _start_windows_listener(target, script, vault, state, programs, icon):
+    """Start the resident listener with Windows and right now; True once it holds the key."""
+    startup = programs / 'Startup' / STARTUP_NAME
+    if os.environ.get('BEYIN_V3_NO_SPAWN') == '1':
+        startup.unlink(missing_ok=True)
+        return False  # tests and CI: no resident process, the Start-menu key keeps working
+    import time
+    _windows_shortcut(startup, target, _argline([script, 'dinle', '--vault', vault]), icon=icon)
+    before = time_now()
+    # Through Explorer, so the listener is an ordinary desktop process: started directly from a
+    # packaged app (an MSIX container, such as a desktop AI client) it would die with that app.
+    subprocess.Popen(['explorer.exe', str(startup)], close_fds=True, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        info = _listener_state(state)
+        if info.get('at', 0) >= before - 1 and 'kisayol_calisiyor' in info:
+            if info['kisayol_calisiyor']:
+                return True
+            break
+        time.sleep(0.1)
+    startup.unlink(missing_ok=True)
+    stop_windows_listener()
+    return False
 
 
 def uninstall(vault, state):
@@ -1446,6 +1708,14 @@ def uninstall(vault, state):
         _launch_agent().unlink()
         removed.append('LaunchAgent')
     elif os.name == 'nt':
+        if _listener_state(state).get('pid'):  # only the listener this vault started
+            stop_windows_listener()
+            (state / LISTENER_STATE).unlink(missing_ok=True)
+            removed.append('dinleyici')
+        startup = _windows_dirs()[0] / 'Startup' / STARTUP_NAME
+        if startup.exists():
+            startup.unlink()
+            removed.append(STARTUP_NAME)
         for folder in _windows_dirs():
             link = folder / 'Beyne At.lnk'
             if link.exists():
@@ -1534,6 +1804,10 @@ def human(result, command):
             lines.append('Kisayol: ' + result['kisayol'] + ' (her uygulamada calisir).')
         if result.get('kisayol_calisiyor') is False:
             lines.append('UYARI: kisayol dinleyicisi baslamadi; bu tus baska bir uygulamada kayitli olabilir. Baska bir tus dene.')
+        if result.get('dinleyici') is True:
+            lines.append('Pencere aninda acilir: dinleyici calisiyor ve Windows acilisinda kendiliginden baslar.')
+        elif result.get('dinleyici') is False:
+            lines.append('Dinleyici baslamadi; kisayol Baslat menusu uzerinden (daha yavas) calisir.')
         if command == 'kisayol':
             return '\n'.join(lines)
         if result.get('gonder_menusu'):
@@ -1609,8 +1883,10 @@ def main(argv=None, vault=None, state=None):
     as_json = args.force_json or not sys.stdout or not sys.stdout.isatty()
     if command == 'pencere':
         context = json.loads(args.baglam) if getattr(args, 'baglam', None) else gather_context()
-        result = popup(vault, context)
+        result = popup(vault, context, state=state)
     elif command == 'dinle':
+        if os.name == 'nt':
+            return listen_windows(vault, state)
         listen_mac(vault, Path(__file__).resolve(), args.keycode, args.mods)
         return 0
     elif command == 'ekle':
