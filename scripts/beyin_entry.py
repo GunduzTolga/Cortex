@@ -416,6 +416,7 @@ def load_cli(directory):
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+    passthrough = argv[1:]  # `pyn` hands these to the client untouched, --json and --human included
     human = ('--human' in argv or sys.stdout.isatty()) and '--json' not in argv
     argv = [arg for arg in argv if arg not in ('--human', '--json')]
     if human:
@@ -452,6 +453,10 @@ def main(argv=None):
             # Optional capture tool: its own small CLI, no index or sync engine.
             import beyin_v3_yakala as yakala
             return yakala.main(argv[1:], vault=vault, state=state)
+        if argv and argv[0] == 'pyn':
+            # Open Pyn in a chosen AI client inside this vault; its own small CLI.
+            import beyin_v3_pyn as pyn
+            return pyn.main(passthrough, vault=vault, state=state)
         if argv and argv[0] == 'tema':
             # Optional Ananas Obsidian theme: writes only under .obsidian, no index or sync.
             import beyin_v3_tema as tema
