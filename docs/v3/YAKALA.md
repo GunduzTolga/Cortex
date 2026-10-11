@@ -27,7 +27,7 @@ Kısayol ek paket istemez; Python'un kendisiyle çalışır. Mac'te bir oturum a
 
 Windows'ta küçük bir **dinleyici** tuşu tutar ve pencereyi önceden hazır bekletir; tuşa basınca
 pencere anında (yaklaşık 50 ms) açılır. Dinleyici Windows açılırken Başlangıç klasöründeki
-"Pyn Yakala" kısayoluyla başlar, kullanıcı başına bir tanedir ve yaklaşık 25 MB bellek kullanır.
+"Pyn Yakala" kısayoluyla başlar, kullanıcı başına bir tanedir ve yaklaşık 40-45 MB bellek kullanır.
 Cortex güncellenince kendini yeni kodla yeniden başlatır. `yakala kaldir` onu durdurur ve
 Başlangıç kısayolunu siler. Tuşu başka bir uygulama tutuyorsa dinleyici çekilir ve eski yönteme,
 Başlat menüsü kısayolunun tuşuna dönülür (o yol her basışta Python'u yeniden açtığı için daha yavaştır).
