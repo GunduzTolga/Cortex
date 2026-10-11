@@ -97,13 +97,27 @@ LOCAL_TOOLS = {'ollama': ('ollama',), 'lmstudio': ('lms',)}
 MEMORY_LABEL = {'tam': 'tam hafıza', 'talimat': 'hafıza talimatla (AGENTS.md)'}
 
 
-def options(clients=CLIENTS, local=LOCAL, which=shutil.which):
+def hooked(vault, option):
+    """True when this vault's install wired the client's hooks (Gemini CLI, Qwen Code since 1.0.4)."""
+    if vault is None or not option.get('ayar'):
+        return False
+    try:
+        text = (Path(vault) / option['ayar']).read_text(encoding='utf-8')
+    except OSError:
+        return False
+    return 'beyin_v3_hook.py' in text or 'cortex-pyn' in text
+
+
+def options(clients=CLIENTS, local=LOCAL, which=shutil.which, vault=None):
     """Everything `pyn` can open on this machine, in menu order, and hints for what is missing."""
     found, hints = [], []
     for client in clients:
         path = next((p for p in (which(name) for name in client['komut']) if p), None)
         if path:
-            found.append(dict(client, yol=path, args=[]))
+            option = dict(client, yol=path, args=[])
+            if hooked(vault, option):
+                option['hafiza'] = 'tam'  # the hooks load memory every turn, as for Claude and Codex
+            found.append(option)
         elif client.get('kur'):
             hints.append(client['ad'] + ' kurulu değil (' + client['not'] + '): ' + client['kur'])
     codex = next((option for option in found if option['id'] == 'codex'), None)
@@ -320,7 +334,7 @@ def main(argv, vault, state, interactive=None):
         else:
             print('`pyn` komutu kaldırıldı.' if result['status'] == 'kaldirildi' else '`pyn` komutu zaten kurulu değildi.')
         return 0
-    found, hints = options()
+    found, hints = options(vault=vault)
     if argv[:1] == ['liste']:
         print(json.dumps({'secenekler': [{k: o[k] for k in ('id', 'ad', 'hafiza')} for o in found], 'notlar': hints},
                          ensure_ascii=False, indent=2))

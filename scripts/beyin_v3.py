@@ -263,7 +263,8 @@ def jev_advice(result):
     return result
 
 
-HOOK_FILES = (".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json")
+HOOK_FILES = (".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json",
+              ".gemini/settings.json", ".qwen/settings.json")
 
 
 def _hook_arguments(command: str) -> list:
@@ -278,6 +279,9 @@ def _hook_arguments(command: str) -> list:
         except (ValueError, UnicodeError):
             return []
         return [item.replace("''", "'") for item in re.findall(r"'((?:[^']|'')*)'", script)]
+    if command.lstrip().startswith("& '"):
+        # Gemini CLI runs Windows hooks in PowerShell itself: the same quoted call, unencoded.
+        return [item.replace("''", "'") for item in re.findall(r"'((?:[^']|'')*)'", command)]
     try:
         return shlex.split(command)
     except ValueError:
@@ -421,7 +425,7 @@ def parser():
     context = sub.add_parser("context", help="Retrieve source-backed shared context")
     context.add_argument("query", nargs="?", help="Query; alternatively use --file")
     context.add_argument("--file", help="JSON retrieval arguments, or - for stdin")
-    context.add_argument("--harness", choices=("codex", "claude", "antigravity", "hermes", "opencode", "omp"), default="codex")
+    context.add_argument("--harness", choices=("codex", "claude", "antigravity", "hermes", "opencode", "omp", "gemini", "qwen"), default="codex")
     context.add_argument("--project")
     context.add_argument("--audience", choices=("internal", "public"), default="internal")
     context.add_argument("--status", action="append", dest="statuses")
@@ -448,7 +452,7 @@ def parser():
     answer.add_argument("--project", required=True)
     receipt = sub.add_parser("receipt", help="Submit an idempotent source-linked receipt")
     receipt.add_argument("--file", help="JSON input path, or - for stdin (default without receipt flags)")
-    receipt.add_argument("--harness", choices=("codex", "claude", "antigravity", "hermes", "opencode", "omp"), default="codex")
+    receipt.add_argument("--harness", choices=("codex", "claude", "antigravity", "hermes", "opencode", "omp", "gemini", "qwen"), default="codex")
     receipt.add_argument("--event-id", help="Required receipt event identifier in flag mode")
     receipt.add_argument("--summary", help="Receipt summary text, preserving literal newlines")
     receipt.add_argument("--summary-file", type=Path, metavar="PATH", help="Read the receipt summary from a UTF-8 file")
@@ -638,7 +642,7 @@ def main(argv=None, return_result=False):
             for filename in ("hook-health.json", "hook-error.json", "receipt-gaps.json"):
                 path = state / filename
                 result[filename] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
-            seen = {name: set() for name in ('codex', 'claude', 'antigravity', 'hermes', 'opencode', 'omp')}
+            seen = {name: set() for name in ('codex', 'claude', 'antigravity', 'hermes', 'opencode', 'omp', 'gemini', 'qwen')}
             for path in (state/'hook-done').glob('*.json'):
                 event = json.loads(path.read_text(encoding='utf-8'))
                 if event.get('harness') in seen:

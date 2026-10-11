@@ -38,6 +38,15 @@ class PynChoiceTest(unittest.TestCase):
         self.assertIn('tam hafıza', menu)
         self.assertIn('AGENTS.md', menu)
 
+    def test_gemini_and_qwen_show_full_memory_once_their_hooks_are_installed(self):
+        settings = self.vault / '.gemini/settings.json'
+        settings.parent.mkdir()
+        settings.write_text(json.dumps({'hooks': {'BeforeAgent': [{'hooks': [
+            {'name': 'cortex-pyn', 'type': 'command', 'command': 'py beyin_v3_hook.py --harness gemini'}]}]}}),
+            encoding='utf-8')
+        found, _ = pyn.options(local=(), which=fake_which({'gemini', 'qwen'}), vault=self.vault)
+        self.assertEqual({o['id']: o['hafiza'] for o in found}, {'gemini': 'tam', 'qwen': 'talimat'})
+
     def test_answers_number_id_name_and_default(self):
         found, _ = pyn.options(local=(), which=fake_which({'claude', 'codex', 'gemini'}))
         self.assertEqual(pyn.pick(found, '', found[1])['id'], 'codex')  # Enter keeps the default

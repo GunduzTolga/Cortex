@@ -72,9 +72,21 @@ def atomic(path, data):
     os.replace(temporary, path)
 
 
+# Gemini CLI names the same moments differently; its payload and output are otherwise the
+# Claude shape (session_id, cwd, prompt, stop_hook_active; hookSpecificOutput.additionalContext).
+# Qwen Code uses Claude's names as they are.
+GEMINI_EVENTS = {"SessionStart": "SessionStart", "BeforeAgent": "UserPromptSubmit", "AfterAgent": "Stop",
+                 "AfterTool": "PostToolUse", "PreCompress": "PreCompact", "SessionEnd": "SessionEnd"}
+GEMINI_NATIVE = {ours: theirs for theirs, ours in GEMINI_EVENTS.items()}
+HARNESSES = ("codex", "claude", "antigravity", "hermes", "opencode", "omp", "gemini", "qwen")
+
+
 def output_context(harness, event, text):
     # OpenCode's vault plugin parses the Claude/Codex shape, so one parser serves three clients.
-    return {"injectSteps": [{"ephemeralMessage": text}]} if harness == "antigravity" else {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
+    if harness == "antigravity":
+        return {"injectSteps": [{"ephemeralMessage": text}]}
+    name = GEMINI_NATIVE.get(event, event) if harness == "gemini" else event
+    return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": text}}
 
 
 def prompt_text(payload):
@@ -216,13 +228,14 @@ def _has_knowledge_update(vault, receipt, since):
 def receipt_reminder(payload, state, harness, event, vault=None):
     """Track edits per session and return a one-time Stop block, or None.
 
-    Installed PostToolUse hooks match only Edit|Write|apply_patch for Claude and
-    Codex, so that event marks the session as edited without reading transcripts.
+    Installed PostToolUse hooks match only file edits (Edit|Write|apply_patch for Claude and
+    Codex, write_file|replace for Gemini's AfterTool, write_file|edit for Qwen), so that event
+    marks the session as edited without reading transcripts.
     Stop then looks for a receipt of this harness and session in the runtime store.
     If a receipt declared learnings but no note under knowledge/ was touched,
     Stop reminds once to distill into knowledge/concepts/.
     """
-    if harness not in ("claude", "codex") or event not in ("UserPromptSubmit", "PostToolUse", "Stop"):
+    if harness not in ("claude", "codex", "gemini", "qwen") or event not in ("UserPromptSubmit", "PostToolUse", "Stop"):
         return None
     if os.environ.get("BEYIN_V3_NO_RECEIPT_REMINDER") == "1":
         return None
@@ -364,7 +377,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--vault", required=True, type=Path)
     parser.add_argument("--state", required=True, type=Path)
-    parser.add_argument("--harness", choices=("codex", "claude", "antigravity", "hermes", "opencode", "omp"), required=True)
+    parser.add_argument("--harness", choices=HARNESSES, required=True)
     parser.add_argument("--event")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--drain-queue", action="store_true")
@@ -390,6 +403,8 @@ def main():
         # records the error for doctor instead of silently dropping the turn.
         payload = json.loads(sys.stdin.read(1_000_000) or "{}")
         event = payload.get("hook_event_name", args.event)
+        if args.harness == "gemini":
+            event = GEMINI_EVENTS.get(event, event)
         if args.harness == "hermes":
             # Hermes plugin hooks: pre_llm_call (first turn -> SessionStart, later ->
             # UserPromptSubmit), on_session_finalize -> SessionEnd. The plugin sends

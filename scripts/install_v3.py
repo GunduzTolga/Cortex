@@ -169,6 +169,19 @@ def commands(argv):
     return posix, windows
 
 
+def powershell_call(argv):
+    """The PowerShell call operator on single-quoted literals, for a client that already runs
+    hooks in PowerShell (Gemini CLI on Windows); the same quoting as inside commands()."""
+    if any(any(c in str(value) for c in "\n\r\x00") for value in argv):
+        raise ValueError("Newlines or NUL in command paths are unsupported")
+    return "& " + " ".join("'" + str(value).replace("'", "''") + "'" for value in argv)
+
+
+# The six lifecycle moments in each client's own names (Gemini renames them; Qwen keeps Claude's).
+GEMINI_HOOK_EVENTS = ("SessionStart", "BeforeAgent", "AfterAgent", "AfterTool", "PreCompress", "SessionEnd")
+QWEN_HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop", "PostToolUse", "PreCompact", "SessionEnd")
+
+
 def line_endings_only(baseline, current):
     """Managed files are UTF-8 text, so a CRLF rewrite by git autocrlf or an editor is not an edit."""
     if baseline is None or current is None: return False
@@ -211,7 +224,7 @@ def semantic_unchanged(name, baseline, current, previous, kept=(), user_excluded
             except RuntimeError:
                 return False
             return foreign and dict(data, state=None) == dict(before, state=None)
-        if name in (".claude/settings.local.json", ".claude/settings.json", ".codex/hooks.json", ".agents/hooks.json"):
+        if name in (".claude/settings.local.json", ".claude/settings.json", ".codex/hooks.json", ".agents/hooks.json", ".gemini/settings.json", ".qwen/settings.json"):
             def owned(raw):
                 data = json.loads(raw)
                 if name == ".agents/hooks.json": return data.get("beyin-v3")
@@ -406,6 +419,57 @@ def _install(vault, state, uninstall=False, plan_only=False, version="0.0.0", le
             hooks.setdefault(event, []).append(group)
         add(name, jbytes(data))
         manifest.setdefault("new_commands", []).extend([posix, windows])
+    # Gemini CLI and Qwen Code read hooks from project settings, where context.fileName also makes
+    # them load AGENTS.md. Every other key in those files is the user's and is kept as it is.
+    for harness, name, events, matcher, own_context in (
+            ("gemini", ".gemini/settings.json", GEMINI_HOOK_EVENTS, "write_file|replace", "GEMINI.md"),
+            ("qwen", ".qwen/settings.json", QWEN_HOOK_EVENTS, "write_file|edit", "QWEN.md")):
+        path = vault / name
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(data, dict):
+            raise ValueError("Unreadable client settings " + name + "; fix or remove it, then install again")
+        hooks = data.get("hooks") if isinstance(data.get("hooks"), dict) else {}
+        previous = manifest.get("commands", [])
+        for event, groups in list(hooks.items()):
+            cleaned = []
+            for group in groups if isinstance(groups, list) else []:
+                remaining = [h for h in group.get("hooks", []) if not managed_handler(h, previous, kept)
+                             and "beyin_v3_hook.py" not in encoded_script(h.get("command", ""))]
+                if remaining:
+                    cleaned.append(dict(group, hooks=remaining))
+            if cleaned:
+                hooks[event] = cleaned
+            else:
+                hooks.pop(event)
+        argv = [sys.executable, hook, "--vault", vault, "--state", state, "--harness", harness]
+        posix, windows = commands(argv)
+        if os.name != "nt":
+            command = posix
+        elif harness == "gemini":
+            # Gemini runs every Windows hook as `powershell -Command <text>`: the call itself, no
+            # second PowerShell (half the start-up time); stdin still reaches the hook.
+            command = powershell_call(argv)
+        else:
+            command = windows  # Qwen runs Windows hooks through cmd.exe, where the encoded form is safe
+        for event in events:
+            # Milliseconds here, unlike Claude and Codex.
+            timeout = 3000 if event == "SessionEnd" else (20000 if os.name == "nt" else 5000)
+            group = {"hooks": [{"name": "cortex-pyn", "type": "command", "command": command, "timeout": timeout}]}
+            if event in ("AfterTool", "PostToolUse"):
+                group["matcher"] = matcher
+            hooks.setdefault(event, []).append(group)
+        data["hooks"] = hooks
+        context = data.get("context") if isinstance(data.get("context"), dict) else {}
+        files = context.get("fileName")
+        files = [files] if isinstance(files, str) else list(files) if isinstance(files, list) else [own_context]
+        context["fileName"] = ["AGENTS.md"] + [f for f in files if f != "AGENTS.md"]
+        data["context"] = context
+        if harness == "qwen":
+            # Qwen Code ships its hooks switched off; this project turns them on for itself only.
+            data["hooksConfig"] = dict(data.get("hooksConfig") if isinstance(data.get("hooksConfig"), dict) else {},
+                                       enabled=True)
+        add(name, jbytes(data))
+        manifest.setdefault("new_commands", []).extend([posix, windows, command])
     # Claude merges checked-in and local settings; retire only recognized legacy adapters.
     path = vault / ".claude/settings.json"
     if path.exists():
@@ -558,7 +622,7 @@ not knowledge synthesis.
                 raise ValueError("Reinstall conflict: managed file changed " + name +
                                  " (" + conflict_case(current) + ")")
         elif not item and current is not None and not line_endings_only(planned[name], current):
-            semantic = name in ("AGENTS.md", "CLAUDE.md", ".claude/settings.local.json", ".claude/settings.json", ".codex/hooks.json", ".agents/hooks.json", ".codex/config.toml", ".beyin-version")
+            semantic = name in ("AGENTS.md", "CLAUDE.md", ".claude/settings.local.json", ".claude/settings.json", ".codex/hooks.json", ".agents/hooks.json", ".codex/config.toml", ".beyin-version", ".gemini/settings.json", ".qwen/settings.json")
             legacy = digest(current) in legacy_skill_hashes.get(name, []) or legacy_hashes.get(name) == digest(current)
             if not semantic and not legacy:
                 raise ValueError("Unmanaged file conflict " + name)
