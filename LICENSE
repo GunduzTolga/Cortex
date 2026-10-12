@@ -20,3 +20,15 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Brand assets are not covered by the license above.
+
+The names "Cortex" (for this software) and "Pyn", the Pyn seal and face, the logo
+and icon files in tema/ananas/marka/ and the same images embedded in
+template/.claude/scripts/beyin_v3_marka.py are brand assets of SoleLuna Tech
+(Tolga Gündüz). The MIT License grants rights to the code, not to these names or
+images. A modified or redistributed version must use its own name and its own
+images. See MARKA.md for what is allowed. Fonts in tema/ananas/fonts keep their
+own SIL Open Font License.

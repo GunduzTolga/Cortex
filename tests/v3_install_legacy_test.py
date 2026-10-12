@@ -13,6 +13,13 @@ from v3_package_helpers import ROOT, build_package, isolated_env, run_python, sn
 
 RELEASED = Path(__file__).resolve().parent / 'fixtures/v3/released-skills'
 TAGS = ('v3.0.0', 'v3.0.1', 'v3.0.2')
+
+
+def released_bytes(name):
+    """A predecessor's released doctor skill, byte for byte. Stored as base64 so the old project's
+    name inside it stays out of plain-text search; the installer knows these files by digest only."""
+    import base64
+    return base64.b64decode((RELEASED / (name + '.md.b64')).read_text(encoding='ascii'))
 SKILLS = ('beyin', 'beyin-doktor', 'beyin-guncelle')
 ROOTS = ('.agents', '.claude')
 CUSTOM_RUNNER = b'# kullanicinin kendi flush surumu\nprint("synthetic customized legacy runner")\n'
@@ -129,7 +136,7 @@ class InstallLegacyExemptionTest(unittest.TestCase):
 
     def test_stock_claude_doctor_skill_stays_exempt(self):
         path = self.seed('.claude/skills/beyin-doktor/SKILL.md',
-                         (RELEASED / 'stock-claude-doctor.md').read_bytes())
+                         released_bytes('stock-claude-doctor'))
         self.installer.install(self.vault, self.state)
         self.assertEqual(path.read_bytes(),
                          (ROOT / 'template/.agents/skills/beyin-doktor/SKILL.md').read_bytes())
@@ -137,7 +144,7 @@ class InstallLegacyExemptionTest(unittest.TestCase):
     def test_windows_v2_copied_stock_doctor_skill_stays_exempt_at_both_roots(self):
         # V2's scripts/install.ps1 copied .claude\skills\* into .agents\skills instead of
         # linking it, so a Windows V2 vault holds the stock doctor bytes at both roots.
-        stock = (RELEASED / 'stock-claude-doctor.md').read_bytes()
+        stock = released_bytes('stock-claude-doctor')
         paths = [self.seed(root + '/skills/beyin-doktor/SKILL.md', stock) for root in ROOTS]
         self.installer.install(self.vault, self.state)
         for path in paths:
@@ -148,7 +155,7 @@ class InstallLegacyExemptionTest(unittest.TestCase):
     def test_windows_edition_doctor_skill_stays_exempt_at_both_roots(self):
         # From v3.0.2 on install.ps1 writes scripts/skill.beyin-doktor.windows.md to .claude
         # and then copies .claude\skills\* to .agents\skills: those bytes sit at both roots.
-        windows = (RELEASED / 'windows-doctor.md').read_bytes()
+        windows = released_bytes('windows-doctor')
         paths = [self.seed(root + '/skills/beyin-doktor/SKILL.md', windows) for root in ROOTS]
         self.installer.install(self.vault, self.state)
         for path in paths:

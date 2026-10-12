@@ -7,7 +7,8 @@
 <p align="center">
   <b>Yapay zekâ asistanların için yerel, kalıcı bir ikinci beyin.</b><br>
   Notların senin Markdown dosyalarında kalır; Claude Code, Codex, OpenCode ve diğerleri aynı hafızayı paylaşır.<br>
-  Maskotu ve düşünme ortağın: ananas <b>Pyn</b>.
+  Maskotu ve düşünme ortağın: ananas <b>Pyn</b>.<br>
+  <sub>SoleLuna Tech</sub>
 </p>
 
 <p align="center">
@@ -35,6 +36,7 @@
 - [Eski bir kurulumdan geliyorsan](#eski-bir-kurulumdan-geliyorsan)
 - [Sürüm geçmişi](#sürüm-geçmişi)
 - [Geliştiriciler](#geliştiriciler)
+- [Lisans ve marka](#lisans-ve-marka)
 
 ---
 
@@ -356,4 +358,15 @@ Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama ya da her s
 
 [Kaynak formatı](docs/v3/MARKDOWN.md) · [Runtime](docs/v3/RUNTIME.md) · [Semantik test sözleşmesi](docs/v3/SEMANTIC-TEST-CONTRACT.md) · [Sürüm paketi ve güncelleyici](docs/v3/UPDATE.md) · [Birden çok makine](docs/v3/MULTI-MACHINE.md) · [OpenCode](docs/v3/OPENCODE.md) · [Hermes](docs/v3/HERMES.md) · [OMP](docs/v3/OMP.md)
 
-Açık kaynak, [MIT lisansı](LICENSE). V2 bilgi derleme fikri için [Karpathy'nin bilgi tabanı desenine](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) teşekkürler.
+## Lisans ve marka
+
+Kod açık kaynaktır: [MIT lisansı](LICENSE). Kullanabilir, değiştirebilir ve dağıtabilirsin. **Cortex** ve **Pyn** adları, Pyn'in mührü ve logo dosyaları ise lisansın dışındadır: değiştirilmiş bir sürümü kendi adınla ve kendi görsellerinle yayınla. Neyin serbest olduğu: [MARKA.md](MARKA.md).
+
+Cortex, MIT lisanslı açık kaynak bir ikinci beyin projesinden doğdu; o projenin telif satırı LICENSE dosyasında korunur. Bilgi derleme fikri için [Karpathy'nin bilgi tabanı desenine](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) teşekkürler.
+
+---
+
+<p align="center">
+  <img src="tema/ananas/marka/pyn-muhur-56.png" width="28" alt=""><br>
+  <b>Cortex</b>, <a href="https://solelunatech.com"><b>SoleLuna Tech</b></a> tarafından geliştirilir.
+</p>

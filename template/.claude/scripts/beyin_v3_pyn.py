@@ -313,6 +313,7 @@ GREEN, RED = '\x1b[38;2;94;186;92m', '\x1b[38;2;217;83;79m'
 LOGO_COLUMNS, LOGO_ROWS = 12, 6
 LEFT_WIDTH = 34
 GREETING = 'Bugün neyi düşünelim?'
+SIGNATURE = 'SoleLuna Tech'
 
 
 def _device_attributes(timeout=0.4):
@@ -477,7 +478,8 @@ def welcome_box(vault, columns, logo=False, update=None):
     for (ltext, lstyle), (rtext, rstyle) in zip(left, right):
         lines.append(GOLD + '│' + RESET + cell(ltext, lstyle, LEFT_WIDTH, center=True) + GOLD + '│' + RESET
                      + cell(rtext, rstyle, right_width) + ' ' + GOLD + '│' + RESET)
-    lines.append(GOLD + '╰' + '─' * (width - 2) + '╯' + RESET)
+    signature = ' ' + SIGNATURE + ' '  # the maker, quietly in the bottom edge
+    lines.append(GOLD + '╰' + '─' * (width - 4 - len(signature)) + RESET + DIM + signature + RESET + GOLD + '──╯' + RESET)
     return lines, ((logo_row, 1 + (LEFT_WIDTH - LOGO_COLUMNS) // 2) if logo else None)
 
 

@@ -236,6 +236,7 @@ class PynChoiceTest(unittest.TestCase):
                 plain = [re.sub(r'\x1b\[[0-9;]*m', '', line) for line in lines]
                 self.assertEqual(len({len(line) for line in plain}), 1, 'Every line of the box is equally wide')
                 self.assertIn('Pyn · Cortex 1.0.5', plain[0])
+                self.assertIn(' SoleLuna Tech ', plain[-1], 'The maker signs the bottom edge')
                 self.assertTrue(any(pyn.GREETING in line for line in plain))
                 self.assertFalse(any('Tolga' in line for line in plain), 'No one\'s name: a vault can be shared')
                 self.assertTrue(any('2026-10-12 21:05 · Logo' in line and '92ee3e48' not in line for line in plain))
