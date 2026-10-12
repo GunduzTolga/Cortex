@@ -7,6 +7,7 @@ Pillow ister; yalnız tasarım değiştiğinde elle çalıştırılır, testler 
 - pyn-muhur-{28,42,56}.png : yakala penceresinin başlığı (ekran ölçeğine göre seçilir)
 - pyn.ico                  : Windows kısayol ikonu (16-256 px)
 - pyn-yuz-256.png          : Obsidian'da boş sekmedeki Pyn yüzü
+- pyn-muhur.six            : `pyn` karşılama kutusundaki mühür (Sixel, terminalde gerçek resim)
 
 Ardından: py -3 scripts/ananas_tema.py uret
 
@@ -21,6 +22,34 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'tema' / 'ananas' / 'marka'
 
+# Sixel size of the seal in the `pyn` welcome box. Windows Terminal draws Sixel on a 10x20 px
+# virtual cell, so 120 px is 12 columns by 6 rows.
+SIXEL_SIZE = 120
+
+
+def sixel(image, size=SIXEL_SIZE, colors=32):
+    """The image as a Sixel string with a transparent background (1:1 pixels)."""
+    image = image.convert('RGBA').resize((size, size), Image.LANCZOS)
+    alpha = image.getchannel('A').load()
+    flat = Image.new('RGB', image.size)
+    flat.paste(image, mask=image.getchannel('A'))
+    indexed = flat.quantize(colors=colors, method=Image.Quantize.MEDIANCUT)
+    palette, pixels = indexed.getpalette()[:colors * 3], indexed.load()
+    out = ['\x1bP9;1;0q', f'"1;1;{size};{size}']
+    for index in range(colors):
+        r, g, b = palette[index * 3:index * 3 + 3]
+        out.append(f'#{index};2;{r * 100 // 255};{g * 100 // 255};{b * 100 // 255}')
+    for band in range(0, size, 6):
+        rows = []
+        for index in range(colors):
+            line = ''.join(chr(63 + sum(1 << k for k in range(6) if band + k < size
+                                        and alpha[x, band + k] >= 128 and pixels[x, band + k] == index))
+                           for x in range(size)).rstrip('?')
+            if line:
+                rows.append(f'#{index}' + re.sub(r'(.)\1{3,}', lambda m: f'!{len(m.group())}{m.group(1)}', line))
+        out.append('$'.join(rows) + '-')
+    return ''.join(out) + '\x1b\\'
+
 
 def main(source):
     source = Path(source)
@@ -31,6 +60,7 @@ def main(source):
         seal.resize((size, size), Image.LANCZOS).save(OUT / f'pyn-muhur-{size}.png', optimize=True)
     seal.save(OUT / 'pyn.ico', sizes=[(s, s) for s in (16, 20, 24, 32, 40, 48, 64, 256)])
     face.resize((256, 256), Image.LANCZOS).save(OUT / 'pyn-yuz-256.png', optimize=True)
+    (OUT / 'pyn-muhur.six').write_text(sixel(seal), encoding='ascii', newline='')
     # The vector seal without its C2PA metadata block: that is provenance, not drawing.
     svg = (source / 'logo-muhur.svg').read_text(encoding='utf-8')
     svg = re.sub(r'<metadata>.*?</metadata>', '', svg, flags=re.S)

@@ -4,7 +4,7 @@ Cortex, Claude Code, Codex veya Google Antigravity ile kullanabileceğin yerel i
 
 Python **3.11 veya üzeri** yeterli. Git, pip, Mem0 hesabı, API anahtarı veya sürekli açık sunucu gerekmez. Kullandığın AI istemcisinin kendi kurulumu ve hesabı ayrı olarak gerekir.
 
-> **Cortex 1.0.4:** Gemini CLI ve Qwen Code artık tam hafızalı ([1.0.4](docs/v3/releases/1.0.4.md)). **1.0.3:** Yeni `pyn` komutu: her yerden Pyn'i istediğin istemciyle aç ([1.0.3](docs/v3/releases/1.0.3.md), [nasıl](#pyni-her-yerden-aç-pyn)). **1.0.2:** Windows'ta Ctrl+Alt+B penceresi anında açılır ve Ananas yazı tipleriyle çizilir ([1.0.2](docs/v3/releases/1.0.2.md)). **1.0.1:** Pyn görünür oldu: Obsidian'da klasör ikonları, Pyn'in mührü ve boş sekmede yüzü; yakala penceresinde mühür ve daha hızlı açılış. İlk sürüm (1.0.0) ile gelenler: Obsidian için isteğe bağlı **Ananas** görsel teması, maskot **Pyn** ve güncellemelerin artık Cortex'in kendi GitHub sürümlerinden gelmesi. İsteğe bağlı **yakala** aracı da yerinde: gördüğün yerde tek tuşla video, tweet, makale, mail ya da dosya yakala (`python3 beyin.py yakala kur`). 3.9.0 kurulu bir vault'u Cortex'e bir kez elle taşı (aşağıdaki **Manuel kurulum**, notların korunur); eski sürümün güncelleyicisi hâlâ eski adrese baktığı için ilk geçişte `update` işe yaramaz, sonraki güncellemeler Cortex'ten gelir. [Sürüm notları](docs/v3/releases/1.0.1.md) · [1.0.0](docs/v3/releases/1.0.0.md) · [Ananas teması](#ananas-teması) · [Yakala](docs/v3/YAKALA.md) · [Güncelleme rehberi](docs/v3/UPDATE.md).
+> **Cortex 1.0.5:** `pyn` karşılama kutusu ve mühürle açılır, cmd'de de çalışır; OpenCode'da sağlayıcı önbelleği korunur, abonelik kotası çok daha geç dolar; yerel modeller OpenCode'da açılır; LM Studio'da hangi model yüklüyse o, katalogda olmasa da ([1.0.5](docs/v3/releases/1.0.5.md)). **1.0.4:** Gemini CLI ve Qwen Code artık tam hafızalı ([1.0.4](docs/v3/releases/1.0.4.md)). **1.0.3:** Yeni `pyn` komutu: her yerden Pyn'i istediğin istemciyle aç ([1.0.3](docs/v3/releases/1.0.3.md), [nasıl](#pyni-her-yerden-aç-pyn)). **1.0.2:** Windows'ta Ctrl+Alt+B penceresi anında açılır ve Ananas yazı tipleriyle çizilir ([1.0.2](docs/v3/releases/1.0.2.md)). **1.0.1:** Pyn görünür oldu: Obsidian'da klasör ikonları, Pyn'in mührü ve boş sekmede yüzü; yakala penceresinde mühür ve daha hızlı açılış. İlk sürüm (1.0.0) ile gelenler: Obsidian için isteğe bağlı **Ananas** görsel teması, maskot **Pyn** ve güncellemelerin artık Cortex'in kendi GitHub sürümlerinden gelmesi. İsteğe bağlı **yakala** aracı da yerinde: gördüğün yerde tek tuşla video, tweet, makale, mail ya da dosya yakala (`python3 beyin.py yakala kur`). 3.9.0 kurulu bir vault'u Cortex'e bir kez elle taşı (aşağıdaki **Manuel kurulum**, notların korunur); eski sürümün güncelleyicisi hâlâ eski adrese baktığı için ilk geçişte `update` işe yaramaz, sonraki güncellemeler Cortex'ten gelir. [Sürüm notları](docs/v3/releases/1.0.1.md) · [1.0.0](docs/v3/releases/1.0.0.md) · [Ananas teması](#ananas-teması) · [Yakala](docs/v3/YAKALA.md) · [Güncelleme rehberi](docs/v3/UPDATE.md).
 
 ## En kolay kurulum: bir klasör, bir mesaj
 
@@ -74,21 +74,24 @@ Vault klasöründe bir kez:
 python3 beyin.py pyn kur
 ```
 
-Windows'ta `py -3`. Bundan sonra hangi klasörde olursan ol, yeni bir terminalde `pyn` yazman yeter. Pyn bu makinede kurulu istemcileri sorar, seçtiğini vault'ta açar ve son seçimini hatırlar (Enter):
+Windows'ta `py -3`. Bundan sonra hangi klasörde olursan ol, yeni bir terminalde `pyn` yazman yeter: PowerShell, cmd, bash ve zsh'ta çalışır. cmd profil okumadığı için Windows'ta `pyn kur` ayrıca `pyn.cmd` yazar; yeri Windows'un her kullanıcıda zaten PATH'e koyduğu `%LOCALAPPDATA%\Microsoft\WindowsApps`, PATH'ine dokunulmaz. Pyn önce bir karşılama kutusu gösterir (Pyn'in mührü, son oturum, ipuçları), sonra bu makinede kurulu istemcileri sorar, seçtiğini vault'ta açar ve son seçimini hatırlar (Enter):
 
 ```
-  🍍 Pyn: hangi istemciyle konuşalım?
+  Hangi istemciyle konuşalım?
 
-  1  Claude Code                              tam hafıza  (son kullanılan)
-  2  Codex                                    tam hafıza
-  3  Gemini CLI                               tam hafıza
-  4  Codex · gpt-oss:20b (Ollama, yüklü)      tam hafıza
+   1  Claude Code                                    tam hafıza   ← son kullanılan
+   2  Codex                                          tam hafıza
+   3  OpenCode                                       tam hafıza
+   4  Gemini CLI                                     tam hafıza
+   5  OpenCode · qwen3-coder-30b (LM Studio, yüklü)  tam hafıza
 ```
+
+Mühür gerçek bir resim olarak çizilir (Sixel): Windows Terminal 1.22 ve sonrası, WezTerm, iTerm2. `pyn` terminale resim çizip çizemediğini sorar; çizemeyen terminalde kutu resimsiz gelir. `PYN_LOGO=0` resmi kapatır, `PYN_LOGO=1` sormadan çizer, `NO_COLOR` kutuyu tümden kapatır.
 
 - **Tam hafıza:** Claude Code, Codex, Gemini CLI, Qwen Code, OpenCode, Oh My Pi. Hook'lar Pyn'in hafızasını her oturum açılışında ve her mesajda bağlama ekler, dosya düzenlenen oturumun sonunda makbuz hatırlatır. Gemini ve Qwen'in hook'ları kurulumda vault'un proje ayarına yazılır (`.gemini/settings.json`, `.qwen/settings.json`); o dosyalardaki diğer ayarların korunur. İlk açılışta istemci bu hook'lara güvenip güvenmediğini sorar: kabul et.
 - **Talimatla:** Cursor Agent. İstemci `AGENTS.md`'yi okur ve Pyn'in kimlik ve hafıza dosyalarını kendisi yükler; otomatik bağlam ve makbuz hatırlatması yoktur.
-- **Hangi model?** Hafızayı model değil istemci taşır. Ücretsiz ve uygun fiyatlı modellerin hepsi tam hafızalı bir istemcinin içinden çalışır: Gemini modelleri Gemini CLI'da (Google hesabıyla ücretsiz kota), Qwen modelleri Qwen Code'da, yerel modeller Codex'te; z.ai GLM, OpenCode Go aboneliği, LM Studio ve OpenRouter gibi sağlayıcılar OpenCode'da.
-- **Yerel modeller:** Ollama ya da LM Studio açıksa ve indirilmiş bir sohbet modeli varsa, Codex o modelle açılır (`--oss`), yani hafıza tam çalışır. Model sorulmaz, makine söyler: **şu an yüklü olan** (LM Studio'da yüklediğin, Ollama'da bellekte olan) çalışır; yoksa bu makinede son kullandığın; o da yoksa tek indirilmiş model. Yalnız birden fazla model indirilmiş ve hiçbiri yüklü değilse bir kez sorar. "Son kullanılan" vault'ta değil, makinenin kendi state klasöründe durur: masaüstü ve laptop kendi modellerini ayrı hatırlar. `pyn` bu sunuculara yalnız zaten açıklarsa sorar, kendisi hiçbir şey başlatmaz; embedding modelleri listelenmez. OpenCode kuruluysa yerel modeller ve OpenCode Go aboneliği onun üzerinden de kullanılabilir.
+- **Hangi model?** Hafızayı model değil istemci taşır. Ücretsiz ve uygun fiyatlı modellerin hepsi tam hafızalı bir istemcinin içinden çalışır: Gemini modelleri Gemini CLI'da (Google hesabıyla ücretsiz kota), Qwen modelleri Qwen Code'da; z.ai GLM, OpenCode Go aboneliği, OpenCode Zen ve OpenRouter gibi sağlayıcılar ve yerel modeller OpenCode'da. Sağlayıcı girişlerini OpenCode'da bir kez sen yaparsın (`opencode auth login`); Cortex anahtarlarını hiç görmez. OpenCode içinde modeli `/models` ile değiştirirsin.
+- **Yerel modeller:** Ollama ya da LM Studio açıksa ve indirilmiş bir sohbet modeli varsa, menüde o model için bir satır çıkar. OpenCode kuruluysa model onunla, değilse Codex'le (`--oss`) açılır; ikisinde de hafıza tam çalışır. OpenCode'un LM Studio listesinde olmayan bir model de çalışır: `pyn` o modeli yalnız o açılış için OpenCode'a tanıtır (`OPENCODE_CONFIG_CONTENT`), hiçbir ayar dosyasına yazmaz. Model, LM Studio'nun yüklediği bağlam uzunluğu 32K'nın altındaysa `pyn` uyarır: OpenCode'un ilk isteği bile yaklaşık 10 bin token, kısa bağlamda hafıza kesilir. LM Studio'da modeli yüklerken Context Length'i artır. Model sorulmaz, makine söyler: **şu an yüklü olan** (LM Studio'da yüklediğin, Ollama'da bellekte olan) çalışır; yoksa bu makinede son kullandığın; o da yoksa tek indirilmiş model. Yalnız birden fazla model indirilmiş ve hiçbiri yüklü değilse bir kez sorar. "Son kullanılan" vault'ta değil, makinenin kendi state klasöründe durur: masaüstü ve laptop kendi modellerini ayrı hatırlar. `pyn` bu sunuculara yalnız zaten açıklarsa sorar, kendisi hiçbir şey başlatmaz; embedding modelleri listelenmez.
 
 Doğrudan seçmek için `pyn claude`, `pyn codex` ya da numarası. Sonraki argümanlar istemciye aynen gider: `pyn claude --continue`. Komutu kaldırmak için `pyn kaldir`.
 

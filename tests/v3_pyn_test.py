@@ -92,7 +92,7 @@ class PynChoiceTest(unittest.TestCase):
         self.assertEqual(offline[0]['modeller'], ['qwen3:8b', 'gemma3:4b'])  # embedding models left out
         self.assertEqual(offline[0]['yuklu'], ['gemma3:4b'])
         self.assertEqual(offline[0]['hafiza'], 'tam')  # Codex hooks: full memory on a local model
-        self.assertTrue(any(hint.startswith('LM Studio kurulu ama') for hint in hints))
+        self.assertTrue(any(hint.startswith('LM Studio: sunucu kapalı') for hint in hints))
         found, _ = pyn.options(local=local, which=fake_which({'claude'}))
         self.assertEqual([o['id'] for o in found], ['claude'])  # no Codex, no local entry
 
@@ -101,9 +101,46 @@ class PynChoiceTest(unittest.TestCase):
             {'id': 'qwen2.5-coder-14b', 'type': 'llm', 'state': 'not-loaded'},
             {'id': 'gpt-oss-20b', 'type': 'llm', 'state': 'loaded'},
             {'id': 'text-embedding-nomic', 'type': 'embeddings', 'state': 'loaded'}]}})
-        self.assertEqual(pyn.lmstudio_models(base=studio), (['qwen2.5-coder-14b', 'gpt-oss-20b'], ['gpt-oss-20b']))
+        self.assertEqual(pyn.lmstudio_models(base=studio), (['qwen2.5-coder-14b', 'gpt-oss-20b'], ['gpt-oss-20b'], {}))
         older = self.serve({'/v1/models': {'data': [{'id': 'mistral-7b'}, {'id': 'text-embedding-bge-m3'}]}})
-        self.assertEqual(pyn.lmstudio_models(base=older), (['mistral-7b'], []))  # no load state there
+        self.assertEqual(pyn.lmstudio_models(base=older), (['mistral-7b'], [], {}))  # no load state there
+        sized = self.serve({'/api/v0/models': {'data': [
+            {'id': 'qwen3-coder-30b', 'type': 'llm', 'state': 'loaded', 'loaded_context_length': 4096,
+             'max_context_length': 262144}]}})
+        self.assertEqual(pyn.lmstudio_models(base=sized)[2], {'qwen3-coder-30b': 4096})  # loaded, not the maximum
+
+    def test_local_models_open_in_opencode_when_it_is_installed(self):
+        local = (('lmstudio', 'LM Studio', lambda: (['a', 'qwen3-coder-30b'], ['qwen3-coder-30b'],
+                                                    {'qwen3-coder-30b': 65536})),)
+        found, _ = pyn.options(local=local, which=fake_which({'codex', 'opencode'}))
+        self.assertEqual([o['id'] for o in found], ['codex', 'opencode', 'opencode-lmstudio'])  # not twice
+        studio = found[2]
+        self.assertEqual((studio['istemci'], studio['args'], studio['hafiza']), ('OpenCode', [], 'tam'))
+        args, env, warning = pyn.local_launch(studio, 'qwen3-coder-30b', environ={'PATH': 'x'})
+        self.assertEqual(args, ['-m', 'lmstudio/qwen3-coder-30b'])
+        self.assertIsNone(warning)
+        self.assertEqual(env['PATH'], 'x')
+        declared = json.loads(env['OPENCODE_CONFIG_CONTENT'])  # this launch only: no file is written
+        self.assertEqual(declared['provider']['lmstudio']['models']['qwen3-coder-30b']['limit'],
+                         {'context': 65536, 'output': 16384})
+        self.assertNotIn('options', declared['provider']['lmstudio'])  # OpenCode's own LM Studio provider
+
+    def test_ollama_in_opencode_is_declared_and_a_short_context_warns(self):
+        option = {'id': 'opencode-ollama', 'saglayici': 'ollama', 'yerel': 'Ollama', 'istemci': 'OpenCode',
+                  'args': [], 'baglam': {'qwen3:8b': 4096}}
+        own = json.dumps({'provider': {'ollama': {'options': {'headers': {'X': '1'}}}}, 'theme': 'mine'})
+        args, env, warning = pyn.local_launch(option, 'qwen3:8b', environ={'OPENCODE_CONFIG_CONTENT': own})
+        self.assertEqual(args, ['-m', 'ollama/qwen3:8b'])
+        declared = json.loads(env['OPENCODE_CONFIG_CONTENT'])
+        self.assertEqual(declared['theme'], 'mine')  # the user's own inline config is kept
+        self.assertEqual(declared['provider']['ollama']['options'],
+                         {'headers': {'X': '1'}, 'baseURL': 'http://127.0.0.1:11434/v1'})
+        self.assertIn('qwen3:8b', declared['provider']['ollama']['models'])
+        self.assertIn('4096', warning)
+        codex = dict(option, id='codex-ollama', istemci='Codex', args=['--oss', '--local-provider', 'ollama'])
+        args, env, warning = pyn.local_launch(codex, 'qwen3:8b')
+        self.assertEqual((args, env), (['--oss', '--local-provider', 'ollama', '-m', 'qwen3:8b'], None))
+        self.assertIn('Codex', warning)
 
     def test_the_machine_decides_the_model_not_a_question(self):
         option = {'saglayici': 'ollama', 'modeller': ['a', 'b', 'c'], 'yuklu': []}
@@ -143,6 +180,20 @@ class PynChoiceTest(unittest.TestCase):
         code = pyn.launch(self.vault, option, ['--continue'], run=lambda cmd, cwd: calls.append((cmd, cwd)) or 7)
         self.assertEqual(code, 7)
         self.assertEqual(calls, [(['/bin/codex', '--oss', '--continue'], str(self.vault))])
+        calls = []
+        option = dict(pyn.CLIENTS[2], yol='/bin/opencode', args=['-m', 'lmstudio/x'], env={'OPENCODE_CONFIG_CONTENT': '{}'})
+        pyn.launch(self.vault, option, [], run=lambda cmd, cwd, env: calls.append(env) or 0)
+        self.assertEqual(calls, [{'OPENCODE_CONFIG_CONTENT': '{}'}])
+
+    def test_old_local_choice_finds_the_same_server_under_opencode(self):
+        local = (('lmstudio', 'LM Studio', lambda: (['qwen3-8b'], ['qwen3-8b'], {})),)
+        found, _ = pyn.options(local=local, which=fake_which({'claude', 'codex', 'opencode'}))
+        self.assertIn('opencode-lmstudio', [o['id'] for o in found])
+        # Saved by 1.0.3/1.0.4, or typed in an old shortcut: `pyn codex-lmstudio`.
+        self.assertEqual(pyn.by_id(found, 'codex-lmstudio')['id'], 'opencode-lmstudio')
+        self.assertEqual(pyn.pick(found, 'codex-lmstudio', None)['id'], 'opencode-lmstudio')
+        self.assertIsNone(pyn.by_id(found, 'codex-ollama'))
+        self.assertIsNone(pyn.by_id(found, 'gemini'))
 
     def test_last_choice_is_remembered(self):
         found, _ = pyn.options(local=(), which=fake_which({'claude', 'codex'}))
@@ -150,6 +201,43 @@ class PynChoiceTest(unittest.TestCase):
         self.assertEqual(pyn._last(self.state)['secim'], 'codex')
         self.assertEqual(pyn.choose_model(['a', 'b'], 'b', read=lambda _p: '', write=lambda *_: None), 'b')
         self.assertEqual(pyn.choose_model(['a', 'b'], None, read=lambda _p: '2', write=lambda *_: None), 'b')
+
+    def test_welcome_box_is_the_same_for_everyone_and_leaves_room_for_the_seal(self):
+        import re
+        companion = self.vault / '🔮 850-Companion'
+        companion.mkdir()
+        (companion / 'Core.md').write_text('- Kullanıcının adı: Deniz. (Kaynak: beyan)\n', encoding='utf-8')
+        (companion / 'Last-Session.md').write_text('# Son oturum\n\n## 2026-10-12 21:05 · Logo · 92ee3e48\n',
+                                                   encoding='utf-8')
+        (self.vault / '.beyin-version').write_text('1.0.5\n', encoding='utf-8')
+        for columns in (40, 90, 300):
+            for logo in (True, False):
+                lines, place = pyn.welcome_box(self.vault, columns, logo=logo)
+                plain = [re.sub(r'\x1b\[[0-9;]*m', '', line) for line in lines]
+                self.assertEqual(len({len(line) for line in plain}), 1, 'Every line of the box is equally wide')
+                self.assertIn('Pyn · Cortex 1.0.5', plain[0])
+                self.assertTrue(any(pyn.GREETING in line for line in plain))
+                self.assertFalse(any('Deniz' in line for line in plain), 'No one\'s name: a vault can be shared')
+                self.assertTrue(any('2026-10-12 21:05 · Logo' in line and '92ee3e48' not in line for line in plain))
+                self.assertEqual(place is not None, logo)
+                if logo:  # the seal's rows of the left column are empty
+                    row, column = place
+                    for line in plain[row:row + pyn.LOGO_ROWS]:
+                        self.assertEqual(line[column:column + pyn.LOGO_COLUMNS].strip(), '')
+
+    def test_seal_is_drawn_only_where_the_terminal_shows_images(self):
+        windows_terminal = lambda: '\x1b[?61;4;6;7;14;21;22;23;24;28;32;42c'  # noqa: E731
+        conhost = lambda: '\x1b[?1;0c'  # noqa: E731
+        silent = lambda: ''  # noqa: E731
+        # The terminal's own answer decides, even without WT_SESSION (cmd from the Start menu).
+        self.assertTrue(pyn.sixel_terminal({}, ask=windows_terminal))
+        self.assertFalse(pyn.sixel_terminal({'WT_SESSION': 'x'}, ask=conhost))
+        self.assertFalse(pyn.sixel_terminal({'WT_SESSION': 'x', 'PYN_LOGO': '0'}, ask=windows_terminal))
+        self.assertTrue(pyn.sixel_terminal({'PYN_LOGO': '1'}, ask=silent))
+        # No answer: the environment is the fallback.
+        self.assertTrue(pyn.sixel_terminal({'WT_SESSION': 'x'}, ask=silent))
+        self.assertFalse(pyn.sixel_terminal({}, ask=silent))
+        self.assertTrue(pyn._sixel_seal().startswith('\x1bP'))
 
 
 class PynShellTest(unittest.TestCase):
@@ -173,6 +261,33 @@ class PynShellTest(unittest.TestCase):
         self.assertEqual(pyn.uninstall_shell([profile])['status'], 'kaldirildi')
         self.assertEqual(profile.read_text(encoding='utf-8-sig'), 'Set-Alias ll Get-ChildItem\n')
         self.assertEqual(pyn.uninstall_shell([profile])['status'], 'kurulu_degil')
+
+    def test_cmd_gets_a_pyn_cmd_on_path_and_loses_it_on_uninstall(self):
+        bin_dir = self.root / 'WindowsApps'
+        bin_dir.mkdir()
+        vault = self.root / 'Pyn Kasası'
+        pyn.install_shell(vault, [], python='C:/Python/python.exe', windows=True, cmd=bin_dir)
+        data = (bin_dir / 'pyn.cmd').read_bytes()
+        self.assertTrue(data.startswith(b'@echo off\r\n'))
+        self.assertIn(pyn.BEGIN.encode('ascii'), data)
+        self.assertTrue(data.rstrip().endswith(b'pyn %*'))
+        # The console's code page when it holds the path, else UTF-8 after `chcp 65001`.
+        text = data.decode('utf-8' if b'chcp 65001' in data or os.name != 'nt' else 'oem')
+        self.assertIn('"C:/Python/python.exe" "' + str(vault / 'beyin.py') + '" pyn %*', text)
+        self.assertEqual(pyn.uninstall_shell([], cmd=bin_dir)['status'], 'kaldirildi')
+        self.assertFalse((bin_dir / 'pyn.cmd').exists())
+        # Someone else's pyn.cmd is neither replaced nor deleted.
+        (bin_dir / 'pyn.cmd').write_bytes(b'@echo off\r\necho baska\r\n')
+        pyn.install_shell(vault, [], python='C:/Python/python.exe', windows=True, cmd=bin_dir)
+        pyn.uninstall_shell([], cmd=bin_dir)
+        self.assertEqual((bin_dir / 'pyn.cmd').read_bytes(), b'@echo off\r\necho baska\r\n')
+
+    def test_pyn_cmd_goes_only_to_windowsapps_already_on_path(self):
+        apps = self.root / 'Microsoft' / 'WindowsApps'
+        apps.mkdir(parents=True)
+        self.assertEqual(pyn.cmd_dir({'LOCALAPPDATA': str(self.root), 'PATH': 'C:\\x;' + str(apps) + '\\'}), apps)
+        self.assertIsNone(pyn.cmd_dir({'LOCALAPPDATA': str(self.root), 'PATH': 'C:\\x'}))
+        self.assertIsNone(pyn.cmd_dir({'PATH': str(apps)}))
 
     def test_posix_function_quotes_paths_and_passes_all_arguments(self):
         rc = self.root / '.zshrc'

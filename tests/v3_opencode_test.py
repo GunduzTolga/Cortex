@@ -29,15 +29,25 @@ const system = async (sessionID) => {
   await hooks["experimental.chat.system.transform"]?.({ sessionID, model: {} }, output)
   return output.system.slice(1)
 }
-const say = (sessionID, text) => hooks["chat.message"]?.({ sessionID }, {
-  message: {}, parts: [{ type: "text", text }, { type: "text", text: "IGNORED", synthetic: true }],
+const say = (sessionID, text, id) => hooks["chat.message"]?.({ sessionID }, {
+  message: { id }, parts: [{ type: "text", text }, { type: "text", text: "IGNORED", synthetic: true }],
 })
 const result = { keys: Object.keys(hooks).sort() }
 if (result.keys.length) {
-  await say("oc-1", "merhaba")
+  await say("oc-1", "merhaba", "m1")
   result.first = await system("oc-1")
-  await say("oc-1", "klima kargo DHL")
-  result.second = await system("oc-1")
+  await say("oc-1", "klima kargo DHL", "m2")
+  result.second = await system("oc-1")  // before any messages transform: a release without it
+  const user = (id, text) => ({ info: { id, sessionID: "oc-1", role: "user" }, parts: [{ type: "text", text }] })
+  const messages = [user("m1", "merhaba"), { info: { id: "a1", sessionID: "oc-1", role: "assistant" }, parts: [] },
+    user("m2", "klima kargo DHL")]
+  for (let request = 0; request < 2; request++)  // every request of the session runs the transform
+    await hooks["experimental.chat.messages.transform"]?.({}, { messages })
+  result.attached = messages.map((m) => m.parts.slice(1))
+  result.third = await system("oc-1")
+  await say("oc-1", "klima kargo DHL")  // a release that sends no message id: nothing to attach to
+  await hooks["experimental.chat.messages.transform"]?.({}, { messages })
+  result.noID = await system("oc-1")
   await hooks["tool.execute.after"]({ tool: "edit", sessionID: "oc-1", callID: "c1", args: {} }, { title: "", output: "", metadata: {} })
   await hooks["tool.execute.after"]({ tool: "read", sessionID: "oc-1", callID: "c2", args: {} }, { title: "", output: "", metadata: {} })
   await hooks["experimental.session.compacting"]({ sessionID: "oc-1" }, { context: [] })
@@ -231,20 +241,32 @@ class OpenCodeHarnessTest(unittest.TestCase):
     @unittest.skipUnless(NODE, 'node is required to execute the OpenCode plugin')
     def test_plugin_maps_opencode_lifecycle_to_adapter_events(self):
         result = self.drive({'sub-1': 'oc-1'})
-        self.assertEqual(result['keys'], ['chat.message', 'event', 'experimental.chat.system.transform',
-                                          'experimental.session.compacting', 'tool.execute.after'])
+        self.assertEqual(result['keys'], ['chat.message', 'event', 'experimental.chat.messages.transform',
+                                          'experimental.chat.system.transform', 'experimental.session.compacting',
+                                          'tool.execute.after'])
         self.assertEqual(len(result['first']), 1, 'First turn injects only the SessionStart context')
         self.assertIn('Receipt session=', result['first'][0])
         self.assertIn('OpenCode köprüsü kuruldu', result['first'][0])
         self.assertEqual(result['second'][0], result['first'][0], 'SessionStart context stays for the whole session')
-        self.assertIn('notes/klima.md', result['second'][1])
+        self.assertIn('notes/klima.md', result['second'][1], 'Without the messages transform the turn stays in system')
+        # With it, the turn context rides in its own user message, once, and the system prompt
+        # stays byte-identical across turns so the provider's prompt cache keeps the conversation.
+        first, assistant, second = result['attached']
+        self.assertEqual((first, assistant), ([], []), 'The SessionStart turn is already in the system prompt')
+        self.assertEqual(len(second), 1, 'Attached once, though every request runs the transform')
+        self.assertEqual((second[0]['type'], second[0]['synthetic'], second[0]['messageID']), ('text', True, 'm2'))
+        self.assertEqual(second[0]['text'], result['second'][1])
+        self.assertEqual(result['third'], result['first'], 'The system prompt no longer changes per turn')
+        self.assertEqual(result['noID'][0], result['first'][0])
+        self.assertEqual(len(result['noID']), 2, 'A turn without a message id keeps its context in system')
         self.assertEqual(result['child'], [], 'Sub-agent sessions get no memory context')
         self.assertEqual(result['afterDelete'], [], 'Deleted sessions are forgotten')
         done = self.done_events()
         self.assertEqual({e['harness'] for e in done}, {'opencode'})
         self.assertEqual(sorted(e['event'] for e in done),
-                         sorted(['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PreCompact', 'Stop', 'SessionEnd']),
-                         'One event per mapped hook; read tools and the sub-agent session queue nothing')
+                         sorted(['SessionStart', 'UserPromptSubmit', 'UserPromptSubmit', 'PostToolUse', 'PreCompact',
+                                 'Stop', 'SessionEnd']),
+                         'One event per mapped hook (two prompts); read tools and the sub-agent session queue nothing')
         for event in done:
             self.assertNotIn('prompt', event, 'Hook metadata must never persist transcript text')
 

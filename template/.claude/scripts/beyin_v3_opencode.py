@@ -65,7 +65,7 @@ function lifecycle(state, parentOf) {
         child = Boolean(await parentOf(id))
       } catch {}
       // Sub-agent sessions never submit receipts; tracking them would report false gaps.
-      sessions.set(id, { child, start: null, turn: "" })
+      sessions.set(id, { child, start: null, turn: "", turnID: "", turns: new Map(), attached: new Set() })
     }
     return sessions.get(id)
   }
@@ -73,18 +73,42 @@ function lifecycle(state, parentOf) {
   return {
     sessions,
     tracked,
-    async message(id, prompt) {
+    async message(id, prompt, messageID) {
       if (typeof id !== "string" || !id) return
       const info = await open(id)
       if (info.child) return
       if (info.start === null) info.start = await send("SessionStart", id, prompt())
-      else info.turn = await send("UserPromptSubmit", id, prompt())
+      else {
+        info.turn = await send("UserPromptSubmit", id, prompt())
+        info.turnID = typeof messageID === "string" ? messageID : ""
+        if (info.turn && info.turnID) info.turns.set(info.turnID, info.turn)
+      }
       return info
     },
     // SessionStart context stays for the whole session, the latest prompt context for its turn.
     context(id) {
       const info = tracked(id)
-      return info ? [info.start, info.turn].filter((text) => text) : []
+      if (!info) return []
+      // Once the latest turn's context rides in its own user message, the system prompt holds
+      // only the session context: it stays byte-identical, so the provider's prompt cache keeps
+      // the whole conversation after it. A turn that could not be attached (a release that
+      // sends no message id) keeps its context here instead of losing it.
+      const inMessage = info.turnID && info.attached.has(info.turnID)
+      return [info.start, inMessage ? "" : info.turn].filter((text) => text)
+    },
+    // Each prompt's context, attached to that prompt's message in every request of the session.
+    attach(messages) {
+      for (const entry of Array.isArray(messages) ? messages : []) {
+        const message = entry?.info
+        const info = message?.role === "user" ? tracked(message.sessionID) : undefined
+        if (!info || !Array.isArray(entry.parts)) continue
+        const text = info.turns.get(message.id)
+        if (!text) continue
+        const id = `${message.id}-beyin-v3`
+        if (!entry.parts.some((part) => part?.id === id))
+          entry.parts.push({ id, sessionID: message.sessionID, messageID: message.id, type: "text", text, synthetic: true })
+        info.attached.add(message.id)
+      }
     },
     async tool(id, tool) {
       if (tracked(id) && WRITE_TOOLS.has(tool)) await send("PostToolUse", id)
@@ -116,9 +140,13 @@ export const BeyinV3 = async ({ client } = {}) => {
     "chat.message": async (input, output) => {
       await core.message(input?.sessionID, () => (output?.parts || [])
         .filter((part) => part?.type === "text" && !part.synthetic && typeof part.text === "string")
-        .map((part) => part.text).join("\n"))
+        .map((part) => part.text).join("\n"), output?.message?.id ?? input?.messageID)
     },
-    // The only request-time injection channel.
+    // Runs before the system transform of the same request; a release without it keeps the
+    // turn context in the system prompt instead.
+    "experimental.chat.messages.transform": async (_input, output) => {
+      core.attach(output?.messages)
+    },
     "experimental.chat.system.transform": async (input, output) => {
       if (Array.isArray(output?.system)) output.system.push(...core.context(input?.sessionID))
     },

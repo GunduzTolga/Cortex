@@ -1649,7 +1649,11 @@ def install(vault, state, hotkey=True, spec=None):
         target = pythonw if pythonw.is_file() else Path(sys.executable)
         programs, sendto = _windows_dirs()
         icon = _windows_icon(state)
-        stop_windows_listener()  # an earlier listener, perhaps another vault's, lets the key go: it moves here
+        # An earlier listener, perhaps another vault's, lets the key go: it moves here. Not when
+        # no listener may start (tests, CI): the stop event is shared by the whole Windows
+        # session, so a test install would end the user's real listener.
+        if os.environ.get('BEYIN_V3_NO_SPAWN') != '1':
+            stop_windows_listener()
         # The Start-menu entry opens the popup directly. It carries the key only when no
         # listener can hold it: Explorer and the listener cannot both own Ctrl+Alt+B.
         start_menu = (programs / 'Beyne At.lnk', target, _argline([script, 'pencere', '--vault', vault]))

@@ -12,7 +12,7 @@ One plugin file serves both plugin APIs. OpenCode 2.x reads the default export `
 
 The first `chat.message` of a session is `SessionStart`; later ones are `UserPromptSubmit` with the non-synthetic text parts as `prompt`. `session.idle` is `Stop`, `session.deleted` is `SessionEnd`, `experimental.session.compacting` is `PreCompact`, and `tool.execute.after` for edit, write and patch tools is `PostToolUse`.
 
-`experimental.chat.system.transform` is the only request-time injection channel. The `SessionStart` context is sent with every request of that session and the latest `UserPromptSubmit` context with its own turn, which matches what Claude keeps in its transcript. The adapter returns the Claude and Codex `hookSpecificOutput.additionalContext` shape for `opencode`; retrieval output is byte-equal to Claude for the same query.
+The `SessionStart` context goes into the system prompt through `experimental.chat.system.transform` and stays there, unchanged, for every request of the session. Each `UserPromptSubmit` context is attached by `experimental.chat.messages.transform` to the user message that triggered it, as a synthetic text part, in that request and in every later one, which matches what Claude keeps in its transcript. The system prompt therefore stays byte-identical across turns, and a provider's prefix cache keeps the whole conversation after it. With the earlier design, the latest turn context sat in the system prompt, changed every turn and invalidated the cache for all history after it; on z.ai and OpenCode Go, cached input counts 4 to 5 times less toward quota. Contexts are kept in the plugin's memory per message, so after an OpenCode restart earlier turns lose their attachment once. If a release never runs the messages transform for a session, the latest turn context stays in the system prompt as before. The adapter returns the Claude and Codex `hookSpecificOutput.additionalContext` shape for `opencode`; retrieval output is byte-equal to Claude for the same query.
 
 ## Lifecycle mapping (OpenCode 2.x)
 
@@ -25,3 +25,17 @@ Sub-agent sessions (`parentID` set, for example the `task` tool on 1.x or `subag
 ## Validation boundary
 
 `tests/v3_opencode_test.py` installs a synthetic vault, imports the generated plugin in Node with a fake OpenCode 1.x client and a fake 2.x `setup` context, and drives every mapped hook and event; the Node cases skip when `node` is absent. One real OpenCode 1.18.25 session in a temporary synthetic vault returned a canary fact from injected context with tool use prohibited by the prompt, and the queue acknowledged `SessionStart` and `Stop` with no hook error. For #133 the same plugin ran in real OpenCode 1.17.18 and 2.0.18 sessions in temporary synthetic vaults against a local mock OpenAI-compatible model: 1.17.18 queued the same events and injected the same system context as the previous plugin, and 2.0.18 reached `observed_metadata` for all six events in `beyin.py doctor`, with the context in the model request and none in a sub-agent request. This does not establish OpenCode Desktop or web delivery.
+
+OpenCode 1.19.0 (2026-10-11), temporary synthetic vault, temporary OpenCode config and data folders, local mock OpenAI-compatible model:
+
+- `opencode serve` (the long-lived path the TUI uses), one session, two prompts: the queue received `SessionStart`, `Stop`, `UserPromptSubmit`, `Stop`, and `SessionEnd` after deleting the session. The first request carried the session context, the second the retrieved canary note.
+- `opencode run` injects the same context, but the one-shot process exits right after `session.idle`, before the `Stop` hook finishes, so that turn's `Stop` is not queued. Each `opencode run --continue` is a new process and starts with `SessionStart` again. Interactive use is unaffected.
+- The first agent request was about 38,500 characters (about 10K tokens): 16K of system text including Pyn's context, 22K of tool definitions. A local model loaded with an 8K context or less cannot hold it.
+
+- Prompt cache, same setup, three turns: before the change, every request first differed from the previous one at the second system message, Cortex's context. After it, each request contained the previous request unchanged, with only new messages appended, and the turn's canary note was still in the request.
+
+## Local models through `pyn`
+
+OpenCode's built-in `lmstudio` provider lists only the models in its catalog, and it has no Ollama provider. When OpenCode is installed, `pyn` opens a local model with `-m <provider>/<model>` and declares that one model in `OPENCODE_CONFIG_CONTENT`, for that launch only. LM Studio uses OpenCode's own provider. Ollama is declared as an `@ai-sdk/openai-compatible` provider at `http://127.0.0.1:11434/v1`. A JSON value the user already set in that variable is merged, never replaced. Nothing is written to the vault, which is synced between machines with different models.
+
+When the server reports the context the model was loaded with, it becomes the model's `limit.context`, so OpenCode compacts before overflowing, and `pyn` warns below 32768 tokens. LM Studio reports this as `loaded_context_length`, Ollama as `context_length` in `/api/ps`. With OpenCode 1.19.0, a model declared this way (`ollama/qwen3:8b` against a mock on port 11434) received the request with the vault context and the canary note.

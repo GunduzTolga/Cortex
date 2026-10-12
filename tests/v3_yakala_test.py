@@ -239,12 +239,28 @@ class YakalaUnitTest(unittest.TestCase):
         agent = Path(self.tmp.name) / 'agent.plist'
         agent.write_bytes(plistlib.dumps({'ProgramArguments': ['python3', 'x.py', 'dinle', '--vault', '/baska/vault']}))
         state = Path(self.tmp.name) / 'state'
+        # On Windows os.name still takes the Windows branch: keep it off the real Start menu,
+        # Startup and Send To folders and away from a real listener.
+        dirs = (Path(self.tmp.name) / 'programs', Path(self.tmp.name) / 'sendto')
         with patch.object(yakala, '_launch_agent', return_value=agent), patch.object(yakala.sys, 'platform', 'darwin'), \
+                patch.object(yakala, '_windows_dirs', return_value=dirs), \
+                patch.object(yakala, 'stop_windows_listener') as stop, \
                 patch.object(yakala.subprocess, 'run') as run:
             result = yakala.uninstall(self.vault, state)
+        stop.assert_not_called()
         run.assert_not_called()
         self.assertTrue(agent.exists())
         self.assertNotIn('LaunchAgent', result['kaldirilan'])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows listener')
+    def test_a_test_install_never_stops_the_users_listener(self):
+        # Named events are shared by the whole Windows session, unlike APPDATA: a suite run
+        # once ended the developer's own Ctrl+Alt+B listener.
+        state = Path(self.tmp.name) / 'state'
+        with patch.dict(os.environ, {'BEYIN_V3_NO_SPAWN': '1', 'APPDATA': str(Path(self.tmp.name) / 'appdata')}), \
+                patch.object(yakala, 'stop_windows_listener') as stop:
+            yakala.install(self.vault, state)
+        stop.assert_not_called()
 
     def test_inbox_report_skips_processed_cards(self):
         import beyin_v3_hygiene as hygiene

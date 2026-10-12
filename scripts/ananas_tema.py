@@ -102,7 +102,8 @@ def module_text():
 
 
 def brand_text():
-    """Pyn's marks for the runtime: the yakala header and the Windows shortcut icon."""
+    """Pyn's marks for the runtime: the yakala header, the Windows shortcut icon and the seal
+    `pyn` draws in its welcome box (Sixel)."""
     lines = ['"""Pyn marka görselleri. ÜRETİLMİŞ DOSYA, elle düzenleme.',
              '',
              'Kaynak: tema/ananas/marka/. Yeniden üretmek için:',
@@ -111,6 +112,7 @@ def brand_text():
     for size in (28, 42, 56):
         lines += [f'MUHUR_{size} = (', *_chunked((MARKA / f'pyn-muhur-{size}.png').read_bytes()), ')']
     lines += ['ICO = (', *_chunked((MARKA / 'pyn.ico').read_bytes()), ')']
+    lines += ['SIXEL = (', *_chunked((MARKA / 'pyn-muhur.six').read_bytes()), ')']
     # Only names and sizes here: the font bytes live in beyin_v3_yazitipi.py, which the popup
     # imports just once per machine to write them into the state folder.
     sizes = {path.name: path.stat().st_size for path in sorted(TTF.glob('*.ttf'))}
