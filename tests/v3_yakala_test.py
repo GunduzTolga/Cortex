@@ -110,18 +110,18 @@ class YakalaUnitTest(unittest.TestCase):
         text, method, _ = yakala.extract(self.vault, card, none)
         self.assertEqual(method, 'dosya')
         self.assertIn('vault disindaki gizli metin', text)  # the copy inside the vault is read
-        for link in ('../disari.txt', str(outside)):
+        # A link that leaves the vault (traversal, a drive path, UNC, a device name) is refused before
+        # anything is resolved or read; `isle` records it as the card's error.
+        for link in ('../disari.txt', str(outside), '\\\\sunucu\\pay\\x.txt', 'CON', 'nul.txt'):
             with self.subTest(link=link):
                 forged = {'meta': {'kaynak_turu': 'dosya'}, 'body': '# x\n\n## Dosyalar\n\n- [[' + link + ']]\n'}
-                text, method, _ = yakala.extract(self.vault, forged, none)
-                self.assertIsNone(text)
-                self.assertEqual(method, 'ajan-okusun')
+                with self.assertRaisesRegex(ValueError, 'vault disinda'):
+                    yakala.extract(self.vault, forged, none)
         local = {'meta': {'kaynak_turu': 'makale', 'url': outside.as_uri()}, 'body': '# x\n'}
         with patch.object(yakala, 'via_stdlib', side_effect=AssertionError('fetched')), \
                 patch.object(yakala, 'via_defuddle', side_effect=AssertionError('fetched')):
-            text, method, note = yakala.extract(self.vault, local, none)
-        self.assertEqual((text, method), (None, None))
-        self.assertIn('http(s)', note)
+            with self.assertRaisesRegex(ValueError, 'HTTP\\(S\\)'):
+                yakala.extract(self.vault, local, none)
 
     def test_windows_virtual_keys(self):
         self.assertEqual(yakala.windows_virtual_key('ctrl+alt+b'), (0x3, ord('B')))
