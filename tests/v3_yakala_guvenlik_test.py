@@ -133,6 +133,8 @@ class YakalaAddressTest(unittest.TestCase):
             with patch.object(yakala, 'via_defuddle', return_value=hostile):
                 yakala.process(vault, [card['id']])
             raw = next((yakala.inbox(vault) / yakala.RAW).glob('*.md')).read_text(encoding='utf-8')
+            ignored = (yakala.inbox(vault) / yakala.RAW / '.gitignore').read_text(encoding='utf-8')
+        self.assertEqual(ignored, '*\n', 'Raw text never enters a versioned vault')
         self.assertIn('kaynak_guveni: guvenilmeyen', raw)
         boundary = re.search(r'<!-- yakala-kaynak:([0-9a-f]{32}):baslangic -->', raw).group(1)
         self.assertTrue(raw.rstrip().endswith('<!-- yakala-kaynak:' + boundary + ':bitis -->'))

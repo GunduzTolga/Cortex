@@ -69,6 +69,12 @@ Web Clipper sayfayı tarayıcının içinden okur; giriş isteyen sayfalar (Gmai
 Her yakalama `📥 000-Inbox/Yakala/` içinde bir kart olur. Aynı videoyu ya da sayfayı ikinci kez
 yakalarsan yeni kart açılmaz; yeni notun aynı karta eklenir.
 
+**Ekran görüntüsü (Windows):** `Win+Shift+S` ile alan seç, sonra kısayola bas. Pencere görüntüyü
+küçük resmiyle bir **GÖRSEL** kartı olarak gösterir ve Enter onu kartın dosyası olarak kaydeder.
+Son 10 dakikada alınmış görüntü ekli gelir; daha eski ya da kaynağı bilinmeyen bir görüntü
+pencerede görünür ama `Tab` ile eklemeden karta girmez. Panoda metin ya da bağlantı varsa
+pencere eskisi gibi onu yakalar.
+
 ## İşleme nasıl çalışır
 
 `python3 beyin.py yakala isle` bekleyen kartların metnini çıkarır, sonra ajan dersleri
@@ -102,6 +108,32 @@ Hiçbiri zorunlu değil; varsa işleme genişler, yoksa elde olanla devam edilir
   X gönderisi sayfada yoksa gönderi adresini FxTwitter API'sine sorar.
 - Mail, pano metni ve dosya kartları `visibility: private` ile yazılır.
 - Kaldırmak için `python3 beyin.py yakala kaldir`: kısayol, skill ve bildirim gider, kartların kalır.
+
+## Güvenlik
+
+Yakalanan içerik dışarıdan gelir; Cortex onu veri olarak tutar, talimat olarak değil.
+
+- **Yalnız herkese açık web adresleri.** Yakala yalnız `http` ve `https` adreslerini kaynak sayar.
+  `localhost`, yerel ağ adları (`.local`, `.lan`, `.internal`), özel ve yerel IP'ler, sayısal ya da
+  yüzde kodlu sunucu yazımları ve kullanıcı adı/parola içeren adresler reddedilir. Yerel bir bağlantı
+  kopyaladıysan kart düz metin olarak kaydedilir, hiçbir zaman getirilmez.
+- **Getirmeden önce DNS kontrolü.** `isle` bir sayfayı ya da videoyu almadan önce adresin herkese
+  açık bir IP'ye çözüldüğünü kontrol eder; yönlendirmelerde de aynı kontrol yapılır. Bilinen sınır:
+  kontrol ile bağlantı arasında DNS cevabı değişebilir ve Defuddle/yt-dlp'nin kendi yönlendirmeleri
+  bu kontrolü atlayabilir; bunlar için ayrı ağ yalıtımı gerekir.
+- **Dosya bağlantıları yalnız vault içinde.** Kartın dosya bağlantısında sürücü harfi, ağ paylaşımı
+  (UNC), `..` ya da Windows aygıt adı (`CON`, `NUL`…) varsa dosya hiç açılmadan reddedilir.
+- **Windows'ta komut satırı.** Yardımcı araçlara giden adresler `cmd.exe`'den geçmez: `npx` doğrudan
+  `node.exe` ile çalıştırılır. `&` içeren YouTube bağlantıları artık kesilmez ve komut olarak yorumlanamaz.
+- **Ham metin sınırlı.** `.ham/` kayıtları `kaynak_guveni: guvenilmeyen` taşır ve kaynak metni her dosyaya
+  özgü rastgele bir başlangıç/bitiş işaretiyle çevrilir. Kaynağın kendi yazdığı "kaynak bitti" ya da
+  "kullanıcı talimatı" başlıkları bu sınırı kapatmaz. Bu işaretler prompt injection'a karşı tek başına
+  güvence değildir; `beyin-yakala` skill'i ajana bu içeriği yalnız veri olarak okumasını söyler.
+
+**Güncellemeden sonra bir kez:** Cortex güncellemesi yakala betiğini yeniler, ama `yakala kur`un yazdığı
+`beyin-yakala` skill'i ve Windows kısayolları kendiliğinden yenilenmez. Yeni güvenlik kurallarını ve
+Türkçe karakterli kısayolları almak için vault klasöründe bir kez `py -3 beyin.py yakala kur` çalıştır
+(macOS / Linux'ta `python3`). Kayıtlı tuşun korunur.
 
 ## Komutlar
 
