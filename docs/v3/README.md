@@ -1,8 +1,8 @@
-# İkinci Beyin V3
+# Cortex belgeleri
 
 Vault dışındaki seçili proje oturumları için: [opsiyonel global köprü](GLOBAL-BRIDGE.md).
 
-V3'te Markdown kaynak, SQLite yerel indeks, Codex/Claude Code/Antigravity, [Hermes Agent](HERMES.md), [OpenCode](OPENCODE.md) ve [OMP](OMP.md) ise aynı motora bağlanan istemcilerdir. Python 3.11+ dışında ek Python paketi gerekmez. Varsayılan akışta Mem0, API anahtarı, daemon veya ayrı sunucu kurulmaz. [Jev danışmanı](JEV.md) isteğe bağlıdır ve varsayılan kapalıdır; `beyin.py jev` ile açılmadıkça normal arama ve hook akışını değiştirmez. Aynı danışman ayrı kurulan yerel Laya sunucusunu da yalnız gölge modda, ölçüm için kullanabilir (`jev shadow --provider laya`).
+Cortex'te Markdown kaynak, SQLite yerel indeks, Codex/Claude Code/Antigravity, [Hermes Agent](HERMES.md), [OpenCode](OPENCODE.md) ve [OMP](OMP.md) ise aynı motora bağlanan istemcilerdir. Python 3.11+ dışında ek Python paketi gerekmez. Varsayılan akışta Mem0, API anahtarı, daemon veya ayrı sunucu kurulmaz. [Jev danışmanı](JEV.md) isteğe bağlıdır ve varsayılan kapalıdır; `beyin.py jev` ile açılmadıkça normal arama ve hook akışını değiştirmez. Aynı danışman ayrı kurulan yerel Laya sunucusunu da yalnız gölge modda, ölçüm için kullanabilir (`jev shadow --provider laya`).
 
 [Yeni kullanıcı başlangıcı](../../README.md) · [Ajanla kurulum](../../SETUP-V3.md) · [Güncelleme/geri alma](UPDATE.md) · [Birden çok makine](MULTI-MACHINE.md) · [Kaynak şeması](MARKDOWN.md) · [Runtime](RUNTIME.md)
 
@@ -10,7 +10,7 @@ V3'te Markdown kaynak, SQLite yerel indeks, Codex/Claude Code/Antigravity, [Herm
 
 Kurucu ortak motoru, `beyin`, `beyin-doktor`, `beyin-guncelle` skill'lerini, kurulu `beyin.py` girişini ve işletim sistemine uygun güncelleme kısayolunu dağıtır. Paket ZIP olarak açılıp kullanılabilir; Git gerekmez. Kurulu vault kaynak repo klasöründen bağımsız çalışır.
 
-[Son kararlı release](https://github.com/GunduzTolga/Cortex/releases/latest) ve içindeki `beyin-v3-X.Y.Z.zip` paketi stable dağıtım noktasıdır. V3.9.0 turunda 1050 test ile 10/10 development ve 6/6 holdout semantik senaryosu geçti; CI aynı paketi Windows, macOS ve Linux'ta doğrular.
+[Son kararlı release](https://github.com/GunduzTolga/Cortex/releases/latest) ve içindeki `beyin-v3-X.Y.Z.zip` paketi stable dağıtım noktasıdır. Devralınan öncül 3.9.0 motoru 1050 test ile 10/10 development ve 6/6 holdout semantik senaryosunu geçti; CI aynı paketi Windows, macOS ve Linux'ta doğrular.
 
 ## Davranış
 
@@ -21,9 +21,9 @@ Kurucu ortak motoru, `beyin`, `beyin-doktor`, `beyin-guncelle` skill'lerini, kur
 - Ortak skill kaynakları `.agents/skills` içindedir. Claude tarafı platforma göre aynı kaynağa veya kontrol edilen karşılığa erişir; kişisel skill çakışmaları gizlenmez.
 - Updater yalnız resmi stable release veya açıkça verilen yerel paketi kullanır. Yönetilen dosya yedekleri, kesinti journal'ı, checksum ve runtime ön kontrolleri uygulanır; başarılı sürüm kaydı en son yazılır.
 
-## V2 geçişi
+## Eski kurulumdan geçiş
 
-[V2 migration rehberi](MIGRATION.md) eski kaynakların korunmasını ve writer geçişini anlatır. Tanınan V2 özetleyici/derleyici devreden çıkarılır. Modelle bilgi damıtmayı artık aktif ajan, `beyin` skill'i üzerinden bilinçli olarak yapar; deterministic görünümler bunun yerine bilgi uydurmaz. Özelleştirilmiş veya harici eski işler ayrıca değerlendirilir.
+[Geçiş rehberi](MIGRATION.md) eski 2.x kurulumundan kalan kaynakların korunmasını ve writer geçişini anlatır. Tanınan eski özetleyici/derleyici devreden çıkarılır. Modelle bilgi damıtmayı artık aktif ajan, `beyin` skill'i üzerinden bilinçli olarak yapar; deterministic görünümler bunun yerine bilgi uydurmaz. Özelleştirilmiş veya harici eski işler ayrıca değerlendirilir.
 
 İlk kurulum/geçiş dahil son sistem işlemi `rollback` ile geri alınabilir; yeni kullanıcı notları kalır. Yarım işlemi `recover` tamamlar. [Komutlar ve sınırlar](UPDATE.md).
 

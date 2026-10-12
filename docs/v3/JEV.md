@@ -176,7 +176,7 @@ Forn Hafıza OS `524fd07` sürümünden bütçeli istemci, kaynak/scope bağlı 
 
 `jev-answer`, hazırlanmış bir cevaptaki 1–20 iddiayı ayrı ayrı değerlendirir.
 Forn Hafıza OS yerel `jev_answer.py` akışındaki kaynak kapısı ve destek/çelişki
-ayrımı V3 kayıt kimliği, proje kapsamı ve revizyon sözleşmesine uyarlandı.
+ayrımı Cortex kayıt kimliği, proje kapsamı ve revizyon sözleşmesine uyarlandı.
 Kişisel kayıtlar ve diğer hafıza sistemi güncellemeleri aktarılmadı.
 
 Önce `context` çıktısından kayıt kimliğini ve güncel hash'i alın. `claims.json`:
@@ -323,7 +323,7 @@ Ayar `jev.json` içinde ayrı bir `laya` bloğunda durur:
 - Anahtar gerekmez. `laya-serve` `LAYA_API_KEY` ile çalışıyorsa aynı değer Beyin'in ortamında (veya `env_file` içinde) `LAYA_API_KEY` olarak bulunmalıdır. `TYPESAFE_API_KEY` Laya'ya hiçbir zaman gönderilmez.
 - `model`: `multilingual` (varsayılan; Türkçe ve İngilizce, satır başına 1024 token) veya `english` (yalnız İngilizce, 512 token). Tek model sabitlenir; aynı sorudaki adaylar farklı modellerle puanlanmaz. Sunucu başka bir modelle cevap verirse sonuç atılır (`laya_checkpoint_mismatch`). `typed-decisions` desteklenmez: başka iş akışlarına göre eğitilmiştir ve yüklü olmayan bir sunucuda ilk istekte 843 MB indirme başlatır.
 - `timeout` en fazla 10 saniyedir, varsayılan 8. Hook yolu yine en fazla 2 saniye bekler; yetişmezse yerel sonuç kullanılır.
-- Laya desteğinden önceki bir sürüme `rollback` yapılırsa eski sürüm `laya` bloğunu tanımaz, ayarı geçersiz sayar ve danışmanı kapatır; TypeSafe anahtarını yerel porta göndermez. Eski sürümde Jev'e dönmek için bloğu `jev.json`'dan silin. Bu davranış `scripts/verify_v3_jev_package.py` içinde yayımlanmış 3.1.0 ile doğrulanır.
+- Laya desteğinden önceki bir sürüme `rollback` yapılırsa eski sürüm `laya` bloğunu tanımaz, ayarı geçersiz sayar ve danışmanı kapatır; TypeSafe anahtarını yerel porta göndermez. Eski sürümde Jev'e dönmek için bloğu `jev.json`'dan silin. Bu davranış `scripts/verify_v3_jev_package.py` içinde yayımlanmış öncül 3.1.0 paketiyle doğrulanır.
 
 ### Jev'den farkları
 

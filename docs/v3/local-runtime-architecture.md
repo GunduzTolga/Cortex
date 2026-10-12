@@ -1,4 +1,4 @@
-# Public V3 infrastructure audit
+# Public infrastructure audit
 
 Scope: approved infrastructure source and test source only. No personal notes, registry data, transcripts, credentials, account configs, or live runtime state read. No production changes. A synthetic temporary Runtime was used for one targeted test.
 
@@ -30,12 +30,12 @@ This demonstrates inconsistent completion semantics, not destruction of the manu
 - Task reference/priority validation is incomplete, and receipt refs establish path existence rather than proof of an asserted result. Engine `314-350`.
 - Missing receipt detection uses assistant-message length and a narrow opt-out expression. Engine `299-310`.
 
-## Verification boundary and public V3 requirements
+## Verification boundary and public runtime requirements
 
 Test source covers deduplication, revision conflicts, local concurrent updates, recovery, partial transcripts, path rejection and view preservation (`tests/test_vault_runtime.py:17-166`). The full suite was not run in this audit. Only the isolated receipt-conflict test above was executed.
 
 Current client lifecycle health, real Desktop/CLI/Claude parity and live service operation are unverified. Documentation correctly requires cold-client verification separately; current hook records distinguish harness but not Desktop versus CLI surface. Engine `174-182`, `470-485`; `scripts/VAULT-AUTOMATION.md:63-67`.
 
-V3 requirements: generic manifest for paths/timezone/identity; platform service adapters; separate migration and installation; strict receipt durability; synthetic-only public fixtures; private/public data classification and allowlisted export; explicit local-single-writer boundary; fair compiler backlog policy; schema validation; cold-client compatibility matrix.
+Runtime requirements: generic manifest for paths/timezone/identity; platform service adapters; separate migration and installation; strict receipt durability; synthetic-only public fixtures; private/public data classification and allowlisted export; explicit local-single-writer boundary; fair compiler backlog policy; schema validation; cold-client compatibility matrix.
 
 Recommended positioning: local-first, source-backed second-brain runtime with agent adapters. Source structure is promising; portable public readiness is not established by this audit.

@@ -1,4 +1,4 @@
-# V3 semantic test contract
+# Cortex semantic test contract
 
 Frozen before implementation: 12 synthetic records, 16 scenarios (10 development, 6 holdout). No real user data. Fixture SHA256 is stored alongside the fixture. Do not change expected results to improve a score; any justified benchmark change requires a separately documented version.
 

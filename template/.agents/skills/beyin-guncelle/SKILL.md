@@ -18,4 +18,4 @@ Updater paket kaynağını, bütünlüğünü ve değiştirebileceği sistem dos
 
 Sonuç mesajında önceki→yeni sürümü, doğrulama sonucunu ve varsa açık kalan adımı belirt. Token, yerel kullanıcı yolu, kişisel ayar dökümü veya ham log paylaşma.
 
-V3.1 öncesinde `--metadata-only` tanınmıyorsa mevcut `update --check` komutuna dön. Sürüm bildirimi varsayılan açık, günlük GitHub metadata kontrolüdür; not göndermez. Kapat/aç talebini `preferences --update-notifications off/on` ile uygula. Tek sürümü susturmak için `update --dismiss X.Y.Z` kullan. Metadata-only sonucu paketin kurulabilirlik kanıtı değildir.
+`--metadata-only` tanınmıyorsa mevcut `update --check` komutuna dön. Sürüm bildirimi varsayılan açık, günlük GitHub metadata kontrolüdür; not göndermez. Kapat/aç talebini `preferences --update-notifications off/on` ile uygula. Tek sürümü susturmak için `update --dismiss X.Y.Z` kullan. Metadata-only sonucu paketin kurulabilirlik kanıtı değildir.

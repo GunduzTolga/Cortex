@@ -23,6 +23,6 @@ must not revive prior cache generations. Memory choices remain advisory; uncerta
 negated or contradicted proposals must not become a write or completed task. Test full source context,
 not a quote lifted from a cancelled plan. Test actual hook output budgets, not just intermediate lists.
 
-Run all V3 offline contracts, frozen retrieval gates, existing POSIX/Windows/platform jobs, and
+Run all `v3_*` offline contracts, frozen retrieval gates, existing POSIX/Windows/platform jobs, and
 portable release installation / upgrade / rollback / interrupted-recovery. Do not call a CLI hook
 simulation a real Desktop cold-session test. Do not publish a release or merge the PR.

@@ -2,7 +2,7 @@
 
 [Hermes Agent](https://github.com/NousResearch/hermes-agent) is the fourth supported client
 after Codex, Claude Code and Antigravity. It has no project-local hook file; it loads plugins from
-`~/.hermes/plugins/<name>/` and calls `register(ctx)` once at startup. V3 therefore ships the
+`~/.hermes/plugins/<name>/` and calls `register(ctx)` once at startup. Cortex therefore ships the
 implementation inside the vault and lets the installer plan a two-file shim that the user links
 into that directory once.
 
@@ -48,7 +48,7 @@ shared plugin directory on a multi-vault machine would use. The installer never 
 
 ## Event mapping
 
-| Hermes hook | V3 event | Context returned |
+| Hermes hook | Cortex event | Context returned |
 | --- | --- | --- |
 | `pre_llm_call` with `is_first_turn=True` | `SessionStart` | companion continuity + ranked context |
 | `pre_llm_call` afterwards | `UserPromptSubmit` (`prompt` = user message) | ranked context for that turn, companion when the query asks for it |
@@ -71,7 +71,7 @@ platforms are tracked normally.
 ### Receipt reminder
 
 Every `REMINDER_EVERY` (15) user turns of an interactive session the plugin appends a one-line
-`[Hafıza]` reminder to write a receipt — the same cadence the V2 Hermes adapter used. It is
+`[Hafıza]` reminder to write a receipt — the same cadence the legacy 2.x Hermes adapter used. It is
 plain text inside the injected context, not an instruction the adapter enforces.
 
 Retrieval semantics are identical to the other harnesses (`tests/v3_hermes_test.py` asserts the

@@ -1,4 +1,4 @@
-# V3 local memory foundation
+# Cortex local memory foundation
 
 This module is an opt-in foundation, not a replacement installer or lifecycle migration. Existing hooks and the isolated compiler are unchanged. It makes no model calls and imports no remote provider. It must be given an existing synthetic or explicitly authorized vault and a runtime directory outside that vault.
 
@@ -44,7 +44,7 @@ Supply a dedicated application runtime directory. Initialization sets that exact
 
 ## Managed paths and unmanaged user layer
 
-V3 writes exclusively to its explicit managed vault files:
+Cortex writes exclusively to its explicit managed vault files:
 - Entry point and metadata: `beyin.py`, `.beyin-runtime.json`, `.beyin-version`.
 - Scripts: `.claude/scripts/beyin_v3*.py`.
 - Managed starter skills: `.agents/skills/{beyin,beyin-doktor,beyin-guncelle}/` and `.claude/skills/...`.

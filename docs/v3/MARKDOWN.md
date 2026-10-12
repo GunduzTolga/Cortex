@@ -1,6 +1,6 @@
 # Markdown sources, local index
 
-`beyin_v3_sync.py` adds explicit in-process synchronization to the V3 foundation. It requires only Python's standard library. No package install, model, network, cloud account, or background service is involved. Existing compiler isolation and hook behavior are unchanged by this module.
+`beyin_v3_sync.py` adds explicit in-process synchronization to the Cortex foundation. It requires only Python's standard library. No package install, model, network, cloud account, or background service is involved. Existing compiler isolation and hook behavior are unchanged by this module.
 
 Use `SyncEngine(vault_root, state_dir)`, then `sync()`. The runtime must be a dedicated directory outside the vault. Its `.store` is the existing `MemoryStore`; retrieve through that store after synchronization. The same source and context APIs serve Codex, Claude and Antigravity.
 

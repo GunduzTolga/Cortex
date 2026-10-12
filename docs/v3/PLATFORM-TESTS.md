@@ -1,35 +1,35 @@
-# V3 source, lifecycle and platform contracts
+# Cortex source, lifecycle and platform contracts
 
-## Final V3.0.0 native verification
+## Final predecessor 3.0.0 native verification
 
-**Windows, macOS and Ubuntu × Python 3.11/3.13: all six jobs passed, each with 114 V3 tests, development 10/10 and holdout 6/6.** Final run source: `5b99e4bb96729c663eae76f1383b9675c6e7419c`.
+**Windows, macOS and Ubuntu × Python 3.11/3.13: all six jobs passed, each with 114 `v3_*` tests, development 10/10 and holdout 6/6.** Final run source: `5b99e4bb96729c663eae76f1383b9675c6e7419c`.
 
-This final run includes direct ZIP/V2 installation, interrupted install and rollback retries, Windows manifest and launcher paths, and direct context refresh without hooks. Earlier local Mac/Linux runs also passed the 47 legacy regressions. The exact release ZIP was installed, its extracted directory removed, then its CLI used to verify source freshness and same-version update checks. Live model and Desktop app-host workflows are [separate](LIVE-CLIENTS.md).
+This final run includes direct ZIP/legacy 2.x installation, interrupted install and rollback retries, Windows manifest and launcher paths, and direct context refresh without hooks. Earlier local Mac/Linux runs also passed the 47 legacy regressions. The exact release ZIP was installed, its extracted directory removed, then its CLI used to verify source freshness and same-version update checks. Live model and Desktop app-host workflows are [separate](LIVE-CLIENTS.md).
 
 Everything below is a historical source snapshot; its pending statements are superseded by the final native result above.
 
 
 ## Release candidate repair verification, 16 September 2026
 
-After the extracted-ZIP installation and interrupted-rollback repairs, independent macOS Python 3.14.2 and network-disabled Linux Python 3.13.15 runs each passed **47/47 legacy + 111/111 V3 tests**. Development 10/10 and holdout 6/6 remain unchanged. The 12 product and 17 updater cases include tests-first failures for manifest-derived package version, stock V2 writer retirement from an extracted release, retry before the root entrypoint exists, and retry of an already-started rollback. All now pass.
+After the extracted-ZIP installation and interrupted-rollback repairs, independent macOS Python 3.14.2 and network-disabled Linux Python 3.13.15 runs each passed **47/47 legacy + 111/111 `v3_*` tests**. Development 10/10 and holdout 6/6 remain unchanged. The 12 product and 17 updater cases include tests-first failures for manifest-derived package version, stock legacy 2.x writer retirement from an extracted release, retry before the root entrypoint exists, and retry of an already-started rollback. All now pass.
 
 The prior six-job native CI success at `ea215a8` covered 107 tests. It does not cover these latest installer/rollback changes; a new native run is required. Earlier sections below are historical source snapshots.
 
 
 ## Productization offline acceptance, 16 September 2026
 
-The current productization source passed **47/47 legacy regressions + 106/106 V3 tests** independently on **macOS Python 3.14.2** and **Linux container Python 3.13.15**. Linux ran with network disabled, a read-only repository/root filesystem and temporary writable state. The 24 product/update acceptance cases cover package validation and preflight, initial V2 rollback, interrupted-update recovery, user-edit conflicts and bundled skill copy rollback. The full suite also covers structured task creation and quarantine of ambiguous double frontmatter.
+The current productization source passed **47/47 legacy regressions + 106/106 `v3_*` tests** independently on **macOS Python 3.14.2** and **Linux container Python 3.13.15**. Linux ran with network disabled, a read-only repository/root filesystem and temporary writable state. The 24 product/update acceptance cases cover package validation and preflight, initial legacy 2.x rollback, interrupted-update recovery, user-edit conflicts and bundled skill copy rollback. The full suite also covers structured task creation and quarantine of ambiguous double frontmatter.
 
 The frozen semantic evaluation passed development **10/10** and holdout **6/6** on both platforms. Recall, abstention and fact retention are 1.0; forbidden results and privacy leaks are zero. Diagnostic precision is 0.95 development and 1.0 holdout. No holdout expectations changed.
 
-The legacy README regression initially failed after the intentional V3 root README rewrite. Its input now points to the archived `docs/V2-README.md`; all five original assertions remain intact and passed on both platforms. Only that affected subset was rerun after the test-path correction.
+The legacy README regression initially failed after the intentional root README rewrite. Its input now points to the archived `docs/V2-README.md`; all five original assertions remain intact and passed on both platforms. Only that affected subset was rerun after the test-path correction.
 
 **Native Windows productization CI has not been run by this lane.** The six-job native CI result below belongs to the earlier 62-test source snapshot and must not be read as verification of the new updater/migration package. Actual client sessions and public release status are separate from these synthetic offline checks.
 
 
 ## Latest native CI result, 16 September 2026
 
-**All six hosted jobs passed** on Windows, macOS and Ubuntu, each with Python 3.11 and 3.13. Every job ran **62 V3 tests** and the frozen development/holdout evaluation. This is real Windows runner execution, including the installed encoded PowerShell hook command under a minimal PATH.
+**All six hosted jobs passed** on Windows, macOS and Ubuntu, each with Python 3.11 and 3.13. Every job ran **62 `v3_*` tests** and the frozen development/holdout evaluation. This is real Windows runner execution, including the installed encoded PowerShell hook command under a minimal PATH.
 
 Tested code commit: `89c9f37d6e4e4650edd71b1d52493b4ed84ed6f2`.
 
@@ -75,9 +75,9 @@ python scripts/evaluate_v3.py
 
 | Platform | Configured CI | Actual evidence in this work |
 |---|---|---|
-| Ubuntu | Python 3.11, 3.13 | Linux container Python 3.13.15: 47 legacy + 61 V3 passed with network disabled; distinct from hosted native CI |
-| macOS | Python 3.11, 3.13 | Local Python 3.14.2: 47 legacy + 61 V3 passed after final source freeze |
-| Windows | Python 3.11, 3.13 | Native hosted jobs passed, 62 V3 tests plus semantic evaluation on each version |
+| Ubuntu | Python 3.11, 3.13 | Linux container Python 3.13.15: 47 legacy + 61 `v3_*` passed with network disabled; distinct from hosted native CI |
+| macOS | Python 3.11, 3.13 | Local Python 3.14.2: 47 legacy + 61 `v3_*` passed after final source freeze |
+| Windows | Python 3.11, 3.13 | Native hosted jobs passed, 62 `v3_*` tests plus semantic evaluation on each version |
 
 `.github/workflows/v3.yml` contains the read-only native OS matrix with standard-library-only tests. Authoring the workflow does not run CI. No push or public CI trigger was performed by this test lane. Interpreter/OS simulation is not native Windows evidence. CLI/model sign-in and real companion continuity are outside these offline gates.
 
@@ -110,12 +110,12 @@ The generated installed command was executed locally with spaces and Unicode in 
 
 A real-host observation prompted an additional tests-first synthetic case: startup snapshots must include plain Markdown notes and ordinary `fact` records with no status field, while excluding completed tasks. The initial focused test failed because both statusless sources were omitted. This differs from task-status filtering: the absence of a workflow status does not make an ordinary note inactive. No frozen semantic fixture expectation changed.
 
-After the fix, an independent macOS rerun passed **57/57** complete V3 tests (including 15 sync tests), with development **10/10** and holdout **6/6** unchanged. Core SHA256 for this newer run: `657ce6f4866b5217bca4dd33a9cee58f3990b3b29c7f2d867f87644aa380c268`. Earlier hashes/counts above are retained as historical run evidence. Explicit statusless tasks remain unknown/excluded; statusless non-task notes/facts are eligible. General empty-query retrieval behavior was not changed.
+After the fix, an independent macOS rerun passed **57/57** complete `v3_*` tests (including 15 sync tests), with development **10/10** and holdout **6/6** unchanged. Core SHA256 for this newer run: `657ce6f4866b5217bca4dd33a9cee58f3990b3b29c7f2d867f87644aa380c268`. Earlier hashes/counts above are retained as historical run evidence. Explicit statusless tasks remain unknown/excluded; statusless non-task notes/facts are eligible. General empty-query retrieval behavior was not changed.
 
 
 ## Final offline audit, 2026-09-16
 
-The final independent run passed **47/47 existing regressions + 61/61 V3 tests** on both **macOS Python 3.14.2** and **Linux container Python 3.13.15**. Linux used `python:3.13-slim` with `--network none`, read-only root filesystem/repository, and temporary writable state. Both environments also passed development 10/10 and holdout 6/6. The exact synthetic Python smoke extracted from QUICKSTART passed locally.
+The final independent run passed **47/47 existing regressions + 61/61 `v3_*` tests** on both **macOS Python 3.14.2** and **Linux container Python 3.13.15**. Linux used `python:3.13-slim` with `--network none`, read-only root filesystem/repository, and temporary writable state. Both environments also passed development 10/10 and holdout 6/6. The exact synthetic Python smoke extracted from QUICKSTART passed locally.
 
 The final audit added regression coverage for native Windows launcher inspection, deterministic symlink-denial copy fallback, CLI Unicode JSON under cp1252, preservation of existing UTF-8 settings under a simulated cp1252 file default, and UTF-8 JSON stdin. CLI stdout and installer settings tests reproduced failures before fixes. The stdin fix arrived concurrently and passed its first test run; it is not described as a measured red-to-green result. Encoded launcher inspection decodes UTF-16LE before looking for the target module and still executes the installed command on the actual host.
 
