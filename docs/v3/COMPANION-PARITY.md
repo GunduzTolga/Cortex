@@ -1,13 +1,13 @@
-# V2 → V3 kişilik ve süreklilik incelemesi
+# Kişilik ve süreklilik incelemesi: eski 2.x ve öncül 3.0.2
 
-İnceleme tarihi: 2026-09-17. Karşılaştırılan tabanlar: V2 `2e074cc`, yayımlanmış
-V3.0.2 `55cd4e8`. Kullanıcının aktardığı “kişilik/performans azaldı” geri bildirimi
+İnceleme tarihi: 2026-09-17. Karşılaştırılan tabanlar: eski 2.x `2e074cc`, Cortex'ten önce
+yayımlanmış öncül 3.0.2 `55cd4e8`. Kullanıcının aktardığı “kişilik/performans azaldı” geri bildirimi
 bir kullanıcı gözlemidir. Aşağıdaki nedenler koddan doğrulanır; öznel kişilik puanı
 veya tüm modeller için kalite artışı ölçülmüş değildir.
 
 ## Kayıp nerede oluştu?
 
-| Davranış | V2 | V3.0.2 | Bu düzeltme |
+| Davranış | Eski 2.x | Öncül 3.0.2 | Bu düzeltme |
 | --- | --- | --- | --- |
 | Kimlik kurulumu | Kişiselleştirilmiş CLAUDE ve Companion şablonları | ZIP installer yalnız teknik AGENTS/CLAUDE bloğunu kuruyordu; Core ve ilişki dosyaları oluşturulmuyordu | Ortak düşünme ortağı protokolü ve bir kez oluşturulan kullanıcıya ait başlangıç notları |
 | Oturum açılışı | Core okuma talimatı ve deterministik ilişki köprüsü; üst sınır 16.000 karakter | Toplam 5.000 karakter; Core/Soul öncelikli sette yok; yinelenen JSON metadata bütçeyi tüketiyor | Core/Soul, düzeltmeler, son sonuç, aktif konu gövdeleri, son Journal ve bilgi haritası kısa kaynak bölümleriyle taşınıyor |
@@ -23,16 +23,16 @@ Kaynaklar: `scripts/install_v3.py`, `template/CLAUDE.md`,
 Upstream #27 sorun kaydı boş SessionStart sorgusunda
 ilişki kaynaklarının seçilmediğini doğrudan raporladı. Önceki #29 düzeltmesi dört dosyayı
 önceliklendirdi ama Core/Soul ve eksik kurulum/öğrenme protokolünü tamamlamadı.
-Upstream #21 sorun kaydı ise V2'nin Threads gövdesini
-kaybettiğini gösterir: V2'nin hatalı satır filtresi geri getirilmedi. Windows hook
-arızaları da algılanan unutkanlığa katkı yapmış olabilir; bunlar V3.0.2'de ayrı olarak
-düzeltildi. Yeni upstream #32 raporu V3.0.1
-kurulumunu anlatır; V3.0.2'de tekrar üretildiği varsayılmadı.
+Upstream #21 sorun kaydı ise eski 2.x'in Threads gövdesini
+kaybettiğini gösterir: eski 2.x'in hatalı satır filtresi geri getirilmedi. Windows hook
+arızaları da algılanan unutkanlığa katkı yapmış olabilir; bunlar öncül 3.0.2'de ayrı olarak
+düzeltildi. Yeni upstream #32 raporu öncül 3.0.1
+kurulumunu anlatır; 3.0.2'de tekrar üretildiği varsayılmadı.
 
 ## Kurulum ve veri koruması
 
 `beyin_v3_companion.py` pakete dahil edilir. Temiz installer eksik başlangıç notlarını
-bir kez oluşturur. V2 veya V3'ten yönetilen güncellemede yeni worker ilk çalışmada aynı
+bir kez oluşturur. Eski 2.x kurulumundan veya önceki bir sürümden yönetilen güncellemede yeni worker ilk çalışmada aynı
 kontrolü yapar. Önce mevcut Companion/Echo dizini, yoksa tek yerel Core/Soul dizini
 kullanılır; birden fazla kimlik adayı varsa seçim uydurulmaz. Arşiv ve symlink dizinleri
 kimlik olarak keşfedilmez. Kullanıcının Soul dosyası varsa rakip bir Core oluşturulmaz.
@@ -130,8 +130,8 @@ güncelleme/rollback koruması ve tek seferlik başlangıç davranışını sın
 13/13 geçti. Eski sürümün başarısızlıkları özellikle eksik Core/kimlik, 2.000 karakterde
 kaybolan bağlam, boş ilişki sorgusu ve no-memory ihlalini görünür kıldı.
 
-Yerel tam suite 199/199, bunun içindeki V3 suite 152/152 geçti. Donmuş semantik sözleşme
-development 10/10 ve holdout 6/6 olarak korundu. Gerçek V3.0.2 kodundan kurulmuş eski
+Yerel tam suite 199/199, bunun içindeki `v3_*` testleri 152/152 geçti. Donmuş semantik sözleşme
+development 10/10 ve holdout 6/6 olarak korundu. Gerçek öncül 3.0.2 kodundan kurulmuş eski
 güncelleyiciyle yerel `3.0.3` aday ZIP'ine geçiş, ilk worker'da eksik notların başlatılması,
 hook'tan kimlik geri okuma ve 3.0.2'ye rollback sırasında kişisel notların korunması geçti.
 Bu aday paket test sürümüdür; yayımlanmış release iddiası değildir.

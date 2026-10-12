@@ -1,4 +1,4 @@
-# V3 kurulumu: ajan için kısa rehber
+# Cortex kurulumu: ajan için kısa rehber
 
 Kullanıcı tek mesajlık kurulumu istediyse kanonik, checksum doğrulamalı akış
 [beyin.md](beyin.md) dosyasındadır. Bu dosya açılmış release paketi veya repo
@@ -31,4 +31,4 @@ Platform kanıtı ve kalan doğrulamalar: [docs/v3/PLATFORM-TESTS.md](docs/v3/PL
 
 Kurulumdan sonra kullanıcı isterse beyin skill'i ile Normal/Ekonomik/Manuel tercihini uygula. Varsayılanı sormadan değiştirme. “15 dakikada kontrol” yerel olay kontrolleri arasındaki minimum aralıktır; model çağıran periyodik iş kurma. `beyin.py preferences` mevcut ayarı gösterir. [Tercihler](docs/v3/PREFERENCES.md).
 
-Yeni kurulum ve V3.1 güncellemesi sonrası sürüm bildirimi varsayılan açık: günde en fazla bir kez GitHub sürüm bilgisi okunur, not gönderilmez, otomatik kurulum yapılmaz. Kapatma: `python3 beyin.py preferences --update-notifications off`. Eski V3.0.2 için ilk geçiş `python3 beyin.py update` komutudur.
+Yeni kurulumda ve güncellemeden sonra sürüm bildirimi varsayılan açık: günde en fazla bir kez GitHub sürüm bilgisi okunur, not gönderilmez, otomatik kurulum yapılmaz. Kapatma: `python3 beyin.py preferences --update-notifications off`. Cortex'ten önceki eski kurulumdan (öncül projenin 3.x sürümleri) ilk geçiş, yukarıdaki 3. adımdaki installer ile bir kez elle yapılır; eski kurulumun bildirim ve güncelleme kodu eski adrese baktığı için Cortex sürümlerini göremez.

@@ -1,13 +1,13 @@
 # Vault dışındaki oturumlar için opsiyonel köprü
 
-Normal V3 kurulumu yalnız vault içindeki hook ayarlarını yönetir. Başka proje
+Normal Cortex kurulumu yalnız vault içindeki hook ayarlarını yönetir. Başka proje
 klasörlerindeki oturumları göremez. Upstream #41 sorun kaydı
 bu sınırı ve eksik proje kökenini bildirdi. Paketle gelen bu sarmalayıcı açıkça
 seçilen proje klasörleri için bağlantı sağlar; varsayılan kurulum değişmez.
 
 ## Kurulum
 
-Bu dosyayı içeren V3 paketini kurduktan sonra:
+Cortex paketini kurduktan sonra:
 
 ```sh
 python3 "/tam/yol/Beynim/.claude/scripts/beyin_v3_bridge.py" \

@@ -1,9 +1,9 @@
-# V3 local foundation quickstart
+# Cortex local foundation quickstart
 
-V3 is an **opt-in project-local installation**. The Python installer wires Claude,
+Cortex is an **opt-in project-local installation**. The Python installer wires Claude,
 Codex and Antigravity to one source-backed engine. It installs no system service,
 connects no account, calls no model and does not enable Mem0. Existing legacy
-installers are separate; run the V3 installer below to choose this runtime.
+installers are separate; run the Cortex installer below to choose this runtime.
 
 Use Python 3.11 or newer. No provider package or API key is required. Run the
 commands below from this repository root. On Windows, `py -3` can replace
@@ -235,7 +235,7 @@ workers; use the hook's `--drain-queue` option to drain explicitly. This testing
 mode may return previously indexed context and should not be used for normal
 interactive operation.
 
-Set `BEYIN_V3_SKIP=1` in a delegated or headless agent process to keep the V3
+Set `BEYIN_V3_SKIP=1` in a delegated or headless agent process to keep the Cortex
 memory hooks out of that run; the hook and bridge return `{}` without queuing an
 event, injecting context or starting a worker (a non-idle Antigravity `Stop`
 still answers `decision: stop`). Only the exact value `1` skips; any other value,

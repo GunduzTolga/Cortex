@@ -1,4 +1,4 @@
-# V3 offline evaluation baseline
+# Cortex offline evaluation baseline
 
 Frozen fixture: `tests/fixtures/v3/semantic_scenarios.json`, SHA256 `26755d6fb2ab368f5c7b5882cb2dd33ef651404f366bce45a4632deae57099bc`.
 

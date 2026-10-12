@@ -106,8 +106,8 @@ identifiers for portability; source identity is also pinned above.
 
 The unchanged existing frozen retrieval benchmark passed all 16 development and
 holdout cases: [result](evidence/review-frozen-retrieval.json). Initial submitted
-code passed 373 V3 tests locally; the reviewed code adds two regressions.
-CI runs the V3 suite and installed ZIP checks on Linux, macOS and Windows with
+code passed 373 `v3_*` tests locally; the reviewed code adds two regressions.
+CI runs the `v3_*` suite and installed ZIP checks on Linux, macOS and Windows with
 Python 3.11 and 3.13. Consult the PR checks
 for the final commit's status; an earlier green run is not proof for a later head.
 
@@ -121,10 +121,10 @@ python3 scripts/verify_v3_jev_package.py --package candidate/beyin-v3-3.1.1.zip 
 ```
 
 The candidate version is a local test package, not a published release. The
-installer proof exercises clean install, actual released 3.1.0 upgrade, saved
+installer proof exercises clean install, actual released predecessor 3.1.0 upgrade, saved
 preferences, installed command and Markdown roundtrip, disable, rollback,
 re-update and interrupted-operation recovery. Existing release CI additionally
-checks the released 3.0.2 upgrade path.
+checks the released predecessor 3.0.2 upgrade path.
 
 ## User rollout and remaining limits
 

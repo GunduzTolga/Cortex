@@ -1,4 +1,4 @@
-# Cortex V3: ajan kurulum rehberi
+# Cortex: ajan kurulum rehberi
 
 Bu dosya, kullanicinin su istegini yerine getirmek icin kanonik kurulum tarifidir:
 
@@ -14,7 +14,7 @@ incelemesi kullaniciya aittir.
 
 1. Kurulum hedefi, kullanicinin bu istegi verdigi mevcut vault/workspace klasorudur.
 2. Kullanici notlarini silme, tasima, yeniden adlandirma veya `git reset` ile ezme.
-3. Var olan V1, V2 veya V3 kurulumunu once tespit et. Resmi installer ve resmi updater
+3. Var olan kurulumu (Cortex ya da Cortex'ten onceki eski bir kurulum) once tespit et. Resmi installer ve resmi updater
    yedekleme, cakisma ve geri alma kurallarini uygular; bu kontrolleri elle atlama.
 4. Yalniz `GunduzTolga/Cortex` deposunun en son kararli GitHub release paketini kullan.
    Source code arsivlerini veya ucuncu taraf paketleri kullanma.
@@ -80,7 +80,13 @@ kokunde `manifest.json` ve `scripts/install_v3.py` bulunmalidir.
 
 Once vault kokunde `.beyin-version` dosyasina bak ve yola gore ayril.
 
-### 3a. `.beyin-version` yoksa, V1 veya V2 varsa: resmi installer
+### 3a. `.beyin-version` yoksa ya da `2.` veya `3.` ile basliyorsa: resmi installer
+
+Bu durumlar Cortex'ten onceki eski kurulumlardir: damgasiz eski 1.x, `2.` damgali eski
+2.x kurulumlari ve `3.` damgali eski kurulum (oncul projenin 3.x surumleri). 3.x
+kurulumundaki updater eski adrese bakar ve Cortex paketini eski surum sayip reddeder;
+bu yuzden Cortex'e gecis bir kez bu installer ile yapilir. Sonraki guncellemeler 3b
+yolundan gelir.
 
 Buldugun ayni Python yorumlayicisiyla:
 
@@ -88,7 +94,7 @@ Buldugun ayni Python yorumlayicisiyla:
 <python> <gecici-paket>/scripts/install_v3.py --vault <mutlak-vault-yolu>
 ```
 
-Eski V1/V2 kurulumunda once ayni komutu sonuna `--plan` ekleyerek calistir; bu hicbir sey
+Damgasiz veya `2.` damgali eski kurulumda once ayni komutu sonuna `--plan` ekleyerek calistir; bu hicbir sey
 degistirmez, nelerin yazilacagini ve emekli edilecegini gosterir. Kullanici eski bir
 runner'i elle degistirmisse installer `Customized legacy runner requires review <yol>`
 mesajiyla 1 cikis kodu dondurur. O dosyayi silme veya ezme; icerigini kisaca ozetle,
@@ -96,9 +102,9 @@ kullanicinin acik onayini al ve ancak o zaman tek dosya icin
 `--accept-customized-legacy <vault-goreli-yol>` kullan. Toplu gecis yoktur. Ayrintilar:
 `https://github.com/GunduzTolga/Cortex/blob/main/docs/v3/MIGRATION.md`
 
-### 3b. `.beyin-version` zaten `3.` ile basliyorsa: kurulu updater
+### 3b. `.beyin-version` `1.` ile basliyorsa: kurulu updater
 
-Mevcut V3 kurulumunda tercih edilen yol vault icindeki `beyin.py` updater'idir.
+Mevcut Cortex kurulumunda tercih edilen yol vault icindeki `beyin.py` updater'idir.
 Vault kokunde, indirip dogruladigin ZIP ile calistir:
 
 ```text
@@ -109,8 +115,8 @@ Vault kokunde, indirip dogruladigin ZIP ile calistir:
 Sonuc `updated` ise surum degismistir, `noop` ise vault zaten gunceldir; ikisi de
 basaridir. Bu yol gereksiz yere yeni bir istemci guven incelemesi zorlamaz ve gerekirse
 `<python> beyin.py rollback` ile tam geri alinir. Ag erisimi varsa `--package` olmadan da
-calisir; ag hatasi (ornegin `http_403`) "guncel" anlamina gelmez. Cok eski bir V3
-paketinde `update` komutu taninmiyorsa 3a yoluna dus. `beyin.py --help` ciktisi `update`,
+calisir; ag hatasi (ornegin `http_403`) "guncel" anlamina gelmez. `update` komutu
+taninmiyorsa 3a yoluna dus. `beyin.py --help` ciktisi `update`,
 `rollback` ve `recover` komutlarini listelemez; bunlar giris scriptinde ayrica ele alinir
 ve calisir. Komutu `--help` listesinde gormedin diye 3a'ya dusme.
 
@@ -123,7 +129,7 @@ dizinine, vault disina yazilir. State'i iCloud, OneDrive, Dropbox veya vault ici
 Yonetilen bir dosya elle degistirilmisse her iki yol da
 `Reinstall conflict: managed file changed <yol>` hatasi verip 1 cikis kodu dondurur.
 Kullanici dosyasini ezme. Cakisan dosyayi ve neden otomatik devam edilemedigini kisa
-bicimde bildir. Yarim kalan resmi V3 isleminde once mevcut vault'taki `beyin.py recover`
+bicimde bildir. Yarim kalan resmi kurulum veya guncelleme isleminde once mevcut vault'taki `beyin.py recover`
 yolunu kullan; basarisiz olmadan yeniden kopyalama yapma. Kendi curl, kopyalama veya
 `git pull` zincirinle kurulu bir vault'u guncelleme.
 
@@ -168,7 +174,7 @@ komutlariyla dogrudan tazeleme kullanilabilir.
 Kurulumdan sonra `.agents/skills/beyin/SKILL.md` dosyasini oku. Kullaniciya en fazla uc
 kisa tanisma sorusu sor. Cevaplarini kaynak Markdown notuna kaydet: kimlik ve hitap
 bilgisi companion klasorundeki `Core.md` dosyasina yazilir. Bu klasoru yalniz resmi
-installer acar. 3b yolunda (eski bir V3'ten guncelleme) klasor hemen olusmaz; installer
+installer acar. 3b yolunda (eski bir Cortex surumunden guncelleme) klasor hemen olusmaz; installer
 ciktisinda `companion` alani `needs_attention` dondugunde de olusmaz. Iki durumda da
 yeni bir kimlik klasoru acma: vault'ta mevcut `Core.md` veya `Soul.md` ara, birden fazla
 aday varsa hangisinin kullanilacagini kullaniciya sor. Yeni semantik notlar ise yalniz
@@ -205,7 +211,7 @@ kendisi koyar. Once `jev shadow` ile olc, sonra `jev on` yap. `jev on` iken ajan
 yollar. `auto_context` ayri ve ek
 bir opt-in'dir: `jev on --enable auto_context` acildiginda her turda istem metni ve en
 fazla 8 aday notun basligi ile ilk 600 karakteri saglayiciya gider. `private` notlar
-hicbir yolda gonderilmez; V3.2.0 ve sonrasinda `remote_allowed: false` ve
+hicbir yolda gonderilmez; `remote_allowed: false` ve
 `sensitivity: sensitive` kayitlar da gonderilmez. Bunlari acmadan once kullaniciya soyle. Mod `off` degilken anahtar yoksa komut
 uyarir ve cagrilar yerel sonuca duser. Kapatma: `<python> beyin.py jev off`; acil durumda
 `BEYIN_JEV_DISABLE=1` ortam degiskeni kayitli modu degistirmeden cagrilari durdurur.

@@ -1,18 +1,18 @@
-# V2 migration and outcome continuity
+# Legacy migration and outcome continuity
 
-V3 preserves existing Markdown, daily notes, knowledge articles and Companion
+Cortex preserves existing Markdown, daily notes, knowledge articles and Companion
 files as sources. Migration does not rewrite their bytes, replay their dates or
-extract new claims from old transcripts. Existing V2 state remains in place; an
+extract new claims from old transcripts. Existing legacy 2.x state remains in place; an
 external copy and hash manifest accompany the one-time cutover watermark.
 
 The installer/updater must hold `migration_guard(vault, state)` while it retires
-recognized V2 handlers and installs V3. `finalize_migration(vault, state, plan)`
-checks every existing source hash and the complete V2 state inventory before
+recognized legacy 2.x handlers and installs Cortex. `finalize_migration(vault, state, plan)`
+checks every existing source hash and the complete legacy state inventory before
 recording success. The version stamp belongs after this successful check.
 Repeated migration keeps the original watermark. Installation rollback preserves
-user sources and the original V2 state; the updater owns system-file rollback.
+user sources and the original legacy state; the updater owns system-file rollback.
 
-The guard takes nonblocking locks on existing V2 `.claude/scripts/.state/*.lock`
+The guard takes nonblocking locks on existing legacy `.claude/scripts/.state/*.lock`
 files and rejects known `inflight`, `running` or `pending` writer states. If a
 worker is active, let it finish and rerun. An orphaned inflight sentinel needs
 explicit reconciliation; the migration never deletes it or declares it safe
@@ -44,14 +44,14 @@ python3 scripts/install_v3.py --vault "/absolute/path/to/vault" \
 
 The flag is repeatable, takes vault-relative paths, and only accepts the known
 legacy runner paths (`.claude/scripts/flush.py`, `.claude/scripts/compile.py` and
-the `.claude/hooks/` V2 handlers). Accepting one path does not accept any other;
+the legacy `.claude/hooks/` handlers). Accepting one path does not accept any other;
 there is no blanket override. The pre-install bytes go into the install manifest
 as the file's `original`, so `--uninstall` and `rollback` put your version back.
 
 ## Keeping a customized legacy runner
 
-A runner you rewrote for your own pipeline may still be wanted next to V3, for
-example a summarizer that writes `daily/YYYY-MM-DD.md` while V3 writes
+A runner you rewrote for your own pipeline may still be wanted next to Cortex, for
+example a summarizer that writes `daily/YYYY-MM-DD.md` while Cortex writes
 `daily/v3/`. Keep that one file by name instead of retiring it:
 
 ```text
@@ -64,7 +64,7 @@ A kept runner is unmanaged: the installer does not read, hash, plan or replace
 it, it takes no manifest entry, and `--uninstall` and `rollback` leave it alone.
 Hook entries in `.claude/settings.json`, `.claude/settings.local.json` and
 `.codex/hooks.json` that call a kept hook file by that exact path stay in place
-and are yours to edit or remove; entries for the other V2 handlers, including a
+and are yours to edit or remove; entries for the other legacy handlers, including a
 file of the same name under `.codex/hooks/` or `.agents/hooks/`, are still
 retired. A kept path must exist and must not already be retired. The same path
 cannot be both kept and accepted in one run, and keeping one path does not keep
@@ -77,8 +77,8 @@ that file. To stop keeping a runner, reinstall with
 `--accept-customized-legacy` for that path: it is retired like any other
 accepted runner and leaves `kept_legacy`.
 `doctor` lists the kept paths as `kept_legacy_runners`. What a kept runner
-writes is yours to reconcile: V3 does not read it, index it or stop it, and a
-kept summarizer that writes the same file as a V3 projection is your conflict.
+writes is yours to reconcile: Cortex does not read it, index it or stop it, and a
+kept summarizer that writes the same file as a Cortex projection is your conflict.
 
 Retiring a runner only replaces that one file. Helper modules it imported stay on
 disk, now uncalled: `_portalock.py` here, and in older vaults files such as
@@ -93,13 +93,13 @@ schedules cannot be ruled out by reading project hook files.
 
 ## What replaces the compiler path
 
-V3 has no background model dependency. The active authorized agent writes short,
+Cortex has no background model dependency. The active authorized agent writes short,
 source-linked semantic receipts and deliberate knowledge notes. The deterministic
 worker projects new structured receipt summaries into:
 
-- `daily/v3/YYYY-MM-DD.md`: new V3 recorded outcomes, named by this machine's
+- `daily/v3/YYYY-MM-DD.md`: new recorded outcomes, named by this machine's
   local day (the day the session-start project block calls today). Receipt
-  stamps inside stay UTC. Up to 3.5.1 the name was the UTC day; the first sync
+  stamps inside stay UTC. In the install that preceded Cortex (predecessor 3.5.1 and earlier) the name was the UTC day; the first sync
   after updating removes an old UTC-named view that was never edited, and an
   edited one is kept and reported as a conflict until you move or delete it.
 - `knowledge/v3/outcomes.md`: an index linking those outcomes to their receipts.
@@ -110,16 +110,16 @@ knowledge texts remain untouched. Pre-cutover receipt files are not recaptured.
 A manually edited generated view is preserved and produces a visible conflict.
 The latest receipt remains available to the next session as historical context.
 
-A preserved V2 `gecmis-import` skill may describe the old automatic compiler.
+A preserved legacy 2.x `gecmis-import` skill may describe the old automatic compiler.
 That legacy promise no longer applies after cutover: imported transcripts and
 daily source notes remain indexed, and the active `beyin` skill performs deliberate
-semantic distillation. Custom skill text remains user-owned; consult the managed
-V3 migration notice when older instructions conflict.
+semantic distillation. Custom skill text remains user-owned; consult the migration
+notice in the managed `AGENTS.md` block when older instructions conflict.
 
 The old model compiler's autonomous distillation is therefore replaced by an
 explicit active-agent workflow, not secretly reproduced by a heuristic. Users who
-want to keep an external V2 compiler must opt in deliberately and isolate its
-write targets/schedule; V3 does not start it or promise compatibility with
+want to keep an external legacy compiler must opt in deliberately and isolate its
+write targets/schedule; Cortex does not start it or promise compatibility with
 simultaneous writers.
 
 ## Agent commands
@@ -185,6 +185,6 @@ covers a session.
 Synthetic tests cover byte preservation, idempotent watermarking, inflight
 rejection, concurrent source-edit detection, private Companion filtering,
 new-only outcome projections, manual-view conflicts, note-create refusal to
-overwrite, and receipt-gap closure. Actual V2 workers, external schedules and
+overwrite, and receipt-gap closure. Actual legacy workers, external schedules and
 client trust still require environment-specific validation. A green migration
 unit test is not evidence that every external worker has stopped.

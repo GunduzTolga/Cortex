@@ -66,7 +66,7 @@ python3 beyin.py rollback
 
 `recover`, yarım kalan işlemin journal'ını okuyup planlanan işlemi tamamlar. Bir hata mesajı işlemin iptal edildiği anlamına gelmez; bazı sistem dosyaları yazılmış, başarılı sürüm damgası henüz yazılmamış olabilir.
 
-`rollback`, son sistem işleminin yedeğini geri getirir. [Opsiyonel global köprüyü](GLOBAL-BRIDGE.md) kendin eklediysen, köprüyü içermeyen eski bir sürüme (V3.1.0 ve öncesi) `rollback` veya `uninstall` yapmadan önce global ayardaki köprü handler'larını kaldır; olmayan bir scripti global hook'ta bırakmak istemci hatası üretir. İlk V2 geçişinde önceki sürüm ve tanınan eski runner'lar da geri yüklenir. Temiz V3 kurulumunu geri almak `uninstalled` olarak raporlanır; olmayan bir eski sürüm uydurulmaz. Sonradan eklediğin kullanıcı notları silinmez. Bu komut bütün vault geçmişini geri alan bir işlem değildir.
+`rollback`, son sistem işleminin yedeğini geri getirir. [Opsiyonel global köprüyü](GLOBAL-BRIDGE.md) kendin eklediysen, köprüyü içermeyen eski bir kuruluma (öncül projenin 3.1.0 ve öncesi sürümleri) `rollback` veya `uninstall` yapmadan önce global ayardaki köprü handler'larını kaldır; olmayan bir scripti global hook'ta bırakmak istemci hatası üretir. Eski 2.x kurulumundan ilk geçişte önceki sürüm ve tanınan eski runner'lar da geri yüklenir. Temiz Cortex kurulumunu geri almak `uninstalled` olarak raporlanır; olmayan bir eski sürüm uydurulmaz. Sonradan eklediğin kullanıcı notları silinmez. Bu komut bütün vault geçmişini geri alan bir işlem değildir.
 
 Yönetilen dosyada araya giren kullanıcı değişikliği varsa işlem bunu ezmek yerine conflict ile durur. Desteklenen JSON ayarlarında ilgisiz değişiklikler korunur; çakışan yönetilen bölüm için inceleme gerekir. Kilitli/aktif bir writer varsa tamamlanmasını bekleyip tekrar dene. Kaybolmuş bir işin kilit/sentinel dosyasını gelişigüzel silme.
 
@@ -158,7 +158,7 @@ onu yukarıdaki adımlarla taşı; diğerini ancak adım 7 doğrulaması geçtik
 
 ### Yönlendirme öncesi yolla sabitlenmiş eski kurulumlar
 
-3.4.0 ve öncesiyle (#114 düzeltmesinden önce) yapılmış bir MSIX kurulumunda sabitlenmiş
+Cortex'ten önceki eski kurulumun (öncül projenin 3.4.0 ve öncesi sürümleri, #114 düzeltmesinden önce) yaptığı bir MSIX kurulumunda sabitlenmiş
 yol yönlendirme uygulanmadan yazılmış olabilir. Bu kendiliğinden düzelmez. Düzeltmek için
 #114'ü içeren kurucuyu **paket içinden** (ajan kabuğundan) mevcut `--state` değeriyle
 yeniden çalıştır; sabitleme yönlendirilmiş kanonik yola döner. Bu durumda kopyalama
@@ -191,7 +191,7 @@ py -3 scripts/install_v3.py --vault "C:\Notlar\Beynim" --state "<.beyin-runtime.
 
 Paket yalnız yönetilen motor dosyaları, kurulu giriş/başlatıcılar, üç çekirdek skill ve istemci bağlantılarını günceller. Aynı adlı özel skill veya değiştirilmiş yönetilen script sessizce ezilmez. İlgisiz kullanıcı ayarları desteklenen birleştirme kurallarıyla korunur. Markdown notlar, Companion metinleri ve eski günlük/bilgi kaynakları paket içeriğiyle değiştirilmez.
 
-V2 geçişinde hash ile tanınan stok writer'lar geri alınabilir, etkisiz girişlerle değiştirilir. Böylece önceden açılmış istemcide kalan eski komut da model derleyicisini yeniden başlatmaz. Özelleştirilmiş runner'lar ve proje dışındaki zamanlayıcılar ayrıca değerlendirilir. [Geçiş rehberi](MIGRATION.md).
+Eski 2.x kurulumundan geçişte hash ile tanınan stok writer'lar geri alınabilir, etkisiz girişlerle değiştirilir. Böylece önceden açılmış istemcide kalan eski komut da model derleyicisini yeniden başlatmaz. Özelleştirilmiş runner'lar ve proje dışındaki zamanlayıcılar ayrıca değerlendirilir. [Geçiş rehberi](MIGRATION.md).
 
 ## Uygulanan kontroller
 
@@ -205,7 +205,7 @@ Kullanıcı gereksinim duymadığı bileşenleri (`skills/<ad>`, `adapters/<ad>`
 
 - `update` ve `install` sırasında hariç tutulan bileşenlere ait yönetilen ve değiştirilmemiş dosyalar diskten temizlenir ve manifestten düşürülür.
 - Kullanıcı tarafından değiştirilmiş dosyalar asla silinmez, üzerine yazılmaz; korunur ve işlem özetinde bildirilir.
-- Kullanıcı ortak dosyalardaki (`AGENTS.md` veya `.agents/hooks.json`) V3 bölgelerini elle kaldırmışsa çakışma üretilmez.
+- Kullanıcı ortak dosyalardaki (`AGENTS.md` veya `.agents/hooks.json`) Cortex'in yönetilen bölgelerini elle kaldırmışsa çakışma üretilmez.
 - Rollback yapıldığında önceki durum geri yüklenir; `.beyin-exclusions.json` dosyasındaki hariç tutma tercihleri korunur.
 
 ## Geliştiriciler için paket üretimi
@@ -220,7 +220,7 @@ Bu komut yalnız yerel ZIP oluşturur, GitHub'a yayınlamaz. Paket `manifest.jso
 
 ## Sürüm bildirimleri
 
-3.9.0 kurulu bir vault'u Cortex'e bir kez elle kur (`install_v3.py --vault`); eski sürümün bildirim kodu eski adrese baktığı için Cortex sürümlerini ancak bu ilk geçişten sonra görürsün. Windows'ta `py -3` kullan. Oturum açılışı ağ beklemez; kısa ömürlü worker yalnız resmi GitHub metadata'sını günde en fazla bir kez kontrol eder. İlk kontrolün sonucu sonraki oturum veya `doctor` çağrısında görünür. Aynı sürüm her prompt'ta tekrar gösterilmez. Notlar ve prompt'lar bu kontrol için gönderilmez, model çağrısı veya otomatik kurulum yapılmaz.
+Cortex'ten önceki eski kurulumu (öncül projenin 3.x sürümleri) taşıyan bir vault'u Cortex'e bir kez elle kur (`install_v3.py --vault`); eski kurulumun bildirim kodu eski adrese baktığı için Cortex sürümlerini ancak bu ilk geçişten sonra görürsün. Windows'ta `py -3` kullan. Oturum açılışı ağ beklemez; kısa ömürlü worker yalnız resmi GitHub metadata'sını günde en fazla bir kez kontrol eder. İlk kontrolün sonucu sonraki oturum veya `doctor` çağrısında görünür. Aynı sürüm her prompt'ta tekrar gösterilmez. Notlar ve prompt'lar bu kontrol için gönderilmez, model çağrısı veya otomatik kurulum yapılmaz.
 
 `update --check --metadata-only` yalnız sürüm bilgisini okur: ZIP indirmez, paket kodu çalıştırmaz ve vault/runtime/cache yazmaz. Tam `update --check` mevcut paket doğrulamasını ve geçici sentetik kurulumu çalıştırmaya devam eder. Metadata sonucu paketin kurulabilirlik kanıtı değildir. Ağ hatası “güncelsin” anlamına gelmez; doctor son başarılı kontrol tarihini ve durumu gösterir.
 
@@ -232,4 +232,4 @@ Online ZIP indirmesinde GitHub asset SHA-256 ve varsa resmi checksum dosyası, h
 
 `VERSION` ve `docs/v3/releases/X.Y.Z.md` aynı sürümü tanımlar. `Verified V3 release package` workflow'u ZIP'i bir kez build eder; altı OS/Python kombinasyonu bu aynı ZIP'i temiz kurulum, devralınan koddan geçiş (deponun ilk commit'i `7177077`'den `0.9.0` etiketiyle build edilir; bu commit yeniden yazılmamalı), no-op, rollback ve kesinti/recover ile doğrular. PR çalışmaları yayın yapmaz.
 
-Main üzerinde manuel `workflow_dispatch` ve `publish=true`, testler yeşilse aynı bytes'ı önce draft olarak yükler, sonra stable/latest yayınlar ve yayınlanmış asset'i tekrar indirip doğrular. Var olan release'in üzerine yazılmaz; yeni sürüm numarası gerekir. Opsiyonel global köprü (#41) V3.2.0 ile pakete girdi; kurulum ve güncelleme global ayarları değiştirmez ([GLOBAL-BRIDGE.md](GLOBAL-BRIDGE.md)).
+Main üzerinde manuel `workflow_dispatch` ve `publish=true`, testler yeşilse aynı bytes'ı önce draft olarak yükler, sonra stable/latest yayınlar ve yayınlanmış asset'i tekrar indirip doğrular. Var olan release'in üzerine yazılmaz; yeni sürüm numarası gerekir. Opsiyonel global köprü (#41) pakettedir; kurulum ve güncelleme global ayarları değiştirmez ([GLOBAL-BRIDGE.md](GLOBAL-BRIDGE.md)).

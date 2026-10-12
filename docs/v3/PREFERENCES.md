@@ -61,7 +61,7 @@ Süre en son otomatik başlatmaya göre yerel SQLite kaydıyla, istemciler aras�
 
 Aralığa takılmış bir kontrolde turn bağlamı istenirse eski kayıtları güncel diye sunmak yerine kısa tazeleme uyarısı verilir. Ekonomik modda sonraki mesajlarda tekrar bağlam eklenmez; beyin skill'i bilgi gerektiğinde kaynakları doğrudan tazeler.
 
-Özel V2 cron/LaunchAgent/Task Scheduler işleri veya kullanıcının ayrı kurduğu 15 dakikalık ücretli ajan otomasyonları bu tercihlerle kapatılmaz. Önce ilgili işi tespit edip ayrı yönetmek gerekir. V3 kendiliğinden Luna/Sonnet çalıştırmaz.
+Eski 2.x kurulumundan kalan özel cron/LaunchAgent/Task Scheduler işleri veya kullanıcının ayrı kurduğu 15 dakikalık ücretli ajan otomasyonları bu tercihlerle kapatılmaz. Önce ilgili işi tespit edip ayrı yönetmek gerekir. Cortex kendiliğinden Luna/Sonnet çalıştırmaz.
 
 Bu değişiklik yerel adaydır; yayımlanmış v3.0.0 paketine otomatik olarak eklenmez. Yeni paket yayımlanmadan kullanıcılara mevcut sürüm özelliği diye duyurulmamalıdır.
 
@@ -133,7 +133,7 @@ Receipt özetinde kalıcı bir öğrenim ayrı bir satırda, satır başında be
 
 `beyin.py doctor` komutu sessiz durgunluğu görünür kılmak için son bilgi damıtmasının kaç gün önce yapıldığını ve o tarihten bu yana kaç receipt kaydedildiğini yazar. Gerçek çıktı ASCII'dir, diğer doctor satırları gibi: `Son bilgi damitmasi: 3 gun once (o tarihten beri 12 makbuz)`; hiç kavram notu yoksa `Son bilgi damitmasi: henuz kavram notu damitilmadi (toplam N makbuz)`; ölçüm başarısız olursa `Son bilgi damitmasi: olculemedi (<hata>)`. Tarih notun frontmatter'ındaki `updated` ya da `modified` alanından, bu alan yoksa dosya zamanından okunur; çünkü git checkout ve iCloud geri yüklemesi dosya zamanını sıfırlar. `knowledge/index.md`, `knowledge/log.md` ve `knowledge/v3/` sayılmaz, her nottan yalnız ilk 4 KB okunur.
 
-Yönetilen blok dışında `AGENTS.md` ya da `CLAUDE.md` içinde `knowledge/` klasörünü derleyiciye bırakan V2 ifadesi (`derleyici yönetir`, `derleyici yazar`, `elle düzenlemeyin`, `compiler-managed` gibi) kalmışsa doctor `Talimat celiskisi: ...` satırını yazar ve durumu `needs_attention` yapar. Bu ifade ajanın knowledge notu yazmaktan kaçınmasına yol açar; satırı kaldırmak uyarıyı kapatır.
+Yönetilen blok dışında `AGENTS.md` ya da `CLAUDE.md` içinde `knowledge/` klasörünü derleyiciye bırakan eski 2.x ifadesi (`derleyici yönetir`, `derleyici yazar`, `elle düzenlemeyin`, `compiler-managed` gibi) kalmışsa doctor `Talimat celiskisi: ...` satırını yazar ve durumu `needs_attention` yapar. Bu ifade ajanın knowledge notu yazmaktan kaçınmasına yol açar; satırı kaldırmak uyarıyı kapatır.
 
 ## Tur başı bağlam: pasaj düzeyinde strict arama
 
@@ -197,4 +197,4 @@ Kullanıcı gereksinim duymadığı başlangıç skill'lerini, adaptörleri, ba�
 Hariç tutulabilen bileşenler:
 `agents_block`, `adapters`, `adapters/hermes`, `adapters/omp`, `adapters/opencode`, `harnesses/antigravity`, `launchers`, `skills`, `skills/beyin`, `skills/beyin-doktor`, `skills/beyin-guncelle`.
 
-Hariç tutma tercihleri vault kökünde bağımsız `.beyin-exclusions.json` dosyasında saklanır (`.beyin-preferences.json` dosyasını değiştirmez; böylece eski sürümlere rollback 3.4.0 uyumlu kalır). Tercih kaydedildiğinde bir sonraki kurulum veya güncellemede uygulanır (`update` veya `install`). Değiştirilmemiş hariç tutulan dosyalar temizlenir, kullanıcının değiştirdiği dosyalar ise çakışma vermeden korunur. `doctor` çıktısı hem uygulanan hariç tutmaları hem de bekleyen değişiklikleri gösterir.
+Hariç tutma tercihleri vault kökünde bağımsız `.beyin-exclusions.json` dosyasında saklanır (`.beyin-preferences.json` dosyasını değiştirmez; böylece eski sürümlere rollback, öncül 3.4.0 dahil, uyumlu kalır). Tercih kaydedildiğinde bir sonraki kurulum veya güncellemede uygulanır (`update` veya `install`). Değiştirilmemiş hariç tutulan dosyalar temizlenir, kullanıcının değiştirdiği dosyalar ise çakışma vermeden korunur. `doctor` çıktısı hem uygulanan hariç tutmaları hem de bekleyen değişiklikleri gösterir.
