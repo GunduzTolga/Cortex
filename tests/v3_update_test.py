@@ -212,12 +212,12 @@ class OfflineUpdateTest(unittest.TestCase):
         report = {'status': 'updated', 'from_version': '3.0.0', 'version': '3.0.1'}
         self.assertNotIn('flush', entry.human_result(report, 'update'))
         message = entry.human_result(dict(report, orphaned_legacy_state=['a.json', 'b.json']), 'update')
-        self.assertIn('Yarida kesilmis 2 V2 flush kaydi var (durumu inflight', message)
+        self.assertIn('Yarida kesilmis 2 eski surumden kalma flush kaydi var (durumu inflight', message)
         self.assertIn('daily/ altina yazilmamis olabilir', message)
         self.assertTrue(message.isascii())
         self.assertNotIn('kilit klasoru', message)
         message = entry.human_result(dict(report, stale_legacy_locks=['a.lock']), 'update')
-        self.assertIn('Sahipsiz kalmis 1 V2 kilit klasoru var (prompt_count.*.lock, sekiz gunden eski)', message)
+        self.assertIn('Sahipsiz kalmis 1 eski surumden kalma kilit klasoru var (prompt_count.*.lock, sekiz gunden eski)', message)
         self.assertNotIn('flush', message)
         self.assertTrue(message.isascii())
 
