@@ -109,7 +109,7 @@ def brand_text():
              'Kaynak: tema/ananas/marka/. Yeniden üretmek için:',
              '    py -3 scripts/ananas_tema.py uret',
              '"""']
-    for size in (28, 42, 56):
+    for size in (28, 42, 56, 200):
         lines += [f'MUHUR_{size} = (', *_chunked((MARKA / f'pyn-muhur-{size}.png').read_bytes()), ')']
     lines += ['ICO = (', *_chunked((MARKA / 'pyn.ico').read_bytes()), ')']
     lines += ['SIXEL = (', *_chunked((MARKA / 'pyn-muhur.six').read_bytes()), ')']

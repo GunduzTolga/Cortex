@@ -8,6 +8,7 @@ Pillow ister; yalnız tasarım değiştiğinde elle çalıştırılır, testler 
 - pyn.ico                  : Windows kısayol ikonu (16-256 px)
 - pyn-yuz-256.png          : Obsidian'da boş sekmedeki Pyn yüzü
 - pyn-muhur.six            : `pyn` karşılama kutusundaki mühür (Sixel, terminalde gerçek resim)
+- pyn-muhur-200.png        : Windows Terminal Pyn profilinin köşe filigranı
 
 Ardından: py -3 scripts/ananas_tema.py uret
 
@@ -61,6 +62,7 @@ def main(source):
     seal.save(OUT / 'pyn.ico', sizes=[(s, s) for s in (16, 20, 24, 32, 40, 48, 64, 256)])
     face.resize((256, 256), Image.LANCZOS).save(OUT / 'pyn-yuz-256.png', optimize=True)
     (OUT / 'pyn-muhur.six').write_text(sixel(seal), encoding='ascii', newline='')
+    seal.resize((200, 200), Image.LANCZOS).save(OUT / 'pyn-muhur-200.png', optimize=True)
     # The vector seal without its C2PA metadata block: that is provenance, not drawing.
     svg = (source / 'logo-muhur.svg').read_text(encoding='utf-8')
     svg = re.sub(r'<metadata>.*?</metadata>', '', svg, flags=re.S)

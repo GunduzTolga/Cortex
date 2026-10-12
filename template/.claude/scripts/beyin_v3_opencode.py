@@ -110,6 +110,20 @@ function lifecycle(state, parentOf) {
         info.attached.add(message.id)
       }
     },
+    // OpenCode 2.x hands each request's messages as { id, role, content: [{ type, text }] },
+    // rebuilt for every request, so the turn context is attached again each time.
+    attachModel(id, messages) {
+      const info = tracked(id)
+      if (!info) return
+      for (const message of Array.isArray(messages) ? messages : []) {
+        if (message?.role !== "user" || !Array.isArray(message.content)) continue
+        const text = info.turns.get(message.id)
+        if (!text) continue
+        if (!message.content.some((part) => part?.type === "text" && part.text === text))
+          message.content.push({ type: "text", text })
+        info.attached.add(message.id)
+      }
+    },
     async tool(id, tool) {
       if (tracked(id) && WRITE_TOOLS.has(tool)) await send("PostToolUse", id)
     },
@@ -179,10 +193,14 @@ async function setup(ctx) {
   }
 
   await hook(() => ctx.session.hook("prompt", async (event) => {
-    const info = await core.message(event?.sessionID, () => (typeof event?.prompt?.text === "string" ? event.prompt.text : ""))
+    const info = await core.message(event?.sessionID, () => (typeof event?.prompt?.text === "string" ? event.prompt.text : ""),
+      event?.messageID)
     if (info) info.awaitingStop = true
   }))
+  // One hook carries both: the turn context goes to its own message first, so the system part
+  // holds only the session context and stays identical for the provider's prompt cache.
   await hook(() => ctx.session.hook("context", async (event) => {
+    core.attachModel(event?.sessionID, event?.messages)
     if (Array.isArray(event?.system))
       for (const text of core.context(event?.sessionID)) event.system.push({ type: "text", text })
   }))

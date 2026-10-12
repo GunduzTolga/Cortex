@@ -154,9 +154,21 @@ def options(clients=CLIENTS, local=LOCAL, which=shutil.which, vault=None):
                               istemci=runner['ad'], yerel=name, saglayici=provider, args=args,
                               modeller=downloaded, yuklu=loaded, baglam=rest[0] if rest else {}))
         elif runner and any(which(tool) for tool in LOCAL_TOOLS.get(provider, ())):
-            # "Name: what is missing"; the menu aligns the names in a column.
-            hints.append(name + ': sunucu kapalı ya da yüklü model yok, model açınca burada görünür')
+            # Installed but its server is off or has no model: a red row, not a launchable one.
+            found.append({'id': provider, 'ad': name, 'hafiza': 'tam', 'kapali': True})
     return found, hints
+
+
+def usable(found):
+    return [option for option in found if not option.get('kapali')]
+
+
+OFF_LABEL = 'kapalı · açıp bir model yükle'
+
+
+def off_message(option):
+    return (option['ad'] + ' kapalı ya da yüklü modeli yok. Uygulamayı açıp bir model yükle; '
+            'satır yeşile döner ve o modelle açılır.')
 
 
 def local_model(option, last):
@@ -296,6 +308,7 @@ def _ask(prompt, read=input):
 # ---------------------------------------------------------------- welcome box
 
 GOLD, BOLD, DIM, RESET = '\x1b[38;2;232;178;58m', '\x1b[1m', '\x1b[2m', '\x1b[0m'
+GREEN, RED = '\x1b[38;2;94;186;92m', '\x1b[38;2;217;83;79m'
 # The Sixel seal is 120 px; Windows Terminal draws Sixel on a 10x20 px virtual cell.
 LOGO_COLUMNS, LOGO_ROWS = 12, 6
 LEFT_WIDTH = 34
@@ -475,7 +488,7 @@ def show_welcome(vault, out=None, environ=None):
 
 
 def menu_text(found, default, hints, color=False):
-    """The numbered client list, then what is missing on this machine, each in aligned columns."""
+    """The numbered list with a status dot (green ready, red off), then what needs attention."""
     def paint(text, style):
         return style + text + RESET if color else text
 
@@ -483,13 +496,17 @@ def menu_text(found, default, hints, color=False):
     width = max(map(len, labels), default=0)
     lines = ['', '  ' + paint('Hangi istemciyle konuşalım?', BOLD), '']
     for number, (option, label) in enumerate(zip(found, labels), 1):
+        off = option.get('kapali')
+        # Without colour the dot's shape carries the state.
+        dot = paint('●', RED if off else GREEN) if color else ('○' if off else '●')
         mark = '   ' + paint('← son kullanılan', GOLD) if option is default else ''
-        lines.append('  ' + paint(f'{number:>2}', GOLD) + '  ' + label.ljust(width) + '   '
-                     + paint(MEMORY_LABEL[option['hafiza']], DIM) + mark)
+        state = OFF_LABEL if off else MEMORY_LABEL[option['hafiza']]
+        lines.append('  ' + paint(f'{number:>2}', GOLD) + '  ' + dot + ' ' + label.ljust(width) + '   '
+                     + paint(state, DIM) + mark)
     notes = [hint.split(': ', 1) if ': ' in hint else ['', hint] for hint in hints]
     if notes:
         name_width = max(len(name) for name, _ in notes)
-        lines += ['', '  ' + paint('Notlar', BOLD)]
+        lines += ['', '  ' + paint('Dikkat', BOLD)]
         for name, text in notes:
             lines.append('   ·  ' + name.ljust(name_width) + '   ' + paint(text, DIM))
     lines.append('')
@@ -636,27 +653,307 @@ def uninstall_shell(paths=None, cmd=None):
     return {'status': 'kaldirildi' if removed else 'kurulu_degil', 'silinen': removed}
 
 
+# ---------------------------------------------------------------- terminal look
+
+# A fixed id, so a second `pyn kur` updates the same profile: uuid5(URL, 'cortex:pyn:windows-terminal').
+PROFILE_GUID = '{b6965b45-0f5a-5807-8742-aa4972eb0c0b}'
+PROFILE_IMAGES = {'pyn-ikon.png': 'MUHUR_56', 'pyn-muhur-200.png': 'MUHUR_200'}
+OWNED = 'pyn-kur.json'  # what `pyn kur` wrote, so `pyn kaldir` removes only that
+
+
+def _owned(state):
+    try:
+        data = json.loads((Path(state) / OWNED).read_text(encoding='utf-8'))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def _own(state, **changes):
+    data = _owned(state)
+    data.update(changes)
+    data = {key: value for key, value in data.items() if value is not None}
+    path = Path(state) / OWNED
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False) + '\n', encoding='utf-8')
+
+
+def _powershell(argv):
+    """The installer's hook form: Claude Code runs Windows commands through Git Bash or cmd, and
+    an encoded PowerShell call is the one spelling that survives both with any path."""
+    import base64
+    script = '& ' + ' '.join("'" + str(value).replace("'", "''") + "'" for value in argv) + '; exit $LASTEXITCODE'
+    root = os.environ.get('SYSTEMROOT') or os.environ.get('WINDIR') or 'C:\\Windows'
+    launcher = str(Path(root) / 'System32/WindowsPowerShell/v1.0/powershell.exe').replace('\\', '/')
+    return (subprocess.list2cmdline([launcher]) + ' -NoProfile -NonInteractive -EncodedCommand '
+            + base64.b64encode(script.encode('utf-16le')).decode())
+
+
+def statusline_command(vault, python=None, windows=None):
+    import shlex
+    windows = os.name == 'nt' if windows is None else windows
+    argv = [str(python or sys.executable), str(Path(vault) / '.claude' / 'scripts' / 'beyin_v3_statusline.py'),
+            '--vault', str(vault)]
+    return _powershell(argv) if windows else shlex.join(argv)
+
+
+def install_statusline(vault, state, python=None, windows=None):
+    """Pyn's line under Claude Code's prompt, in this vault only (`.claude/settings.local.json`;
+    the installer keeps keys it does not manage). A status line someone else set stays."""
+    path = Path(vault) / '.claude' / 'settings.local.json'
+    try:
+        data = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+    except (OSError, ValueError):
+        return 'okunamadı'
+    if not isinstance(data, dict):
+        return 'okunamadı'
+    command = statusline_command(vault, python, windows)
+    current = data.get('statusLine')
+    theirs = current.get('command') if isinstance(current, dict) else current
+    if current and theirs not in (command, _owned(state).get('statusLine')):
+        return 'başkasının'
+    data['statusLine'] = {'type': 'command', 'command': command, 'padding': 0}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8', newline='\n')
+    _own(state, statusLine=command)
+    return 'kuruldu'
+
+
+def uninstall_statusline(vault, state):
+    path = Path(vault) / '.claude' / 'settings.local.json'
+    owned = _owned(state).get('statusLine')
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return 'kurulu_degil'
+    current = data.get('statusLine') if isinstance(data, dict) else None
+    if not owned or not isinstance(current, dict) or current.get('command') != owned:
+        return 'kurulu_degil'
+    del data['statusLine']
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n', encoding='utf-8', newline='\n')
+    _own(state, statusLine=None)
+    return 'kaldirildi'
+
+
+def terminal_folders(environ=None):
+    """Windows Terminal settings folders on this machine: (folder, packaged). The Store and
+    preview builds read their own folder through ms-appdata, the unpackaged build any path."""
+    environ = os.environ if environ is None else environ
+    local = environ.get('LOCALAPPDATA')
+    if not local:
+        return []
+    packages = Path(local) / 'Packages'
+    candidates = [(packages / name / 'LocalState', True) for name in
+                  ('Microsoft.WindowsTerminal_8wekyb3d8bbwe', 'Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe')]
+    candidates.append((Path(local) / 'Microsoft' / 'Windows Terminal', False))
+    return [(folder, packaged) for folder, packaged in candidates if (folder / 'settings.json').is_file()]
+
+
+def pyn_profile(folder, packaged):
+    def image(name):
+        return 'ms-appdata:///local/' + name if packaged else str(folder / name)
+    return {'guid': PROFILE_GUID, 'name': 'Pyn', 'commandline': '%SystemRoot%\\System32\\cmd.exe /k pyn',
+            'startingDirectory': '%USERPROFILE%', 'icon': image('pyn-ikon.png'), 'tabTitle': 'Pyn',
+            'suppressApplicationTitle': True, 'tabColor': '#E8B23A', 'backgroundImage': image('pyn-muhur-200.png'),
+            'backgroundImageAlignment': 'bottomRight', 'backgroundImageStretchMode': 'none',
+            'backgroundImageOpacity': 0.18}
+
+
+def _profiles(data):
+    profiles = data.setdefault('profiles', {})
+    return profiles if isinstance(profiles, list) else profiles.setdefault('list', [])
+
+
+def install_terminal_profile(environ=None):
+    """A 'Pyn' profile in Windows Terminal: the seal as tab icon and as a faint corner mark, a
+    gold tab named Pyn that keeps its name while a client runs. Returns one status per folder."""
+    import base64
+    try:
+        import beyin_v3_marka as marka
+        images = {name: base64.b64decode(''.join(getattr(marka, part))) for name, part in PROFILE_IMAGES.items()}
+    except (ImportError, AttributeError, ValueError):
+        images = {}
+    results = []
+    for folder, packaged in terminal_folders(environ):
+        settings = folder / 'settings.json'
+        try:
+            raw = settings.read_text(encoding='utf-8-sig')
+            data = json.loads(raw)
+        except (OSError, ValueError):
+            # Comments or a half-written file: never rewrite what cannot be read back exactly.
+            results.append((str(settings), 'okunamadı'))
+            continue
+        backup = folder / 'settings.pyn-yedek.json'
+        if not backup.exists():
+            backup.write_text(raw, encoding='utf-8')
+        for name, content in images.items():
+            target = folder / name
+            try:
+                if not target.exists() or target.read_bytes() != content:
+                    target.write_bytes(content)
+            except OSError:
+                pass  # an open Pyn tab holds its image; the one there keeps showing
+        profiles = _profiles(data)
+        profiles[:] = [p for p in profiles if not (isinstance(p, dict) and p.get('guid') == PROFILE_GUID)]
+        profiles.insert(0, pyn_profile(folder, packaged))
+        settings.write_text(json.dumps(data, indent=4, ensure_ascii=False) + '\n', encoding='utf-8')
+        results.append((str(settings), 'kuruldu'))
+    return results
+
+
+def uninstall_terminal_profile(environ=None):
+    results = []
+    for folder, _packaged in terminal_folders(environ):
+        settings = folder / 'settings.json'
+        try:
+            data = json.loads(settings.read_text(encoding='utf-8-sig'))
+        except (OSError, ValueError):
+            continue
+        profiles = _profiles(data)
+        kept = [p for p in profiles if not (isinstance(p, dict) and p.get('guid') == PROFILE_GUID)]
+        if len(kept) != len(profiles):
+            profiles[:] = kept
+            if isinstance(data.get('defaultProfile'), str) and data['defaultProfile'].lower() == PROFILE_GUID:
+                del data['defaultProfile']
+            settings.write_text(json.dumps(data, indent=4, ensure_ascii=False) + '\n', encoding='utf-8')
+            results.append(str(settings))
+        for name in PROFILE_IMAGES:
+            try:
+                (folder / name).unlink()
+            except OSError:
+                pass
+    return results
+
+
+# ---------------------------------------------------------------- client health
+
+# npm packages of the clients installed through npm; `pyn kontrol` compares versions.
+NPM_PACKAGES = {'claude': '@anthropic-ai/claude-code', 'codex': '@openai/codex', 'opencode': 'opencode-ai',
+                'gemini': '@google/gemini-cli', 'qwen': '@qwen-code/qwen-code'}
+HEALTH = 'pyn-saglik.json'
+HEALTH_DAYS = 14
+
+
+def _version(text):
+    found = re.search(r'(\d+)\.(\d+)\.(\d+)', text or '')
+    return '.'.join(found.groups()) if found else None
+
+
+def _newer(latest, installed):
+    def key(version):
+        return tuple(int(part) for part in version.split('.'))
+    return bool(latest and installed) and key(latest) > key(installed)
+
+
+def _output(argv, timeout):
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, encoding='utf-8', errors='replace',
+                              timeout=timeout, stdin=subprocess.DEVNULL)
+        return done.stdout + done.stderr
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return ''
+
+
+def check_clients(found, run=_output, which=shutil.which):
+    """{id: {ad, kurulu, son, paket}}: each client's own `--version` and, for npm clients, the
+    version npm publishes. The one `pyn` command that uses the network, and only when asked."""
+    from concurrent.futures import ThreadPoolExecutor
+    npm = which('npm')
+    clients = [o for o in found if not o.get('saglayici') and not o.get('kapali')]
+
+    def one(option):
+        package = NPM_PACKAGES.get(option['id'])
+        installed = _version(run([option['yol'], '--version'], 30))
+        latest = _version(run([npm, 'view', package, 'version'], 30)) if npm and package else None
+        return option['id'], {'ad': option['ad'], 'kurulu': installed, 'son': latest, 'paket': package}
+
+    with ThreadPoolExecutor(max_workers=max(len(clients), 1)) as pool:
+        return dict(pool.map(one, clients))
+
+
+def save_health(state, results, now=None):
+    import time
+    path = Path(state) / HEALTH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({'zaman': now or time.time(), 'istemciler': results}, ensure_ascii=False) + '\n',
+                    encoding='utf-8')
+
+
+def health_hints(state, now=None):
+    """Menu notes from the last `pyn kontrol`: outdated clients, or a reminder when it is old."""
+    import time
+    try:
+        data = json.loads((Path(state) / HEALTH).read_text(encoding='utf-8'))
+    except (OSError, ValueError, TypeError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    hints = []
+    for info in (data.get('istemciler') or {}).values():
+        if isinstance(info, dict) and _newer(info.get('son'), info.get('kurulu')):
+            hints.append(info['ad'] + ': ' + info['kurulu'] + ' kurulu, ' + info['son'] + ' çıktı; güncelle: npm i -g '
+                         + info['paket'] + '@latest')
+    days = int(((now or time.time()) - float(data.get('zaman') or 0)) // 86400)
+    if days >= HEALTH_DAYS:
+        hints.append('İstemciler: sürümler ' + str(days) + ' gün önce kontrol edildi; yeniden bak: pyn kontrol')
+    return hints
+
+
+def health_report(results):
+    lines = ['', '  İstemci sürümleri', '']
+    width = max((len(info['ad']) for info in results.values()), default=0)
+    for info in results.values():
+        if _newer(info['son'], info['kurulu']):
+            state = info['kurulu'] + ' → ' + info['son'] + ' çıktı · npm i -g ' + info['paket'] + '@latest'
+        elif info['kurulu']:
+            state = info['kurulu'] + ' · güncel' if info['son'] else info['kurulu']
+        else:
+            state = 'sürümü okunamadı'
+        lines.append('   ·  ' + info['ad'].ljust(width) + '   ' + state)
+    return '\n'.join(lines + [''])
+
+
 # ---------------------------------------------------------------- command line
 
 def main(argv, vault, state, interactive=None):
-    """`pyn [secim] [istemci argümanları]`, `pyn liste`, `pyn kur`, `pyn kaldir`."""
+    """`pyn [secim] [istemci argümanları]`, `pyn liste`, `pyn kontrol`, `pyn kur`, `pyn kaldir`."""
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(errors='replace')
     vault, argv = Path(vault), list(argv)
-    if argv[:1] in (['kur'], ['kaldir']):
-        result = install_shell(vault) if argv[0] == 'kur' else uninstall_shell()
-        if result['status'] == 'kuruldu':
-            print('`pyn` komutu eklendi. Yeni bir terminal aç ve her yerden `pyn` yaz.')
-        else:
-            print('`pyn` komutu kaldırıldı.' if result['status'] == 'kaldirildi' else '`pyn` komutu zaten kurulu değildi.')
+    if argv[:1] == ['kur']:
+        install_shell(vault)
+        print('`pyn` komutu eklendi. Yeni bir terminal aç ve her yerden `pyn` yaz.')
+        line = install_statusline(vault, state)
+        print({'kuruldu': '  Claude Code: Pyn durum satırı eklendi (yalnız bu vault\'ta).',
+               'başkasının': '  Claude Code: bu vault\'ta başka bir durum satırı var, dokunulmadı.',
+               'okunamadı': '  Claude Code: .claude/settings.local.json okunamadı, durum satırı eklenmedi.'}[line])
+        if os.name == 'nt':
+            for settings, status in install_terminal_profile():
+                print('  Windows Terminal: Pyn profili eklendi (sekme menüsünde, en üstte).' if status == 'kuruldu'
+                      else '  Windows Terminal: ' + settings + ' okunamadı (yorum satırı olabilir), profil eklenmedi.')
+        return 0
+    if argv[:1] == ['kaldir']:
+        result = uninstall_shell()
+        line = uninstall_statusline(vault, state)
+        profiles = uninstall_terminal_profile() if os.name == 'nt' else []
+        removed = (['`pyn` komutu'] if result['status'] == 'kaldirildi' else []) + (
+            ['Claude durum satırı'] if line == 'kaldirildi' else []) + (['Windows Terminal profili'] if profiles else [])
+        print('Kaldırıldı: ' + ', '.join(removed) + '.' if removed else '`pyn` zaten kurulu değildi.')
         return 0
     found, hints = options(vault=vault)
-    if argv[:1] == ['liste']:
-        print(json.dumps({'secenekler': [{k: o[k] for k in ('id', 'ad', 'hafiza')} for o in found], 'notlar': hints},
-                         ensure_ascii=False, indent=2))
+    if argv[:1] == ['kontrol']:
+        print('  İstemcilerin sürümleri soruluyor (npm), birkaç saniye sürebilir…')
+        results = check_clients(found)
+        save_health(state, results)
+        print(health_report(results))
         return 0
-    if not found:
+    hints += health_hints(state)
+    if argv[:1] == ['liste']:
+        print(json.dumps({'secenekler': [dict({k: o[k] for k in ('id', 'ad', 'hafiza')}, aktif=not o.get('kapali'))
+                                         for o in found], 'notlar': hints}, ensure_ascii=False, indent=2))
+        return 0
+    if not usable(found):
         print('Bu makinede Pyn\'i açabilecek bir istemci bulunamadı. Örnek: npm i -g @anthropic-ai/claude-code',
               file=sys.stderr)
         return 1
@@ -668,15 +965,19 @@ def main(argv, vault, state, interactive=None):
             name, client = option['yerel'], option['istemci']
             option['etiket'] = (client + ' · ' + option['model'] + ' (' + name + (', ' + why if why else '') + ')'
                                 if option['model'] else client + ' · yerel (' + name + ', model sorulacak)')
-    default = by_id(found, last.get('secim')) or found[0]
+    remembered = by_id(found, last.get('secim'))
+    default = remembered if remembered and not remembered.get('kapali') else usable(found)[0]
     interactive = sys.stdin.isatty() if interactive is None else interactive
     choice, extra = None, argv
     if argv and not argv[0].startswith('-'):
         choice = pick(found, argv[0], None)
         if choice is None:
-            print('Böyle bir seçenek yok: ' + argv[0] + '. Seçenekler: ' + ', '.join(o['id'] for o in found),
+            print('Böyle bir seçenek yok: ' + argv[0] + '. Seçenekler: ' + ', '.join(o['id'] for o in usable(found)),
                   file=sys.stderr)
             return 2
+        if choice.get('kapali'):
+            print(off_message(choice), file=sys.stderr)
+            return 1
         extra = argv[1:]
     if choice is None:
         if len(found) == 1 or not interactive:
@@ -690,6 +991,9 @@ def main(argv, vault, state, interactive=None):
                 choice = pick(found, answer, default)
                 if choice is None:
                     print('  Anlamadım; numara ya da ad yaz.')
+                elif choice.get('kapali'):
+                    print('  ' + off_message(choice))
+                    choice = None
     model = None
     if choice.get('saglayici'):
         # Whatever the machine has loaded runs; asked only when nothing says which one.

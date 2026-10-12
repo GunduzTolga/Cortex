@@ -1,214 +1,352 @@
-# 🧠 Cortex V3
+<p align="center">
+  <img src="tema/ananas/marka/pyn-muhur-200.png" width="132" alt="Pyn'in mührü: altın zemin üzerinde ananas">
+</p>
 
-Cortex, Claude Code, Codex veya Google Antigravity ile kullanabileceğin yerel ikinci beyin; maskotu yapay zekâ destekli ananas **Pyn**. Notların Markdown dosyalarında kalır; bir istemcide kaydettiğin kaynak ve iş sonucu diğerinde de bulunabilir. Obsidian ile açabilir, normal bir metin editörüyle düzenleyebilirsin.
+<h1 align="center">Cortex</h1>
 
-Python **3.11 veya üzeri** yeterli. Git, pip, Mem0 hesabı, API anahtarı veya sürekli açık sunucu gerekmez. Kullandığın AI istemcisinin kendi kurulumu ve hesabı ayrı olarak gerekir.
+<p align="center">
+  <b>Yapay zekâ asistanların için yerel, kalıcı bir ikinci beyin.</b><br>
+  Notların senin Markdown dosyalarında kalır; Claude Code, Codex, OpenCode ve diğerleri aynı hafızayı paylaşır.<br>
+  Maskotu ve düşünme ortağın: ananas <b>Pyn</b>.
+</p>
 
-> **Cortex 1.0.5:** `pyn` karşılama kutusu ve mühürle açılır, cmd'de de çalışır; OpenCode'da sağlayıcı önbelleği korunur, abonelik kotası çok daha geç dolar; yerel modeller OpenCode'da açılır; LM Studio'da hangi model yüklüyse o, katalogda olmasa da ([1.0.5](docs/v3/releases/1.0.5.md)). **1.0.4:** Gemini CLI ve Qwen Code artık tam hafızalı ([1.0.4](docs/v3/releases/1.0.4.md)). **1.0.3:** Yeni `pyn` komutu: her yerden Pyn'i istediğin istemciyle aç ([1.0.3](docs/v3/releases/1.0.3.md), [nasıl](#pyni-her-yerden-aç-pyn)). **1.0.2:** Windows'ta Ctrl+Alt+B penceresi anında açılır ve Ananas yazı tipleriyle çizilir ([1.0.2](docs/v3/releases/1.0.2.md)). **1.0.1:** Pyn görünür oldu: Obsidian'da klasör ikonları, Pyn'in mührü ve boş sekmede yüzü; yakala penceresinde mühür ve daha hızlı açılış. İlk sürüm (1.0.0) ile gelenler: Obsidian için isteğe bağlı **Ananas** görsel teması, maskot **Pyn** ve güncellemelerin artık Cortex'in kendi GitHub sürümlerinden gelmesi. İsteğe bağlı **yakala** aracı da yerinde: gördüğün yerde tek tuşla video, tweet, makale, mail ya da dosya yakala (`python3 beyin.py yakala kur`). 3.9.0 kurulu bir vault'u Cortex'e bir kez elle taşı (aşağıdaki **Manuel kurulum**, notların korunur); eski sürümün güncelleyicisi hâlâ eski adrese baktığı için ilk geçişte `update` işe yaramaz, sonraki güncellemeler Cortex'ten gelir. [Sürüm notları](docs/v3/releases/1.0.1.md) · [1.0.0](docs/v3/releases/1.0.0.md) · [Ananas teması](#ananas-teması) · [Yakala](docs/v3/YAKALA.md) · [Güncelleme rehberi](docs/v3/UPDATE.md).
+<p align="center">
+  <img alt="Sürüm 1.0.6" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.6-E8B23A">
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
+  <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
+  <img alt="Telemetri yok" src="https://img.shields.io/badge/telemetri-yok-1B1712">
+</p>
 
-## En kolay kurulum: bir klasör, bir mesaj
+---
 
-1. Obsidian'da yeni bir vault oluştur veya mevcut vault klasörünü seç.
-2. Bu klasörü Codex, Claude Code veya Antigravity ile aç.
+## İçindekiler
+
+- [Cortex nedir?](#cortex-nedir)
+- [Desteklenen istemciler](#desteklenen-istemciler)
+- [Kurulum](#kurulum)
+- [Kurulumdan sonra: beş adımda hazır](#kurulumdan-sonra-beş-adımda-hazır)
+- [`pyn`: Pyn'i her yerden aç](#pyn-pyni-her-yerden-aç)
+- [Günlük kullanım](#günlük-kullanım)
+- [Gizlilik: notların nereye gider?](#gizlilik-notların-nereye-gider)
+- [İsteğe bağlı eklentiler](#isteğe-bağlı-eklentiler)
+- [Tüketim ve kontrol sıklığı](#tüketim-ve-kontrol-sıklığı)
+- [Güncelleme](#güncelleme)
+- [Sorun giderme](#sorun-giderme)
+- [Eski bir kurulumdan geliyorsan](#eski-bir-kurulumdan-geliyorsan)
+- [Sürüm geçmişi](#sürüm-geçmişi)
+- [Geliştiriciler](#geliştiriciler)
+
+---
+
+## Cortex nedir?
+
+Her yapay zekâ asistanı oturum kapanınca unutur; bir istemcide anlattığını diğeri bilmez. Cortex bu boşluğu kapatır. Bir Obsidian vault'una (ya da sıradan bir klasöre) kurulur ve kullandığın istemcilere ortak bir hafıza bağlar:
+
+- **Hatırlar.** Her oturum açılışında ve her mesajda, konuyla ilgili notların asistanın bağlamına eklenir. Önceki oturumun devir kartı, açık konular ve senin düzeltmelerin hep el altındadır.
+- **Kaynak gösterir.** Biten işler kısa, kaynak bağlantılı makbuzlarla kaydedilir. Neyin nereden geldiği her zaman izlenebilir.
+- **İstemciden bağımsızdır.** Claude Code'da kaydettiğini Codex'te, OpenCode'da ya da yerel bir modelde bulursun.
+- **Senin dosyalarındır.** Her şey düz Markdown'dır; Obsidian'la ya da herhangi bir editörle açar, düzenlersin.
+- **Hafif ve yereldir.** Git, pip, API anahtarı, hesap ya da sürekli açık bir sunucu gerekmez. Motor kendi başına hiçbir model çağırmaz ve telemetri toplamaz.
+
+Cortex'in içinde bir düşünme ortağı da gelir: **Pyn**. Seni tanır, fikirlerine gerekçeli itiraz eder, işlerini takip eder ve öğrendiklerini düzenler. Kimliği ve hafızası vault'undaki Markdown dosyalarındadır.
+
+## Desteklenen istemciler
+
+Hafızayı model değil istemci taşır. Bu yüzden ücretsiz, uygun fiyatlı ya da yerel modellerin hepsi, tam hafızalı bir istemcinin içinden kullanılabilir.
+
+| İstemci | Hafıza | Not |
+| --- | --- | --- |
+| **Claude Code** | Tam | Hook'lar her oturumda ve her mesajda bağlam ekler. |
+| **Codex** | Tam | İlk açılışta `/hooks` ekranında hook'ları inceleyip güven. |
+| **OpenCode** | Tam | z.ai GLM, OpenCode Go ve Zen aboneliği, OpenRouter ve yerel modeller (LM Studio, Ollama) burada. Eklenti kurulumla gelir, ek adım yok. |
+| **Qwen Code** | Tam | Hook'lar kurulumda `.qwen/settings.json` dosyasına yazılır. |
+| **Gemini CLI** | Tam | Hook'lar kurulumda `.gemini/settings.json` dosyasına yazılır. Google, bireysel Google hesabıyla girişi kapattı; Gemini CLI'yi API anahtarıyla kullan. |
+| **Oh My Pi (OMP)** | Tam | Kurulum `.omp/hooks/pre/beyin-v3.ts` dosyasını yazar. [Ayrıntılar](docs/v3/OMP.md) |
+| **Google Antigravity** | Oturum başında | Kurulum `.agents/hooks.json` dosyasını yazar. Hafıza ilk model çağrısında eklenir, tur sonları kaydedilir; mesaj başına bağlam yoktur. |
+| **Hermes Agent** | Tam | Eklenti vault'a yazılır; etkinleştirme adımını sen yaparsın. [Ayrıntılar](docs/v3/HERMES.md) |
+| **Cursor Agent** | Talimatla | `AGENTS.md`'yi okur ve hafıza dosyalarını kendisi yükler; otomatik bağlam ve makbuz hatırlatması yoktur. |
+
+**Tam hafıza:** Hook'lar Pyn'in hafızasını her oturum açılışında ve her mesajda bağlama ekler, dosya düzenlenen oturumun sonunda makbuz hatırlatır. Gemini ve Qwen ilk açılışta bu hook'lara güvenip güvenmediğini sorar: kabul et. O dosyalardaki diğer ayarların korunur.
+
+## Kurulum
+
+**Gereksinimler:** Python **3.11 veya üzeri** ve kullanmak istediğin yapay zekâ istemcisi (kendi kurulumu ve hesabıyla). Windows, macOS ve Linux desteklenir.
+
+İki yol var. İkisi de mevcut notlarına dokunmaz; Cortex'i zaten kurduysan aynı yol, notlarını koruyarak günceller.
+
+### Yol 1: Asistanına kurdur (en kolayı)
+
+1. Obsidian'da yeni bir vault oluştur ya da mevcut vault klasörünü seç.
+2. Bu klasörü Claude Code, Codex ya da Antigravity ile aç.
 3. Aşağıdaki mesajı yapıştır:
 
 > https://raw.githubusercontent.com/GunduzTolga/Cortex/main/beyin.md adresini oku. Bu klasöre ikinci beynimi kur. Mevcut kurulum varsa notlarımı koruyarak güncelle. Gerekli indirme ve kurulum adımlarını sen yap. Sonunda örnek bir bilgiyi kaydedip yeni oturumda geri okuyarak birlikte doğrulayalım.
 
-Ajan resmi kararlı paketi bulur, checksum ile doğrular, geçici alanda açar, kurulumu yapar ve sağlık kontrolünü çalıştırır. Kullanıcı yalnızca istemcinin gösterdiği normal klasör, workspace veya hook güven incelemesini tamamlar.
+Asistan resmi kararlı paketi bulur, checksum ile doğrular, geçici bir alanda açar, kurar ve sağlık kontrolünü çalıştırır. Sana yalnız istemcinin gösterdiği klasör ya da hook güven onayını vermek kalır.
 
-## Manuel kurulum
+### Yol 2: Elle kur
 
-1. [Son kararlı sürüm sayfasını](https://github.com/GunduzTolga/Cortex/releases/latest) aç. **`beyin-v3-X.Y.Z.zip`** dosyasını ve yanındaki SHA-256 dosyasını indir (`X.Y.Z` sayfadaki sürüm numarasıdır). GitHub'ın otomatik “Source code” arşivi yerine bu paketi seç.
-2. Obsidian'da bir vault oluştur veya mevcut vault klasörünü seç. Notlarını başka yere taşıman gerekmez.
-3. Açtığın paket klasöründe terminal aç ve vault yolunu kendi klasörünle değiştir:
+1. [Son kararlı sürüm sayfasından](https://github.com/GunduzTolga/Cortex/releases/latest) **`beyin-v3-X.Y.Z.zip`** paketini ve yanındaki **`.sha256`** dosyasını indir. GitHub'ın otomatik "Source code" arşivini değil, bu paketi seç.
+2. Paketi bir klasöre aç ve o klasörde terminal aç.
+3. Kurucuyu vault klasörünü göstererek çalıştır:
 
-macOS / Linux:
-
-```sh
-python3 scripts/install_v3.py --vault "/tam/yol/Beynim"
-```
-
-Windows:
+**Windows (PowerShell ya da cmd):**
 
 ```powershell
 py -3 scripts/install_v3.py --vault "C:\Notlar\Beynim"
 ```
 
-Kurulum üç istemci için proje bağlantılarını, ortak motoru, üç başlangıç skill'ini ve güncelleme kısayolunu kurar. Bundan sonra paket klasörünü açık tutman gerekmez.
+**macOS / Linux:**
 
-Hermes Agent kullanıyorsan aynı motor bir Hermes eklentisi üzerinden bağlanır; installer eklenti dosyalarını vault içine yazar, ama profil bazlı bağlantı ve `hermes plugins enable beyin-v3` adımını sen yaparsın. Adımlar: [docs/v3/HERMES.md](docs/v3/HERMES.md). Bu destek V3.1.0 ve sonraki paketlere dahildir.
+```sh
+python3 scripts/install_v3.py --vault "/tam/yol/Beynim"
+```
 
-Vault klasörünü kullandığın AI istemcisinde açıp **yeni bir oturum başlat**. Codex'te `/hooks` ekranında yeni hook tanımlarını inceleyip güven; diğer istemcilerde workspace güvenini tamamla. İstemci güvenini kurucu senin adına uydurmaz. Agent ile kurulum yapmak istersen [SETUP-V3.md](SETUP-V3.md) rehberini takip etmesini iste.
+Kurucu istemci bağlantılarını, ortak motoru, üç başlangıç skill'ini ve güncelleme kısayolunu kurar. Bundan sonra paket klasörüne ihtiyacın kalmaz, silebilirsin.
 
-OpenCode için ek adım yok: installer vault içine eklentisini yazar, OpenCode vault klasöründe açılınca aynı motora bağlanır. Aynı eklenti OpenCode 1.x (1.3.4 ve sonrası) ve 2.x ile çalışır. OpenCode 2.x eklentileri istemci kapansa da çalışan arka plan servisinde yükler; bu yüzden orada `SessionEnd` yalnız oturum silinince veya servis durunca gelir, tur sonu senkronizasyonu `Stop` ile her turda sürer. Adımlar: [docs/v3/OPENCODE.md](docs/v3/OPENCODE.md).
+> **Not:** Arama indeksi ve çalışma dosyaları vault'un dışında, yalnız senin hesabının okuyabildiği bir klasörde tutulur. Başka bir yer istersen kurulumda `--state "/ayri/klasor"` ver. Ayrıntılar: [güncelleme ve runtime rehberi](docs/v3/UPDATE.md).
 
-OMP (Oh My Pi) için ek adım yok: installer vault içine `.omp/hooks/pre/beyin-v3.ts` yazar, OMP vault klasöründe açılınca aynı motora bağlanır. Dosyayı global agentDir'e kopyalama; vault dışında işe yaramaz. Adımlar: [docs/v3/OMP.md](docs/v3/OMP.md).
+## Kurulumdan sonra: beş adımda hazır
 
-## İlk konuşma
+**1. Vault'u istemcinde aç ve yeni bir oturum başlat.** Codex'te `/hooks` ekranında yeni hook'ları incele ve güven. Diğer istemcilerde klasör ya da workspace güvenini onayla. Kurucu bu güveni senin yerine vermez.
 
-V3.1.0 kişilik/süreklilik davranışı: yeni kurulum düşünme ortağı kimliğini
-ve başlangıç notlarını oluşturur; mevcut Core/Soul, kullanıcı düzeltmeleri, aktif konular
-ve son oturum kaynakları açılışta önceliklidir. Kalıcı öğrenimler aktif ajan tarafından
-kavram ve bağlantı notlarına işlenir. [V2/V3 karşılaştırması ve doğrulama](docs/v3/COMPANION-PARITY.md).
-Bu davranış V3.1.0 ve sonraki paketlere dahildir.
-
-Ajanına şunu söyle:
+**2. Pyn'le tanış.** Asistanına şunu yaz:
 
 > Beyin skill'ini kullan. Beni tanımak için kısa sorular sor; cevapları kaynak notlara kaydet. Sonra birlikte bir görev oluşturup tekrar okuyalım.
 
-Kurulu üç skill:
+Pyn hitap şeklini, çalışma alanını ve beklentilerini öğrenip `Core.md`'ye yazar. Kurulu üç skill:
 
-| Skill | Ne zaman kullanılır? |
+| Skill | Ne zaman? |
 | --- | --- |
-| **beyin** | Not bulmak, bilgi kaydetmek, görev değiştirmek, iş sonucu ve ders çıkarmak |
-| **beyin-doktor** | Bir not bulunamıyorsa, bağlantı veya kayıt sorunu varsa |
-| **beyin-guncelle** | Kurulu sistemi kontrol etmek, güncellemek veya geri almak |
+| **beyin** | Not bulmak, bilgi kaydetmek, görev güncellemek, iş sonucu ve ders çıkarmak |
+| **beyin-doktor** | Bir not bulunamıyorsa, bağlantı ya da kayıt sorunu varsa |
+| **beyin-guncelle** | Kurulu sistemi kontrol etmek, güncellemek ya da geri almak |
 
-Bunlar `.agents/skills` altında bulunur; istemciler aynı kaynakları kullanır. Eklemek istediğin kişisel skill'leri ayrıca içe alabilirsin. Aynı adlı farklı içerik sessizce ezilmez.
-
-## Pyn'i her yerden aç: `pyn`
-
-Vault klasöründe bir kez:
+**3. `pyn` komutunu kur.** Vault klasöründe bir kez:
 
 ```sh
-python3 beyin.py pyn kur
+py -3 beyin.py pyn kur        # Windows
+python3 beyin.py pyn kur      # macOS / Linux
 ```
 
-Windows'ta `py -3`. Bundan sonra hangi klasörde olursan ol, yeni bir terminalde `pyn` yazman yeter: PowerShell, cmd, bash ve zsh'ta çalışır. cmd profil okumadığı için Windows'ta `pyn kur` ayrıca `pyn.cmd` yazar; yeri Windows'un her kullanıcıda zaten PATH'e koyduğu `%LOCALAPPDATA%\Microsoft\WindowsApps`, PATH'ine dokunulmaz. Pyn önce bir karşılama kutusu gösterir (Pyn'in mührü, son oturum, ipuçları), sonra bu makinede kurulu istemcileri sorar, seçtiğini vault'ta açar ve son seçimini hatırlar (Enter):
+Yeni bir terminal aç ve nerede olursan ol `pyn` yaz. Ayrıntılar [aşağıda](#pyn-pyni-her-yerden-aç).
+
+**4. Doğrula.** Asistanına bir bilgi söyleyip kaydettir, yeni bir oturumda sor. Terminalden sağlık kontrolü:
+
+```sh
+py -3 beyin.py doctor         # Windows
+python3 beyin.py doctor       # macOS / Linux
+```
+
+**5. İsteğe bağlı:** Obsidian için [Ananas teması](#ananas-teması) ve tek tuşla kaynak yakalamak için [yakala](#tek-tuşla-beyne-at-yakala).
+
+## `pyn`: Pyn'i her yerden aç
+
+`pyn`, hangi klasörde olursan ol Pyn'i istediğin istemciyle vault'unda açar. Önce altın çerçeveli bir karşılama kutusu gösterir: solda Pyn'in mührü, sağda son oturumun ve ipuçları. Ardından bu makinede kurulu istemcileri listeler:
 
 ```
   Hangi istemciyle konuşalım?
 
-   1  Claude Code                                    tam hafıza   ← son kullanılan
-   2  Codex                                          tam hafıza
-   3  OpenCode                                       tam hafıza
-   4  Gemini CLI                                     tam hafıza
-   5  OpenCode · qwen3-coder-30b (LM Studio, yüklü)  tam hafıza
+   1  ● Claude Code                                    tam hafıza   ← son kullanılan
+   2  ● Codex                                          tam hafıza
+   3  ● OpenCode                                       tam hafıza
+   4  ● Qwen Code                                      tam hafıza
+   5  ● OpenCode · qwen3-coder-30b (LM Studio, yüklü)  tam hafıza
+   6  ● Ollama                                         kapalı · açıp bir model yükle
+
+  Dikkat
+   ·  Codex   0.122.0 kurulu, 0.162.1 çıktı; güncelle: npm i -g @openai/codex@latest
+
+  Seçimin [1-6, Enter = Claude Code, q = çık]:
 ```
 
-Mühür gerçek bir resim olarak çizilir (Sixel): Windows Terminal 1.22 ve sonrası, WezTerm, iTerm2. `pyn` terminale resim çizip çizemediğini sorar; çizemeyen terminalde kutu resimsiz gelir. `PYN_LOGO=0` resmi kapatır, `PYN_LOGO=1` sormadan çizer, `NO_COLOR` kutuyu tümden kapatır.
+Her satırın başındaki nokta durumu gösterir: **yeşil** hazır, **kırmızı** kapalı. Ollama ya da LM Studio kuruluysa ama sunucusu kapalıysa ya da yüklü modeli yoksa kırmızı görünür; seçersen ne yapman gerektiğini söyler. Uygulamayı açıp bir model yüklediğinde satır yeşile döner ve o modelle açılır. "Dikkat" bölümü, `pyn kontrol`ün bulduğu eski istemcileri güncelleme komutlarıyla gösterir.
 
-- **Tam hafıza:** Claude Code, Codex, Gemini CLI, Qwen Code, OpenCode, Oh My Pi. Hook'lar Pyn'in hafızasını her oturum açılışında ve her mesajda bağlama ekler, dosya düzenlenen oturumun sonunda makbuz hatırlatır. Gemini ve Qwen'in hook'ları kurulumda vault'un proje ayarına yazılır (`.gemini/settings.json`, `.qwen/settings.json`); o dosyalardaki diğer ayarların korunur. İlk açılışta istemci bu hook'lara güvenip güvenmediğini sorar: kabul et.
-- **Talimatla:** Cursor Agent. İstemci `AGENTS.md`'yi okur ve Pyn'in kimlik ve hafıza dosyalarını kendisi yükler; otomatik bağlam ve makbuz hatırlatması yoktur.
-- **Hangi model?** Hafızayı model değil istemci taşır. Ücretsiz ve uygun fiyatlı modellerin hepsi tam hafızalı bir istemcinin içinden çalışır: Gemini modelleri Gemini CLI'da (Google hesabıyla ücretsiz kota), Qwen modelleri Qwen Code'da; z.ai GLM, OpenCode Go aboneliği, OpenCode Zen ve OpenRouter gibi sağlayıcılar ve yerel modeller OpenCode'da. Sağlayıcı girişlerini OpenCode'da bir kez sen yaparsın (`opencode auth login`); Cortex anahtarlarını hiç görmez. OpenCode içinde modeli `/models` ile değiştirirsin.
-- **Yerel modeller:** Ollama ya da LM Studio açıksa ve indirilmiş bir sohbet modeli varsa, menüde o model için bir satır çıkar. OpenCode kuruluysa model onunla, değilse Codex'le (`--oss`) açılır; ikisinde de hafıza tam çalışır. OpenCode'un LM Studio listesinde olmayan bir model de çalışır: `pyn` o modeli yalnız o açılış için OpenCode'a tanıtır (`OPENCODE_CONFIG_CONTENT`), hiçbir ayar dosyasına yazmaz. Model, LM Studio'nun yüklediği bağlam uzunluğu 32K'nın altındaysa `pyn` uyarır: OpenCode'un ilk isteği bile yaklaşık 10 bin token, kısa bağlamda hafıza kesilir. LM Studio'da modeli yüklerken Context Length'i artır. Model sorulmaz, makine söyler: **şu an yüklü olan** (LM Studio'da yüklediğin, Ollama'da bellekte olan) çalışır; yoksa bu makinede son kullandığın; o da yoksa tek indirilmiş model. Yalnız birden fazla model indirilmiş ve hiçbiri yüklü değilse bir kez sorar. "Son kullanılan" vault'ta değil, makinenin kendi state klasöründe durur: masaüstü ve laptop kendi modellerini ayrı hatırlar. `pyn` bu sunuculara yalnız zaten açıklarsa sorar, kendisi hiçbir şey başlatmaz; embedding modelleri listelenmez.
+Enter son seçimini açar. Kutuda kimsenin adı yazmaz; aynı vault'u kim açarsa aynı karşılamayı görür.
 
-Doğrudan seçmek için `pyn claude`, `pyn codex` ya da numarası. Sonraki argümanlar istemciye aynen gider: `pyn claude --continue`. Komutu kaldırmak için `pyn kaldir`.
+### Komutlar
+
+| Komut | Ne yapar? |
+| --- | --- |
+| `pyn` | Karşılama kutusu ve istemci menüsü |
+| `pyn 2`, `pyn claude`, `pyn codex` | Menüsüz, doğrudan o istemciyle açar |
+| `pyn claude --continue` | Sonraki argümanlar istemciye aynen gider |
+| `pyn liste` | Bulunan istemcileri JSON olarak listeler |
+| `pyn kontrol` | Kurulu istemcilerin sürümlerini npm'deki son sürümle karşılaştırır |
+| `pyn kur` | Komutu ve görünümü kurar (aşağıda) |
+| `pyn kaldir` | `pyn kur`un eklediği her şeyi geri alır |
+
+### `pyn kur` neleri kurar?
+
+| Ne | Nerede | Not |
+| --- | --- | --- |
+| `pyn` komutu | PowerShell profili, `.bashrc` / `.zshrc` | Profilde yalnız kendi işaretli bölümü durur. |
+| cmd desteği | `%LOCALAPPDATA%\Microsoft\WindowsApps\pyn.cmd` | cmd profil okumaz. Bu klasör her Windows kullanıcısında zaten PATH'tedir, PATH'ine dokunulmaz. |
+| Claude Code durum satırı | Vault'taki `.claude/settings.local.json` | Claude'un yazma kutusunun altında `Pyn · ikinci beyin · Sonnet 5.5 · son: …` satırı. Yalnız bu vault'ta açılan Claude oturumlarında görünür. Kendi durum satırın varsa dokunulmaz. |
+| Windows Terminal profili | Windows Terminal ayarları | Sekme menüsünde **Pyn**: ananas ikonu, altın sekme, sağ alt köşede soluk mühür. Açılınca `pyn` başlar. Varsayılan profilin değişmez; ilk kurulumdan önce ayarların `settings.pyn-yedek.json` olarak yedeklenir. |
+
+Her şey `pyn kaldir` ile geri alınır. Başka bir programa ait aynı adlı dosyalar ne değiştirilir ne silinir.
+
+### Mühür hangi terminalde görünür?
+
+Mühür terminalin içinde gerçek bir resim olarak çizilir (Sixel): Windows Terminal 1.22 ve sonrası, WezTerm ve iTerm2. `pyn` açılışta terminale resim çizip çizemediğini sorar; çizemeyen terminalde kutu resimsiz gelir, ekrana bozuk karakter dökülmez.
+
+- `PYN_LOGO=0`: resmi kapatır.
+- `PYN_LOGO=1`: sormadan çizer.
+- `NO_COLOR`: kutuyu tümden kapatır.
+
+### Yerel modeller
+
+Ollama ya da LM Studio açıksa ve indirilmiş bir sohbet modeli varsa, menüde o model için bir satır çıkar. OpenCode kuruluysa model onunla, değilse Codex'le (`--oss`) açılır; ikisinde de hafıza tam çalışır.
+
+- **Hangi model?** Sorulmaz, makine söyler: şu an yüklü olan; yoksa bu makinede son kullandığın; o da yoksa tek indirilmiş model. Birden fazla model indirilmiş ve hiçbiri yüklü değilse bir kez sorar. "Son kullanılan" vault'ta değil, makinenin kendi klasöründe durur: masaüstü ve laptop kendi modellerini ayrı hatırlar.
+- **Listede olmayan model de çalışır.** `pyn` modeli yalnız o açılış için OpenCode'a tanıtır (`OPENCODE_CONFIG_CONTENT`), hiçbir ayar dosyasına yazmaz.
+- **Bağlam uzunluğu:** OpenCode'un ilk isteği Pyn'in hafızasıyla birlikte yaklaşık 10 bin token. LM Studio modeli 32K'nın altında bir bağlamla yüklemişse `pyn` uyarır; modeli yüklerken Context Length'i artır.
+- `pyn` bu sunuculara yalnız zaten açıklarsa sorar, kendisi hiçbir şey başlatmaz. Embedding modelleri listelenmez.
+
+### Sağlayıcılar ve abonelikler
+
+Sağlayıcı girişlerini OpenCode'da bir kez sen yaparsın: `opencode auth login`. Cortex anahtarlarını hiç görmez. OpenCode içinde modeli `/models` ile değiştirirsin. OpenCode'da her turun notları o turun kendi mesajına eklenir ve sistem metni oturum boyunca değişmez. Böylece sağlayıcının önbelleği korunur ve abonelik kotası çok daha geç dolar.
 
 ## Günlük kullanım
 
-Notu yaz, ajana ne istediğini söyle. Kaynaklar oturum açılışı ve konuşmanın uygun noktalarında yeniden indekslenir. İstemciler kapalıyken sürekli tarayan bir servis yoktur. Önemli iş sonuçları kısa, kaynak bağlantılı kayıtlarla tutulur; tüm sohbetin kendiliğinden doğru bilgiye dönüştüğü iddia edilmez.
+Notunu yaz, asistanına ne istediğini söyle. Kaynaklar oturum açılışında ve konuşmanın uygun noktalarında yeniden indekslenir; istemciler kapalıyken arka planda çalışan bir servis yoktur. Önemli iş sonuçları kısa, kaynak bağlantılı kayıtlarla tutulur. Sohbetin tamamı kendiliğinden doğru bilgiye dönüşmez; kalıcı olmasını istediğin karar ve bilgiyi nota yazdır.
 
-Beyin sohbet metnini saklamaz. Claude Code yerel sohbet kayıtlarını (`~/.claude/projects/`) varsayılan olarak 30 gün sonra siler; kalıcı olmasını istediğin karar ve bilgiyi nota yazdır. Süreyi uzatmak için `~/.claude/settings.json` içine örneğin `"cleanupPeriodDays": 365` ekle ([Claude Code belgesi](https://code.claude.com/docs/en/claude-directory#cleaned-up-automatically)).
+| İstersen | Komut (vault klasöründe; Windows'ta `py -3`) |
+| --- | --- |
+| Son 7 günde ne yapıldı? | `python3 beyin.py recap --days 7` |
+| Sağlık kontrolü | `python3 beyin.py doctor` |
+| Tercihleri gör | `python3 beyin.py preferences` |
 
-Son günlerde ne yapıldığını görmek için vault klasöründe `python3 beyin.py recap --days 7`
-çalıştır. Son yedi UTC gününün kaynak bağlantılı iş sonuçlarını en yeniden eskiye listeler;
-model çağırmaz. Bunlar ajanın yazdığı sonuç iddialarıdır, bağımsız doğrulanmış olgular
-değildir. Özel notlara giden bağlantılar gizlenir, silinmiş kaynaklar listelenmez.
-`--days` (1-366) ve `--limit` (1-100) ile aralığı ve uzunluğu değiştirebilirsin.
+`recap` son günlerin kaynak bağlantılı iş sonuçlarını en yeniden eskiye listeler ve model çağırmaz. Bunlar asistanın yazdığı sonuç iddialarıdır, bağımsız doğrulanmış olgular değildir. `--days` (1-366) ve `--limit` (1-100) ile aralığı ve uzunluğu değiştirebilirsin.
 
-Bir şey ters giderse ajana **“beyin-doktor ile kontrol et”** de. Terminalden, vault klasöründe:
+Bir şey ters giderse asistanına **"beyin-doktor ile kontrol et"** de.
 
-```sh
-python3 beyin.py doctor
-```
+Claude Code yerel sohbet kayıtlarını (`~/.claude/projects/`) varsayılan olarak 30 gün sonra siler. Süreyi uzatmak için `~/.claude/settings.json` içine örneğin `"cleanupPeriodDays": 365` ekle ([Claude Code belgesi](https://code.claude.com/docs/en/claude-directory#cleaned-up-automatically)).
 
-Windows'ta aynı komutun başında `py -3` kullan. Kurulumda özel runtime yolu seçtiysen kurulu `beyin.py` bunu zaten bilir.
+### Hafıza dosyalarının boyutu
+
+`Last-Session.md` son oturumların devir kartlarıdır: her oturum `## YYYY-MM-DD HH:MM · <etiket> · <session_id[:8]>` başlığıyla kendi kartını açar ve yalnız onu düzenler. `Threads.md` açık konuların güncel durumudur. İkisi de yerinde güncellenir.
+
+Varsayılan sınırlar 3.000 ve 8.000 karakterdir. Sınır aşılınca oturum `Memory hygiene:` uyarısıyla açılır ve asistan `python3 beyin.py companion-compact` çalıştırır: eski bölümler kelimesi kelimesine companion klasöründeki `Arşiv/` altına taşınır. Hiçbir metin silinmez ya da özetlenmez, model çağrılmaz. Planı önce görmek için `--dry-run`; sınırları değiştirmek için `preferences --last-session-chars 4000 --threads-chars 12000` (`0` kapatır). [Ayrıntılar](docs/v3/COMPANION-PARITY.md)
 
 ## Gizlilik: notların nereye gider?
 
-Cortex kendi başına notlarını hiçbir yere göndermez ve telemetri toplamaz. Tek otomatik ağ isteği, günde en çok bir kez GitHub'a "yeni sürüm var mı?" sorusudur; not, prompt veya hesap bilgisi taşımaz (`preferences --update-notifications off` kapatır).
+Cortex notlarını kendi başına hiçbir yere göndermez ve telemetri toplamaz. Tek otomatik ağ isteği, günde en çok bir kez GitHub'a sorulan "yeni sürüm var mı?" sorusudur; not, prompt ya da hesap bilgisi taşımaz (`preferences --update-notifications off` kapatır). `pyn kontrol` npm'e yalnız sen çalıştırdığında sorar.
 
-Asıl akış şudur: yazdığın mesajla eşleşen notlar asistanının bağlamına eklenir ve böylece **kullandığın yapay zekâ sağlayıcısına** (Anthropic, OpenAI, Google…) gider. Sistemin amacı budur; ama varsayılan olarak vault'taki her not aday sayılır. Kendini korumak için:
+Asıl akış şudur: yazdığın mesajla eşleşen notlar asistanının bağlamına eklenir ve böylece **kullandığın yapay zekâ sağlayıcısına** (Anthropic, OpenAI, Google…) gider. Sistemin amacı budur; ama varsayılan olarak vault'taki her not adaydır. Kendini korumak için:
 
-- **Tek bir notu dışarıda tut:** notun en başına şu üç satırı koy. Not otomatik bağlama hiç girmez; yalnız açıkça istediğinde okunur.
+- **Tek bir notu dışarıda tut.** Notun en başına şu üç satırı koy; not otomatik bağlama hiç girmez, yalnız açıkça istediğinde okunur:
 
   ```
   ---
   visibility: private
   ---
   ```
-- **Hassas notları ayrı tut:** sağlık, finans gibi notlar için Cortex'i kurmadığın ayrı bir vault en temiz yoldur. Nokta ile başlayan klasörler (`.gizli/`) hiç indekslenmez, ama Obsidian bunları kenar çubuğunda göstermez.
-- **Sır süzgeci:** `preferences --secret-filter on` ajanın yazdığı notlarda, makbuzlarda ve görevlerde API anahtarı ve parola gibi sırları maskeler. Varsayılan kapalıdır.
 
-Arama indeksi vault dışında, yalnız senin hesabının okuyabildiği bir klasörde durur (Windows: `%LOCALAPPDATA%\beyin-v3\…`, macOS: `~/Library/Application Support/beyin-v3/…`, Linux: `~/.local/state/beyin-v3/…`) ve notlarının bir kopyasını içerir. Vault'u herkese açık bir git deposuna koyacaksan `.beyin-runtime.json` dosyasını dışarıda bırak: bu makinedeki tam yolu, dolayısıyla kullanıcı adını içerir ([birden çok makine](docs/v3/MULTI-MACHINE.md)).
+- **Hassas notları ayrı tut.** Sağlık, finans gibi notlar için Cortex'i kurmadığın ayrı bir vault en temiz yoldur. Nokta ile başlayan klasörler (`.gizli/`) hiç indekslenmez, ama Obsidian bunları kenar çubuğunda göstermez.
+- **Sır süzgeci.** `preferences --secret-filter on`, asistanın yazdığı notlarda, makbuzlarda ve görevlerde API anahtarı ve parola gibi sırları maskeler. Varsayılan kapalıdır.
 
-## İsteğe bağlı: tek tuşla beyne at
+Arama indeksi vault'un dışında, yalnız senin hesabının okuyabildiği bir klasörde durur (Windows: `%LOCALAPPDATA%\beyin-v3\…`, macOS: `~/Library/Application Support/beyin-v3/…`, Linux: `~/.local/state/beyin-v3/…`) ve notlarının bir kopyasını içerir. Vault'u herkese açık bir git deposuna koyacaksan `.beyin-runtime.json` dosyasını dışarıda bırak: bu makinedeki tam yolu, dolayısıyla kullanıcı adını içerir ([birden çok makine](docs/v3/MULTI-MACHINE.md)).
 
-Video, tweet, makale, mail ya da dosyayı gördüğün yerde yakala; ajanın metni çıkarıp dersleri `knowledge/` notlarına bağlasın. Kurulum bir kez: `python3 beyin.py yakala kur` (Windows'ta `py -3`). Sonra her uygulamada Mac'te `Control+Option+B`, Windows'ta `Ctrl+Alt+B`; tarayıcıda Obsidian Web Clipper'ın "Beyne at" şablonu. Tuşu değiştirmek için `beyin.py yakala kisayol 'cmd+"'`. Ajanına "yakalananları işle" demen yeter. YouTube'da önce altyazı, yoksa yalnız ses yerelde yazıya dökülür. Ayrıntı: [docs/v3/YAKALA.md](docs/v3/YAKALA.md).
+## İsteğe bağlı eklentiler
 
-## Ananas teması
+### Tek tuşla beyne at: yakala
 
-İsteğe bağlı Obsidian görünümü: fildişi kâğıt, mürekkep kontur, sert gölgeli kartlar, Fraunces başlıklar. Yazı tipleri temanın içinde gelir, internet gerekmez. Vault klasöründe:
+Video, tweet, makale, mail ya da dosyayı gördüğün yerde yakala; asistan metni çıkarıp dersleri `knowledge/` notlarına bağlasın.
+
+1. Bir kez kur: `python3 beyin.py yakala kur` (Windows'ta `py -3`).
+2. Her uygulamada Windows'ta `Ctrl+Alt+B`, Mac'te `Control+Option+B`. Tarayıcıda Obsidian Web Clipper'ın "Beyne at" şablonu.
+3. Asistanına "yakalananları işle" de.
+
+YouTube'da önce altyazı kullanılır, yoksa ses yalnız yerelde yazıya dökülür. Tuşu değiştirmek için `beyin.py yakala kisayol 'cmd+"'`. [Ayrıntılar](docs/v3/YAKALA.md)
+
+### Ananas teması
+
+Obsidian için isteğe bağlı görünüm: fildişi kâğıt, mürekkep kontur, sert gölgeli kartlar, Fraunces başlıklar. Yazı tipleri temanın içinde gelir, internet gerekmez.
 
 ```sh
-python3 beyin.py tema kur
+python3 beyin.py tema kur     # Windows'ta: py -3 beyin.py tema kur
 ```
 
-Windows'ta `py -3 beyin.py tema kur`. Obsidian açıksa Ayarlar > Görünüm > CSS parçacıkları > yenile. `tema durum` kurulu ve güncel olup olmadığını söyler (Cortex güncellemesinden sonra "eski" derse `tema kur` yeniden yazar); `tema kaldir` geri alır.
+Obsidian açıksa Ayarlar > Görünüm > CSS parçacıkları > yenile. `tema durum` kurulu ve güncel olup olmadığını söyler; `tema kaldir` geri alır.
 
-Tema yalnız `.obsidian/snippets/ananas.css` dosyasını yazar ve onu `.obsidian/appearance.json` içinde etkinleştirir; notlara, motora ve diğer Obsidian ayarlarına dokunmaz, senin yazdığın bir `ananas.css` dosyasının üzerine yazmaz. Kenar çubuğunda klasörler sade Türkçe etiketlerle görünür (`🔮 850-Companion` → Pyn, `receipts` → Makbuzlar, `📥 000-Inbox/Yakala` → Yakalananlar); diskteki adlar değişmez.
+Tema yalnız `.obsidian/snippets/ananas.css` dosyasını yazar ve onu `.obsidian/appearance.json` içinde etkinleştirir. Notlara, motora ve diğer Obsidian ayarlarına dokunmaz; senin yazdığın bir `ananas.css` dosyasının üzerine yazmaz. Kenar çubuğunda klasörler sade Türkçe etiketlerle görünür (`🔮 850-Companion` → Pyn, `receipts` → Makbuzlar, `📥 000-Inbox/Yakala` → Yakalananlar); diskteki adlar değişmez.
 
 ## Tüketim ve kontrol sıklığı
 
-Ajanına **“ekonomik moda geç”**, **“otomatik kontrolleri kapat”** veya **“kontrol aralığını 30 dakika yap”** diyebilirsin. Üç istemci aynı vault tercihini kullanır; güncellemeler tercihini korur.
+Asistanına **"ekonomik moda geç"**, **"otomatik kontrolleri kapat"** ya da **"kontrol aralığını 30 dakika yap"** diyebilirsin. Bütün istemciler aynı vault tercihini kullanır; güncellemeler tercihini korur.
 
 | Mod | Yerel kontrol | Oturuma eklenen bağlam |
 | --- | --- | --- |
-| Normal (varsayılan) | Her ilgili istemci olayında | Oturum başı ve mesajlarda, en çok 5000 karakter |
-| Ekonomik | Yeni oturumda; sonrasında en az 15 dakika aralıklı | Yalnız oturum başında, en çok 2000 karakter |
+| Normal (varsayılan) | Her ilgili istemci olayında | Oturum başında ve mesajlarda, en çok 5.000 karakter |
+| Ekonomik | Yeni oturumda; sonra en az 15 dakika arayla | Yalnız oturum başında, en çok 2.000 karakter |
 | Manuel | Otomatik kapalı | Otomatik kapalı |
 
-Süre dolunca kendi başına çalışan bir zamanlayıcı kurulmaz; bir sonraki istemci olayı kontrolü başlatır. İstemciler kapalıyken işlem yapılmaz. Yerel Python kontrolleri **model çağırmaz**; otomatik Luna/Sonnet maliyeti yoktur. Ajana yaptırdığın işler ve eklenen bağlam normal istemci tüketimine girer. Ekonomik veya manuel modda gerektiğinde kaynaklar açık `context`/`sync` komutuyla tazelenir.
+Süre dolunca kendi başına çalışan bir zamanlayıcı kurulmaz; bir sonraki istemci olayı kontrolü başlatır. Yerel Python kontrolleri **model çağırmaz**. Asistana yaptırdığın işler ve eklenen bağlam, istemcinin normal kullanımına girer.
 
-İsteğe bağlı Jev danışmanı bundan ayrıdır: varsayılan kapalıdır, yalnız kendi TypeSafe API anahtarı olanlar içindir ve kurucu onu ne sorar ne kurar. Durumu `python3 beyin.py jev status` gösterir; `jev shadow`, `jev on` ve `jev off` ile değiştirilir. Anahtar istemeyen yerel seçenek olarak ayrı kurulan açık ağırlıklı Laya sunucusu da seçilebilir (`jev shadow --provider laya`); Beyin'e PyTorch veya model girmez. Laya yalnız gölge modda çalışır: ölçümde Jev'den çok daha zayıf çıktığı için puanları ölçüm ve gizlilik denemeleri için kaydedilir, gördüğün sonucu değiştirmez. [Ayrıntılar ve sınırlar](docs/v3/JEV.md).
+Tercih komutları: `preferences --profile economical`, `preferences --profile manual`, `preferences --interval-minutes 30`, `preferences --secret-filter on`. [Ayrıntılar](docs/v3/PREFERENCES.md)
 
-Tercihler: `python3 beyin.py preferences`. Ekonomik: `preferences --profile economical`. Manuel: `preferences --profile manual`. Aralık: `preferences --interval-minutes 30`. Opt-in sır süzgeci: `preferences --secret-filter on`. Windows'ta `py -3` kullan. [Ayrıntılar](docs/v3/PREFERENCES.md).
-
-## Hafıza dosyalarının boyutu
-
-`Last-Session.md` son oturumların devir kartlarıdır (oturum başına `## YYYY-MM-DD HH:MM · <etiket> · <session_id[:8]>` başlığıyla açılır, oturum yalnız kendi kartını düzenler), `Threads.md` açık konuların güncel durumudur. İkisi de yerinde güncellenir, alta eklenmez. Varsayılan sınır 3.000 ve 8.000 karakterdir. Sınır aşılırsa oturum başı bağlamı tek satırlık `Memory hygiene:` uyarısıyla açılır ve `doctor` aynı bilgiyi gösterir. Ajan o zaman `python3 beyin.py companion-compact` çalıştırır: eski bölümler ve eski tarihli kayıtlar kelimesi kelimesine companion klasöründeki `Arşiv/` altına, özel işaretli aylık bir dosyaya taşınır. Hiçbir metin silinmez veya özetlenmez, model çağrılmaz, zamanlayıcı kurulmaz. Planı önce görmek için `--dry-run`, sınırları değiştirmek için `preferences --last-session-chars 4000 --threads-chars 12000` (`0` kapatır). [Ayrıntılar](docs/v3/COMPANION-PARITY.md).
+İsteğe bağlı Jev danışmanı bundan ayrıdır: varsayılan kapalıdır ve yalnız kendi TypeSafe API anahtarı olanlar içindir; kurucu onu ne sorar ne kurar. Anahtar istemeyen yerel seçenek olarak ayrı kurulan Laya sunucusu yalnız gölge modda çalışır. [Ayrıntılar ve sınırlar](docs/v3/JEV.md)
 
 ## Güncelleme
 
-Ajanına **“beynimi güncelle”** diyebilir veya vault içindeki kısayolu açabilirsin:
-
-- macOS: `Beyni Güncelle.command`
-- Windows: `Beyni Guncelle.cmd`
-- Linux: `Beyni Güncelle.desktop` veya `Beyni Güncelle.sh`
-
-Kısayol aynı updater'ı çalıştırır. Terminalde önce kontrol etmek istersen:
+Asistanına **"beynimi güncelle"** de ya da vault'taki kısayolu aç: Windows'ta `Beyni Guncelle.cmd`, macOS'ta `Beyni Güncelle.command`, Linux'ta `Beyni Güncelle.desktop` ya da `Beyni Güncelle.sh`. Terminalden:
 
 ```sh
-python3 beyin.py update --check
-python3 beyin.py update
+python3 beyin.py update --check   # yeni sürüm var mı?
+python3 beyin.py update           # kur
 ```
 
-Yeni sürüm kontrolü varsayılan olarak açıktır: oturum başında ayrı bir süreç günde en fazla bir kez GitHub sürüm bilgisini kontrol eder. Not, prompt veya hesap bilgisi göndermez; model çağırmaz. İlk sonuç sonraki oturumda veya `doctor` çıktısında görünür. Aynı sürüm için bildirim bir kez gösterilir. Otomatik kurulum yapılmaz.
+Güncelleme yalnız resmi GitHub **stable release** paketinden yapılır; geliştirme dalından kendiliğinden kod çekmez. Paket önce doğrulanır (checksum, manifest, dosya hash'leri), ardından notlarına dokunmadan ayrı bir deneme vault'unda çalıştırılır ve ancak bundan sonra uygulanır. Bir kesintiden sonra `recover`, geri dönmek için `rollback` kullanılır.
 
-- Hafif kontrol: `python3 beyin.py update --check --metadata-only`
-- Bildirimi kapat: `python3 beyin.py preferences --update-notifications off`
-- Aç: `python3 beyin.py preferences --update-notifications on`
-- Bir sürümü sustur: `python3 beyin.py update --dismiss X.Y.Z`
+Yeni sürüm kontrolü oturum başında günde en çok bir kez yapılır; otomatik kurulum yapılmaz.
 
-Windows'ta `python3` yerine `py -3` kullan. V3.0.2 kurulumunda yeni seçenekler ilk `update` işleminden sonra gelir.
+- Bildirimi kapat / aç: `preferences --update-notifications off` / `on`
+- Bir sürümü sustur: `update --dismiss X.Y.Z`
+- İnternetsiz güncelleme: `update --package "/indirilen/beyin-v3-X.Y.Z.zip"`
 
-Varsayılan kaynak yalnız resmi GitHub **stable release** paketidir; geliştirme dalından kendiliğinden kod çekmez. Paket yayınlanmamışsa veya erişilemiyorsa hata bildirir, güncellenmiş gibi davranmaz. İndirilmiş ZIP ile çevrimdışı güncelleme ve geri alma için [güncelleme rehberi](docs/v3/UPDATE.md).
+[Güncelleme rehberi](docs/v3/UPDATE.md)
 
-## V2'den geliyorsan
+## Sorun giderme
 
-Aynı kurucuyu mevcut vault üzerinde çalıştır. Notlar, Companion dosyaları, eski `daily/` ve `knowledge/` içerikleri korunur. Tanınan eski writer'lar geri alınabilir biçimde devreden çıkarılır; özelleştirilmiş sistem dosyası veya çalışan eski worker varsa işlem durur ve açıklama verir.
+| Belirti | Çözüm |
+| --- | --- |
+| cmd'de `pyn` yazınca bir şey olmuyor | Vault'ta `pyn kur`u yeniden çalıştır, sonra **yeni** bir terminal aç. |
+| Karşılama kutusunda mühür yok | Terminal resim çizmiyordur (Sixel). Windows Terminal'i güncelle ya da `PYN_LOGO=1` ile dene. |
+| Windows Terminal'de Pyn profili yok | Ayar dosyanda yorum satırı varsa `pyn kur` onu bilerek değiştirmez. Profili Windows Terminal ayarlarından elle ekleyebilirsin. |
+| Bir istemci açılmıyor ya da "yeni sürüm gerekli" diyor | `pyn kontrol` eski istemcileri ve güncelleme komutlarını gösterir. Menü de son kontrolden kalan uyarıları "Dikkat" altında listeler. |
+| Menüde Ollama ya da LM Studio kırmızı | Sunucu kapalı ya da yüklü model yok. Uygulamayı açıp bir model yükle, `pyn`'i yeniden çalıştır. |
+| Gemini CLI `IneligibleTierError` veriyor | Google bireysel Google hesabıyla girişi kapattı. Gemini CLI'de API anahtarıyla giriş yap ya da başka bir istemci kullan. |
+| Asistan notları hatırlamıyor | İstemcide hook güvenini onayladığını kontrol et, sonra `beyin.py doctor` çalıştır ya da asistana "beyin-doktor ile kontrol et" de. |
+| Oturum `Memory hygiene:` uyarısıyla açılıyor | `beyin.py companion-compact` eski kayıtları silmeden arşive taşır. |
 
-V2'nin arka planda model çağıran günlük özetleyici/derleyici akışı V3'te çalışmaz. Bunun yerine aktif ajan bilinçli olarak iş sonucu ve bilgi notu yazar. Yeni sonuç bağlantıları `daily/v3/` ve `knowledge/v3/outcomes.md` altında oluşturulur. Eski günlükler yeniden özetlenmez. [Geçiş ve sınırları](docs/v3/MIGRATION.md) · [Tarihsel V2 rehberi](docs/V2-README.md).
+## Eski bir kurulumdan geliyorsan
 
-## Ne korunur, ne ölçülür?
+Cortex'ten önceki bir ikinci beyin kurulumun varsa (Cortex'in doğduğu açık kaynak projenin eski sürümleri), aynı kurucuyu mevcut vault üzerinde bir kez çalıştır ([Yol 2](#yol-2-elle-kur)). Notlar, companion dosyaları, `daily/` ve `knowledge/` içerikleri korunur. Tanınan eski yazıcılar geri alınabilir biçimde devreden çıkarılır; özelleştirilmiş bir sistem dosyası ya da çalışan eski bir arka plan işi varsa işlem durur ve ne yapılacağını söyler. Sonraki güncellemeler Cortex'ten gelir.
 
-Kullanıcı notları updater'ın değiştireceği sistem dosyaları değildir. Yönetilen dosyada farklı bir değişiklik görülürse conflict bildirilir; ilgisiz desteklenen ayar değişiklikleri birleştirilir. Yedek ve journal vault dışında yereldir. Bir kesinti sonrası `recover` veya `rollback` kullanılabilir.
+Eski sürümlerdeki, arka planda model çağıran günlük özetleyici Cortex'te yoktur; onun yerine asistan bilinçli olarak iş sonucu ve bilgi notu yazar. Eski günlükler yeniden özetlenmez. [Geçiş ayrıntıları](docs/v3/MIGRATION.md)
 
-Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama veya her soruda doğru hatırlama sözü vermez. Motor kendisi model çağırmaz; ajana yaptırdığın işler istemcinin normal kullanımına girer. Otomatik doğrulamalar ve gerçek istemci kontrolleri [ayrı raporlanır](docs/v3/README.md).
+### Ne korunur, ne ölçülür?
+
+Kullanıcı notları, güncelleyicinin değiştireceği sistem dosyaları değildir. Yönetilen bir dosyada farklı bir değişiklik görülürse çakışma bildirilir; ilgisiz desteklenen ayar değişiklikleri birleştirilir. Yedek ve journal vault'un dışında, yereldedir.
+
+Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama ya da her soruda doğru hatırlama sözü vermez. Otomatik doğrulamalar ve gerçek istemci kontrolleri [ayrı raporlanır](docs/v3/README.md).
+
+## Sürüm geçmişi
+
+| Sürüm | Öne çıkan |
+| --- | --- |
+| [1.0.6](docs/v3/releases/1.0.6.md) | `pyn kur` Claude Code'a Pyn durum satırı, Windows Terminal'e Pyn profili ekler; menüde yeşil/kırmızı durum noktaları; `pyn kontrol` eski istemcileri bulur; OpenCode 2.x'te de önbellek korunur. |
+| [1.0.5](docs/v3/releases/1.0.5.md) | `pyn` karşılama kutusu ve mühürle açılır, cmd'de de çalışır; OpenCode'da önbellek korunur, yerel modeller OpenCode'da açılır. |
+| [1.0.4](docs/v3/releases/1.0.4.md) | Gemini CLI ve Qwen Code tam hafızalı. |
+| [1.0.3](docs/v3/releases/1.0.3.md) | Yeni `pyn` komutu: Pyn'i her yerden, istediğin istemciyle aç. |
+| [1.0.2](docs/v3/releases/1.0.2.md) | Windows'ta yakala penceresi anında açılır, Ananas yazı tipleriyle. |
+| [1.0.1](docs/v3/releases/1.0.1.md) | Pyn görünür oldu: Obsidian'da klasör ikonları, mühür ve Pyn'in yüzü. |
+| [1.0.0](docs/v3/releases/1.0.0.md) | Cortex: Ananas teması, maskot Pyn, güncellemeler Cortex'in kendi sürümlerinden. |
 
 ## Geliştiriciler
 
-[Kaynak formatı](docs/v3/MARKDOWN.md) · [Runtime](docs/v3/RUNTIME.md) · [Semantik test sözleşmesi](docs/v3/SEMANTIC-TEST-CONTRACT.md) · [Sürüm paketi ve updater](docs/v3/UPDATE.md) · [Birden çok makine](docs/v3/MULTI-MACHINE.md).
+[Kaynak formatı](docs/v3/MARKDOWN.md) · [Runtime](docs/v3/RUNTIME.md) · [Semantik test sözleşmesi](docs/v3/SEMANTIC-TEST-CONTRACT.md) · [Sürüm paketi ve güncelleyici](docs/v3/UPDATE.md) · [Birden çok makine](docs/v3/MULTI-MACHINE.md) · [OpenCode](docs/v3/OPENCODE.md) · [Hermes](docs/v3/HERMES.md) · [OMP](docs/v3/OMP.md)
 
 Açık kaynak, [MIT lisansı](LICENSE). V2 bilgi derleme fikri için [Karpathy'nin bilgi tabanı desenine](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) teşekkürler.

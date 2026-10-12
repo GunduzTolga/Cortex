@@ -111,17 +111,27 @@ const cleanup = await definition.setup(ctx)
 result.cleanup = typeof cleanup
 result.keys = Object.keys(hooks).sort()
 if (result.keys.length) {
-  const prompt = (sessionID, text) => hooks["session.prompt"]({ sessionID, messageID: "msg", prompt: { text, files: [] }, delivery: "steer" })
+  const prompt = (sessionID, text, messageID = "msg") => hooks["session.prompt"]({ sessionID, messageID, prompt: { text, files: [] }, delivery: "steer" })
   const system = async (sessionID) => {
     const event = { sessionID, agent: "build", model: {}, system: [{ type: "text", text: "base" }], messages: [], options: {}, tools: {} }
     await hooks["session.context"](event)
     return event.system.slice(1)
   }
   const tool = (tool, status) => hooks["tool.execute.after"]({ tool, sessionID: "oc-1", agent: "build", messageID: "msg", id: tool, input: {}, status })
-  await prompt("oc-1", "merhaba")
+  await prompt("oc-1", "merhaba", "m1")
   result.first = await system("oc-1")
-  await prompt("oc-1", "klima kargo DHL")
-  result.second = await system("oc-1")
+  await prompt("oc-1", "klima kargo DHL", "m2")
+  result.second = await system("oc-1")  // no messages in the request: the turn stays in system
+  // A real request carries the conversation; 2.x rebuilds these objects for every request.
+  const conversation = () => [{ id: "m1", role: "user", content: [{ type: "text", text: "merhaba" }] },
+    { id: "a1", role: "assistant", content: [{ type: "text", text: "selam" }] },
+    { id: "m2", role: "user", content: [{ type: "text", text: "klima kargo DHL" }] }]
+  result.requests = []
+  for (let request = 0; request < 2; request++) {
+    const event = { sessionID: "oc-1", agent: "build", model: {}, system: [{ type: "text", text: "base" }], messages: conversation(), options: {}, tools: {} }
+    await hooks["session.context"](event)
+    result.requests.push({ system: event.system.slice(1), attached: event.messages.map((m) => m.content.slice(1)) })
+  }
   await tool("edit", "completed")
   await tool("write", "error")
   await tool("read", "completed")
@@ -286,6 +296,13 @@ class OpenCodeHarnessTest(unittest.TestCase):
         self.assertIn('OpenCode köprüsü kuruldu', result['first'][0]['text'])
         self.assertEqual(result['second'][0], result['first'][0], 'SessionStart context stays for the whole session')
         self.assertIn('notes/klima.md', result['second'][1]['text'])
+        # With the conversation in the request, the turn context rides in its own user message
+        # and the system part stays byte-identical: the provider's prompt cache keeps the history.
+        for request in result['requests']:
+            self.assertEqual(request['system'], result['first'], 'The system prompt no longer changes per turn')
+            first, assistant, second = request['attached']
+            self.assertEqual((first, assistant), ([], []), 'The SessionStart turn is already in system')
+            self.assertEqual(second, [{'type': 'text', 'text': result['second'][1]['text']}])
         self.assertEqual(result['child'], [], 'Sub-agent sessions get no memory context')
         self.assertEqual(result['afterDelete'], [], 'Deleted sessions are forgotten')
         self.assertEqual(result['afterCleanup'], [], 'Cleanup forgets every session')

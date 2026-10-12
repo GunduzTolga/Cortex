@@ -92,7 +92,13 @@ class PynChoiceTest(unittest.TestCase):
         self.assertEqual(offline[0]['modeller'], ['qwen3:8b', 'gemma3:4b'])  # embedding models left out
         self.assertEqual(offline[0]['yuklu'], ['gemma3:4b'])
         self.assertEqual(offline[0]['hafiza'], 'tam')  # Codex hooks: full memory on a local model
-        self.assertTrue(any(hint.startswith('LM Studio: sunucu kapalı') for hint in hints))
+        off = [o for o in found if o.get('kapali')]
+        self.assertEqual([(o['id'], o['ad']) for o in off], [('lmstudio', 'LM Studio')], 'Installed, server off: red row')
+        self.assertNotIn(off[0], pyn.usable(found))
+        menu = pyn.menu_text(found, found[0], hints)
+        self.assertIn('○ LM Studio', menu)
+        self.assertIn('kapalı · açıp bir model yükle', menu)
+        self.assertIn('● Codex', menu)
         found, _ = pyn.options(local=local, which=fake_which({'claude'}))
         self.assertEqual([o['id'] for o in found], ['claude'])  # no Codex, no local entry
 
@@ -185,6 +191,20 @@ class PynChoiceTest(unittest.TestCase):
         pyn.launch(self.vault, option, [], run=lambda cmd, cwd, env: calls.append(env) or 0)
         self.assertEqual(calls, [{'OPENCODE_CONFIG_CONTENT': '{}'}])
 
+    def test_a_red_row_explains_instead_of_launching(self):
+        from unittest import mock
+        found = [dict(pyn.CLIENTS[0], yol='/bin/claude', args=[]), {'id': 'ollama', 'ad': 'Ollama', 'hafiza': 'tam',
+                                                                   'kapali': True}]
+        pyn._remember(self.state, found[1], None)  # even a remembered red row is never the default
+        launched = []
+        with mock.patch.object(pyn, 'options', return_value=(found, [])), \
+                mock.patch.object(pyn, 'launch', side_effect=lambda v, o, e: launched.append(o['id']) or 0), \
+                mock.patch.object(pyn, 'ensure_context', return_value=None):
+            self.assertEqual(pyn.main(['ollama'], self.vault, self.state, interactive=False), 1)
+            self.assertEqual(launched, [])
+            self.assertEqual(pyn.main([], self.vault, self.state, interactive=False), 0)
+        self.assertEqual(launched, ['claude'])
+
     def test_old_local_choice_finds_the_same_server_under_opencode(self):
         local = (('lmstudio', 'LM Studio', lambda: (['qwen3-8b'], ['qwen3-8b'], {})),)
         found, _ = pyn.options(local=local, which=fake_which({'claude', 'codex', 'opencode'}))
@@ -206,7 +226,7 @@ class PynChoiceTest(unittest.TestCase):
         import re
         companion = self.vault / '🔮 850-Companion'
         companion.mkdir()
-        (companion / 'Core.md').write_text('- Kullanıcının adı: Deniz. (Kaynak: beyan)\n', encoding='utf-8')
+        (companion / 'Core.md').write_text('- Kullanıcının adı: Tolga. (Kaynak: beyan)\n', encoding='utf-8')
         (companion / 'Last-Session.md').write_text('# Son oturum\n\n## 2026-10-12 21:05 · Logo · 92ee3e48\n',
                                                    encoding='utf-8')
         (self.vault / '.beyin-version').write_text('1.0.5\n', encoding='utf-8')
@@ -217,7 +237,7 @@ class PynChoiceTest(unittest.TestCase):
                 self.assertEqual(len({len(line) for line in plain}), 1, 'Every line of the box is equally wide')
                 self.assertIn('Pyn · Cortex 1.0.5', plain[0])
                 self.assertTrue(any(pyn.GREETING in line for line in plain))
-                self.assertFalse(any('Deniz' in line for line in plain), 'No one\'s name: a vault can be shared')
+                self.assertFalse(any('Tolga' in line for line in plain), 'No one\'s name: a vault can be shared')
                 self.assertTrue(any('2026-10-12 21:05 · Logo' in line and '92ee3e48' not in line for line in plain))
                 self.assertEqual(place is not None, logo)
                 if logo:  # the seal's rows of the left column are empty
@@ -294,6 +314,108 @@ class PynShellTest(unittest.TestCase):
         pyn.install_shell(self.root / 'My Vault', [rc], python='/usr/bin/python3', windows=False)
         self.assertIn('pyn() { "/usr/bin/python3" "' + str(self.root / 'My Vault' / 'beyin.py') + '" pyn "$@"; }',
                       rc.read_text(encoding='utf-8'))
+
+
+class PynLookTest(unittest.TestCase):
+    """`pyn kur` also gives Claude Code a Pyn status line and Windows Terminal a Pyn profile."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='v3-pyn-look-')
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.vault, self.state = self.root / 'Örnek Beyin', self.root / 'state'
+        (self.vault / '.claude').mkdir(parents=True)
+        self.settings = self.vault / '.claude' / 'settings.local.json'
+        self.settings.write_text(json.dumps({'hooks': {'Stop': []}}), encoding='utf-8')
+
+    def test_status_line_is_added_kept_beside_hooks_and_removed(self):
+        self.assertEqual(pyn.install_statusline(self.vault, self.state, python='C:/Py/python.exe', windows=True),
+                         'kuruldu')
+        data = json.loads(self.settings.read_text(encoding='utf-8'))
+        self.assertEqual(data['hooks'], {'Stop': []}, 'Cortex hooks stay untouched')
+        command = data['statusLine']['command']
+        self.assertIn('-EncodedCommand', command, 'Same Windows-safe form as the hooks')
+        self.assertNotIn('Örnek', command, 'The Unicode path stays inside the encoded script')
+        # Again: updated in place, not refused as someone else's.
+        self.assertEqual(pyn.install_statusline(self.vault, self.state, python='C:/Py/python.exe', windows=True),
+                         'kuruldu')
+        self.assertEqual(pyn.uninstall_statusline(self.vault, self.state), 'kaldirildi')
+        self.assertNotIn('statusLine', json.loads(self.settings.read_text(encoding='utf-8')))
+
+    def test_someone_elses_status_line_is_left_alone(self):
+        self.settings.write_text(json.dumps({'statusLine': {'type': 'command', 'command': 'benim.sh'}}),
+                                 encoding='utf-8')
+        self.assertEqual(pyn.install_statusline(self.vault, self.state, windows=False), 'başkasının')
+        self.assertEqual(pyn.uninstall_statusline(self.vault, self.state), 'kurulu_degil')
+        self.assertEqual(json.loads(self.settings.read_text(encoding='utf-8'))['statusLine']['command'], 'benim.sh')
+
+    def test_status_line_script_shows_pyn_model_and_last_session(self):
+        import io
+        import re
+        sys.path.insert(0, str(SCRIPTS))
+        import beyin_v3_statusline as statusline
+        companion = self.vault / '🔮 850-Companion'
+        companion.mkdir()
+        (companion / 'Last-Session.md').write_text('# Son oturum\n\n## 2026-10-12 21:05 · Logo işi · 92ee3e48\n',
+                                                   encoding='utf-8')
+        out = io.BytesIO()
+        statusline.main(['--vault', str(self.vault)], io.BytesIO(b'{"model": {"display_name": "Sonnet 5.5"}}'), out)
+        plain = re.sub(r'\x1b\[[0-9;]*m', '', out.getvalue().decode('utf-8'))
+        self.assertEqual(plain, 'Pyn · ikinci beyin · Sonnet 5.5 · son: Logo işi')
+        out = io.BytesIO()
+        statusline.main(['--vault', str(self.root / 'yok')], io.BytesIO(b'not json'), out)
+        self.assertTrue(out.getvalue().decode('utf-8').endswith('ikinci beyin\x1b[0m'), 'Bad input still prints')
+
+    def test_windows_terminal_profile_is_added_once_and_removed(self):
+        local = self.root / 'local'
+        folder = local / 'Packages' / 'Microsoft.WindowsTerminal_8wekyb3d8bbwe' / 'LocalState'
+        folder.mkdir(parents=True)
+        original = {'defaultProfile': '{61c54bbd-c2c6-5271-96e7-009a87ff44bf}',
+                    'profiles': {'defaults': {}, 'list': [{'guid': '{61c54bbd-c2c6-5271-96e7-009a87ff44bf}',
+                                                           'name': 'Windows PowerShell'}]}}
+        (folder / 'settings.json').write_text(json.dumps(original), encoding='utf-8')
+        environ = {'LOCALAPPDATA': str(local)}
+        for _ in range(2):
+            self.assertEqual(pyn.install_terminal_profile(environ), [(str(folder / 'settings.json'), 'kuruldu')])
+        data = json.loads((folder / 'settings.json').read_text(encoding='utf-8'))
+        names = [p['name'] for p in data['profiles']['list']]
+        self.assertEqual(names, ['Pyn', 'Windows PowerShell'], 'One Pyn profile, first in the menu')
+        profile = data['profiles']['list'][0]
+        self.assertEqual(profile['icon'], 'ms-appdata:///local/pyn-ikon.png', 'Store build reads its own folder')
+        self.assertTrue((folder / 'pyn-ikon.png').read_bytes().startswith(b'\x89PNG'))
+        self.assertTrue((folder / 'pyn-muhur-200.png').read_bytes().startswith(b'\x89PNG'))
+        self.assertEqual(data['defaultProfile'], original['defaultProfile'], 'The default profile is not changed')
+        self.assertEqual(json.loads((folder / 'settings.pyn-yedek.json').read_text(encoding='utf-8')), original)
+        self.assertEqual(pyn.uninstall_terminal_profile(environ), [str(folder / 'settings.json')])
+        data = json.loads((folder / 'settings.json').read_text(encoding='utf-8'))
+        self.assertEqual([p['name'] for p in data['profiles']['list']], ['Windows PowerShell'])
+        self.assertFalse((folder / 'pyn-ikon.png').exists())
+
+    def test_terminal_settings_with_comments_are_not_rewritten(self):
+        folder = self.root / 'local' / 'Microsoft' / 'Windows Terminal'
+        folder.mkdir(parents=True)
+        text = '// benim ayarım\n{"profiles": {"list": []}}\n'
+        (folder / 'settings.json').write_text(text, encoding='utf-8')
+        result = pyn.install_terminal_profile({'LOCALAPPDATA': str(self.root / 'local')})
+        self.assertEqual(result, [(str(folder / 'settings.json'), 'okunamadı')])
+        self.assertEqual((folder / 'settings.json').read_text(encoding='utf-8'), text)
+
+    def test_outdated_clients_show_in_the_menu_until_checked_again(self):
+        found, _ = pyn.options(local=(), which=fake_which({'claude', 'codex', 'cursor-agent'}))
+        answers = {('/bin/claude', '--version'): '2.1.296 (Claude Code)', ('/bin/codex', '--version'): 'codex-cli 0.122.0',
+                   ('/bin/npm', 'view', '@anthropic-ai/claude-code', 'version'): '2.1.296\n',
+                   ('/bin/npm', 'view', '@openai/codex', 'version'): '0.162.1\n',
+                   ('/bin/cursor-agent', '--version'): '2026.05.01'}
+        results = pyn.check_clients(found, run=lambda argv, timeout: answers.get(tuple(argv), ''),
+                                    which=fake_which({'npm'}))
+        self.assertEqual(results['codex'], {'ad': 'Codex', 'kurulu': '0.122.0', 'son': '0.162.1', 'paket': '@openai/codex'})
+        self.assertIsNone(results['cursor']['son'], 'Not an npm client: no latest version')
+        pyn.save_health(self.state, results, now=1000.0)
+        hints = pyn.health_hints(self.state, now=1000.0)
+        self.assertEqual(hints, ['Codex: 0.122.0 kurulu, 0.162.1 çıktı; güncelle: npm i -g @openai/codex@latest'])
+        self.assertIn('pyn kontrol', pyn.health_hints(self.state, now=1000.0 + 15 * 86400)[-1])
+        self.assertIn('0.122.0 → 0.162.1', pyn.health_report(results))
+        self.assertEqual(pyn.health_hints(self.root / 'hic-yok'), [], 'Never checked: no note, no network')
 
 
 class PynInstalledEntryTest(unittest.TestCase):
