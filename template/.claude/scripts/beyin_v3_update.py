@@ -42,6 +42,38 @@ def allowed(name):
     return name in ('scripts/install_v3.py', 'scripts/beyin_v3.py', 'scripts/beyin_entry.py') or bool(re.fullmatch(r'template/\.claude/scripts/beyin_v3(?:_[a-z]+)*\.py', name)) or bool(re.fullmatch(r'template/\.agents/skills/(beyin|beyin-doktor|beyin-guncelle)/SKILL\.md', name))
 
 
+def _read_only(path):
+    """True only for a file that carries the Windows read-only attribute.
+
+    Read from the file's own attributes: os.access also answers False for a target it cannot
+    query at all, such as one pending deletion, and that one is worth a retry.
+    """
+    try:
+        return bool(os.stat(path).st_file_attributes & stat.FILE_ATTRIBUTE_READONLY)
+    except (OSError, AttributeError):
+        return False
+
+
+def _safe_replace(source, destination):
+    """os.replace, retried briefly only for a Windows sharing violation.
+
+    An antivirus scan, the search indexer or an editor can hold the target open for a few
+    milliseconds there (WinError 5/32/33): four retries, 225 ms in all. A POSIX
+    PermissionError is a real EACCES/EPERM and is raised at once, as is any other error and
+    WinError 5 for a read-only target, which no wait will lift (#230).
+    """
+    attempts = 5 if os.name == 'nt' else 1
+    for attempt in range(attempts):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError as exc:
+            if (attempt == attempts - 1 or getattr(exc, 'winerror', None) not in (5, 32, 33)
+                    or _read_only(destination)):
+                raise
+            time.sleep(0.015 * (2 ** attempt))
+
+
 def atomic(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,7 +83,7 @@ def atomic(path, data):
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        _safe_replace(temporary, path)
         try:
             fd = os.open(path.parent, os.O_RDONLY)
             try: os.fsync(fd)
@@ -442,6 +474,18 @@ def update(vault, state, package=None, check=False):
             result['preserved_excluded'] = plan['preserved_excluded']
         if plan.get('manifest', {}).get('excluded_components'):
             result['excluded_components'] = plan['manifest']['excluded_components']
+        # A kept V2 flush that died mid-summary: the guard let its sentinel through on proof,
+        # but nothing else would ever tell the user that session's summary is missing. Sentinels
+        # the cutover receipt already lists were reported by that install and never change again
+        # once the flush is retired, so repeating them here would follow every update forever.
+        # The same goes for a prompt-counter lock directory the guard read as stale.
+        for key in ('orphaned_legacy_state', 'stale_legacy_locks'):
+            if migration and migration[1].get(key):
+                receipt = migration[1].get('previous')
+                reported = set(receipt.get(key) or []) if isinstance(receipt, dict) else set()
+                later = [name for name in migration[1][key] if name not in reported]
+                if later:
+                    result[key] = later
         return result
 
 
