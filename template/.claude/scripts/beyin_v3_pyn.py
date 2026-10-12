@@ -416,7 +416,27 @@ def _cut(text, width):
     return text if len(text) <= width else text[:max(width - 1, 0)] + '…'
 
 
-def welcome_box(vault, columns, logo=False):
+def available_update(vault, state):
+    """{'version', 'current'} when a newer Cortex is published, else None. Reads only the cache the
+    session-start check keeps (at most one GitHub request a day, made by that check); no network here."""
+    if state is None:
+        return None
+    try:
+        import beyin_v3_releases as releases
+        result = releases.status(Path(vault), Path(state))
+    except Exception:
+        return None
+    if result.get('status') != 'available':
+        return None
+    return {'version': result.get('version'), 'current': result.get('current_version')}
+
+
+def update_hint(update):
+    return ('Cortex: ' + update['version'] + ' çıktı (sende ' + (update['current'] or '?') + '); güncelle: pyn guncelle'
+            if update else None)
+
+
+def welcome_box(vault, columns, logo=False, update=None):
     """(lines of the box, (row, column) where the seal goes or None). Claude Code's welcome
     box is the model: greeting and seal on the left, last session and tips on the right."""
     vault = Path(vault)
@@ -434,11 +454,16 @@ def welcome_box(vault, columns, logo=False):
     logo_row = len(left) + 1 if logo else None
     left += [('', '')] * LOGO_ROWS + [('', '')] if logo else []
     left += [('ikinci beynin hazır', DIM), (_cut(place, LEFT_WIDTH - 2), DIM)]
-    right = [('', ''), ('Son oturum', GOLD + BOLD), (_cut(_last_session(vault) or 'Henüz kayıt yok', text_width), ''),
-             ('─' * text_width, GOLD), ('İpuçları', GOLD + BOLD),
-             (_cut('pyn 1 ya da pyn claude: menüsüz aç', text_width), ''),
-             (_cut('pyn liste: bulunan istemciler', text_width), ''),
-             (_cut('pyn kaldir: komutu kaldır', text_width), '')]
+    right = [('', '')]
+    if update:  # first, where it is seen: a newer Cortex is out
+        right += [(_cut('Yeni sürüm: Cortex ' + update['version'] + ' hazır', text_width), GOLD + BOLD),
+                  (_cut('pyn guncelle ile kur (sende ' + (update['current'] or '?') + ')', text_width), ''),
+                  ('─' * text_width, GOLD)]
+    right += [('Son oturum', GOLD + BOLD), (_cut(_last_session(vault) or 'Henüz kayıt yok', text_width), ''),
+              ('─' * text_width, GOLD), ('İpuçları', GOLD + BOLD),
+              (_cut('pyn 1 ya da pyn claude: menüsüz aç', text_width), ''),
+              (_cut('pyn guncelle: Cortex\'i güncelle', text_width), ''),
+              (_cut('pyn kaldir: komutu kaldır', text_width), '')]
     rows = max(len(left), len(right))
     left += [('', '')] * (rows - len(left))
     right += [('', '')] * (rows - len(right))
@@ -470,14 +495,14 @@ def _enable_ansi():
         pass
 
 
-def show_welcome(vault, out=None, environ=None):
+def show_welcome(vault, out=None, environ=None, update=None):
     """Draws the box on a colour terminal; True when it did, so the menu below matches it."""
     out = sys.stdout if out is None else out
     if not (hasattr(out, 'isatty') and out.isatty()) or (environ or os.environ).get('NO_COLOR'):
         return False
     _enable_ansi()
     seal = _sixel_seal() if sixel_terminal(environ) else None
-    lines, place = welcome_box(vault, shutil.get_terminal_size().columns, logo=bool(seal))
+    lines, place = welcome_box(vault, shutil.get_terminal_size().columns, logo=bool(seal), update=update)
     out.write('\n' + '\n'.join(lines) + '\n')
     if seal:
         # The box is already on screen, so the image draws inside it without scrolling.
@@ -916,11 +941,16 @@ def health_report(results):
 # ---------------------------------------------------------------- command line
 
 def main(argv, vault, state, interactive=None):
-    """`pyn [secim] [istemci argümanları]`, `pyn liste`, `pyn kontrol`, `pyn kur`, `pyn kaldir`."""
+    """`pyn [secim] [istemci argümanları]`, `pyn liste`, `pyn kontrol`, `pyn guncelle`, `pyn kur`, `pyn kaldir`."""
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, 'reconfigure'):
             stream.reconfigure(errors='replace')
     vault, argv = Path(vault), list(argv)
+    if argv[:1] in (['guncelle'], ['güncelle']):
+        # The vault's own updater: verified package, trial install, rollback. Arguments pass through
+        # (`pyn guncelle --check`).
+        print('  Cortex güncelleniyor (vault: ' + str(vault) + ')…')
+        return subprocess.call([sys.executable, str(vault / 'beyin.py'), 'update', *argv[1:]], cwd=str(vault))
     if argv[:1] == ['kur']:
         install_shell(vault)
         print('`pyn` komutu eklendi. Yeni bir terminal aç ve her yerden `pyn` yaz.')
@@ -948,7 +978,8 @@ def main(argv, vault, state, interactive=None):
         save_health(state, results)
         print(health_report(results))
         return 0
-    hints += health_hints(state)
+    update = available_update(vault, state)
+    hints += ([update_hint(update)] if update else []) + health_hints(state)
     if argv[:1] == ['liste']:
         print(json.dumps({'secenekler': [dict({k: o[k] for k in ('id', 'ad', 'hafiza')}, aktif=not o.get('kapali'))
                                          for o in found], 'notlar': hints}, ensure_ascii=False, indent=2))
@@ -983,7 +1014,7 @@ def main(argv, vault, state, interactive=None):
         if len(found) == 1 or not interactive:
             choice = default
         else:
-            print(menu_text(found, default, hints, color=show_welcome(vault)))
+            print(menu_text(found, default, hints, color=show_welcome(vault, update=update)))
             while choice is None:
                 answer = _ask('\n  Seçimin [1-' + str(len(found)) + ', Enter = ' + default['ad'] + ', q = çık]: ')
                 if answer is None or answer.strip().casefold() in ('q', 'vazgec', 'vazgeç'):

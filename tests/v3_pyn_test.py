@@ -245,6 +245,31 @@ class PynChoiceTest(unittest.TestCase):
                     for line in plain[row:row + pyn.LOGO_ROWS]:
                         self.assertEqual(line[column:column + pyn.LOGO_COLUMNS].strip(), '')
 
+    def test_a_newer_cortex_is_announced_in_the_box_and_the_menu(self):
+        import re
+        from unittest import mock
+        import beyin_v3_releases as releases
+        newer = {'status': 'available', 'version': '1.0.7', 'current_version': '1.0.6', 'release_url': 'x'}
+        with mock.patch.object(releases, 'status', return_value=newer):
+            update = pyn.available_update(self.vault, self.state)
+        self.assertEqual(update, {'version': '1.0.7', 'current': '1.0.6'})
+        self.assertEqual(pyn.update_hint(update), 'Cortex: 1.0.7 çıktı (sende 1.0.6); güncelle: pyn guncelle')
+        lines, _ = pyn.welcome_box(self.vault, 90, update=update)
+        plain = [re.sub(r'\x1b\[[0-9;]*m', '', line) for line in lines]
+        self.assertTrue(any('Yeni sürüm: Cortex 1.0.7 hazır' in line for line in plain))
+        self.assertEqual(len({len(line) for line in plain}), 1)
+        for status in ({'status': 'up_to_date'}, {'status': 'unavailable', 'reason': 'http_404'}, {'status': 'disabled'}):
+            with mock.patch.object(releases, 'status', return_value=status):
+                self.assertIsNone(pyn.available_update(self.vault, self.state), status)
+        lines, _ = pyn.welcome_box(self.vault, 90)
+        self.assertFalse(any('Yeni sürüm' in line for line in lines), 'Nothing newer: no line')
+
+    def test_pyn_guncelle_runs_the_vaults_own_updater(self):
+        from unittest import mock
+        with mock.patch.object(pyn.subprocess, 'call', return_value=0) as call:
+            self.assertEqual(pyn.main(['guncelle', '--check'], self.vault, self.state), 0)
+        self.assertEqual(call.call_args.args[0][1:], [str(self.vault / 'beyin.py'), 'update', '--check'])
+
     def test_seal_is_drawn_only_where_the_terminal_shows_images(self):
         windows_terminal = lambda: '\x1b[?61;4;6;7;14;21;22;23;24;28;32;42c'  # noqa: E731
         conhost = lambda: '\x1b[?1;0c'  # noqa: E731

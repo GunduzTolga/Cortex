@@ -173,6 +173,7 @@ Enter son seçimini açar. Kutuda kimsenin adı yazmaz; aynı vault'u kim açars
 | `pyn claude --continue` | Sonraki argümanlar istemciye aynen gider |
 | `pyn liste` | Bulunan istemcileri JSON olarak listeler |
 | `pyn kontrol` | Kurulu istemcilerin sürümlerini npm'deki son sürümle karşılaştırır |
+| `pyn guncelle` | Cortex'i en son sürüme günceller (`beyin.py update` ile aynı; `pyn guncelle --check` yalnız bakar) |
 | `pyn kur` | Komutu ve görünümü kurar (aşağıda) |
 | `pyn kaldir` | `pyn kur`un eklediği her şeyi geri alır |
 
@@ -291,7 +292,13 @@ Tercih komutları: `preferences --profile economical`, `preferences --profile ma
 
 ## Güncelleme
 
-Asistanına **"beynimi güncelle"** de ya da vault'taki kısayolu aç: Windows'ta `Beyni Guncelle.cmd`, macOS'ta `Beyni Güncelle.command`, Linux'ta `Beyni Güncelle.desktop` ya da `Beyni Güncelle.sh`. Terminalden:
+Yeni bir Cortex sürümü çıktığında `pyn` bunu sana söyler: karşılama kutusunun en üstünde **"Yeni sürüm: Cortex X.Y.Z hazır"** satırı ve menünün "Dikkat" bölümünde bir uyarı çıkar. Güncellemek için tek komut:
+
+```sh
+pyn guncelle
+```
+
+Ya da asistanına **"beynimi güncelle"** de, veya vault'taki kısayolu aç: Windows'ta `Beyni Guncelle.cmd`, macOS'ta `Beyni Güncelle.command`, Linux'ta `Beyni Güncelle.desktop` ya da `Beyni Güncelle.sh`. Terminalden:
 
 ```sh
 python3 beyin.py update --check   # yeni sürüm var mı?
