@@ -1,0 +1,82 @@
+name: desktop
+
+# Cortex's desktop app (desktop/): the type checker, the tests and the app run
+# end to end, then the Windows installer built and kept for a week so it can be
+# tried on a real machine. Windows only, as every job of this repository: it is
+# the platform the app is for.
+#
+# Only when the app or what it reads changes: desktop/ itself, this file, the
+# template the end-to-end run lays its vault out from, and Pyn's seal, which
+# the window and the installer carry. The engine's own workflows are untouched.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
+      - 'template/**'
+      - 'tema/ananas/marka/**'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop.yml'
+      - 'template/**'
+      - 'tema/ananas/marka/**'
+  workflow_dispatch:
+
+# A newer push to a pull request stops the run its older one started.
+concurrency:
+  group: desktop-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  desktop:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Bagimliliklar
+        run: npm ci
+
+      - name: Tip denetimi
+        run: npm run typecheck
+
+      - name: Testler
+        run: npm test
+
+      # The real window, never shown: drawn offscreen and photographed with
+      # capturePage (scripts/e2e.mjs). Playwright drives Electron's own
+      # Chromium, so no browser is downloaded.
+      - name: Uctan uca
+        run: npm run e2e
+
+      # What the run saw, kept when it fails: a Windows runner cannot be watched.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: desktop-smoke-screenshots
+          path: desktop/e2e/screenshots/*.png
+          if-no-files-found: ignore
+
+      # The installer, unsigned: Windows SmartScreen warns before it runs until
+      # the app is signed (desktop/README.md). Not a release: a week's copy of
+      # what this commit builds, to try by hand.
+      - name: Kurulum dosyasi
+        run: npx electron-builder --win nsis --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cortex-setup-windows
+          path: desktop/release/*.exe
+          if-no-files-found: error
+          retention-days: 7
