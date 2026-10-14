@@ -39,7 +39,7 @@ Not ekranı dosyalarında **Y** şu standart yeniden adlandırmalar demek, başk
 | `electron/ipc.ts` | `electron/ipc.ts` | `4c16218f97d1` | Yalnız 12 `notes:*` kanalı ve kasa seçimi alındı (gövdeler aynı). Her kanal `handle()` ile sarılı: yalnız uygulamanın kendi sayfası, ana çerçevesinden çağırabilir. `cortex:chooseVault` → `vault:choose`. |
 | `electron/preload.ts` | `electron/preload.ts` | `bbaa43da56c2` | `notes` köprüsü aynen; `window.krewgent` → `window.cortex`. Preload artık sandbox içinde çalışıyor (Krewgent'ta `sandbox: false`). |
 | `electron/main.ts` | `electron/main.ts` | `a419ac816c23` | Yeniden yazıldı; korunanlar: tek örnek kilidi, gizli/offscreen çizim (`KREWGENT_HIDDEN` → `CORTEX_HIDDEN`), `will-navigate` köken karşılaştırması, yeni pencere reddi. Eklenenler: `sandbox: true`, izin istekleri reddi, ağ isteklerinin oturumda kesilmesi, webview reddi. |
-| `electron/services/vault.ts` | `electron/services/cortex.ts` | `bfd2cfdc9c39` | `setCortexVault` ve `ownDataTouchedBy` (`electron/services/ownData.ts`) sadeleştirildi; Krewgent'ın üç kod klasörü alınmadı. Pencereye kasanın yalnız adı gider (Krewgent yolu da gönderiyordu). |
+| `electron/services/vault.ts` | `electron/services/cortex.ts` | `bfd2cfdc9c39` | `setCortexVault` ve `ownDataTouchedBy` (`electron/services/ownData.ts`) sadeleştirildi; Krewgent'ın üç kod klasörü alınmadı. Pencereye kasanın yalnız adı gider (Krewgent yolu da gönderiyordu). Link denetimi farklı: Krewgent yolu gerçek yoluyla karşılaştırıyordu; bu, Windows'un 8.3 kısa adlarını (`RUNNER~1`) link sanıp kasayı reddediyordu. Burada yolun her parçasına `lstat` ile bakılıyor. |
 | `electron/services/settings.ts` | `electron/services/store.ts` | `028f28c51b59` | Krewgent durum dosyasının yerine uygulamanın kendi `settings.json`'ı; kuralları (yalnız eksik dosya ilk açılış, bozuk dosya `.corrupt-<zaman>` olarak kenara, okunamayan dosyanın üstüne yazılmaz, geçici + yeniden adlandırma, Windows'ta meşgul dosyada yeniden deneme) aynen. |
 | `src/notes/GraphView.tsx` | `src/cortex/notes/GraphView.tsx` | `2f6e626bf6e5` | Y. |
 | `src/notes/NoteEditor.tsx` | `src/cortex/notes/NoteEditor.tsx` | `43f0bcc880e9` | Yalnız içe aktarma yolları. |
@@ -71,7 +71,7 @@ Not ekranı dosyalarında **Y** şu standart yeniden adlandırmalar demek, başk
 | `index.html` | `index.html` | `701b19fa6647` | CSP daha sıkı: `default-src 'none'`, `connect-src 'self'`, `img-src 'self' data:`. |
 | `vite.config.ts` | `vite.config.ts` | `69513da4e370` | Geliştirme portu 5274 (Krewgent 5273). |
 | `tests/vaultNotes.test.ts` | `tests/vaultNotes.test.ts` | `508e833903ee` | Aynen. |
-| `tests/vaultNotesService.test.ts` | `tests/vaultNotesService.test.ts` | `ef2f1e7203b8` | Kasa, durum dosyası yerine ayar dosyasıyla veriliyor; Hermes testi alınmadı. |
+| `tests/vaultNotesService.test.ts` | `tests/vaultNotesService.test.ts` | `ef2f1e7203b8` | Kasa, durum dosyası yerine ayar dosyasıyla veriliyor; kasa klasörü `realpathSync.native` ile, uygulamanın sakladığı gerçek yoluyla (Krewgent'ta `realpathSync`, Windows'ta kısa adı bırakabiliyor). Hermes testi alınmadı. |
 | `tests/vaultNotesBoundary.test.ts` | `tests/vaultNotesBoundary.test.ts` | `64b8c59bec69` | Sınır aynı (yalnız `electron/ipc.ts`); ajan/işçi klasörleri olmadığından üçüncü test yerine pencerenin node/electron içe aktarmadığı denetleniyor. |
 | `tests/escapeLayers.test.ts` | `tests/escapeLayers.test.ts` | `cc946051848d` | Yol `src/ui/`; Krewgent'ın açılış filmi istisnası çıktı. |
 | `tests/ipcError.test.ts` | `tests/ipcError.test.ts` | `e8c1bd5e319e` | Aynen. |

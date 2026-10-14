@@ -42,7 +42,8 @@ const links = (() => {
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', 'base64');
 
 function vault(): string {
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'notes-vault-')));
+  // By the real path the disk gives, as the app keeps a chosen vault (electron/services/vault.ts): on Windows the temporary folder can come by its 8.3 short name.
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'notes-vault-')));
   const write = (relative: string, text: string | Buffer) => {
     fs.mkdirSync(path.dirname(path.join(dir, relative)), { recursive: true });
     fs.writeFileSync(path.join(dir, relative), text);

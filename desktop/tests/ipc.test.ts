@@ -57,7 +57,7 @@ test('the vault comes through the dialog, and what the window is told of it hold
   firstRun();
   dialogAnswer.value = { canceled: true, filePaths: [] };
   assert.equal(await call('vault:choose'), null, 'closed without a choice');
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-')));
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-')));
   dialogAnswer.value = { canceled: false, filePaths: [dir] };
   sent.length = 0;
   const chosen = await call('vault:choose');

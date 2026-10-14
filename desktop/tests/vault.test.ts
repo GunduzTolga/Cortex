@@ -31,7 +31,7 @@ const links = (() => {
 
 test('a folder chosen is kept by its real path, and the window is told its name alone', async () => {
   firstRun();
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-')));
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-')));
   const status = await setVault(dir);
   assert.deepEqual(status, { vault: { name: path.basename(dir) }, missing: false });
   assert.ok(!JSON.stringify(status).includes(path.dirname(dir)), 'no path in what the window is told');
@@ -40,9 +40,24 @@ test('a folder chosen is kept by its real path, and the window is told its name 
   assert.deepEqual(await vaultStatus(), { vault: { name: path.basename(dir) }, missing: true }, 'a vault gone from disk is said, not forgotten');
 });
 
+/*
+  GitHub's Windows runner names its temporary folder by its 8.3 short name
+  (C:\Users\RUNNER~1\...), which is what a folder named as spelled there
+  looks like: a path whose real one differs with no link on the way. Elsewhere
+  a temporary folder whose real path differs is reached through a link (macOS's
+  /var), which is refused, so this is Windows's alone.
+*/
+test('a folder named through a short alias, which is not a link, is taken and kept by its real path', { skip: process.platform !== 'win32' && 'Windows names folders through 8.3 aliases' }, async () => {
+  firstRun();
+  const spelled = fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-'));
+  const real = fs.realpathSync.native(spelled);
+  assert.deepEqual(await setVault(spelled), { vault: { name: path.basename(real) }, missing: false });
+  assert.equal(readSettings().vault, real);
+});
+
 test('what is not a folder, and a folder reached through a link, are refused', async () => {
   firstRun();
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-')));
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-')));
   fs.writeFileSync(path.join(dir, 'not-a-folder.md'), '# x\n');
   await assert.rejects(setVault(path.join(dir, 'not-a-folder.md')), /Not a folder/);
   await assert.rejects(setVault(path.join(dir, 'gone')), /Not a folder/);
