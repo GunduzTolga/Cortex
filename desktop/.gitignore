@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist-electron/
+release/
+.tmp-tests/
+*.log
+# Pictures the e2e run takes of the hidden window: output, not source.
+e2e/screenshots/
