@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { CliId, CliInfo } from '../../shared/chat';
+import { keyEnv } from './keys';
+import { LOCAL, type LocalId, lastSeen } from './localModels';
 
 /**
  * The person's own AI command lines, found where they installed them, and
@@ -10,6 +12,9 @@ import type { CliId, CliInfo } from '../../shared/chat';
  * standard input and output - OpenCode (`opencode acp`), Gemini CLI and Qwen
  * Code (`--acp`) (acpChat.ts), and Codex through its app server
  * (`codex app-server`, codexChat.ts).
+ *
+ * The model servers on this machine, LM Studio and Ollama, are run through
+ * OpenCode (localModels.ts): they are offered while they are up with a model.
  *
  * Nothing is run through a shell. On Windows an npm install puts a `.cmd`
  * shim on the PATH, and Node refuses to start a `.cmd` without one; the shim
@@ -40,6 +45,9 @@ const KNOWN: Known[] = [
   { id: 'qwen', name: 'Qwen Code', protocol: 'acp', bin: 'qwen', args: ['--acp'] },
 ];
 
+export const LOCAL_IDS: readonly LocalId[] = ['lmstudio', 'ollama'];
+export const isLocal = (id: CliId): id is LocalId => (LOCAL_IDS as readonly CliId[]).includes(id);
+
 /** How a CLI talks to the chat. */
 export const protocolOf = (id: CliId): Protocol =>
   id === 'test-claude' ? 'claude' : id === 'test-codex' ? 'codex' : id === 'test' ? 'acp' : (KNOWN.find((one) => one.id === id)?.protocol ?? 'acp');
@@ -66,6 +74,12 @@ const isFile = (file: string) => {
     return false;
   }
 };
+
+/** Whether one of these programs is on the PATH, found by its name and never run (Ollama's own command starts its app). */
+export function onPathAny(names: string[], env: NodeJS.ProcessEnv = process.env): boolean {
+  const withExe = WINDOWS ? names.flatMap((name) => [`${name}.exe`, `${name}.cmd`]) : names;
+  return onPath(withExe, env) !== null;
+}
 
 /** The first of these names in a folder of the PATH. */
 function onPath(names: string[], env: NodeJS.ProcessEnv): string | null {
@@ -103,18 +117,24 @@ export function readShim(shim: string, env: NodeJS.ProcessEnv = process.env): La
 }
 
 /** How one CLI is started on this machine, or null when it is not installed. */
-export function launchOf(id: CliId, env: NodeJS.ProcessEnv = process.env): Launch | null {
+/** The CLI itself, as it is started for any of its commands - its sign-in, its status - without what makes it talk to the chat. */
+export function programOf(id: CliId, env: NodeJS.ProcessEnv = process.env): Launch | null {
   const known = KNOWN.find((one) => one.id === id);
   if (!known) return null;
   if (WINDOWS) {
     const exe = onPath([`${known.bin}.exe`], env);
-    if (exe) return { command: exe, args: known.args };
+    if (exe) return { command: exe, args: [] };
     const shim = onPath([`${known.bin}.cmd`], env);
-    const started = shim ? readShim(shim, env) : null;
-    return started ? { command: started.command, args: [...started.args, ...known.args], env: started.env } : null;
+    return shim ? readShim(shim, env) : null;
   }
   const bin = onPath([known.bin], env);
-  return bin ? { command: bin, args: known.args } : null;
+  return bin ? { command: bin, args: [] } : null;
+}
+
+export function launchOf(id: CliId, env: NodeJS.ProcessEnv = process.env): Launch | null {
+  const known = KNOWN.find((one) => one.id === id);
+  const program = known ? programOf(id, env) : null;
+  return known && program ? { command: program.command, args: [...program.args, ...known.args], env: program.env } : null;
 }
 
 /**
@@ -139,12 +159,22 @@ export function testLaunch(id: TestId, env: NodeJS.ProcessEnv = process.env): La
 /** Every CLI the chat knows, and whether this machine has it. */
 export function listClis(env: NodeJS.ProcessEnv = process.env): CliInfo[] {
   const out: CliInfo[] = KNOWN.map((one) => ({ id: one.id, name: one.name, available: launchOf(one.id, env) !== null }));
+  // A model server is offered while OpenCode, which runs it, is installed and the server was last found up with a chat model.
+  const runner = launchOf('opencode', env) !== null;
+  for (const id of LOCAL_IDS) out.push({ id, name: LOCAL[id].name, available: runner && lastSeen(id).models.length > 0 });
   if (testLaunch('test', env)) out.push({ id: 'test', name: 'Test agent', available: true });
   if (testLaunch('test-claude', env)) out.push({ id: 'test-claude', name: 'Test Claude', available: true });
   if (testLaunch('test-codex', env)) out.push({ id: 'test-codex', name: 'Test Codex', available: true });
   return out;
 }
 
+/** How the chat starts a CLI: with the key the person gave Cortex for it, where it takes one from its environment (electron/services/keys.ts). */
 export function launchFor(id: CliId, env: NodeJS.ProcessEnv = process.env): Launch | null {
-  return id === 'test' || id === 'test-claude' || id === 'test-codex' ? testLaunch(id, env) : launchOf(id, env);
+  if (id === 'test' || id === 'test-claude' || id === 'test-codex') return testLaunch(id, env);
+  // OpenCode, told at its start which server and models (acpChat.ts, localModels.ts).
+  if (isLocal(id)) return launchOf('opencode', env);
+  const launch = launchOf(id, env);
+  if (!launch) return null;
+  const keys = keyEnv(id);
+  return Object.keys(keys).length ? { ...launch, env: { ...launch.env, ...keys } } : launch;
 }

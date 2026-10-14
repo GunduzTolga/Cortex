@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import test from 'node:test';
 import type { ChatEvent } from '../shared/chat';
-import { optionOf, turnsOf, usageOf, waitingOn } from '../src/chat/turns';
+import { notesOf, optionOf, turnsOf, usageOf, waitingOn } from '../src/chat/turns';
 
 /**
  * A chat's events as the screen reads them (src/chat/turns.ts): a turn per
@@ -60,4 +60,27 @@ test('a setting is found by its category, else its id', () => {
   assert.equal(optionOf(options, 'model')?.id, 'm');
   assert.equal(optionOf(options, 'mode')?.id, 'mode');
   assert.equal(optionOf(options, 'thought_level'), null);
+});
+
+test('the notes a chat touched: read and changed by its steps, named in its answers, the most recent first; nothing that is not a note of the vault', () => {
+  const vault = new Map([
+    ['notes/plan.md', 'Notes/Plan.md'],
+    ['notes/ideas.md', 'Notes/Ideas.md'],
+    ['other.md', 'Other.md'],
+  ]);
+  const note = (path: string) => vault.get(path.toLowerCase()) ?? null;
+  const resolve = (target: string) => (target === 'Plan' ? 'Notes/Plan.md' : target === 'Other.md' ? 'Other.md' : target === 'pic.png' ? 'pic.png' : null);
+  const turns = turnsOf([
+    { type: 'user', text: 'oku', at: 1 },
+    { type: 'tool', id: 'a', title: 'read', kind: 'read', status: 'completed', paths: ['Notes/Plan.md', '…/win.ini', 'Gone.md'] },
+    { type: 'text', id: 'm', text: 'Bak: [[Plan]], ![[pic.png]], [[Yazılmamış]] ve `[[Kodda]]`.' },
+    { type: 'user', text: 'düzenle', at: 2 },
+    { type: 'tool', id: 'b', title: 'edit', kind: 'edit', status: 'completed', paths: ['notes/ideas.md'] },
+    { type: 'text', id: 'n', text: 'Şuna da bak: [öteki](Other.md).' },
+  ]);
+  assert.deepEqual(notesOf(turns, note, resolve), [
+    { path: 'Notes/Ideas.md', read: false, edited: true, mentioned: false },
+    { path: 'Other.md', read: false, edited: false, mentioned: true },
+    { path: 'Notes/Plan.md', read: true, edited: false, mentioned: true },
+  ]);
 });

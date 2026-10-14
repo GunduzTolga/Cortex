@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, ChevronDown, ShieldQuestion, Square } from 'lucide-react';
-import type { CliId, CliInfo, ConfigOption, PermissionKind } from '@shared/chat';
+import { ArrowUp, Check, ChevronDown, Settings2, ShieldQuestion, Square } from 'lucide-react';
+import type { CliAuth, CliId, CliInfo, ConfigOption, PermissionKind } from '@shared/chat';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
 import { useEscapeLayer } from '../ui/useEscapeLayer';
+import { authDot } from './AuthDialog';
 import type { Asked } from './turns';
 
 /**
@@ -18,10 +19,29 @@ import type { Asked } from './turns';
 interface Choice {
   value: string;
   name: string;
+  /** A tool's sign-in, as a dot beside its name. */
+  dot?: 'on' | 'off' | null;
 }
 
 /** A chip that opens a list over it: a long list - sixty models - gets a field to narrow it. */
-function ChipSelect({ label, value, choices, onChoose, data, disabled }: { label: string; value: string; choices: Choice[]; onChoose: (value: string) => void; data: string; disabled?: boolean }) {
+function ChipSelect({
+  label,
+  value,
+  choices,
+  onChoose,
+  data,
+  disabled,
+  footer,
+}: {
+  label: string;
+  value: string;
+  choices: Choice[];
+  onChoose: (value: string) => void;
+  data: string;
+  disabled?: boolean;
+  /** One more thing to do from the list, under it: managing the tools' sign-ins. */
+  footer?: { label: string; run: () => void };
+}) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('');
@@ -82,11 +102,26 @@ function ChipSelect({ label, value, choices, onChoose, data, disabled }: { label
                 >
                   <span className="w-3.5 shrink-0 text-darkDelegation">{one.value === value ? <Check size={13} /> : null}</span>
                   <span className="truncate">{one.name}</span>
+                  {one.dot ? <span className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${one.dot === 'on' ? 'bg-good' : 'bg-gold'}`} data-chat-choice-dot={one.dot} /> : null}
                 </button>
               </li>
             ))}
             {!shown.length ? <li className="px-3 py-2 text-[12px] text-zinc-400">{t('chat.chip.none')}</li> : null}
           </ul>
+          {footer ? (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                footer.run();
+              }}
+              className="flex w-full items-center gap-2 border-t border-zinc-100 px-3 py-2 text-left text-[12px] text-zinc-500 hover:bg-zinc-50 hover:text-darkDelegation"
+              data-chat-chip-footer
+            >
+              <Settings2 size={13} />
+              {footer.label}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -183,6 +218,8 @@ export function Composer({
   onAnswer,
   big = false,
   focusKey,
+  auth,
+  onAuth,
 }: {
   draft: string;
   onDraft: (text: string) => void;
@@ -203,6 +240,9 @@ export function Composer({
   big?: boolean;
   /** Changed, the field takes the cursor: another chat put in front. */
   focusKey: string;
+  /** Whether each tool is signed in, for the dots on the tool chip. */
+  auth: CliAuth[] | null;
+  onAuth: () => void;
 }) {
   const t = useT();
   const field = useRef<HTMLTextAreaElement>(null);
@@ -259,10 +299,11 @@ export function Composer({
           <ChipSelect
             label={t('chat.chip.cli')}
             value={cli ?? ''}
-            choices={(cliFixed ? clis : available).map((one) => ({ value: one.id, name: one.name }))}
+            // A chat written to keeps its tool: its list is that tool alone, and still opens for the sign-ins under it.
+            choices={(cliFixed ? clis.filter((one) => one.id === cli) : available).map((one) => ({ value: one.id, name: one.name, dot: authDot(auth, one.id) }))}
             onChoose={(value) => onCli(value as CliId)}
             data="cli"
-            disabled={cliFixed}
+            footer={{ label: t('auth.manage'), run: onAuth }}
           />
           {settings.map((option) => (
             <ChipSelect key={option.id} label={option.name} value={option.current} choices={option.choices} onChoose={(value) => onOption(option.id, value)} data={option.category ?? option.id} disabled={running} />

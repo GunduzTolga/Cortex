@@ -1,15 +1,18 @@
 import { useEffect } from 'react';
-import { BookOpen, FolderOpen, MessageCircle, Network } from 'lucide-react';
+import { BookOpen, FolderOpen, MessageCircle, Network, Settings } from 'lucide-react';
 import seal from '../../tema/ananas/marka/pyn-muhur.svg';
-import { LANGUAGES, type Key } from './i18n';
-import { useLanguage, useT } from './i18n/useT';
+import type { Key } from './i18n';
+import { useT } from './i18n/useT';
+import { AuthDialog } from './chat/AuthDialog';
 import { ChatView } from './chat/ChatView';
 import { NotesView } from './notes/NotesView';
 import { GraphView } from './notes/GraphView';
 import { NotesDialogs } from './notes/NotesMenus';
+import { useNotes } from './notes/notesStore';
 import { useApp } from './store/app';
 import { useView, type View } from './store/view';
-import { Flag } from './ui/flags';
+import { LanguageSwitch } from './ui/LanguageSwitch';
+import { SettingsDialog } from './ui/SettingsDialog';
 import { Toasts } from './ui/Toasts';
 import { Button, Spinner } from './ui/ui';
 
@@ -26,10 +29,14 @@ export function App() {
   const bootError = useApp((s) => s.bootError);
   const vault = useApp((s) => s.vault);
   const unreadable = useApp((s) => s.settingsUnreadable);
+  const nameIcons = useApp((s) => s.settings.nameIcons);
 
   useEffect(() => {
     void useApp.getState().boot();
   }, []);
+
+  // The notes are named as the settings say, wherever they are shown (src/notes/notesStore.ts).
+  useEffect(() => useNotes.getState().setNameIcons(nameIcons), [nameIcons]);
 
   // A settings file that would not be read is said once, and stays until it is closed.
   useEffect(() => {
@@ -55,45 +62,6 @@ export function App() {
       <NotesDialogs />
       <Toasts />
     </>
-  );
-}
-
-/**
- * The language, one press away: a flag and its code for each, the one in use
- * raised on the paper and the other greyed until it is pointed at. Each is
- * named in its own language for a screen reader, as LANGUAGES names them.
- */
-function LanguageSwitch() {
-  const t = useT();
-  const language = useLanguage();
-  return (
-    <div role="group" aria-label={t('app.language')} className="flex items-center rounded-lg bg-zinc-100 p-0.5">
-      {LANGUAGES.map((one) => {
-        const current = one.id === language;
-        return (
-          <button
-            key={one.id}
-            type="button"
-            lang={one.id}
-            aria-label={one.label}
-            title={one.label}
-            aria-pressed={current}
-            data-language={one.id}
-            onClick={() => {
-              if (!current) void useApp.getState().setLanguage(one.id);
-            }}
-            className={`group flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-semibold tracking-widest transition-colors ${
-              current ? 'bg-paper-2 text-darkDelegation shadow-[0_1px_2px_rgba(27,23,18,0.12)]' : 'text-zinc-400 hover:text-darkDelegation'
-            }`}
-          >
-            <span className={current ? '' : 'opacity-60 grayscale transition group-hover:opacity-100 group-hover:grayscale-0'}>
-              <Flag language={one.id} />
-            </span>
-            {one.id.toUpperCase()}
-          </button>
-        );
-      })}
-    </div>
   );
 }
 
@@ -135,6 +103,18 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
     return () => window.removeEventListener('focus', back);
   }, []);
 
+  // Ctrl+, opens the settings, as in most desktop apps.
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key === ',') {
+        event.preventDefault();
+        useApp.getState().openSettings(true);
+      }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, []);
+
   const views: Array<[View, React.ReactNode, Key]> = [
     ['pyn', <MessageCircle key="pyn" size={13} />, 'app.view.pyn'],
     ['notes', <BookOpen key="notes" size={13} />, 'app.view.notes'],
@@ -166,6 +146,16 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
           </span>
           <button type="button" onClick={choose} title={t('app.vault.change')} aria-label={t('app.vault.change')} className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation" data-vault-change>
             <FolderOpen size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => useApp.getState().openSettings(true)}
+            title={t('app.settings.open')}
+            aria-label={t('settings.title')}
+            className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation"
+            data-settings-open
+          >
+            <Settings size={14} />
           </button>
           <LanguageSwitch />
         </div>
@@ -203,6 +193,8 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
           </>
         )}
       </div>
+      <SettingsDialog />
+      <AuthDialog />
     </div>
   );
 }

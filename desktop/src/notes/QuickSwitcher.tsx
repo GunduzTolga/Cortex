@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CornerDownLeft, FilePlus2, FileText } from 'lucide-react';
 import { messageOf } from '@shared/ipcError';
-import { folderOf, fuzzyMatch, nameProblem, noteTitle } from '../../core/vaultNotes';
+import { folderOf, fuzzyMatch, nameProblem } from '../../core/vaultNotes';
 import { useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 import { useDialogLayer } from '../ui/useEscapeLayer';
-import { useNotes } from './notesStore';
+import { folderLabel, labelOf, useNotes } from './notesStore';
 
 /**
  * Obsidian's quick switcher (Ctrl-O): a note by a few letters of its name, its
@@ -69,12 +69,12 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
       return [...notes]
         .sort((a, b) => b.modified - a.modified)
         .slice(0, SHOWN)
-        .map((note) => ({ path: note.path, title: note.label ?? noteTitle(note.path), alias: null, score: 0, indices: [] }));
+        .map((note) => ({ path: note.path, title: labelOf(note.path), alias: null, score: 0, indices: [] }));
     }
     const out: Choice[] = [];
     for (const note of notes) {
       // A receipt is found by its event_id, the name it is shown by (`labelOf`).
-      const title = note.label ?? noteTitle(note.path);
+      const title = labelOf(note.path);
       const byTitle = fuzzyMatch(query, title);
       const byPath = byTitle ? null : fuzzyMatch(query, note.path.replace(/\.md$/i, ''));
       let best: Choice | null = byTitle ? { path: note.path, title, alias: null, score: byTitle.score + 50, indices: byTitle.indices } : byPath ? { path: note.path, title, alias: null, score: byPath.score, indices: [] } : null;
@@ -174,7 +174,7 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
                       <Bold text={choice.title} indices={choice.indices} />
                     )}
                   </span>
-                  {folderOf(choice.path) ? <span className="block truncate text-[11px] text-zinc-400">{folderOf(choice.path)}</span> : null}
+                  {folderOf(choice.path) ? <span className="block truncate text-[11px] text-zinc-400">{folderLabel(folderOf(choice.path))}</span> : null}
                 </span>
                 {which === at ? <CornerDownLeft size={13} className="shrink-0 text-zinc-400" /> : null}
               </button>

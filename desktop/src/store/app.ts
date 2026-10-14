@@ -30,6 +30,11 @@ interface AppState {
   toasts: Toast[];
   boot(): Promise<void>;
   setLanguage(language: WindowSettings['language']): Promise<void>;
+  /** A setting changed and kept by the main process; what it keeps comes back. */
+  setSettings(patch: Partial<WindowSettings>): Promise<void>;
+  /** The settings window, open or not. */
+  settingsOpen: boolean;
+  openSettings(open: boolean): void;
   /** The system's dialog; the vault chosen, or the reason it could not be, said in a toast. */
   chooseVault(failed: string): Promise<void>;
   refreshVault(): Promise<void>;
@@ -42,7 +47,7 @@ let toastSeq = 0;
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
   bootError: null,
-  settings: { language: null },
+  settings: { language: null, allFiles: false, nameIcons: false },
   vault: { vault: null, missing: false },
   settingsUnreadable: null,
   version: '',
@@ -58,11 +63,20 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   async setLanguage(language) {
+    await get().setSettings({ language });
+  },
+
+  async setSettings(patch) {
     try {
-      set({ settings: await window.cortex.settings.set({ language }) });
+      set({ settings: await window.cortex.settings.set(patch) });
     } catch (err) {
       get().toast({ tone: 'error', title: 'Cortex', detail: messageOf(err) });
     }
+  },
+
+  settingsOpen: false,
+  openSettings(open) {
+    set({ settingsOpen: open });
   },
 
   async chooseVault(failed) {

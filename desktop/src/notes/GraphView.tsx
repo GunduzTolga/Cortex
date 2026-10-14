@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type Simulation, type SimulationLinkDatum, type SimulationNodeDatum } from 'd3-force';
 import { Maximize2, Minus, Plus } from 'lucide-react';
-import { foldForMatch } from '../../core/titles';
+import { foldForMatch, withoutIcon } from '../../core/titles';
 import { vaultGraph, type GraphNode, type GraphOptions } from '../../core/vaultNotes';
 import { useT } from '../i18n/useT';
 import type { Key } from '../i18n';
@@ -142,10 +142,13 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
   };
 
   const around = local ? live?.path ?? front ?? null : null;
+  const nameIcons = useNotes((state) => state.nameIcons);
   const graph = useMemo(() => {
     if (!index) return { nodes: [], edges: [] };
-    return vaultGraph(index.notes, index.files.map((file) => file.path), { ...settings, around });
-  }, [index, settings, around]);
+    const built = vaultGraph(index.notes, index.files.map((file) => file.path), { ...settings, around });
+    // Names as the tree shows them: without the emoji they start with, unless those are asked for.
+    return nameIcons ? built : { ...built, nodes: built.nodes.map((node) => (node.kind === 'tag' ? node : { ...node, label: withoutIcon(node.label) })) };
+  }, [index, settings, around, nameIcons]);
 
   // The graph's shape, so that a save which changed no link does not stir the drawing.
   const shape = useMemo(() => `${graph.nodes.map((node) => `${node.id}:${node.degree}`).join('\n')}|${graph.edges.map((edge) => `${edge.source}>${edge.target}`).join('\n')}`, [graph]);

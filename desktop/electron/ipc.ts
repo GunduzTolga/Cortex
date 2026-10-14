@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'el
 import type { BootstrapPayload, WindowSettings } from '../shared/api';
 import { readSettings, settingsUnreadable, updateSettings } from './services/settings';
 import { setVault, vaultStatus } from './services/vault';
+import * as auth from './services/auth';
 import * as chat from './services/chat';
 import * as vaultNotes from './services/vaultNotes';
 
@@ -41,7 +42,8 @@ function broadcast(channel: string, payload: unknown): void {
 }
 
 function windowSettings(): WindowSettings {
-  return { language: readSettings().language };
+  const { language, allFiles, nameIcons } = readSettings();
+  return { language, allFiles, nameIcons };
 }
 
 export function registerIpc(): void {
@@ -52,14 +54,14 @@ export function registerIpc(): void {
     version: app.getVersion(),
   }));
 
-  // The language, and nothing else: the vault is not the window's to set.
+  // The language and how the tree shows the vault, each only as a value it can have: the vault is not the window's to set.
   handle('settings:set', (patch: unknown) => {
-    const language = (patch as { language?: unknown } | null)?.language;
-    if (language === 'en' || language === 'tr' || language === null) {
-      updateSettings((settings) => {
-        settings.language = language;
-      });
-    }
+    const asked = patch && typeof patch === 'object' ? (patch as Record<string, unknown>) : {};
+    const change: Partial<WindowSettings> = {};
+    if (asked.language === 'en' || asked.language === 'tr' || asked.language === null) change.language = asked.language;
+    if (typeof asked.allFiles === 'boolean') change.allFiles = asked.allFiles;
+    if (typeof asked.nameIcons === 'boolean') change.nameIcons = asked.nameIcons;
+    if (Object.keys(change).length) updateSettings((settings) => Object.assign(settings, change));
     return windowSettings();
   });
 
@@ -118,6 +120,19 @@ export function registerIpc(): void {
   handle('chat:setOption', (id, option, value) => chat.setChatOption(id, option, value));
   handle('chat:rename', (id, title) => chat.renameChat(id, title));
   handle('chat:remove', (id) => chat.removeChat(id));
+
+  // Signing in to those tools (services/auth.ts): a key goes in and is never sent back.
+  auth.onAuthChanged(() => broadcast('chat:authChanged', null));
+  handle('chat:auth', () => auth.authStatuses());
+  handle('chat:login', (cli) => auth.startLogin(cli));
+  handle('chat:setKey', async (cli, key, baseUrl) => {
+    await auth.setToolKey(cli, key, baseUrl);
+    return auth.authStatuses();
+  });
+  handle('chat:forgetKey', (cli) => {
+    auth.forgetToolKey(cli);
+    return auth.authStatuses();
+  });
 }
 
 export function stopWatching(): void {

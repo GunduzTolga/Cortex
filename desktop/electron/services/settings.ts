@@ -4,8 +4,8 @@ import { app } from 'electron';
 import type { AppLanguage } from '../../shared/language';
 
 /**
- * The app's own settings file: which vault is open and which language the
- * window speaks. In the app's data folder (`%APPDATA%\Cortex` on Windows),
+ * The app's own settings file: which vault is open, which language the
+ * window speaks, and how the notes tree shows the vault. In the app's data folder (`%APPDATA%\Cortex` on Windows),
  * never in the vault: the vault stays the person's Markdown and nothing else.
  *
  * Krewgent kept the same two facts in its state file (`cortexVault`, the
@@ -22,7 +22,7 @@ import type { AppLanguage } from '../../shared/language';
  *
  * The vault's path is written only by the main process, when the person has
  * chosen a folder through the system's dialog (`setVault`); the window can
- * patch the language and nothing else (electron/ipc.ts).
+ * patch the rest and nothing else (electron/ipc.ts).
  */
 
 export interface Settings {
@@ -30,9 +30,13 @@ export interface Settings {
   vault: string | null;
   /** Null until somebody picks; read through `appLanguage` (shared/language.ts). */
   language: AppLanguage | null;
+  /** The notes tree lists every kind of file; off by default (shared/api.ts). */
+  allFiles: boolean;
+  /** Names are shown with the emoji they start with; off by default. */
+  nameIcons: boolean;
 }
 
-const EMPTY: Settings = { vault: null, language: null };
+const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false };
 
 let cache: Settings | null = null;
 let keepOff = false;
@@ -46,6 +50,8 @@ function hydrate(raw: Record<string, unknown>): Settings {
   return {
     vault: typeof raw.vault === 'string' && raw.vault ? raw.vault : null,
     language: raw.language === 'en' || raw.language === 'tr' ? raw.language : null,
+    allFiles: raw.allFiles === true,
+    nameIcons: raw.nameIcons === true,
   };
 }
 

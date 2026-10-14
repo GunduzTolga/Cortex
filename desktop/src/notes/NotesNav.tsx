@@ -19,14 +19,14 @@ import {
 } from 'lucide-react';
 import { messageOf } from '@shared/ipcError';
 import type { SearchHit } from '@shared/notes';
-import { baseName, captureFolder, dayOf, folderOf, isNotePath, nameProblem, noteTitle, pathKey, shortestLink } from '../../core/vaultNotes';
+import { baseName, captureFolder, dayOf, folderOf, isNotePath, listedByDefault, nameProblem, noteTitle, pathKey, shortestLink } from '../../core/vaultNotes';
 import { noteTemplateOf, templateText } from './templates';
-import { foldForMatch } from '../../core/titles';
+import { foldForMatch, withoutIcon } from '../../core/titles';
 import { useT } from '../i18n/useT';
 import type { Key } from '../i18n';
 import { useApp } from '../store/app';
 import { Spinner } from '../ui/ui';
-import { labelOf, useActiveTab, useNotes, type NavTab } from './notesStore';
+import { folderLabel, labelOf, useActiveTab, useNotes, type NavTab } from './notesStore';
 import { openContextMenu, usePrompt, type MenuItem } from './NotesMenus';
 import { TrashPanel, useTrash } from './bin';
 
@@ -66,20 +66,42 @@ export const NAME_PROBLEM: Record<NonNullable<ReturnType<typeof nameProblem>>, K
   long: 'notes.name.long',
 };
 
-function buildTree(folders: string[], files: string[], labels: ReadonlyMap<string, string>): TreeNode {
+interface TreeShow {
+  /** Every kind of file, not only notes and what notes show (`listedByDefault`). */
+  allFiles: boolean;
+  /** Names with the emoji they start with on disk. */
+  nameIcons: boolean;
+}
+
+function buildTree(folders: string[], files: string[], labels: ReadonlyMap<string, string>, show: TreeShow): TreeNode {
   const root: TreeNode = { name: '', path: '', kind: 'folder', children: [] };
   const byPath = new Map<string, TreeNode>([['', root]]);
+  const named = (name: string) => (show.nameIcons ? name : withoutIcon(name));
   const folder = (path: string): TreeNode => {
     const had = byPath.get(path);
     if (had) return had;
-    const node: TreeNode = { name: baseName(path), path, kind: 'folder', children: [] };
+    const node: TreeNode = { name: named(baseName(path)), path, kind: 'folder', children: [] };
     byPath.set(path, node);
     folder(folderOf(path)).children.push(node);
     return node;
   };
   for (const one of folders) folder(one);
-  // A receipt by its event_id, and sorted by it, where its file's name is a hash (`labelOf`).
-  for (const one of files) folder(folderOf(one)).children.push({ name: labels.get(one) ?? (isNotePath(one) ? noteTitle(one) : baseName(one)), path: one, kind: isNotePath(one) ? 'note' : 'file', children: [] });
+  // The folders that hold a file left out, and so are not empty but look it.
+  const holdsHidden = new Set<string>();
+  for (const one of files) {
+    if (!show.allFiles && !listedByDefault(one)) {
+      for (let at = folderOf(one); at; at = folderOf(at)) holdsHidden.add(at);
+      continue;
+    }
+    // A receipt by its event_id, and sorted by it, where its file's name is a hash (`labelOf`).
+    folder(folderOf(one)).children.push({ name: labels.get(one) ?? named(isNotePath(one) ? noteTitle(one) : baseName(one)), path: one, kind: isNotePath(one) ? 'note' : 'file', children: [] });
+  }
+  // A folder of nothing but what is left out goes with it; one that is empty on disk stays, as it does in Obsidian.
+  const prune = (node: TreeNode): boolean => {
+    node.children = node.children.filter((child) => child.kind !== 'folder' || prune(child));
+    return node.children.length > 0 || !holdsHidden.has(node.path);
+  };
+  prune(root);
   const sort = (node: TreeNode) => {
     node.children.sort((a, b) => (a.kind === 'folder') !== (b.kind === 'folder') ? (a.kind === 'folder' ? -1 : 1) : collator.compare(sortName(a.name), sortName(b.name)));
     node.children.forEach(sort);
@@ -267,13 +289,15 @@ function FileTree() {
   const readOnly = Boolean(index?.readOnly);
   const paths = useNotes((state) => state.paths);
   const labels = useNotes((state) => state.labels);
+  const allFiles = useApp((s) => s.settings.allFiles);
+  const nameIcons = useNotes((state) => state.nameIcons);
   const [dragging, setDragging] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
   const linkTo = (path: string) => shortestLink(path, paths);
 
   const tree = useMemo(
-    () => buildTree(index?.folders ?? [], [...(index?.notes.map((note) => note.path) ?? []), ...(index?.files.map((file) => file.path) ?? [])], labels),
-    [index, labels],
+    () => buildTree(index?.folders ?? [], [...(index?.notes.map((note) => note.path) ?? []), ...(index?.files.map((file) => file.path) ?? [])], labels, { allFiles, nameIcons }),
+    [index, labels, allFiles, nameIcons],
   );
   // What Cortex's engine keeps, and every folder on the way to it: not renamed, moved or binned from here (electron/services/vaultNotes.ts refuses it too).
   const kept = useMemo(() => {
@@ -404,7 +428,9 @@ function FileTree() {
         >
           <ChevronRight size={12} className={`shrink-0 text-zinc-300 transition-transform ${node.kind === 'folder' ? '' : 'invisible'} ${expanded ? 'rotate-90' : ''}`} />
           <span className="shrink-0 text-zinc-400">{icon}</span>
-          <span className="min-w-0 truncate">{node.name}</span>
+          <span className="min-w-0 truncate" title={node.name !== baseName(node.path) && node.kind !== 'note' ? baseName(node.path) : undefined}>
+            {node.name}
+          </span>
         </button>
         {node.kind === 'folder' && expanded && node.children.length ? <ul>{node.children.map((child) => row(child, depth + 1))}</ul> : null}
       </li>
@@ -534,7 +560,7 @@ function SearchPanel() {
                     className="w-full rounded-md px-2 py-1 text-left hover:bg-zinc-50"
                   >
                     <span className="block truncate text-[13px] font-semibold text-darkDelegation">{labelOf(hit.path)}</span>
-                    {folderOf(hit.path) ? <span className="block truncate text-[10.5px] text-zinc-400">{folderOf(hit.path)}</span> : null}
+                    {folderOf(hit.path) ? <span className="block truncate text-[10.5px] text-zinc-400">{folderLabel(folderOf(hit.path))}</span> : null}
                   </button>
                   {hit.lines.map((line) => (
                     <button

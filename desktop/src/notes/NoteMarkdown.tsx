@@ -91,6 +91,7 @@ function WikiLink({ target, subpath, alias }: { target: string; subpath: string;
       className="kg-wikilink"
       data-missing={to ? undefined : ''}
       data-note-link={target}
+      data-note-path={to ?? undefined}
       title={to ? undefined : t('notes.link.missing', { name: target })}
       onClick={open}
       onAuxClick={open}
@@ -342,6 +343,7 @@ function MarkdownLink({ href, title, children }: { href: string; title: string; 
       href="#"
       className="kg-wikilink"
       data-missing={to ? undefined : ''}
+      data-note-path={to ?? undefined}
       onClick={(event) => {
         event.preventDefault();
         if (to) useNotes.getState().open(to, { ...openOptions(event), subpath: subpath || null });

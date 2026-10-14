@@ -7,7 +7,7 @@ import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 import { Button, Spinner } from '../ui/ui';
-import { useNotes } from './notesStore';
+import { folderLabel, nameLabel, useNotes } from './notesStore';
 import { useConfirm } from './NotesMenus';
 
 /**
@@ -23,7 +23,7 @@ type Translate = ReturnType<typeof useT>;
 type Toast = ReturnType<typeof useApp.getState>['toast'];
 
 /** The name a thing in the bin is shown by: a note without `.md`, as the tree shows it. */
-const nameOf = (from: string) => (isNotePath(from) ? noteTitle(from) : baseName(from));
+const nameOf = (from: string) => nameLabel(isNotePath(from) ? noteTitle(from) : baseName(from));
 
 /** Take one back: where it was, or beside it when that place was taken since; a note is opened again. */
 export async function restoreFromBin(id: string, t: Translate, toast: Toast, wanted?: string): Promise<void> {
@@ -159,7 +159,7 @@ export function TrashPanel() {
               </button>
             </div>
             <p className="truncate pl-[1.35rem] text-[10.5px] text-zinc-400">
-              {folderOf(item.from) || t('notes.bin.top')} · {whenOf(item.deletedAt, language)} · {sizeOf(item)}
+              {folderLabel(folderOf(item.from)) || t('notes.bin.top')} · {whenOf(item.deletedAt, language)} · {sizeOf(item)}
             </p>
           </li>
         ))}

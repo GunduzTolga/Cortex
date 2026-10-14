@@ -12,7 +12,8 @@ import { NoteEditor, type LinkChoice, type NoteEditorHandle } from './NoteEditor
 import type { LiveHooks } from './livePreview';
 import { imageOf } from './vaultCache';
 import { peekLeave, peekSoon } from './peek';
-import { useActiveTab, useLabel, useNotes } from './notesStore';
+import { nameIcon } from '../../core/titles';
+import { folderLabel, useActiveTab, useLabel, useNotes } from './notesStore';
 import { Menu } from './NotesMenus';
 import { useTrash } from './bin';
 import { NAME_PROBLEM } from './NotesNav';
@@ -67,11 +68,16 @@ export function NotePane({ path }: { path: string }) {
   const [conflict, setConflict] = useState<{ text: string; hash: string; modified: number } | null>(null);
   const [changed, setChanged] = useState(false);
   const [jump, setJump] = useState<{ line: number; seq: number } | null>(null);
-  const [title, setTitle] = useState(noteTitle(path));
+  // A name's leading emoji, where names are shown without one: kept out of the field and put back on a rename.
+  const icon = useNotes((state) => (state.nameIcons ? '' : nameIcon(noteTitle(path))));
+  const [title, setTitle] = useState(() => noteTitle(path).slice(icon.length));
+  // The setting changed with the note open: the field takes the name as now shown, so a commit does not rename it to that.
+  useEffect(() => setTitle(noteTitle(path).slice(icon.length)), [icon, path]);
   const [titleProblem, setTitleProblem] = useState<string | null>(null);
   // A receipt is shown by its event_id: its file's name is the hash Cortex finds it by, and it is not renamed from here.
+  const keptLabel = useNotes((state) => state.keptLabels.get(path) ?? null);
   const label = useLabel(path);
-  const shownTitle = label !== noteTitle(path) ? label : title;
+  const shownTitle = keptLabel ?? title;
   const reader = useRef<HTMLDivElement>(null);
   const editor = useRef<NoteEditorHandle>(null);
   // What the save in flight and the last one read, for the callbacks that outlive a render.
@@ -206,7 +212,7 @@ export function NotePane({ path }: { path: string }) {
   );
 
   const rename = async () => {
-    const name = title.trim();
+    const name = `${icon}${title.trim()}`;
     if (name === noteTitle(path)) {
       setTitleProblem(null);
       return;
@@ -310,7 +316,7 @@ export function NotePane({ path }: { path: string }) {
         <p className="ml-1 min-w-0 flex-1 truncate text-[12px] text-zinc-400" data-note-crumbs>
           {folder ? (
             <>
-              {folder.split('/').join(' / ')}
+              {folderLabel(folder).split('/').join(' / ')}
               <span className="mx-1.5">/</span>
             </>
           ) : null}

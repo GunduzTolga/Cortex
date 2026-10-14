@@ -69,10 +69,15 @@ const api: CortexApi = {
     setOption: (id, option, value) => invoke('chat:setOption', id, option, value),
     rename: (id, title) => invoke('chat:rename', id, title),
     remove: (id) => invoke('chat:remove', id),
+    auth: () => invoke('chat:auth'),
+    login: (cli) => invoke('chat:login', cli),
+    setKey: (cli, key, baseUrl) => invoke('chat:setKey', cli, key, baseUrl),
+    forgetKey: (cli) => invoke('chat:forgetKey', cli),
   },
   on: {
     notesChanged: (handler) => subscribe('notes:changed', handler),
     chat: (handler) => listen('chat:event', handler),
+    authChanged: (handler) => subscribe('chat:authChanged', handler),
   },
 };
 

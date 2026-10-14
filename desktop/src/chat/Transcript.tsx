@@ -5,15 +5,15 @@ import type { Key } from '../i18n';
 import { useT } from '../i18n/useT';
 import { NoteMarkdown } from '../notes/NoteMarkdown';
 import { noteFor, useNotes } from '../notes/notesStore';
-import { useView } from '../store/view';
 import { Spinner } from '../ui/ui';
+import { captureNoteLinks, openNote } from './noteLinks';
 import type { Step, Turn } from './turns';
 
 /**
  * A chat as it reads: what the person wrote on the right, Pyn's answers on
  * the left - the words first, the thinking and the steps each folded into one
  * line above them. A note the answer links to, or a step touched, opens in
- * the notes. The view follows the answer as it comes while the person is at
+ * the panel beside the chat (SidePane.tsx); with Ctrl, in the notes. The view follows the answer as it comes while the person is at
  * its foot, and stays where they scrolled to when they are not.
  */
 
@@ -28,16 +28,11 @@ const KIND_ICONS: Record<string, React.ReactNode> = {
   think: <Brain size={13} />,
 };
 
-/** A note the CLI named, opened in the notes; a path that is not a note of the vault is shown, not opened. */
+/** A note the CLI named, opened beside the chat; a path that is not a note of the vault is shown, not opened. */
 function PathChip({ path }: { path: string }) {
   const note = useNotes((state) => (path.toLowerCase().endsWith('.md') ? noteFor(path) : null) ?? null);
-  const open = () => {
-    if (!note) return;
-    useNotes.getState().open(note);
-    useView.getState().setView('notes');
-  };
   return note ? (
-    <button type="button" onClick={open} className="max-w-[16rem] truncate rounded bg-zinc-100 px-1.5 py-px font-mono text-[10.5px] text-zinc-600 hover:bg-zinc-200 hover:text-darkDelegation" data-chat-path={path}>
+    <button type="button" onClick={(event) => openNote(note, event.ctrlKey || event.metaKey)} className="max-w-[16rem] truncate rounded bg-zinc-100 px-1.5 py-px font-mono text-[10.5px] text-zinc-600 hover:bg-zinc-200 hover:text-darkDelegation" data-chat-path={path}>
       {path}
     </button>
   ) : (
@@ -97,7 +92,7 @@ const ERRORS: Record<string, Key> = {
   unsupported: 'chat.error.unsupported',
 };
 
-function Answer({ turn, live }: { turn: Turn; live: boolean }) {
+function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?: () => void }) {
   const t = useT();
   const working = live && !turn.end;
   const answered = turn.asked.filter((one) => one.answer !== undefined);
@@ -151,6 +146,11 @@ function Answer({ turn, live }: { turn: Turn; live: boolean }) {
               {t(ERRORS[turn.end.error ?? ''] ?? 'chat.error.other')}
             </p>
             <p className="mt-0.5 break-words font-mono text-[11px] text-zinc-500">{turn.end.message}</p>
+            {turn.end.error === 'auth' && onSignIn ? (
+              <button type="button" onClick={onSignIn} className="mt-2 rounded-lg border-[1.5px] border-darkDelegation bg-gold px-2.5 py-1 text-[11.5px] font-semibold text-darkDelegation hover:bg-signal" data-chat-sign-in>
+                {t('chat.signIn')}
+              </button>
+            ) : null}
           </div>
         ) : turn.end?.kind === 'done' && turn.end.reason !== 'end_turn' ? (
           <p className="mt-1 text-[11.5px] text-zinc-400" data-chat-stopped={turn.end.reason}>
@@ -162,7 +162,7 @@ function Answer({ turn, live }: { turn: Turn; live: boolean }) {
   );
 }
 
-export function Transcript({ turns, running }: { turns: Turn[]; running: boolean }) {
+export function Transcript({ turns, running, onSignIn }: { turns: Turn[]; running: boolean; onSignIn?: () => void }) {
   const box = useRef<HTMLDivElement>(null);
   // Following the answer while the person is at the foot of the chat; left where they are when they scrolled up.
   const atFoot = useRef(true);
@@ -180,13 +180,8 @@ export function Transcript({ turns, running }: { turns: Turn[]; running: boolean
     element.addEventListener('scroll', scrolled, { passive: true });
     return () => element.removeEventListener('scroll', scrolled);
   }, []);
-  // A link in an answer opens its note in the notes: the click is the link's, the view comes forward after it.
-  const opened = (event: React.MouseEvent) => {
-    if ((event.target as Element).closest('.kg-wikilink')) useView.getState().setView('notes');
-  };
-
   return (
-    <div ref={box} className="min-h-0 flex-1 overflow-y-auto" data-chat-transcript onClick={opened}>
+    <div ref={box} className="min-h-0 flex-1 overflow-y-auto" data-chat-transcript onClickCapture={captureNoteLinks}>
       <div className="mx-auto flex max-w-[46rem] flex-col gap-6 px-6 pb-8 pt-8">
         {turns.map((turn, at) => (
           <div key={at} className="flex flex-col gap-4">
@@ -195,7 +190,7 @@ export function Transcript({ turns, running }: { turns: Turn[]; running: boolean
                 {turn.user.text}
               </div>
             ) : null}
-            <Answer turn={turn} live={running && at === turns.length - 1} />
+            <Answer turn={turn} live={running && at === turns.length - 1} onSignIn={onSignIn} />
           </div>
         ))}
       </div>

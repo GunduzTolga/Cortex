@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ChatEvent, ChatOpened, ChatPush, ChatSummary, CliId, CliInfo, ConfigOption } from '@shared/chat';
+import type { ChatEvent, ChatOpened, ChatPush, ChatSummary, CliAuth, CliId, CliInfo, ConfigOption } from '@shared/chat';
 import { messageOf } from '@shared/ipcError';
 
 /**
@@ -35,6 +35,20 @@ interface ChatState {
   /** What is written and not yet sent, by chat (`new` for a new one). */
   drafts: Record<string, string>;
   error: string | null;
+  /** The panel beside the chat: whether it is open, and the note shown in it (null: the chat's notes, listed). */
+  side: { open: boolean; path: string | null };
+  /** The panel opened, on a note or on the chat's notes. */
+  showSide(path?: string | null): void;
+  hideSide(): void;
+  /** Whether each AI tool is signed in; null before it is asked. */
+  auth: CliAuth[] | null;
+  /** The sign-in window: open on every tool, on one, or closed. */
+  authOpen: CliId | 'all' | null;
+  /** Tools a chat was refused by for want of a sign-in since one last answered: their own status can say signed in with a token that has expired. */
+  authFailed: CliId[];
+  loadAuth(): Promise<void>;
+  openAuth(focus?: CliId): void;
+  closeAuth(): void;
   boot(): Promise<void>;
   select(id: string | null): Promise<void>;
   setCli(cli: CliId): void;
@@ -48,6 +62,7 @@ interface ChatState {
 }
 
 const CLI_KEY = 'cortex.chat.cli';
+const SIDE_KEY = 'cortex.chat.side';
 const DRAFTS_KEY = 'cortex.chat.drafts';
 
 function load<T>(key: string, fallback: T): T {
@@ -83,11 +98,16 @@ export const useChat = create<ChatState>((set, get) => {
     set((state) => {
       const open = { ...state.open };
       let chats = state.chats;
+      let authFailed = state.authFailed;
       for (const push of pushes) {
         if (push.summary) {
           const summary = push.summary;
           chats = [summary, ...chats.filter((one) => one.id !== summary.id)].sort(byTime);
         }
+        // A tool refused for want of a sign-in is marked until it answers again; a chat new in this frame is in `chats` already.
+        const tool = chats.find((one) => one.id === push.chatId)?.cli;
+        if (tool && push.event?.type === 'error' && push.event.kind === 'auth' && !authFailed.includes(tool)) authFailed = [...authFailed, tool];
+        if (tool && push.event?.type === 'done' && authFailed.includes(tool)) authFailed = authFailed.filter((one) => one !== tool);
         const chat = open[push.chatId];
         if (!chat) continue;
         let next = chat;
@@ -96,7 +116,7 @@ export const useChat = create<ChatState>((set, get) => {
         if (push.state) next = { ...next, running: push.state.running, options: push.state.options };
         open[push.chatId] = next;
       }
-      return { open, chats };
+      return { open, chats, authFailed };
     });
   };
   let listening = false;
@@ -109,6 +129,38 @@ export const useChat = create<ChatState>((set, get) => {
     cli: load<CliId | null>(CLI_KEY, null),
     drafts: load<Record<string, string>>(DRAFTS_KEY, {}),
     error: null,
+    side: { open: load<boolean>(SIDE_KEY, false), path: null },
+
+    showSide(path = null) {
+      set({ side: { open: true, path } });
+      keep(SIDE_KEY, true);
+    },
+
+    hideSide() {
+      set({ side: { open: false, path: null } });
+      keep(SIDE_KEY, false);
+    },
+
+    auth: null,
+    authOpen: null,
+    authFailed: [],
+
+    async loadAuth() {
+      try {
+        set({ auth: await window.cortex.chat.auth() });
+      } catch (err) {
+        set({ error: messageOf(err) });
+      }
+    },
+
+    openAuth(focus) {
+      set({ authOpen: focus ?? 'all' });
+      void get().loadAuth();
+    },
+
+    closeAuth() {
+      set({ authOpen: null });
+    },
 
     async boot() {
       if (!listening) {
@@ -117,6 +169,8 @@ export const useChat = create<ChatState>((set, get) => {
           queue.push(push);
           if (!frame) frame = requestAnimationFrame(flush);
         });
+        // A sign-in window closed: every tool asked again.
+        window.cortex.on.authChanged(() => void get().loadAuth());
       }
       try {
         const [clis, chats] = await Promise.all([window.cortex.chat.clis(), window.cortex.chat.list()]);
@@ -125,12 +179,15 @@ export const useChat = create<ChatState>((set, get) => {
         // The CLI last written to, while it is still here; else the first this machine has.
         const cli = chosen && available.some((one) => one.id === chosen) ? chosen : (available[0]?.id ?? null);
         set({ clis, chats, cli, error: null });
+        // Asked once at the start, so the tool chip can say which tools are signed in; it takes a second or two.
+        void get().loadAuth();
       } catch (err) {
         set({ error: messageOf(err), clis: [] });
       }
     },
 
     async select(id) {
+      set((state) => ({ side: { ...state.side, path: null } }));
       if (id === null) {
         set({ active: null });
         return;

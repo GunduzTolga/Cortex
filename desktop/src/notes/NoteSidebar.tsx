@@ -5,7 +5,7 @@ import { folderOf, parseNote, pathKey } from '../../core/vaultNotes';
 import { useT } from '../i18n/useT';
 import type { Key } from '../i18n';
 import { GraphView } from './GraphView';
-import { labelOf, useActiveTab, useNotes } from './notesStore';
+import { folderLabel, labelOf, useActiveTab, useNotes } from './notesStore';
 
 /**
  * Beside the note in front: what links to it and what it links to, its
@@ -118,7 +118,7 @@ function Links() {
     <li key={to} className="rounded-md px-1 py-1 hover:bg-zinc-50" data-side-link={to}>
       <button type="button" onClick={(event) => useNotes.getState().open(to, { newTab: event.ctrlKey || event.metaKey, line: lines?.[0]?.line ?? null })} className="block w-full text-left">
         <span className="block truncate text-[13px] font-semibold text-darkDelegation">{labelOf(to)}</span>
-        {folderOf(to) ? <span className="block truncate text-[10.5px] text-zinc-400">{folderOf(to)}</span> : null}
+        {folderOf(to) ? <span className="block truncate text-[10.5px] text-zinc-400">{folderLabel(folderOf(to))}</span> : null}
       </button>
       {lines?.map((line) => (
         <button key={line.line} type="button" onClick={() => useNotes.getState().open(to, { line: line.line })} className="mt-0.5 block w-full text-left text-[11.5px] leading-snug text-zinc-500 hover:text-darkDelegation">

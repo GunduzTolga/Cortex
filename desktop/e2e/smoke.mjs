@@ -85,6 +85,9 @@ const launch = () =>
       CORTEX_TEST_AGENT: path.resolve('tests/fixtures/fake-acp-agent.mjs'),
       CORTEX_TEST_CLAUDE: path.resolve('tests/fixtures/fake-claude.mjs'),
       CORTEX_TEST_CODEX: path.resolve('tests/fixtures/fake-codex.mjs'),
+      // The model servers asked where nothing answers: never the machine's own LM Studio or Ollama.
+      CORTEX_TEST_LMSTUDIO: 'http://127.0.0.1:9',
+      CORTEX_TEST_OLLAMA: 'http://127.0.0.1:9',
     },
   });
 
@@ -293,6 +296,39 @@ check(
     fs.readFileSync(vaultNote(receipt), 'utf8') === receiptBefore,
 );
 await shoot('07-receipt.png');
+/*
+  The settings (src/ui/SettingsDialog.tsx): what is not a note or what a note
+  shows is out of the tree until every kind is asked for, and a name's leading
+  emoji is left out of what is shown unless asked for; the disk is not touched.
+*/
+const commandCenter = notesView.locator('[data-tree-path="🎯 100-Command-Center"]');
+check(
+  'scripts, JSON and text files are out of the tree, and names are shown without the emoji they start with',
+  (await notesView.locator('[data-tree-path="Notes/settings.json"]').count()) === 0 && (await commandCenter.textContent())?.trim() === '100-Command-Center',
+);
+await page.locator('[data-settings-open]').click();
+check('the gear in the top bar opens the settings', await shownSoon(page.locator('[data-settings]')));
+await page.waitForTimeout(400);
+await shoot('07b-settings.png');
+await page.locator('[data-settings-all-files]').click();
+await page.locator('[data-settings-name-icons]').click();
+check(
+  'a setting changed is kept by the main process at once',
+  await page.waitForFunction(async () => {
+    const { settings } = await window.cortex.bootstrap();
+    return settings.allFiles && settings.nameIcons;
+  }, null, { timeout: 5_000 }).then(() => true, () => false),
+);
+await page.keyboard.press('Escape');
+check(
+  'and the tree follows it: every kind of file, the names as they are on disk',
+  (await shownSoon(notesView.locator('[data-tree-path="Notes/settings.json"]'))) && (await commandCenter.textContent())?.trim() === '🎯 100-Command-Center' && fs.existsSync(vaultNote('🎯 100-Command-Center')),
+);
+await page.keyboard.press('Control+,');
+check('Ctrl+, opens them too', await shownSoon(page.locator('[data-settings]')));
+await page.locator('[data-settings-name-icons]').click();
+await page.keyboard.press('Escape');
+check('and the emoji go again', await page.waitForFunction(() => document.querySelector('[data-tree-path="🎯 100-Command-Center"]')?.textContent?.trim() === '100-Command-Center', null, { timeout: 5_000 }).then(() => true, () => false));
 await notesView.locator('[data-tree-path="Notes/settings.json"]').click();
 check(
   'a JSON file is shown as the text it is, read only',
@@ -366,6 +402,21 @@ await notesView.locator('[data-notes-nav-tab="files"]').click();
 console.log('\nPyn');
 await page.locator('[data-app-view="pyn"]').click();
 check('Pyn opens on a new chat: the greeting and the field', await shownSoon(page.locator('[data-chat-empty] [data-chat-input]')));
+// The tools' sign-ins, from the tool chip: each tool listed with what it says of itself. Nothing is pressed in it: a sign-in opens a window.
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-chip-footer]').click();
+check(
+  'the tools’ sign-ins open from the tool chip, every tool listed, the model servers with them',
+  (await shownSoon(page.locator('[data-auth-list]'), 30_000)) && (await page.locator('[data-auth-tool]').count()) === 7 && (await page.locator('[data-auth-tool="lmstudio"]').count()) === 1,
+);
+await shoot('15-auth.png');
+await page.keyboard.press('Escape');
+await page.locator('[data-auth-list]').waitFor({ state: 'detached' });
+await page.locator('[data-settings-open]').click();
+await page.locator('[data-settings-auth]').click();
+check('and from the settings', (await shownSoon(page.locator('[data-auth-list]'), 30_000)) && (await page.locator('[data-settings]').count()) === 0);
+await page.keyboard.press('Escape');
+await page.locator('[data-auth-list]').waitFor({ state: 'detached' });
 await page.locator('[data-chat-chip="cli"]').click();
 await page.locator('[data-chat-choice="test"]').click();
 await page.locator('[data-chat-input]').fill('merhaba Pyn');
@@ -389,6 +440,13 @@ await page.locator('[data-chat-input]').fill('yavaş olsun');
 await page.keyboard.press('Enter');
 await page.locator('[data-chat-stop]').click();
 check('Stop ends an answer, and says so', await shownSoon(page.locator('[data-chat-stopped="cancelled"]')));
+await page.locator('[data-chat-send]').waitFor();
+await page.locator('[data-chat-input]').fill('giriş yapmadım');
+await page.keyboard.press('Enter');
+await page.locator('[data-chat-sign-in]').click();
+check('a tool not signed in says so, and its card opens the sign-ins', await shownSoon(page.locator('[data-auth-list]'), 30_000));
+await page.keyboard.press('Escape');
+await page.locator('[data-auth-list]').waitFor({ state: 'detached' });
 // Claude Code, in its own stream of JSON: a new chat with its stand-in.
 await page.locator('[data-chat-new]').click();
 await page.locator('[data-chat-chip="cli"]').click();
@@ -415,9 +473,19 @@ check(
   (await shownSoon(page.locator('[data-chat-text]', { hasText: 'komut: accept.' }))) && (await page.locator('[data-chat-chip="model"]').textContent())?.trim() === 'GPT-6-Luna',
 );
 await shoot('13-codex.png');
+// A note an answer links to opens beside the chat; the panel lists what the chat touched; one opens in the notes from there.
 await page.locator('[data-chat-text] .kg-wikilink', { hasText: 'Ideas' }).first().click();
 check(
-  'a note an answer links to opens in the notes',
+  'a note an answer links to opens beside the chat, and the chat stays',
+  (await shownSoon(page.locator('[data-chat-side-note="Personal/Ideas.md"]'))) && (await page.locator('[data-app-view="pyn"]').getAttribute('aria-pressed')) === 'true',
+);
+await page.locator('[data-chat-side-back]').click();
+check('the panel lists the notes the chat touched', await shownSoon(page.locator('[data-chat-side-item="Personal/Ideas.md"]')));
+await shoot('14-side.png');
+await page.locator('[data-chat-side-item="Personal/Ideas.md"]').click();
+await page.locator('[data-chat-side-open]').click();
+check(
+  'and one opens in the notes from there, to be written',
   (await shownSoon(notesView.locator('[data-note-pane="Personal/Ideas.md"]'))) && (await page.locator('[data-app-view="notes"]').getAttribute('aria-pressed')) === 'true',
 );
 await page.locator('[data-app-view="graph"]').click();

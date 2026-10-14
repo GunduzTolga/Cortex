@@ -7,13 +7,32 @@
  * never starts a program: it names a CLI from the list it was given.
  */
 
-export type CliId = 'claude' | 'codex' | 'opencode' | 'gemini' | 'qwen' | 'test' | 'test-claude' | 'test-codex';
+export type CliId = 'claude' | 'codex' | 'opencode' | 'gemini' | 'qwen' | 'lmstudio' | 'ollama' | 'test' | 'test-claude' | 'test-codex';
 
 export interface CliInfo {
   id: CliId;
   name: string;
   /** Whether it is installed on this machine. */
   available: boolean;
+}
+
+/** Whether an AI tool is signed in, and how it can be (electron/services/auth.ts). Never a key. */
+export interface CliAuth {
+  id: CliId;
+  installed: boolean;
+  /** Signed in or holding a key, as the tool says; null when it could not be asked. */
+  signedIn: boolean | null;
+  /** How: "Claude · kisi@example.com", "ChatGPT", "API key", the connections it keeps. */
+  detail: string | null;
+  /** Whether its own sign-in can be opened from here, in a window of its own. */
+  canLogin: boolean;
+  /** Where a key goes: kept by Cortex and given as the tool's environment, handed to the tool itself, or nowhere. */
+  key: 'cortex' | 'cli' | null;
+  /** Whether a key needs the OpenAI-compatible address it is for. */
+  baseUrl: boolean;
+  hasKey: boolean;
+  /** For a model server on this machine (LM Studio, Ollama), which needs no sign-in: what it has, and whether OpenCode, which runs it, is installed. */
+  local?: { models: number; loaded: string[]; shortContext: number | null; runner: boolean };
 }
 
 export interface ChatSummary {
@@ -91,4 +110,11 @@ export interface ChatApi {
   setOption(id: string, option: string, value: string): Promise<ConfigOption[]>;
   rename(id: string, title: string): Promise<ChatSummary>;
   remove(id: string): Promise<void>;
+  /** Every AI tool, and whether it is signed in. */
+  auth(): Promise<CliAuth[]>;
+  /** The tool's own sign-in, in a window of its own; the statuses are pushed again when it closes. */
+  login(cli: CliId): Promise<void>;
+  /** A key for a tool: kept encrypted by Cortex, or handed to the tool itself (Codex). */
+  setKey(cli: CliId, key: string, baseUrl?: string): Promise<CliAuth[]>;
+  forgetKey(cli: CliId): Promise<CliAuth[]>;
 }

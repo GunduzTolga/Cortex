@@ -2,13 +2,14 @@
 
 Cortex'in Windows masaüstü uygulaması. İlk ekranı Pyn: kendi yapay zekâ araçlarınla kasanın hafızası üzerinden konuştuğun sohbet. Yanında kasanı Obsidian'a gerek kalmadan okuyup yazan not ekranı ve grafik var. Sonraki aşamada Cortex'i kendisi kuracak.
 
-Bu klasör **Aşama 1** (notlar) ve **Aşama 2'nin ilk parçası** (Pyn'in sohbeti). Motor (`beyin.py`, `template/`, `scripts/`) bu iş için değişmedi: sohbetteki araç kasada başlatılır, hafızayı motorun oradaki hook'ları verir.
+Bu klasör **Aşama 1** (notlar) ve **Aşama 2'nin büyük kısmı** (Pyn'in sohbeti, araç girişleri, yerel modeller, ayarlar). Motor (`beyin.py`, `template/`, `scripts/`) bu iş için değişmedi: sohbetteki araç kasada başlatılır, hafızayı motorun oradaki hook'ları verir.
 
 ## Ne yapar
 
 - **İlk açılış:** Kasa seçilmemişse kasa seçme ekranıyla açılır. Klasör, sistemin kendi klasör seçme penceresiyle seçilir. Uygulama sonraki açılışlarda aynı kasayla açılır.
-- **Dil:** Türkçe varsayılan. İngilizce üst çubuktan ya da ilk ekrandan seçilir; seçim kalıcıdır.
-- **Pyn (ilk ekran):** Kişinin kendi yapay zekâ aracıyla sohbet. Araç şunlardan biridir: **Claude Code**, kendi yapılandırılmış modunda (`claude -p --input-format stream-json --output-format stream-json`, Claude Agent SDK'nın onu sürdüğü gibi); **Codex**, kendi uygulama sunucusuyla (`codex app-server`, JSON-RPC); ya da Agent Client Protocol (ACP) konuşan **OpenCode** (`opencode acp`), **Gemini CLI** ve **Qwen Code** (`--acp`).
+- **Dil:** Türkçe varsayılan. İngilizce üst çubuktan, ayarlardan ya da ilk ekrandan seçilir; seçim kalıcıdır.
+- **Ayarlar:** üst çubuktaki dişli ya da Ctrl+, açar. Dil, kasa, dosya ağacının nasıl göstereceği (bütün dosya türleri; adlardaki emojiler) ve yapay zekâ araçlarının girişleri buradadır. Her değişiklik ana süreçte `settings.json`'a o an yazılır; kaydet düğmesi yoktur.
+- **Pyn (ilk ekran):** Kişinin kendi yapay zekâ aracıyla sohbet. Araç şunlardan biridir: **Claude Code**, kendi yapılandırılmış modunda (`claude -p --input-format stream-json --output-format stream-json`, Claude Agent SDK'nın onu sürdüğü gibi); **Codex**, kendi uygulama sunucusuyla (`codex app-server`, JSON-RPC); ya da Agent Client Protocol (ACP) konuşan **OpenCode** (`opencode acp`), **Gemini CLI** ve **Qwen Code** (`--acp`). Bilgisayarındaki yerel modeller için **LM Studio** ve **Ollama** da listede: ikisi de OpenCode üzerinden çalışır.
   - Claude Code'da her sohbet kendi `claude` sürecidir; sohbete devam edilirken oturumu `--resume` ile sürdürülür. Model listesi Claude Code'un kendisinden gelir; izin modu (Önce sor, Düzenlemeleri kabul et, Plan modu, Otomatik) ve efor çiplerle seçilir; "tüm izinleri atla" hiç sunulmaz. Bir ayar değişince süreç turlar arasında kapatılıp aynı oturumda yeni bayrakla açılır. "Her zaman izin ver", Claude Code'un önerdiği kuralı Claude Code'un kendi ayarına yazdırır.
   - Codex'te her kasa için tek sunucu, her sohbet için bir thread vardır; sohbete devam edilirken thread sürdürülür (`thread/resume`). Model listesi sunucudan gelir; sohbet, seçim yapılmamışsa sunucunun işaretlediği varsayılan modelle başlar (`config.toml`'daki model hesabın artık kullanamadığı bir model olabilir). Model, efor, onay politikası ve sandbox her mesajla gönderilir: ayar değişince yeniden başlatma gerekmez. İzin modu: Önce sor, Salt okunur, Kasada sormadan çalış; tam disk erişimi hiç sunulmaz. Komut ve dosya değişikliği onayları aynı kartla sorulur ("Bu sohbette hep izin ver" dahil).
   - araç kasada başlatılır; kasadaki Cortex hook'ları ona kasanın hafızasını verir
@@ -16,11 +17,13 @@ Bu klasör **Aşama 1** (notlar) ve **Aşama 2'nin ilk parçası** (Pyn'in sohbe
   - araç bir adım için izin isterse yazı kutusunun üstünde kart çıkar: bir kez, her zaman, reddet (Enter = bir kez)
   - yazı kutusunda aracın, oturumun modelinin, modunun ve düşünme düzeyinin çipleri; seçilen model o araç için hatırlanır
   - bağlamın doluluğu halka olarak görünür; cevap gelirken Gönder düğmesi Durdur olur
-  - cevaptaki `[[not]]` linki ya da bir adımın dokunduğu not tıklanınca Notlar'da açılır
+  - sohbetin sağında açılıp kapanan panel: bu sohbette okunan, değiştirilen ve bahsedilen notlar; cevaptaki `[[not]]` linki, bir adımın dokunduğu not ya da listedeki bir not sohbetten ayrılmadan panelde açılır (diskte değişince yeniden okunur); Ctrl+tıklama ya da paneldeki düğme onu Notlar'da açar
   - sohbetler kasaya göre listelenir (Bugün / Dün / Bu hafta / Daha eski); Ctrl+K yeni sohbet; hiçbir sohbet ilk mesajdan önce açılmaz
   - kota bitmesi, giriş yapılmamış araç, aracın kapanması kartta anlaşılır bir cümleyle söylenir
+  - **Yerel modeller (LM Studio, Ollama):** Cortex'in `pyn` komutunun kurallarıyla. Sunucular yalnız 127.0.0.1'e HTTP ile sorulur (`/api/v0/models`, `/api/tags`, `/api/ps`); onları başlatabilecek hiçbir komut (`ollama list` gibi) çalıştırılmaz. Gömme (embedding) modelleri listelenmez. Sunucu açık ve bir sohbet modeli varsa araç çipinde görünür. Sohbet o an yüklü modelle başlar; yüklü model yoksa o araç için en son seçilenle, o da yoksa ilk modelle. Sorulmaz. OpenCode, kataloğunda olmayan modelleri bilmediği için sunucu ve modeller yalnız o başlatma için `OPENCODE_CONFIG_CONTENT` ile bildirilir (yüklü modelin bağlam uzunluğu dahil); kasaya ve OpenCode'un ayar dosyasına bir şey yazılmaz, senin `OPENCODE_CONFIG_CONTENT` değerin korunur. Model çipi yalnız o sunucunun modellerini sunar. "Girişleri yönet" penceresi sunucunun açık olup olmadığını, model sayısını ve yüklü modeli gösterir; model 32768'den kısa bağlamla yüklüyse uyarır (OpenCode ve Pyn'in hafızası daha fazlasını ister). OpenCode kurulu değilse "OpenCode gerekir" der.
+  - **Girişler:** araç çipindeki "Girişleri yönet…" ya da "giriş yok" kartındaki düğme, araçların penceresini açar. Her araç kendi komutuyla sorulur (`claude auth status`, `codex login status`, `opencode auth list`); "Giriş yap" aracın kendi girişini ayrı bir konsol penceresinde açar (Claude ve Codex tarayıcıyla, OpenCode sağlayıcı menüsüyle), pencere kapanınca durum yenilenir. API anahtarı: Codex'e doğrudan verilir (`codex login --with-api-key`, girdi üzerinden), Claude Code, Gemini CLI ve Qwen Code için Windows'un şifreli deposunda (DPAPI, `%APPDATA%\Cortex\keys.json`) saklanır ve yalnız o araç başlarken ortam değişkeni olarak verilir; pencere anahtarı bir daha görmez. Durum, aracın bu bilgisayarda kayıtlı girişidir (terminaldekiyle aynı); girişin hâlâ geçerli olduğunu göstermez. Bir araç "giriş yok" diye reddettiğinde, kendi durumu "giriş kayıtlı" dese bile pencere onu "Giriş geçersiz" diye gösterir ve yeniden giriş yapmayı söyler.
 - **Notlar:** Krewgent'ta yazılıp test edilen not ekranı ([KAYNAK.md](KAYNAK.md)):
-  - dosya ağacı (sürükle-bırakla taşıma), sekmeler, ileri/geri
+  - dosya ağacı (sürükle-bırakla taşıma), sekmeler, ileri/geri. Ağaç varsayılan olarak notları ve notların kullandığı resim, PDF, ses ve video dosyalarını listeler; betik, JSON ve metin dosyaları (Cortex'in `beyin.py`'si gibi) "Bütün dosya türlerini göster" açılınca görünür, yalnız gizli dosyalardan oluşan klasörler de onlarla gizlenir. Adların başındaki emojiler (`📥 000-Inbox`) yalnız görünüşte kaldırılır; diskteki adlar değişmez, notun başlığından yeniden adlandırırken emoji korunur.
   - okuma görünümü: wiki linkleri, gömmeler, callout'lar, özellikler, görevler; bir linkin üstüne gelince notu gösterir
   - CodeMirror düzenleyici: Obsidian'ın canlı önizlemesi, bir tuşla kaynak modu
   - geri bağlantılar, ana hat, arama, hızlı geçiş (Ctrl+O), grafik
@@ -53,8 +56,9 @@ Bu kuralların her biri Krewgent'ta bir hatanın bedeli. Hepsi testlerle tutuluy
 - Notun içindeki `https://` bağlantısına tıklarsan bağlantı sistemin tarayıcısında açılır, uygulamanın içinde açılmaz.
 - Yazım denetimi sözlükleri Google'dan indirilmez.
 - Sohbetteki araç kabuk olmadan, sabit argümanlarla, kasada başlatılır. Windows'ta npm'in `.cmd` kısayolu okunur, başlattığı `.exe` ya da betik doğrudan çalıştırılır. Pencere program adı vermez, yalnız ana sürecin verdiği listeden bir araç seçer. Aracın söylediği her şey pencereye gitmeden önce temizlenir: yollar kasaya göre göreli olur, kasa dışındaki bir yol yalnız dosya adıyla görünür, ev klasörü `~` olur, metinler bir uzunlukta kesilir. Uygulama araca dosya ya da terminal servis etmez; araç kendi araçlarıyla, kendi izinleriyle çalışır. Uygulama kapanınca ya da kasa değişince araç ve başlattığı her süreç kapatılır. Cortex bir Claude Code oturumunun içinden açılmışsa (geliştirirken olduğu gibi), o oturumun kendi değişkenleri (`CLAUDECODE`, `CLAUDE_CODE_*`, onun API adresi) araca geçmez; geçseydi araç o oturumun sunucusuna gidip reddedilirdi.
+- Araçların giriş jetonları her aracın kendi dosyasında, senin kullanıcı klasöründe durur (Claude Code `~\.claude\.credentials.json`, Codex `~\.codex\auth.json`, OpenCode `~\.local\share\opencode\auth.json`). Uygulama bu dosyaları okumaz, yalnız araca durumunu sorar. Hiçbiri kasada ya da bu depoda değildir; her bilgisayarda ayrı giriş yapılır. Uygulamanın sakladığı tek sır, girilen API anahtarlarıdır (DPAPI, `%APPDATA%\Cortex\keys.json`).
 - Sohbetlerin listesi ve ekranda gösterilenler uygulamanın veri klasöründe durur (`%APPDATA%\Cortex\chats`), kasada değil. Konuşmanın kendisi aracındır: devam edilen sohbet, araç destekliyorsa kendi oturumunu sürdürür (`session/resume`).
-- Telemetri yok, hesap yok, sürekli açık sunucu yok. Ayarlar (`settings.json`: kasanın yolu ve dil) uygulamanın kendi veri klasöründe durur (`%APPDATA%\Cortex`), kasada değil. Bu dosya okunamazsa üstüne yazılmaz; bozuksa yanına kopyalanır.
+- Telemetri yok, hesap yok, sürekli açık sunucu yok. Ayarlar (`settings.json`: kasanın yolu, dil ve dosya ağacının görünüşü) uygulamanın kendi veri klasöründe durur (`%APPDATA%\Cortex`), kasada değil. Bu dosya okunamazsa üstüne yazılmaz; bozuksa yanına kopyalanır.
 
 ## Nasıl çalıştırılır
 
@@ -69,7 +73,7 @@ npm run dev          # Vite + Electron, değişiklikte yeniden başlar
 | Komut | Ne yapar |
 | --- | --- |
 | `npm run typecheck` | Üç TypeScript projesi: pencere, ana süreç, çekirdek tek başına |
-| `npm test` | `node:test`; testler esbuild ile gerçek kaynaktan paketlenir (116 test; biri yalnız Windows'ta çalışır, başka yerde atlanır) |
+| `npm test` | `node:test`; testler esbuild ile gerçek kaynaktan paketlenir (129 test; biri yalnız Windows'ta çalışır, başka yerde atlanır) |
 | `npm run e2e` | Derler ve gerçek Electron uygulamasını Playwright ile sürer. Pencere hiç gösterilmez: ekran dışında çizilir, `capturePage` ile fotoğraflanır (`e2e/screenshots/`). Linux'ta Xvfb altında çalışır. `CORTEX_SHOW=1` pencereyi gösterir. |
 | `npm run package` | Windows NSIS kurulum dosyası (`release/Cortex Setup X.Y.Z.exe`). Windows'ta çalıştır; Linux'ta son adım wine ister. |
 
@@ -80,7 +84,7 @@ CI: `.github/workflows/desktop.yml`. `desktop/`, `template/` ya da `tema/ananas/
 ```
 core/       Obsidian'ın kuralları: ayrıştırma, link çözme, relink, arama, şablon (node yok, electron yok)
 shared/     iki tarafın ortak tipleri: köprü (api.ts), notlar, dil
-electron/   ana süreç: pencere, IPC kanalları, ayar dosyası, kasa seçimi, kasanın okuyucusu/yazıcısı; CLI bulucu (clis.ts), sohbet (chat.ts) ve üç arka ucu: Claude Code (claudeChat.ts), Codex (codexChat.ts), ACP (acp.ts, acpChat.ts)
+electron/   ana süreç: pencere, IPC kanalları, ayar dosyası, kasa seçimi, kasanın okuyucusu/yazıcısı; CLI bulucu (clis.ts), yerel model sunucuları (localModels.ts), girişler ve anahtarlar (auth.ts, keys.ts), sohbet (chat.ts) ve üç arka ucu: Claude Code (claudeChat.ts), Codex (codexChat.ts), ACP (acp.ts, acpChat.ts)
 src/        pencere: React + Tailwind v4; sohbet src/chat/, not ekranı src/notes/
 tests/      node:test, gerçek kaynak üzerinde
 e2e/        Playwright _electron ile uçtan uca koşu
@@ -89,7 +93,7 @@ scripts/    derleme, geliştirme, test ve e2e betikleri
 
 ## Ne eksik
 
-- **Sohbetin geri kalanı (Aşama 2):** yan panelde not önizlemesi ve "bu sohbette dokunulan notlar"; her turdan önce anlık kopya ve geri alma; kasadan gelen öneriler; silinen sohbetlerin çöp kutusuna düşmesi.
+- **Sohbetin geri kalanı (Aşama 2):** her turdan önce anlık kopya ve geri alma; kasadan gelen öneriler; silinen sohbetlerin çöp kutusuna düşmesi.
 - **Cortex'i kurma ve güncelleme (Aşama 3):** Cortex'in kendi kurulumcusuyla. Windows'ta Python uygulamayla gelecek (PSF'nin NuGet paketi).
 - **Ananas görünümü (Aşama 4):** Renkler şimdiden Ananas'ın kâğıt ve mürekkebi. Fraunces ve diğer yazı tipleri henüz uygulamayla gelmiyor; sistem yazı tipleri kullanılıyor. Yakala entegrasyonu ve Windows kurulumu için release iş akışı da bu aşamada.
 - **İmza:** Kurulum dosyası imzasız. Windows SmartScreen ilk çalıştırmada uyarır.

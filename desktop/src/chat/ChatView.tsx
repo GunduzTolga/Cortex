@@ -1,17 +1,18 @@
 import { useEffect, useMemo } from 'react';
-import { PencilLine, Plus, Trash2 } from 'lucide-react';
+import { BookOpen, PencilLine, Plus, Trash2 } from 'lucide-react';
 import seal from '../../../tema/ananas/marka/pyn-muhur.svg';
 import type { ChatSummary } from '@shared/chat';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
-import { useNotes } from '../notes/notesStore';
+import { noteFor, useNotes } from '../notes/notesStore';
 import { useConfirm, usePrompt } from '../notes/NotesMenus';
 import { useApp } from '../store/app';
 import { Spinner } from '../ui/ui';
 import { useChat } from './chatStore';
 import { Composer } from './Composer';
+import { SidePane } from './SidePane';
 import { Transcript } from './Transcript';
-import { turnsOf, usageOf, waitingOn } from './turns';
+import { notesOf, turnsOf, usageOf, waitingOn } from './turns';
 
 /**
  * Pyn: Cortex's first screen, where the person talks to their own AI. The
@@ -126,6 +127,14 @@ export function ChatView({ visible }: { visible: boolean }) {
   const turns = useMemo(() => turnsOf(chat?.events ?? []), [chat?.events]);
   const usage = useMemo(() => usageOf(chat?.events ?? []), [chat?.events]);
   const asked = chat?.running ? waitingOn(turns) : null;
+  // The notes this chat touched, for the panel beside it: read again when the vault's index is.
+  const revision = useNotes((s) => s.revision);
+  const touched = useMemo(
+    () => notesOf(turns, noteFor, (target, kind) => useNotes.getState().resolve(target, '', kind)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [turns, revision],
+  );
+  const side = state.side;
   const draftKey = active ?? 'new';
 
   useEffect(() => {
@@ -180,16 +189,31 @@ export function ChatView({ visible }: { visible: boolean }) {
       usage={usage}
       asked={asked}
       onAnswer={(option) => asked && state.answer(asked.id, option)}
+      auth={state.auth}
+      onAuth={() => state.openAuth(summary?.cli ?? cli ?? undefined)}
     />
   );
 
   return (
     <div className="flex h-full min-h-0" data-chat-view>
       <ChatList />
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="relative flex min-w-0 flex-1 flex-col">
         {chat ? (
           <>
-            <Transcript turns={turns} running={chat.running} />
+            {!side.open ? (
+              <button
+                type="button"
+                onClick={() => state.showSide()}
+                title={t('chat.side.title')}
+                className="absolute right-4 top-3 z-10 flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-paper-2 px-2.5 py-1 text-[11.5px] text-zinc-500 shadow-[0_1px_2px_rgba(27,23,18,0.06)] hover:border-zinc-400 hover:text-darkDelegation"
+                data-chat-side-toggle
+              >
+                <BookOpen size={13} />
+                {t('chat.side.toggle')}
+                {touched.length ? <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] font-semibold tabular-nums text-zinc-600">{touched.length}</span> : null}
+              </button>
+            ) : null}
+            <Transcript turns={turns} running={chat.running} onSignIn={() => summary && state.openAuth(summary.cli)} />
             {composer(false)}
           </>
         ) : (
@@ -229,6 +253,7 @@ export function ChatView({ visible }: { visible: boolean }) {
           </div>
         )}
       </main>
+      {chat && side.open ? <SidePane notes={touched} /> : null}
     </div>
   );
 }

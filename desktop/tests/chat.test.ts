@@ -86,8 +86,9 @@ test('a CLI is found without a shell: an npm shim read for the program or the sc
     assert.equal(launchOf('qwen', { PATH: bin }), null, 'not installed');
   }
   const listed = listClis({ PATH: bin, CORTEX_TEST_AGENT: AGENT });
-  assert.deepEqual(listed.map((one) => one.id), ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'test']);
+  assert.deepEqual(listed.map((one) => one.id), ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'lmstudio', 'ollama', 'test']);
   assert.equal(listed.find((one) => one.id === 'qwen')?.available, false);
+  assert.equal(listed.find((one) => one.id === 'ollama')?.available, false, 'a model server not found up with a model is not offered');
   assert.equal(listClis({ PATH: bin }).some((one) => one.id === 'test'), false, 'the test agent only when named');
 });
 

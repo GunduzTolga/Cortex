@@ -52,6 +52,13 @@ export const shell = {
   },
 };
 
+/** The system's encrypted store, as safeStorage is: reversible, and never the text it was given. */
+export const safeStorage = {
+  isEncryptionAvailable: () => true,
+  encryptString: (text) => Buffer.from(`sealed:${Buffer.from(text, 'utf8').toString('hex')}`, 'utf8'),
+  decryptString: (sealed) => Buffer.from(sealed.toString('utf8').slice('sealed:'.length), 'hex').toString('utf8'),
+};
+
 export const sent = [];
 export class BrowserWindow {
   static getAllWindows() {
@@ -62,4 +69,4 @@ export const Menu = { setApplicationMenu: noop, buildFromTemplate: () => ({}) };
 export const session = {};
 export const contextBridge = { exposeInMainWorld: noop };
 export const ipcRenderer = { invoke: async () => undefined, on: noop, removeListener: noop };
-export default { app, ipcMain, dialog, shell, BrowserWindow, Menu, session, contextBridge, ipcRenderer };
+export default { app, ipcMain, dialog, shell, safeStorage, BrowserWindow, Menu, session, contextBridge, ipcRenderer };

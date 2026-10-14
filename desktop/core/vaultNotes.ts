@@ -351,6 +351,17 @@ export function pathKey(value: string): string {
 }
 
 export const isNotePath = (path: string) => /\.md$/i.test(path);
+
+/** What a note shows or links to as media, the file kinds Obsidian lists without being asked to. */
+const MEDIA = /\.(png|jpe?g|gif|webp|avif|bmp|svg|pdf|mp3|wav|m4a|ogg|flac|3gp|webm|mp4|ogv|mov|mkv|canvas|base)$/i;
+
+/**
+ * Whether the tree lists a file before the person asks for every kind: notes
+ * and what notes show. A script, a JSON or a text file beside the notes
+ * (`beyin.py`, `Beyni Guncelle.cmd`, a tool's scratch output) is the engine's
+ * or a tool's, and is listed only when every kind is asked for (settings).
+ */
+export const listedByDefault = (path: string) => isNotePath(path) || MEDIA.test(path);
 export const baseName = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 export const noteTitle = (path: string) => baseName(path).replace(/\.md$/i, '');
 export const folderOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');

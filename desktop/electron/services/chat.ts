@@ -7,7 +7,8 @@ import { acpBackend } from './acpChat';
 import { type Backend, type Card, ChatRefusal, type Turn, failureEvent, scrubberFor } from './chatKit';
 import { claudeBackend } from './claudeChat';
 import { codexBackend } from './codexChat';
-import { launchFor, listClis, protocolOf } from './clis';
+import { LOCAL_IDS, launchFor, listClis, protocolOf } from './clis';
+import { findLocal } from './localModels';
 import { readSettings } from './settings';
 
 export { ChatRefusal } from './chatKit';
@@ -59,7 +60,7 @@ interface Live {
   seq: number;
 }
 
-const CLI_IDS: readonly CliId[] = ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'test', 'test-claude', 'test-codex'];
+const CLI_IDS: readonly CliId[] = ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'lmstudio', 'ollama', 'test', 'test-claude', 'test-codex'];
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const TITLE_MAX = 60;
 const MESSAGE_MAX = 100_000;
@@ -254,7 +255,9 @@ async function run(chat: Live, message: string): Promise<void> {
   }
 }
 
-export function listChatClis(): CliInfo[] {
+/** Every CLI, the model servers on this machine asked first: one is offered while it is up with a model. */
+export async function listChatClis(): Promise<CliInfo[]> {
+  await Promise.all(LOCAL_IDS.map((one) => findLocal(one)));
   return listClis();
 }
 

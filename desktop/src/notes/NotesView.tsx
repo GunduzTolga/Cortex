@@ -12,7 +12,7 @@ import { NoteSidebar } from './NoteSidebar';
 import { QuickSwitcher } from './QuickSwitcher';
 import { NotePeek } from './peek';
 import { imageOf } from './vaultCache';
-import { labelOf, useActiveTab, useNotes } from './notesStore';
+import { folderLabel, labelOf, nameLabel, useActiveTab, useNotes } from './notesStore';
 import { TextFile } from './TextFile';
 import './notes.css';
 
@@ -265,7 +265,7 @@ function NotesHome({ onSwitch, onGraph, onNew, onCapture }: { onSwitch: () => vo
                     <FileText size={14} className="shrink-0 text-zinc-400" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13.5px] font-semibold text-darkDelegation">{labelOf(note.path)}</span>
-                      {folderOf(note.path) ? <span className="block truncate text-[11px] text-zinc-400">{folderOf(note.path)}</span> : null}
+                      {folderOf(note.path) ? <span className="block truncate text-[11px] text-zinc-400">{folderLabel(folderOf(note.path))}</span> : null}
                     </span>
                     <span className="shrink-0 text-[11px] text-zinc-400">{new Date(note.modified).toLocaleDateString()}</span>
                   </button>
@@ -330,8 +330,8 @@ function FileView({ path }: { path: string }) {
       <div className="flex h-full min-h-0 flex-col" data-notes-file={path} data-notes-file-text>
         <div className="flex h-10 shrink-0 items-center gap-3 border-b border-zinc-100 px-4">
           <p className="min-w-0 truncate text-[12px] text-zinc-400">
-            {folderOf(path) ? `${folderOf(path).split('/').join(' / ')} / ` : ''}
-            <span className="text-zinc-600">{baseName(path)}</span>
+            {folderOf(path) ? `${folderLabel(folderOf(path)).split('/').join(' / ')} / ` : ''}
+            <span className="text-zinc-600">{nameLabel(baseName(path))}</span>
           </p>
           {size ? <span className="shrink-0 text-[11px] text-zinc-400">{size}</span> : null}
           <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">{t('notes.file.readOnly')}</span>

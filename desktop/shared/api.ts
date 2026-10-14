@@ -11,6 +11,10 @@ import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem
 /** What the window may change of the settings. The vault is not here: it comes through the system's dialog. */
 export interface WindowSettings {
   language: AppLanguage | null;
+  /** The tree lists every kind of file, scripts and JSON with the notes; off, only notes and what notes show. */
+  allFiles: boolean;
+  /** Names are shown with the emoji they start with on disk (`📥 000-Inbox`); off, without it. */
+  nameIcons: boolean;
 }
 
 /** The vault by its folder's name, and whether that folder is still there; never its path. */
@@ -77,5 +81,7 @@ export interface CortexApi {
     notesChanged(handler: () => void): () => void;
     /** A chat going on: an event, its state, its list entry. */
     chat(handler: (push: ChatPush) => void): () => void;
+    /** A sign-in window was closed: ask the tools' statuses again. */
+    authChanged(handler: () => void): () => void;
   };
 }
