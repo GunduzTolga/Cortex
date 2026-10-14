@@ -50,6 +50,8 @@ interface ChatState {
   openAuth(focus?: CliId): void;
   closeAuth(): void;
   boot(): Promise<void>;
+  /** The CLIs asked again: a model server opened since, or closed. */
+  refreshClis(): Promise<void>;
   select(id: string | null): Promise<void>;
   setCli(cli: CliId): void;
   setDraft(key: string, text: string): void;
@@ -171,6 +173,8 @@ export const useChat = create<ChatState>((set, get) => {
         });
         // A sign-in window closed: every tool asked again.
         window.cortex.on.authChanged(() => void get().loadAuth());
+        // Back from another app - LM Studio, where a model was just loaded: the CLIs asked again.
+        window.addEventListener('focus', () => void get().refreshClis());
       }
       try {
         const [clis, chats] = await Promise.all([window.cortex.chat.clis(), window.cortex.chat.list()]);
@@ -183,6 +187,17 @@ export const useChat = create<ChatState>((set, get) => {
         void get().loadAuth();
       } catch (err) {
         set({ error: messageOf(err), clis: [] });
+      }
+    },
+
+    async refreshClis() {
+      try {
+        const clis = await window.cortex.chat.clis();
+        const chosen = get().cli;
+        const available = clis.filter((one) => one.available);
+        set({ clis, cli: chosen && available.some((one) => one.id === chosen) ? chosen : (available[0]?.id ?? chosen) });
+      } catch {
+        /* The list as it was. */
       }
     },
 

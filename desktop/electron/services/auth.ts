@@ -134,7 +134,7 @@ async function localStatus(id: LocalId): Promise<CliAuth> {
     key: null,
     baseUrl: false,
     hasKey: false,
-    local: { models: found.models.length, loaded: found.loaded, shortContext: model && found.loaded.includes(model) ? shortContext(found, model) : null, runner: programOf('opencode') !== null },
+    local: { models: found.models.length, loaded: found.loaded, shortContext: model && found.loaded.includes(model) ? shortContext(found, model) : null },
   };
 }
 

@@ -33,11 +33,9 @@ function Status({ tool, refused }: { tool: CliAuth; refused: boolean }) {
   const [words, colours]: [Key, string] = !tool.installed
     ? ['auth.status.missing', 'bg-zinc-100 text-zinc-400']
     : tool.local
-      ? !tool.local.runner
-        ? ['auth.status.runner', 'bg-gold/25 text-darkDelegation']
-        : tool.signedIn
-          ? ['auth.status.running', 'bg-good/15 text-good']
-          : ['auth.status.off', 'bg-gold/25 text-darkDelegation']
+      ? tool.signedIn
+        ? ['auth.status.running', 'bg-good/15 text-good']
+        : ['auth.status.off', 'bg-gold/25 text-darkDelegation']
       : refused && tool.signedIn !== false
       ? ['auth.status.refused', 'bg-bad/10 text-bad']
       : tool.signedIn === true

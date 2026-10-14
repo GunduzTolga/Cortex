@@ -13,8 +13,8 @@ import { LOCAL, type LocalId, lastSeen } from './localModels';
  * Code (`--acp`) (acpChat.ts), and Codex through its app server
  * (`codex app-server`, codexChat.ts).
  *
- * The model servers on this machine, LM Studio and Ollama, are run through
- * OpenCode (localModels.ts): they are offered while they are up with a model.
+ * The model servers on this machine, LM Studio and Ollama, are talked to
+ * directly (localChat.ts): they are offered while they are up with a model.
  *
  * Nothing is run through a shell. On Windows an npm install puts a `.cmd`
  * shim on the PATH, and Node refuses to start a `.cmd` without one; the shim
@@ -22,7 +22,7 @@ import { LOCAL, type LocalId, lastSeen } from './localModels';
  * and that is started with its arguments as an array.
  */
 
-export type Protocol = 'claude' | 'codex' | 'acp';
+export type Protocol = 'claude' | 'codex' | 'acp' | 'local';
 
 interface Known {
   id: CliId;
@@ -50,7 +50,7 @@ export const isLocal = (id: CliId): id is LocalId => (LOCAL_IDS as readonly CliI
 
 /** How a CLI talks to the chat. */
 export const protocolOf = (id: CliId): Protocol =>
-  id === 'test-claude' ? 'claude' : id === 'test-codex' ? 'codex' : id === 'test' ? 'acp' : (KNOWN.find((one) => one.id === id)?.protocol ?? 'acp');
+  isLocal(id) ? 'local' : id === 'test-claude' ? 'claude' : id === 'test-codex' ? 'codex' : id === 'test' ? 'acp' : (KNOWN.find((one) => one.id === id)?.protocol ?? 'acp');
 
 export interface Launch {
   command: string;
@@ -79,6 +79,17 @@ const isFile = (file: string) => {
 export function onPathAny(names: string[], env: NodeJS.ProcessEnv = process.env): boolean {
   const withExe = WINDOWS ? names.flatMap((name) => [`${name}.exe`, `${name}.cmd`]) : names;
   return onPath(withExe, env) !== null;
+}
+
+/** The first of these files on the PATH that the test lets through. */
+export function onPathFile(names: string[], env: NodeJS.ProcessEnv = process.env, accept: (file: string) => boolean = () => true): string | null {
+  for (const dir of pathDirs(env)) {
+    for (const name of names) {
+      const file = path.join(dir, name);
+      if (accept(file) && isFile(file)) return file;
+    }
+  }
+  return null;
 }
 
 /** The first of these names in a folder of the PATH. */
@@ -159,9 +170,8 @@ export function testLaunch(id: TestId, env: NodeJS.ProcessEnv = process.env): La
 /** Every CLI the chat knows, and whether this machine has it. */
 export function listClis(env: NodeJS.ProcessEnv = process.env): CliInfo[] {
   const out: CliInfo[] = KNOWN.map((one) => ({ id: one.id, name: one.name, available: launchOf(one.id, env) !== null }));
-  // A model server is offered while OpenCode, which runs it, is installed and the server was last found up with a chat model.
-  const runner = launchOf('opencode', env) !== null;
-  for (const id of LOCAL_IDS) out.push({ id, name: LOCAL[id].name, available: runner && lastSeen(id).models.length > 0 });
+  // A model server is offered while it was last found up with a chat model.
+  for (const id of LOCAL_IDS) out.push({ id, name: LOCAL[id].name, available: lastSeen(id).models.length > 0 });
   if (testLaunch('test', env)) out.push({ id: 'test', name: 'Test agent', available: true });
   if (testLaunch('test-claude', env)) out.push({ id: 'test-claude', name: 'Test Claude', available: true });
   if (testLaunch('test-codex', env)) out.push({ id: 'test-codex', name: 'Test Codex', available: true });
@@ -171,8 +181,8 @@ export function listClis(env: NodeJS.ProcessEnv = process.env): CliInfo[] {
 /** How the chat starts a CLI: with the key the person gave Cortex for it, where it takes one from its environment (electron/services/keys.ts). */
 export function launchFor(id: CliId, env: NodeJS.ProcessEnv = process.env): Launch | null {
   if (id === 'test' || id === 'test-claude' || id === 'test-codex') return testLaunch(id, env);
-  // OpenCode, told at its start which server and models (acpChat.ts, localModels.ts).
-  if (isLocal(id)) return launchOf('opencode', env);
+  // A model server is no program to start: it is talked to over HTTP (localChat.ts).
+  if (isLocal(id)) return null;
   const launch = launchOf(id, env);
   if (!launch) return null;
   const keys = keyEnv(id);

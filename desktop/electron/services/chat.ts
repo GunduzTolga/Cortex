@@ -7,7 +7,8 @@ import { acpBackend } from './acpChat';
 import { type Backend, type Card, ChatRefusal, type Turn, failureEvent, scrubberFor } from './chatKit';
 import { claudeBackend } from './claudeChat';
 import { codexBackend } from './codexChat';
-import { LOCAL_IDS, launchFor, listClis, protocolOf } from './clis';
+import { localBackend } from './localChat';
+import { LOCAL_IDS, isLocal, launchFor, listClis, protocolOf } from './clis';
 import { findLocal } from './localModels';
 import { readSettings } from './settings';
 
@@ -66,7 +67,7 @@ const TITLE_MAX = 60;
 const MESSAGE_MAX = 100_000;
 const EVENTS_KEPT = 2000;
 
-const BACKENDS = { claude: claudeBackend, codex: codexBackend, acp: acpBackend } as const;
+const BACKENDS = { claude: claudeBackend, codex: codexBackend, acp: acpBackend, local: localBackend } as const;
 const backendOf = (cli: CliId): Backend => BACKENDS[protocolOf(cli)];
 
 let push: (message: ChatPush) => void = () => undefined;
@@ -282,7 +283,8 @@ export function sendChat(id: unknown, cli: unknown, message: unknown): { id: str
   let chat: Live;
   if (id === null) {
     if (!CLI_IDS.includes(cli as CliId)) throw new ChatRefusal('Not a CLI the chat knows.');
-    if (!launchFor(cli as CliId)) throw new ChatRefusal(`${cli} is not installed on this machine.`);
+    // A model server is asked when the chat runs; one that is off says so in the chat.
+    if (!isLocal(cli as CliId) && !launchFor(cli as CliId)) throw new ChatRefusal(`${cli} is not installed on this machine.`);
     const now = Date.now();
     const stored: Stored = { id: randomUUID(), title: '', cli: cli as CliId, createdAt: now, updatedAt: now, vault, sessionId: null };
     readIndex().chats.push(stored);

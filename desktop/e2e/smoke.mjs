@@ -1,6 +1,7 @@
 import { _electron as electron } from 'playwright';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -58,6 +59,33 @@ write(receipt, '---\n{\n  "kind": "receipt",\n  "event_id": "cortex-ad-karari-20
 write('daily/v3/2026-10-13.md', `---\n{"generated": true, "kind": "receipt-index"}\n---\n# Recorded outcomes\n\nSource: [[${receipt}]]\n`);
 write('Notes/settings.json', '{\n  "theme": "ananas",\n  "count": 3\n}\n');
 const receiptBefore = fs.readFileSync(vaultNote(receipt), 'utf8');
+
+/*
+  A stand-in for LM Studio's server: its model list and a streamed answer,
+  as LM Studio's OpenAI-compatible endpoint gives them. The chat talks to it
+  directly, as it talks to the person's own LM Studio.
+*/
+const lmBodies = [];
+const lmStudio = http.createServer((request, response) => {
+  let body = '';
+  request.on('data', (chunk) => (body += chunk));
+  request.on('end', () => {
+    if (request.url === '/api/v0/models') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ data: [{ id: 'qwen-e2e', type: 'llm', state: 'loaded', loaded_context_length: 16384 }] }));
+    } else if (request.url === '/v1/chat/completions') {
+      lmBodies.push(JSON.parse(body));
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      for (const content of ['Yerel model ', 'burada.']) response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content } }] })}\n\n`);
+      response.end('data: [DONE]\n\n');
+    } else {
+      response.writeHead(404);
+      response.end();
+    }
+  });
+});
+await new Promise((done) => lmStudio.listen(0, '127.0.0.1', done));
+const lmStudioBase = `http://127.0.0.1:${lmStudio.address().port}`;
 const hiddenBefore = fs.readFileSync(vaultNote('.hidden/Secret.md'), 'utf8');
 const obsidianBefore = fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'utf8');
 
@@ -85,8 +113,8 @@ const launch = () =>
       CORTEX_TEST_AGENT: path.resolve('tests/fixtures/fake-acp-agent.mjs'),
       CORTEX_TEST_CLAUDE: path.resolve('tests/fixtures/fake-claude.mjs'),
       CORTEX_TEST_CODEX: path.resolve('tests/fixtures/fake-codex.mjs'),
-      // The model servers asked where nothing answers: never the machine's own LM Studio or Ollama.
-      CORTEX_TEST_LMSTUDIO: 'http://127.0.0.1:9',
+      // The model servers: LM Studio's stand-in, and Ollama where nothing answers; never the machine's own.
+      CORTEX_TEST_LMSTUDIO: lmStudioBase,
       CORTEX_TEST_OLLAMA: 'http://127.0.0.1:9',
     },
   });
@@ -488,6 +516,22 @@ check(
   'and one opens in the notes from there, to be written',
   (await shownSoon(notesView.locator('[data-note-pane="Personal/Ideas.md"]'))) && (await page.locator('[data-app-view="notes"]').getAttribute('aria-pressed')) === 'true',
 );
+// LM Studio, talked to directly: the model loaded in its app answers, no other program between.
+await page.locator('[data-app-view="pyn"]').click();
+await page.locator('[data-chat-new]').click();
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-choice="lmstudio"]').click();
+await page.locator('[data-chat-input]').fill('merhaba yerel');
+await page.keyboard.press('Enter');
+check(
+  'LM Studio answers in the chat, on the model loaded in its app, unasked',
+  (await shownSoon(page.locator('[data-chat-text]', { hasText: 'Yerel model burada.' }))) &&
+    lmBodies.length === 1 &&
+    lmBodies[0].model === 'qwen-e2e' &&
+    lmBodies[0].messages.at(-1)?.content === 'merhaba yerel' &&
+    ((await page.locator('[data-chat-chip="model"]').textContent()) ?? '').includes('qwen-e2e'),
+);
+await shoot('13b-lmstudio.png');
 await page.locator('[data-app-view="graph"]').click();
 await page.waitForTimeout(1_500);
 const graphSize = await page.locator('[data-notes-graph="vault"]').evaluate((element) => ({ nodes: Number(element.dataset.graphNodes), edges: Number(element.dataset.graphEdges) }));

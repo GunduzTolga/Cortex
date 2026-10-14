@@ -54,7 +54,7 @@ test('with no tool installed, each is said to be missing and nothing is offered;
     assert.deepEqual(statuses.map((one) => one.id), ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'lmstudio', 'ollama']);
     const [tools, servers] = [statuses.slice(0, 5), statuses.slice(5)];
     assert.ok(tools.every((one) => !one.installed && !one.canLogin && one.key === null && one.signedIn === null && !one.local));
-    assert.ok(servers.every((one) => !one.installed && !one.canLogin && one.key === null && one.signedIn === false && one.local?.runner === false && one.local.models === 0), 'a model server off and not installed: nothing to sign in to');
+    assert.ok(servers.every((one) => !one.installed && !one.canLogin && one.key === null && one.signedIn === false && one.local?.models === 0), 'a model server off and not installed: nothing to sign in to');
     assert.throws(() => startLogin('claude'), /not signed in to from here/);
     assert.throws(() => startLogin('nope'), /Not a tool/);
     await assert.rejects(setToolKey('codex', 'sk-test', undefined), /not installed/);

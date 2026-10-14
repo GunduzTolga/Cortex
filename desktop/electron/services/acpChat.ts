@@ -2,9 +2,8 @@ import { app } from 'electron';
 import type { CliId, ConfigOption, PermissionKind, ToolStatus } from '../../shared/chat';
 import { AcpConnection, AcpError } from './acp';
 import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, TITLE_MAX, type Turn, TurnFailure, scrubberFor, shownPath, textOf } from './chatKit';
-import { isLocal, launchFor } from './clis';
+import { launchFor } from './clis';
 import { keptHere } from './keys';
-import { LOCAL, findLocal, localModel, opencodeConfig } from './localModels';
 
 /**
  * The chat with the CLIs that speak the Agent Client Protocol: OpenCode
@@ -13,11 +12,6 @@ import { LOCAL, findLocal, localModel, opencodeConfig } from './localModels';
  * Its words are recorded from OpenCode's own (14 October): thought and
  * message chunks, tool calls and their updates with locations, usage, config
  * options for the model, the mode and the effort.
- *
- * LM Studio and Ollama are OpenCode too, one program each, started with the
- * server's models declared in its environment and the one to start on: the
- * model loaded now, else the last one chosen (localModels.ts). Their model
- * chip offers that server's models only.
  */
 
 interface Conn {
@@ -26,8 +20,6 @@ interface Conn {
   acp: AcpConnection;
   ready: Promise<void>;
   canResume: boolean;
-  /** For a model server: the model a new session starts on, as `provider/model`. */
-  model: string | null;
 }
 
 const conns = new Map<CliId, Conn>();
@@ -86,36 +78,13 @@ function outputOf(vault: string, content: unknown, scrub: (text: string) => stri
   return parts.length ? scrub(parts.join('\n')).slice(0, OUTPUT_MAX) : undefined;
 }
 
-/** A model server's own models, out of every model OpenCode offers; the list as it was where it names none of them. */
-export function shaped(cli: CliId, options: ConfigOption[]): ConfigOption[] {
-  if (!isLocal(cli)) return options;
-  const ours = (value: string) => value.startsWith(`${cli}/`);
-  return options.map((one) => {
-    const kept = one.choices.filter((choice) => ours(choice.value));
-    return kept.length && (one.category === 'model' || ours(one.current)) ? { ...one, choices: kept } : one;
-  });
-}
-
-/** The model last chosen for a model server, from the person's choices for it (`provider/model`). */
-export const rememberedModel = (cli: CliId, prefs: Readonly<Record<string, string>>) =>
-  Object.values(prefs).find((value) => value.startsWith(`${cli}/`))?.slice(cli.length + 1) ?? null;
-
-async function connectionFor(cli: CliId, vault: string, prefs: Readonly<Record<string, string>>): Promise<Conn> {
+function connectionFor(cli: CliId, vault: string): Promise<Conn> {
   const had = conns.get(cli);
   if (had && had.acp.alive && had.vault === vault) return had.ready.then(() => had);
   had?.acp.close();
-  let launch = launchFor(cli);
+  const launch = launchFor(cli);
   if (!launch) throw new ChatRefusal(`${cli} is not installed on this machine.`);
-  let model: string | null = null;
-  if (isLocal(cli)) {
-    // The server asked now, at the start: its models and the one loaded.
-    const found = await findLocal(cli);
-    const chosen = localModel(found, rememberedModel(cli, prefs));
-    if (!chosen) throw new TurnFailure(`${LOCAL[cli].name} is not running, or has no model. Open it, load a model, and write again.`, 'local-off');
-    model = `${cli}/${chosen}`;
-    launch = { ...launch, env: { ...launch.env, OPENCODE_CONFIG_CONTENT: opencodeConfig(cli, found, chosen, process.env.OPENCODE_CONFIG_CONTENT) } };
-  }
-  const conn = { cli, vault, canResume: false, model } as Conn;
+  const conn = { cli, vault, canResume: false } as Conn;
   conn.acp = new AcpConnection(launch, vault, {
     notify: (method, params) => heard(conn, method, params),
     request: (method, params) => asked(method, params),
@@ -152,7 +121,7 @@ async function sessionFor(turn: Turn, conn: Conn): Promise<string> {
       const resumed = (await conn.acp.request('session/resume', { sessionId: known, cwd: conn.vault, mcpServers: [] })) as { configOptions?: unknown } | null;
       sessions.set(turn.chatId, { conn, sessionId: known });
       const options = optionsOf(resumed?.configOptions);
-      if (options) turn.setOptions(shaped(conn.cli, options));
+      if (options) turn.setOptions(options);
       return known;
     } catch {
       /* A session the program no longer has: a new one. */
@@ -163,20 +132,14 @@ async function sessionFor(turn: Turn, conn: Conn): Promise<string> {
   const sessionId = made.sessionId;
   sessions.set(turn.chatId, { conn, sessionId });
   turn.setSession(sessionId);
-  let options = shaped(conn.cli, optionsOf(made.configOptions) ?? []);
+  let options = optionsOf(made.configOptions) ?? [];
   turn.setOptions(options);
-  // A model server starts on the model chosen for this start (the one loaded, `connectionFor`), not on the last one written down.
-  const wanted = Object.entries(turn.prefs).filter(([, value]) => !conn.model || !value.startsWith(`${conn.cli}/`));
-  if (conn.model) {
-    const modelOption = options.find((one) => one.category === 'model' || one.choices.some((choice) => choice.value === conn.model));
-    if (modelOption) wanted.unshift([modelOption.id, conn.model]);
-  }
-  for (const [configId, value] of wanted) {
+  for (const [configId, value] of Object.entries(turn.prefs)) {
     const option = options.find((one) => one.id === configId);
     if (!option || option.current === value || !option.choices.some((choice) => choice.value === value)) continue;
     try {
       const set = (await conn.acp.request('session/set_config_option', { sessionId, configId, value })) as { configOptions?: unknown } | null;
-      options = shaped(conn.cli, optionsOf(set?.configOptions) ?? options.map((one) => (one.id === configId ? { ...one, current: value } : one)));
+      options = optionsOf(set?.configOptions) ?? options.map((one) => (one.id === configId ? { ...one, current: value } : one));
       turn.setOptions(options);
     } catch {
       /* The program's own default stands. */
@@ -228,7 +191,7 @@ function heard(conn: Conn, method: string, params: unknown): void {
     }
     case 'config_option_update': {
       const options = optionsOf(update.configOptions);
-      if (options) turn.setOptions(shaped(conn.cli, options));
+      if (options) turn.setOptions(options);
       break;
     }
     case 'session_info_update':
@@ -273,7 +236,7 @@ export const acpBackend: Backend = {
   async run(turn, message) {
     let sessionId: string | null = null;
     try {
-      const conn = await connectionFor(turn.cli, turn.vault, turn.prefs);
+      const conn = await connectionFor(turn.cli, turn.vault);
       sessionId = await sessionFor(turn, conn);
       running.set(sessionId, turn);
       const result = (await conn.acp.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: message }] })) as { stopReason?: unknown } | null;
@@ -299,7 +262,7 @@ export const acpBackend: Backend = {
     const held = sessions.get(chatId);
     if (!held || !held.conn.acp.alive) throw new ChatRefusal('The chat is not connected; write to it first.');
     const set = (await held.conn.acp.request('session/set_config_option', { sessionId: held.sessionId, configId: option, value })) as { configOptions?: unknown } | null;
-    return shaped(held.conn.cli, optionsOf(set?.configOptions) ?? options.map((one) => (one.id === option ? { ...one, current: value } : one)));
+    return optionsOf(set?.configOptions) ?? options.map((one) => (one.id === option ? { ...one, current: value } : one));
   },
 
   forget(chatId) {

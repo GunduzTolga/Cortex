@@ -8,13 +8,11 @@ import http from 'node:http';
  * - Only an HTTP request to a server that is already up. No command of
  *   theirs is run: `ollama list` starts Ollama's app where its bundle does.
  * - An embedding model answers no prompt, and is left out.
- * - The model that runs is the one loaded now; else the last one chosen on
- *   this machine; else the first. The person is not asked which.
- * - OpenCode runs them. It knows only the LM Studio models in its catalog,
- *   so the models are declared for that one start, in its environment
- *   (OPENCODE_CONFIG_CONTENT): nothing is written into the synced vault,
- *   where a desktop and a laptop with different models would overwrite each
- *   other.
+ * - The model that runs is the one loaded now in the server's own app; else
+ *   the last one chosen on this machine; else the first. The person is not
+ *   asked which.
+ *
+ * The chat talks to the server itself (localChat.ts).
  */
 
 export type LocalId = 'lmstudio' | 'ollama';
@@ -36,8 +34,8 @@ export const LOCAL: Record<LocalId, { name: string; base: string; tools: string[
 /** Where a server is asked: its own address, or the stand-in the tests and the end-to-end run name (CORTEX_TEST_LMSTUDIO, CORTEX_TEST_OLLAMA). */
 export const baseOf = (id: LocalId): string => process.env[`CORTEX_TEST_${id.toUpperCase()}`] || LOCAL[id].base;
 
-/** OpenCode's own system prompt and tools and Pyn's memory take well over 8K tokens; LM Studio often loads a model at 4096. */
-export const MIN_CONTEXT = 32_768;
+/** Pyn's memory takes thousands of tokens; LM Studio often loads a model at 4096. */
+export const MIN_CONTEXT = 8_192;
 
 const EMBEDDING = ['embed', 'bge-', 'e5-', 'minilm', 'nomic-bert'];
 const NONE: LocalModels = { models: [], loaded: [], contexts: {} };
@@ -129,38 +127,4 @@ export function localModel(found: LocalModels, remembered: string | null): strin
 export function shortContext(found: LocalModels, model: string): number | null {
   const tokens = found.contexts[model];
   return tokens && tokens < MIN_CONTEXT ? tokens : null;
-}
-
-function merge(base: Record<string, unknown>, extra: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...base };
-  for (const [key, value] of Object.entries(extra)) {
-    const had = out[key];
-    out[key] = value && typeof value === 'object' && !Array.isArray(value) && had && typeof had === 'object' && !Array.isArray(had) ? merge(had as Record<string, unknown>, value as Record<string, unknown>) : value;
-  }
-  return out;
-}
-
-/**
- * OpenCode's configuration for one start on a local server: its provider,
- * every chat model it has (each loaded one with the context it was loaded
- * with, so OpenCode compacts before it overflows), and the model it starts on.
- * A value the person set themselves is kept and added to, never replaced.
- */
-export function opencodeConfig(id: LocalId, found: LocalModels, model: string, own: string | undefined): string {
-  const models = Object.fromEntries(
-    found.models.map((one) => {
-      const tokens = found.contexts[one];
-      return [one, { name: `${one} (${LOCAL[id].name})`, ...(tokens ? { limit: { context: tokens, output: Math.min(Math.floor(tokens / 4), 16_384) } } : {}) }];
-    }),
-  );
-  // LM Studio's provider is built into OpenCode; Ollama is any OpenAI-compatible server to it.
-  const provider = id === 'lmstudio' ? { models } : { npm: '@ai-sdk/openai-compatible', name: 'Ollama', options: { baseURL: `${baseOf('ollama')}/v1` }, models };
-  let mine: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = JSON.parse(own || '{}');
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) mine = parsed as Record<string, unknown>;
-  } catch {
-    /* not JSON: left out */
-  }
-  return JSON.stringify(merge(mine, { provider: { [id]: provider }, model: `${id}/${model}` }));
 }
