@@ -1,0 +1,316 @@
+import { _electron as electron } from 'playwright';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+/**
+ * Boots the built app in a real Electron process and walks it: the first
+ * opening, the vault chosen, and the notes read and written as in Obsidian.
+ * A build that typechecks can still die on a bad preload path, a sandbox the
+ * preload does not fit, or a policy that blocks the page's own script; this
+ * catches that before it reaches the owner.
+ *
+ * The Notes section is Krewgent's (e2e/smoke.mjs there, desktop/KAYNAK.md),
+ * on a vault in the shape the owner's is: this repository's own template,
+ * Cortex's folders, its `📋 Templates/Note.md` and `📥 000-Inbox/Dump`, with
+ * an `.obsidian` and a `.git` beside them as Obsidian and Obsidian Git leave.
+ *
+ * Run with CORTEX_HIDDEN=1 (scripts/e2e.mjs sets it) the window is never shown
+ * and is drawn offscreen; the pictures go through `capturePage` (`shoot`),
+ * because a hidden window does not answer `page.screenshot`.
+ */
+const shots = path.resolve('e2e/screenshots');
+fs.mkdirSync(shots, { recursive: true });
+
+const failures = [];
+const check = (label, condition) => {
+  if (condition) console.log(`  ok   ${label}`);
+  else {
+    console.log(`  FAIL ${label}`);
+    failures.push(label);
+  }
+};
+
+const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-'));
+const vaultDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-vault-')));
+const vaultNote = (relative) => path.join(vaultDir, ...relative.split('/'));
+const write = (relative, text) => {
+  fs.mkdirSync(path.dirname(vaultNote(relative)), { recursive: true });
+  fs.writeFileSync(vaultNote(relative), text);
+};
+
+/*
+  The vault: Cortex's template as the installer lays it out, the hidden parts
+  Obsidian, git and Cortex keep, and a few notes of the person's.
+*/
+fs.cpSync(path.resolve('..', 'template'), vaultDir, { recursive: true });
+write('.obsidian/workspace.json', '{"main":{}}\n');
+write('.git/HEAD', 'ref: refs/heads/main\n');
+write('.hidden/Secret.md', '# Secret\n');
+write('Personal/Health.md', '# Health\n\nWalk every day.\n');
+write('Notes/Plan.md', '---\ntags: [plan]\n---\n# Plan\n\nSee [[Health]] and [[Missing note]].\n\n- [ ] first task\n\n> [!warning] Careful\n> The body.\n');
+write('Notes/Ideas.md', '# Ideas\n\nThe plan is here: [[Plan#Plan|the plan]]. #idea\n');
+fs.writeFileSync(vaultNote('Latin1.md'), Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]));
+const hiddenBefore = fs.readFileSync(vaultNote('.hidden/Secret.md'), 'utf8');
+const obsidianBefore = fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'utf8');
+
+/*
+  Linux in a container has no GPU, and there an offscreen window's frame is
+  not handed to `capturePage` (UnknownVizError) unless Chromium draws in
+  software. Windows, where CI runs, draws offscreen as it is.
+*/
+const launchArgs = ['.', `--user-data-dir=${userData}`, ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-gpu'] : [])];
+const launch = () =>
+  electron.launch({
+    args: launchArgs,
+    env: {
+      ...process.env,
+      // Electron refuses to be Electron with this set, and Playwright waits out its timeout on a launch that technically succeeded.
+      ELECTRON_RUN_AS_NODE: undefined,
+      NODE_ENV: 'production',
+    },
+  });
+
+let app = await launch();
+
+/** A picture of the window, from the main process. A picture is not a check, so one that cannot be taken is said and the run goes on. */
+async function shoot(name) {
+  try {
+    const png = await app.evaluate(async ({ BrowserWindow }) => {
+      const image = await BrowserWindow.getAllWindows()[0].webContents.capturePage();
+      return image.toPNG().toString('base64');
+    });
+    fs.writeFileSync(path.join(shots, name), Buffer.from(png, 'base64'));
+  } catch (error) {
+    console.log(`       note: no picture for ${name}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+const consoleErrors = [];
+function listen(page) {
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('pageerror', (error) => consoleErrors.push(error.stack ?? String(error)));
+}
+let page = await app.firstWindow();
+listen(page);
+await page.waitForLoadState('domcontentloaded');
+const shownSoon = (locator, timeout = 10_000) => locator.first().waitFor({ timeout }).then(() => true, () => false);
+
+console.log('\nFirst opening');
+check('a first run opens on choosing the vault', await shownSoon(page.locator('[data-welcome]'), 30_000));
+check(
+  'in Turkish, unless chosen otherwise, cased as Turkish',
+  (await page.locator('[data-welcome-choose]').textContent())?.trim() === 'Kasayı seç' && (await page.evaluate(() => document.documentElement.lang)) === 'tr',
+);
+await shoot('01-welcome-tr.png');
+await page.locator('[data-language]').selectOption('en');
+check(
+  'English is one choice away, and the choice is kept by the main process',
+  (await shownSoon(page.getByRole('button', { name: 'Choose the vault' }))) &&
+    (await page.evaluate(() => document.documentElement.lang)) === 'en' &&
+    (await page.evaluate(() => window.cortex.bootstrap())).settings.language === 'en',
+);
+
+console.log('\nThe window');
+const windowAlone = await page.evaluate(async () => {
+  const fetched = await fetch('https://example.com/').then(() => 'reached', () => 'blocked');
+  const image = await new Promise((done) => {
+    const img = new Image();
+    img.onload = () => done('loaded');
+    img.onerror = () => done('blocked');
+    img.src = 'https://example.com/pixel.png';
+  });
+  return { node: typeof require + typeof process, bridge: Object.keys(window.cortex).sort(), fetched, image, opened: window.open('https://example.com/') === null };
+});
+check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,notes,on,settings,vault');
+check('it reaches nothing on the network: no request, no image', windowAlone.fetched === 'blocked' && windowAlone.image === 'blocked');
+check('and opens no window of its own', windowAlone.opened && app.windows().length === 1);
+
+console.log('\nThe vault');
+// The system's dialog answers with the vault for this run; the window names no folder.
+await app.evaluate(({ dialog }, dir) => {
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
+}, vaultDir);
+await page.locator('[data-welcome-choose]').click();
+check('a vault chosen, the notes open', await shownSoon(page.locator('[data-notes-view]'), 15_000));
+check('the window is told the vault by its name', (await page.locator('[data-vault-name]').textContent())?.trim() === path.basename(vaultDir));
+const indexNow = await page.evaluate(() => window.cortex.notes.index());
+// The folder the vault is in, as written and as JSON writes it (a Windows path's backslashes doubled).
+const around = [path.dirname(vaultDir), JSON.stringify(path.dirname(vaultDir)).slice(1, -1)];
+const namesWhere = (text) => around.some((one) => text.includes(one));
+check(
+  'and never where it is: no absolute path in what it is sent, nor on the page',
+  !namesWhere(JSON.stringify(indexNow)) && !namesWhere(JSON.stringify(await page.evaluate(() => window.cortex.bootstrap()))) && !namesWhere(await page.evaluate(() => document.body.innerHTML)),
+);
+
+/*
+  The notes screen (src/notes/, electron/services/vaultNotes.ts): the vault
+  read and written as in Obsidian. Its reader reads the whole vault but what
+  is hidden; what it writes is the person's press, over the version read.
+*/
+console.log('\nNotes');
+/** Whether the disk comes to say something within a few seconds: a save happens a moment after the last key, not at once. */
+const onDiskSoon = async (test, ms = 6_000) => {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((done) => setTimeout(done, 100))) if (test()) return true;
+  return test();
+};
+const notesView = page.locator('[data-notes-view]');
+check(
+  'the tree is the vault as Obsidian shows it, hidden folders left out',
+  (await shownSoon(notesView.locator('[data-tree-path="Notes"]'))) &&
+    (await notesView.locator('[data-tree-path="🎯 100-Command-Center"]').count()) === 1 &&
+    (await notesView.locator('[data-tree-path^=".hidden"], [data-tree-path^=".claude"], [data-tree-path^=".obsidian"], [data-tree-path^=".git"], [data-tree-path^=".agents"]').count()) === 0 &&
+    !indexNow.notes.some((note) => note.path.split('/').some((part) => part.startsWith('.'))) &&
+    !indexNow.folders.some((folder) => folder.split('/').some((part) => part.startsWith('.'))),
+);
+check(
+  'and the window cannot read past the vault or into what is hidden',
+  (await page.evaluate(() => window.cortex.notes.read('../outside.md').then(() => 'read', () => 'refused'))) === 'refused' &&
+    (await page.evaluate(() => window.cortex.notes.read('.hidden/Secret.md').then(() => 'read', () => 'refused'))) === 'refused' &&
+    (await page.evaluate(() => window.cortex.notes.read('.obsidian/workspace.json').then(() => 'read', () => 'refused'))) === 'refused',
+);
+check(
+  "the home names Cortex's own places where the vault has them",
+  (await shownSoon(notesView.locator('[data-notes-places]'))) && (await notesView.locator('[data-notes-places] button', { hasText: 'Dashboard' }).count()) === 1,
+);
+await shoot('02-notes-home.png');
+await notesView.locator('[data-tree-path="Notes"]').click();
+await notesView.locator('[data-tree-path="Notes/Plan.md"]').click();
+const reader = notesView.locator('[data-note-reader]');
+check(
+  'a note is read with its properties, its wiki links, the one not written yet marked, and its callout',
+  (await shownSoon(reader.locator('[data-note-tag="plan"]'))) &&
+    (await reader.locator('[data-note-link="Health"]:not([data-missing])').count()) === 1 &&
+    (await reader.locator('[data-note-link="Missing note"][data-missing]').count()) === 1 &&
+    (await reader.locator('[data-callout="warning"]').count()) === 1,
+);
+check('what links to it is beside it', await shownSoon(notesView.locator('[data-backlinks] [data-side-link="Notes/Ideas.md"]')));
+await reader.locator('[data-note-link="Health"]').hover();
+check('a link hovered shows the note it finds, over the page', await shownSoon(page.locator('[data-note-peek="Personal/Health.md"]')));
+await page.mouse.move(2, 400);
+await shoot('03-note-read.png');
+await reader.locator('[data-task-line]').first().click();
+check('a task ticked in the reading view is ticked in the file', await onDiskSoon(() => /- \[x\] first task/.test(fs.readFileSync(vaultNote('Notes/Plan.md'), 'utf8'))));
+await notesView.locator('[data-note-mode="edit"]').click();
+await notesView.locator('.cm-content').click();
+await page.keyboard.press('Control+End');
+await page.keyboard.type('\nWritten here.');
+check(
+  'what is written is saved a moment after the last key, through the reader, into the file',
+  await onDiskSoon(() => fs.readFileSync(vaultNote('Notes/Plan.md'), 'utf8').endsWith('Written here.')),
+);
+check('and leaves no temporary behind', !fs.readdirSync(vaultNote('Notes')).some((name) => name.endsWith('.tmp')));
+await page.waitForFunction(() => document.querySelector('[data-note-saving]')?.getAttribute('data-note-saving') === 'saved', null, { timeout: 5_000 }).catch(() => undefined);
+await page.keyboard.type(' And more.');
+fs.writeFileSync(vaultNote('Notes/Plan.md'), '# Plan\n\nObsidian wrote this meanwhile.\n');
+await page.waitForTimeout(2_500);
+check(
+  'a note changed on disk while it is being written is not written over, and the screen says so',
+  fs.readFileSync(vaultNote('Notes/Plan.md'), 'utf8') === '# Plan\n\nObsidian wrote this meanwhile.\n' &&
+    (await notesView.locator('[data-note-banner="conflict"], [data-note-banner="changed"]').count()) === 1,
+);
+await shoot('04-conflict.png');
+const takeDisk = notesView.locator('[data-note-take-disk]');
+if (await takeDisk.count()) await takeDisk.click();
+else await notesView.locator('[data-note-banner="changed"] button').click();
+await page.waitForTimeout(500);
+check(
+  'and the version on disk can be taken',
+  (await notesView.locator('[data-note-banner]').count()) === 0 && ((await notesView.locator('.cm-content').textContent()) ?? '').includes('Obsidian wrote this meanwhile.'),
+);
+fs.writeFileSync(vaultNote('Notes/Plan.md'), '---\ntags: [plan]\n---\n# Plan\n\nSee [[Health]].\n\n> [!warning] Careful\n> The body.\n');
+await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+await page.waitForTimeout(800);
+check(
+  'writing is live preview: the lines away from the cursor are drawn, a callout as a callout',
+  (await notesView.locator('.cm-line.cm-lp-callout').count()) === 2 && (await notesView.locator('.cm-editor').count()) === 1,
+);
+await shoot('05-note-edit.png');
+await notesView.locator('[data-note-mode="read"]').click();
+await notesView.locator('[data-note-title]').fill('Master plan');
+await notesView.locator('[data-note-title]').press('Enter');
+await page.waitForFunction(() => document.querySelector('[data-note-pane]')?.getAttribute('data-note-pane') === 'Notes/Master plan.md', null, { timeout: 5_000 }).catch(() => undefined);
+check(
+  'renamed by its title, every link to it follows, with its heading and its alias',
+  fs.existsSync(vaultNote('Notes/Master plan.md')) &&
+    !fs.existsSync(vaultNote('Notes/Plan.md')) &&
+    fs.readFileSync(vaultNote('Notes/Ideas.md'), 'utf8') === '# Ideas\n\nThe plan is here: [[Master plan#Plan|the plan]]. #idea\n',
+);
+await notesView.locator('[data-tree-path="Latin1.md"]').click();
+check('bytes that are not UTF-8 are shown and not saved', await shownSoon(notesView.locator('[data-note-banner="read-only"]')));
+await page.keyboard.press('Control+o');
+await notesView.locator('[data-notes-switcher-input]').fill('heal');
+await page.keyboard.press('Enter');
+check('Ctrl+O finds a note by a few letters and opens it', await shownSoon(notesView.locator('[data-note-pane="Personal/Health.md"]')));
+await notesView.locator('[data-notes-nav-tab="search"]').click();
+await notesView.locator('[data-notes-search]').fill('careful');
+check('a search finds a word in any note', await shownSoon(notesView.locator('[data-search-hit="Notes/Master plan.md"]')));
+await notesView.locator('[data-notes-nav-tab="files"]').click();
+check('back from the search, the tree’s folders are open as they were', await shownSoon(notesView.locator('[data-tree-path="Notes/Ideas.md"]')));
+// Dragged onto a folder of the tree, a note moves there, and what linked to it by name still finds it.
+await notesView.locator('[data-tree-path="Notes/Ideas.md"]').dragTo(notesView.locator('[data-tree-path="Personal"]'));
+check(
+  'a note dragged onto a folder moves into it',
+  (await onDiskSoon(() => fs.existsSync(vaultNote('Personal/Ideas.md')) && !fs.existsSync(vaultNote('Notes/Ideas.md')))) &&
+    (await shownSoon(notesView.locator('[data-tree-path="Personal/Ideas.md"]'))),
+);
+await notesView.locator('[data-notes-new]').click();
+check(
+  'a new note is made at the top of the vault, exclusively, from Cortex’s template, filled for its name, and opened to be written',
+  (await shownSoon(notesView.locator('[data-note-pane="Untitled.md"]'))) && /^---\ntitle: "Untitled"\ncreated: \d{4}-\d{2}-\d{2}\n/.test(fs.readFileSync(vaultNote('Untitled.md'), 'utf8')),
+);
+const inboxBefore = fs.readdirSync(vaultNote('📥 000-Inbox/Dump')).filter((name) => name.endsWith('.md'));
+await page.keyboard.press('Control+Shift+n');
+check(
+  'Ctrl+Shift+N captures a note into Cortex’s inbox',
+  await onDiskSoon(() => fs.readdirSync(vaultNote('📥 000-Inbox/Dump')).filter((name) => name.endsWith('.md')).length === inboxBefore.length + 1),
+);
+await page.locator('[data-app-view="graph"]').click();
+await page.waitForTimeout(1_500);
+const graphSize = await page.locator('[data-notes-graph="vault"]').evaluate((element) => ({ nodes: Number(element.dataset.graphNodes), edges: Number(element.dataset.graphEdges) }));
+check('the graph draws the vault’s notes and the links between them', graphSize.nodes >= 4 && graphSize.edges >= 2);
+await shoot('06-graph.png');
+check(
+  'nothing was written into what is hidden',
+  fs.readFileSync(vaultNote('.hidden/Secret.md'), 'utf8') === hiddenBefore && fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'utf8') === obsidianBefore,
+);
+await page.locator('[data-app-view="notes"]').click();
+
+/*
+  Last before the restart, because Playwright waits for a navigation it saw
+  begin even when the app refused it: the page asks to go to the network, and
+  the main process says where it still is.
+*/
+await page.evaluate(() => {
+  window.location.href = 'https://example.com/';
+});
+await page.waitForTimeout(800);
+const stillAt = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((one) => one.webContents.getURL()));
+check('and the page does not navigate away', stillAt.length === 1 && stillAt[0].startsWith('file:') && stillAt[0].endsWith('/dist/index.html'));
+
+/*
+  Closed and opened again: the vault and the language are the app's own
+  settings, in its data folder, and the window opens where it was.
+*/
+console.log('\nOpened again');
+await app.close();
+app = await launch();
+page = await app.firstWindow();
+listen(page);
+check('the vault chosen is opened again, with nothing to choose', await shownSoon(page.locator('[data-notes-view]'), 30_000));
+check('in the language chosen', (await page.evaluate(() => document.documentElement.lang)) === 'en');
+check('and the settings file is in the app’s data, not in the vault', fs.existsSync(path.join(userData, 'settings.json')) && !fs.readdirSync(vaultDir).includes('settings.json'));
+
+// The policy's refusals of the probes above are what was asked for; anything else the window logged is a fault.
+const unexpected = consoleErrors.filter((text) => !text.includes('https://example.com/'));
+check('the window logged no errors but the refusals asked for', unexpected.length === 0 && consoleErrors.length >= 2);
+if (unexpected.length) console.log(unexpected.map((e) => `       ${e}`).join('\n'));
+
+await app.close();
+fs.rmSync(userData, { recursive: true, force: true });
+fs.rmSync(vaultDir, { recursive: true, force: true });
+
+console.log(`\n${failures.length ? `${failures.length} check(s) failed` : 'All smoke checks passed'}`);
+process.exit(failures.length ? 1 : 0);

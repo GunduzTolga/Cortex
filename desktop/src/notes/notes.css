@@ -1,0 +1,339 @@
+/*
+  The notes screen's reading view and editor. A note is read for minutes at a
+  time, so it is set as a page is: a measure of about seventy characters, the
+  body face at a size meant for reading rather than for a panel's labels, and
+  Fraunces for the title and the first two levels of heading, as the app's own
+  titles are. Wiki links take the palette's second accent, the violet Obsidian
+  readers know links by; tags its first.
+*/
+
+.kg-note {
+  --note-link: var(--color-accent-2);
+  --note-tag: var(--color-accent);
+  --note-muted: var(--color-muted);
+  max-width: 46rem;
+  margin: 0 auto;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+.kg-note > :first-child {
+  margin-top: 0;
+}
+.kg-note p,
+.kg-note ul,
+.kg-note ol,
+.kg-note pre,
+.kg-note table,
+.kg-note blockquote,
+.kg-note [data-callout] {
+  margin: 0 0 0.9em;
+}
+.kg-note h1,
+.kg-note h2,
+.kg-note h3,
+.kg-note h4,
+.kg-note h5,
+.kg-note h6 {
+  margin: 1.5em 0 0.5em;
+  line-height: 1.25;
+  font-weight: 700;
+  scroll-margin-top: 1rem;
+}
+.kg-note h1,
+.kg-note h2 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.kg-note h1 {
+  font-size: 1.75em;
+}
+.kg-note h2 {
+  font-size: 1.4em;
+}
+.kg-note h3 {
+  font-size: 1.15em;
+}
+.kg-note h4,
+.kg-note h5,
+.kg-note h6 {
+  font-size: 1em;
+}
+.kg-note h6 {
+  color: var(--note-muted);
+}
+.kg-note ul {
+  list-style: disc;
+  padding-left: 1.5em;
+}
+.kg-note ol {
+  list-style: decimal;
+  padding-left: 1.6em;
+}
+.kg-note li {
+  margin: 0.15em 0;
+}
+.kg-note li > ul,
+.kg-note li > ol {
+  margin: 0.15em 0 0;
+}
+.kg-note li::marker {
+  color: var(--note-muted);
+}
+.kg-note .task-list-item {
+  list-style: none;
+  margin-left: -1.4em;
+}
+.kg-note .task-list-item input[type='checkbox'] {
+  width: 0.95em;
+  height: 0.95em;
+  margin: 0 0.45em 0 0;
+  vertical-align: -0.1em;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+.kg-note .task-list-item input[type='checkbox']:disabled {
+  cursor: default;
+}
+.kg-note .task-list-item:has(> input:checked) {
+  color: var(--note-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklab, var(--note-muted) 50%, transparent);
+}
+.kg-note strong {
+  font-weight: 700;
+}
+.kg-note em {
+  font-style: italic;
+}
+.kg-note del {
+  color: var(--note-muted);
+}
+.kg-note mark {
+  background: color-mix(in oklab, var(--color-warn) 28%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.kg-note a {
+  color: var(--note-link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--note-link) 35%, transparent);
+  text-underline-offset: 3px;
+}
+.kg-note a:hover {
+  text-decoration-color: var(--note-link);
+}
+.kg-note code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--color-zinc-50);
+  border-radius: 4px;
+  padding: 0.12em 0.35em;
+}
+.kg-note pre {
+  background: var(--color-zinc-50);
+  border: 1px solid var(--color-zinc-100);
+  border-radius: 10px;
+  padding: 0.85em 1em;
+  overflow-x: auto;
+  line-height: 1.55;
+}
+.kg-note pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.82em;
+}
+.kg-note blockquote {
+  border-left: 3px solid var(--color-zinc-200);
+  padding: 0.1em 0 0.1em 1em;
+  color: var(--color-zinc-600);
+}
+.kg-note hr {
+  border: 0;
+  border-top: 1px solid var(--color-zinc-200);
+  margin: 2em 0;
+}
+.kg-note table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  font-size: 0.92em;
+}
+.kg-note th,
+.kg-note td {
+  border: 1px solid var(--color-zinc-200);
+  padding: 0.4em 0.75em;
+  text-align: left;
+}
+.kg-note th {
+  background: var(--color-zinc-50);
+  font-weight: 700;
+}
+.kg-note img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+/* A wiki link, there or waiting to be written. */
+.kg-note .kg-wikilink {
+  color: var(--note-link);
+  cursor: pointer;
+  text-decoration: none;
+  border-radius: 3px;
+}
+.kg-note .kg-wikilink:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.kg-note .kg-wikilink[data-missing] {
+  opacity: 0.6;
+  text-decoration: underline dashed;
+  text-decoration-color: color-mix(in oklab, var(--note-link) 50%, transparent);
+  text-underline-offset: 3px;
+}
+.kg-note .kg-tag {
+  display: inline-block;
+  padding: 0 0.5em;
+  border-radius: 999px;
+  font-size: 0.85em;
+  line-height: 1.6;
+  color: var(--note-tag);
+  background: color-mix(in oklab, var(--note-tag) 12%, transparent);
+  cursor: pointer;
+  vertical-align: 0.05em;
+}
+.kg-note .kg-tag:hover {
+  background: color-mix(in oklab, var(--note-tag) 22%, transparent);
+}
+
+/* An embedded note: a page inside the page, its title above it. */
+.kg-note .kg-embed {
+  border-left: 3px solid color-mix(in oklab, var(--note-link) 45%, transparent);
+  background: color-mix(in oklab, var(--color-zinc-50) 60%, transparent);
+  border-radius: 0 10px 10px 0;
+  padding: 0.6em 1em 0.2em;
+  margin: 0 0 0.9em;
+}
+.kg-note .kg-embed .kg-note {
+  font-size: 0.95em;
+}
+
+/* Callouts, as Obsidian draws them: a tinted box, an icon and a title. */
+.kg-note [data-callout] {
+  --callout: var(--color-accent);
+  border-radius: 10px;
+  padding: 0.7em 1em 0.2em;
+  background: color-mix(in oklab, var(--callout) 9%, transparent);
+  border: 1px solid color-mix(in oklab, var(--callout) 22%, transparent);
+}
+.kg-note [data-callout] > summary,
+.kg-note .kg-callout-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  font-weight: 700;
+  color: var(--callout);
+  margin-bottom: 0.35em;
+  list-style: none;
+  cursor: default;
+}
+.kg-note details[data-callout] > summary {
+  cursor: pointer;
+}
+.kg-note details[data-callout]:not([open]) {
+  padding-bottom: 0.35em;
+}
+.kg-note details[data-callout]:not([open]) > summary {
+  margin-bottom: 0;
+}
+.kg-note [data-callout-kind='info'],
+.kg-note [data-callout-kind='todo'] {
+  --callout: var(--color-accent);
+}
+.kg-note [data-callout-kind='tip'],
+.kg-note [data-callout-kind='success'] {
+  --callout: var(--color-good);
+}
+.kg-note [data-callout-kind='question'],
+.kg-note [data-callout-kind='warning'] {
+  --callout: var(--color-warn);
+}
+.kg-note [data-callout-kind='failure'],
+.kg-note [data-callout-kind='danger'],
+.kg-note [data-callout-kind='bug'] {
+  --callout: var(--color-bad);
+}
+.kg-note [data-callout-kind='example'] {
+  --callout: var(--color-accent-2);
+}
+.kg-note [data-callout-kind='quote'] {
+  --callout: var(--color-zinc-500);
+}
+
+/* A line the screen was asked to show - a search hit, a heading - flashed once. */
+.kg-note .kg-flash {
+  animation: kg-note-flash 1.6s ease-out;
+  border-radius: 4px;
+}
+@keyframes kg-note-flash {
+  0%,
+  30% {
+    background: color-mix(in oklab, var(--color-warn) 25%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* The editor: the same page, in its source. */
+.kg-editor .cm-editor {
+  height: 100%;
+  background: transparent;
+  font-size: 15px;
+}
+.kg-editor .cm-editor.cm-focused {
+  outline: none;
+}
+.kg-editor .cm-scroller {
+  font-family: var(--font-sans);
+  line-height: 1.7;
+}
+.kg-editor .cm-content {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 1.5rem 0 40vh;
+  caret-color: var(--color-ink);
+}
+.kg-editor .cm-line {
+  padding: 0 2px;
+}
+.kg-editor .cm-activeLine {
+  background: color-mix(in oklab, var(--color-zinc-50) 55%, transparent);
+}
+.kg-editor .cm-selectionBackground,
+.kg-editor .cm-focused .cm-selectionBackground {
+  background: color-mix(in oklab, var(--color-accent-2) 22%, transparent) !important;
+}
+.kg-editor .cm-cursor {
+  border-left-color: var(--color-ink);
+  border-left-width: 2px;
+}
+.kg-editor .cm-wikilink {
+  color: var(--color-accent-2);
+}
+.kg-editor.kg-editor-ctrl .cm-wikilink {
+  cursor: pointer;
+  text-decoration: underline;
+}
+.kg-editor .cm-tagmark {
+  color: var(--color-accent);
+}
+.kg-editor .cm-searchMatch {
+  background: color-mix(in oklab, var(--color-warn) 30%, transparent);
+}
+.kg-editor .cm-searchMatch-selected {
+  background: color-mix(in oklab, var(--color-warn) 55%, transparent);
+}

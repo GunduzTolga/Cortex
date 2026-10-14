@@ -1,0 +1,528 @@
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, BookOpen, Code2, ExternalLink, FolderOpen, LayoutTemplate, MoreHorizontal, PencilLine, Trash2 } from 'lucide-react';
+import type { NoteRead } from '@shared/notes';
+import { messageOf } from '@shared/ipcError';
+import { fillTemplate, folderOf, insertTemplate, nameProblem, noteTitle, parseNote, pathKey, shortestLink } from '../../core/vaultNotes';
+import { TemplatePicker, templateText } from './templates';
+import { useT } from '../i18n/useT';
+import { useApp } from '../store/app';
+import { Spinner } from '../ui/ui';
+import { NoteDocument } from './NoteMarkdown';
+import { NoteEditor, type LinkChoice, type NoteEditorHandle } from './NoteEditor';
+import type { LiveHooks } from './livePreview';
+import { imageOf } from './vaultCache';
+import { peekLeave, peekSoon } from './peek';
+import { useActiveTab, useNotes } from './notesStore';
+import { Menu, useConfirm } from './NotesMenus';
+import { NAME_PROBLEM } from './NotesNav';
+
+/**
+ * One note, read or written. It is read from the vault when it is opened and
+ * again when the file changes on disk while nothing here is unsaved; it is
+ * saved a moment after the last key, at Ctrl-S, and when the note is left -
+ * each time over the version that was read, so that a note Obsidian, Pyn or a
+ * sync wrote meanwhile is never written over: the screen says so and the
+ * person chooses which stays.
+ */
+
+const SAVE_AFTER_MS = 1000;
+
+type Saving = 'saved' | 'unsaved' | 'saving' | 'failed';
+
+/** `- [ ]` and `- [x]` on one line of a note, the other way round. */
+export function toggleTask(text: string, line: number): string | null {
+  const lines = text.split('\n');
+  const now = lines[line];
+  if (now === undefined) return null;
+  const match = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\])/.exec(now);
+  if (!match) return null;
+  lines[line] = `${match[1]}${match[2] === ' ' ? 'x' : ' '}${match[3]}${now.slice(match[0].length)}`;
+  return lines.join('\n');
+}
+
+/** The line a heading or a block of the note is on, by what a link names after `#`. */
+function lineOfSubpath(text: string, subpath: string): number | null {
+  const facts = parseNote(text);
+  if (subpath.startsWith('^')) return facts.blocks.find((one) => one.id === subpath.slice(1))?.line ?? null;
+  const wanted = pathKey(subpath.split('#').pop() ?? '');
+  return facts.headings.find((one) => pathKey(one.text) === wanted)?.line ?? null;
+}
+
+export function NotePane({ path }: { path: string }) {
+  const t = useT();
+  const toast = useApp((s) => s.toast);
+  const mode = useNotes((state) => state.mode);
+  const sourceMode = useNotes((state) => state.sourceMode);
+  const revision = useNotes((state) => state.revision);
+  const onDisk = useNotes((state) => state.index?.notes.find((note) => note.path === path)?.modified ?? null);
+  const readOnlyVault = useNotes((state) => state.index?.readOnly ?? null);
+  const tab = useActiveTab();
+  const target = useNotes((state) => state.target);
+  const confirm = useConfirm();
+
+  const [doc, setDoc] = useState<NoteRead | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [text, setText] = useState('');
+  const [saving, setSaving] = useState<Saving>('saved');
+  const [conflict, setConflict] = useState<{ text: string; hash: string; modified: number } | null>(null);
+  const [changed, setChanged] = useState(false);
+  const [jump, setJump] = useState<{ line: number; seq: number } | null>(null);
+  const [title, setTitle] = useState(noteTitle(path));
+  const [titleProblem, setTitleProblem] = useState<string | null>(null);
+  const reader = useRef<HTMLDivElement>(null);
+  const editor = useRef<NoteEditorHandle>(null);
+  // What the save in flight and the last one read, for the callbacks that outlive a render.
+  const current = useRef({ path, text, doc, saving: false });
+  current.current = { ...current.current, path, text, doc };
+
+  const writable = doc !== null && doc.text !== null && doc.hash !== null && !doc.readOnly && !conflict;
+  const dirty = doc !== null && doc.text !== null && text !== doc.text;
+
+  const load = useCallback(async () => {
+    try {
+      const read = await window.cortex.notes.read(path);
+      setDoc(read);
+      setText(read.text ?? '');
+      setFailed(null);
+      setConflict(null);
+      setChanged(false);
+      setSaving('saved');
+    } catch (err) {
+      setFailed(messageOf(err));
+    }
+  }, [path]);
+
+  // One pane per note (the screen keys it by the path), so a save that outlives it is still of this note.
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // The file changed on disk: read again when nothing here is unsaved, else say so and wait for the person.
+  useEffect(() => {
+    if (!doc || onDisk === null || Math.abs(onDisk - doc.modified) < 1 || current.current.saving) return;
+    if (current.current.text === (doc.text ?? '')) void load();
+    else setChanged(true);
+  }, [onDisk, revision, doc, load]);
+
+  const save = useCallback(
+    async (base?: string) => {
+      const { path: at, text: now, doc: was } = current.current;
+      if (!was || was.text === null || was.hash === null || was.readOnly || current.current.saving) return;
+      if (now === was.text && !base) return;
+      current.current.saving = true;
+      setSaving('saving');
+      try {
+        const saved = await window.cortex.notes.save(at, now, base ?? was.hash);
+        // The renderer is not strict: the union is told apart with `in`, as CLAUDE.md says.
+        if ('hash' in saved) {
+          const next = { ...was, text: now, hash: saved.hash, modified: saved.modified };
+          current.current.doc = next;
+          if (current.current.path === at) {
+            setDoc(next);
+            setConflict(null);
+            setChanged(false);
+            setSaving(current.current.text === now ? 'saved' : 'unsaved');
+          }
+          void useNotes.getState().refresh();
+        } else if ('current' in saved && current.current.path === at) {
+          setConflict(saved.current);
+          setSaving('unsaved');
+        }
+      } catch (err) {
+        setSaving('failed');
+        toast({ tone: 'error', title: t('notes.save.failed'), detail: messageOf(err) });
+      } finally {
+        current.current.saving = false;
+      }
+    },
+    [t, toast],
+  );
+
+  useEffect(() => {
+    if (!dirty || !writable) return;
+    setSaving('unsaved');
+    const timer = setTimeout(() => void save(), SAVE_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [text, dirty, writable, save]);
+
+  // Leaving the note saves what is unsaved, over the version read.
+  useEffect(() => () => void save(), [save]);
+
+  // The text of the note in front, for the outline and the links beside it.
+  useEffect(() => {
+    const timer = setTimeout(() => useNotes.getState().setLive(doc ? { path, text } : null), 200);
+    return () => clearTimeout(timer);
+  }, [path, text, doc]);
+
+  // Where the note was asked to open: a line, a heading, a block.
+  useEffect(() => {
+    if (!doc || !target || target.path !== path) return;
+    useNotes.getState().takeTarget(path);
+    const line = target.line ?? (target.subpath ? lineOfSubpath(current.current.text, target.subpath) : null);
+    if (target.edit || mode === 'edit') setJump(line === null ? (target.edit ? { line: 0, seq: Date.now() } : null) : { line, seq: Date.now() });
+    else if (line !== null) requestAnimationFrame(() => scrollReaderTo(reader.current, line, true));
+  }, [doc, target, path, mode]);
+
+  const switchMode = (next: 'read' | 'edit') => {
+    if (next === mode) return;
+    if (next === 'edit') {
+      const line = topLineOf(reader.current);
+      useNotes.getState().setMode('edit');
+      setJump({ line, seq: Date.now() });
+    } else {
+      const line = editor.current?.topLine() ?? 0;
+      void save();
+      useNotes.getState().setMode('read');
+      requestAnimationFrame(() => scrollReaderTo(reader.current, line, false));
+    }
+  };
+
+  // Ctrl+E, heard by the screen while it is on screen (NotesView) and passed here.
+  const modeSwitch = useNotes((state) => state.modeSwitch);
+  const seenSwitch = useRef(modeSwitch);
+  useEffect(() => {
+    if (seenSwitch.current === modeSwitch) return;
+    seenSwitch.current = modeSwitch;
+    switchMode(mode === 'edit' ? 'read' : 'edit');
+    // Only a new press switches; the rest is read as it is at that press.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeSwitch]);
+
+  const onToggleTask = useMemo(
+    () =>
+      writable
+        ? (line: number) => {
+            const next = toggleTask(current.current.text, line);
+            if (next === null) return;
+            current.current.text = next;
+            setText(next);
+            void save();
+          }
+        : undefined,
+    [writable, save],
+  );
+
+  const rename = async () => {
+    const name = title.trim();
+    if (name === noteTitle(path)) {
+      setTitleProblem(null);
+      return;
+    }
+    const problem = nameProblem(name);
+    if (problem) {
+      setTitleProblem(t(NAME_PROBLEM[problem]));
+      return;
+    }
+    await save();
+    try {
+      const done = await window.cortex.notes.rename(path, name);
+      useNotes.getState().moved(path, done.path);
+      await useNotes.getState().refresh();
+      setTitleProblem(null);
+      if (done.updated.length) toast({ tone: 'success', title: t('notes.rename.updated', { count: done.updated.length }) });
+      if (done.skipped.length) toast({ tone: 'error', title: t('notes.rename.skipped', { count: done.skipped.length }), detail: done.skipped.join('\n') });
+    } catch (err) {
+      setTitleProblem(messageOf(err));
+    }
+  };
+
+  const choices = useCallback(() => linkChoices(), []);
+  const openLink = useCallback((link: { target: string; subpath: string | null; kind: 'wiki' | 'markdown' }, newTab: boolean) => {
+    const to = link.target ? useNotes.getState().resolve(link.target, path, link.kind) : path;
+    if (to) useNotes.getState().open(to, { newTab, subpath: link.subpath });
+  }, [path]);
+
+  // What the live preview asks of the vault: where a link of this note goes, an image, and opening one.
+  const liveHooks = useMemo<LiveHooks>(
+    () => ({
+      resolve: (target, kind) => useNotes.getState().resolve(target, path, kind),
+      image: (file) => imageOf(file, useNotes.getState().index?.files.find((one) => one.path === file)?.modified ?? 0),
+      open: (link, newTab) => openLink(link, newTab),
+      peek: (link, box) => {
+        const to = link ? (link.target ? useNotes.getState().resolve(link.target, path, link.kind) : path) : null;
+        if (link && to && box && /\.md$/i.test(to)) peekSoon(to, link.subpath, box);
+        else peekLeave();
+      },
+    }),
+    [path, openLink],
+  );
+
+  // A template from the vault's templates folder, into this note: at the cursor while writing, at the end while reading.
+  const [picking, setPicking] = useState(false);
+  const putTemplate = async (from: string) => {
+    setPicking(false);
+    const raw = await templateText(from);
+    if (raw === null) {
+      toast({ tone: 'error', title: t('notes.template.failed') });
+      return;
+    }
+    const filled = fillTemplate(raw, noteTitle(path), new Date());
+    if (mode === 'edit' && editor.current) {
+      editor.current.insertTemplate(filled);
+      return;
+    }
+    const next = insertTemplate(current.current.text, current.current.text.length, filled).text;
+    current.current.text = next;
+    setText(next);
+    void save();
+  };
+
+  const trash = async () => {
+    if (!(await confirm({ title: t('notes.trash.title', { name: noteTitle(path) }), detail: t('notes.trash.detail'), action: t('notes.trash.action') }))) return;
+    try {
+      await window.cortex.notes.trash(path);
+      useNotes.getState().removed(path);
+      await useNotes.getState().refresh();
+    } catch (err) {
+      toast({ tone: 'error', title: t('notes.trash.failed'), detail: messageOf(err) });
+    }
+  };
+
+  const openOutside = async (how: 'obsidian' | 'folder') => {
+    try {
+      const done = await window.cortex.notes.open(path, how);
+      if (!done.opened) toast({ tone: 'error', title: t('notes.obsidian.none') });
+    } catch (err) {
+      toast({ tone: 'error', title: t('notes.open.failed'), detail: messageOf(err) });
+    }
+  };
+
+  // Counted from the text a moment behind the keys: a long note is parsed whole for it.
+  const settled = useDeferredValue(text);
+  const words = useMemo(() => (doc ? parseNote(settled).words : 0), [doc, settled]);
+  const backlinks = useNotes((state) => state.index?.notes.filter((note) => note.path !== path && note.links.includes(path)).length ?? 0);
+  const folder = folderOf(path);
+  const reason = doc?.readOnly === 'encoding' ? t('notes.readOnly.encoding') : readOnlyVault ? t('notes.readOnly.vault') : null;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col" data-note-pane={path}>
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-zinc-100 px-3">
+        <button type="button" className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation disabled:opacity-30" disabled={!tab.back.length} onClick={() => useNotes.getState().back()} title={t('notes.back')}>
+          <ArrowLeft size={15} />
+        </button>
+        <button type="button" className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation disabled:opacity-30" disabled={!tab.forward.length} onClick={() => useNotes.getState().forward()} title={t('notes.forward')}>
+          <ArrowRight size={15} />
+        </button>
+        <p className="ml-1 min-w-0 flex-1 truncate text-[12px] text-zinc-400" data-note-crumbs>
+          {folder ? (
+            <>
+              {folder.split('/').join(' / ')}
+              <span className="mx-1.5">/</span>
+            </>
+          ) : null}
+          <span className="text-zinc-600">{noteTitle(path)}</span>
+        </p>
+        <span className="mr-1 shrink-0 text-[11px] text-zinc-400" data-note-saving={saving}>
+          {saving === 'saving' ? t('notes.saving') : saving === 'unsaved' ? t('notes.unsaved') : saving === 'failed' ? t('notes.save.failed') : null}
+        </span>
+        <div className="flex shrink-0 rounded-lg bg-zinc-50 p-0.5" role="group" aria-label={t('notes.mode')}>
+          {(['read', 'edit'] as const).map((one) => (
+            <button
+              key={one}
+              type="button"
+              onClick={() => switchMode(one)}
+              aria-pressed={mode === one}
+              data-note-mode={one}
+              title={t(one === 'read' ? 'notes.mode.read.hint' : 'notes.mode.edit.hint')}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-bold transition-colors ${mode === one ? 'bg-white text-darkDelegation shadow-sm' : 'text-zinc-400 hover:text-zinc-600'}`}
+            >
+              {one === 'read' ? <BookOpen size={13} /> : <PencilLine size={13} />}
+              {t(one === 'read' ? 'notes.mode.read' : 'notes.mode.edit')}
+            </button>
+          ))}
+        </div>
+        <Menu
+          label={t('notes.more')}
+          trigger={<MoreHorizontal size={16} />}
+          items={[
+            { label: t('notes.template.insert'), icon: <LayoutTemplate size={14} />, run: () => setPicking(true), disabled: !writable },
+            { label: t(sourceMode ? 'notes.mode.live' : 'notes.mode.source'), icon: <Code2 size={14} />, run: () => useNotes.getState().setSourceMode(!sourceMode) },
+            { label: t('notes.open.obsidian'), icon: <ExternalLink size={14} />, run: () => void openOutside('obsidian') },
+            { label: t('notes.open.folder'), icon: <FolderOpen size={14} />, run: () => void openOutside('folder') },
+            { label: t('notes.trash'), icon: <Trash2 size={14} />, run: () => void trash(), danger: true, disabled: Boolean(reason) },
+          ]}
+        />
+      </div>
+
+      {conflict ? (
+        <Banner tone="warn" data="conflict">
+          <span className="flex-1">{t('notes.conflict')}</span>
+          <button
+            type="button"
+            className="font-bold underline"
+            data-note-take-disk
+            onClick={() => {
+              current.current.text = conflict.text;
+              setText(conflict.text);
+              setDoc((was) => (was ? { ...was, text: conflict.text, hash: conflict.hash, modified: conflict.modified } : was));
+              setConflict(null);
+              setChanged(false);
+              setSaving('saved');
+            }}
+          >
+            {t('notes.conflict.theirs')}
+          </button>
+          <button type="button" className="font-bold underline" data-note-keep-mine onClick={() => (setConflict(null), void save(conflict.hash))}>
+            {t('notes.conflict.mine')}
+          </button>
+        </Banner>
+      ) : changed ? (
+        <Banner tone="warn" data="changed">
+          <span className="flex-1">{t('notes.changed')}</span>
+          <button type="button" className="font-bold underline" onClick={() => void load()}>
+            {t('notes.changed.reload')}
+          </button>
+        </Banner>
+      ) : reason ? (
+        <Banner tone="quiet" data="read-only">
+          <span>{reason}</span>
+        </Banner>
+      ) : null}
+
+      <div className="relative min-h-0 flex-1">
+        {failed ? (
+          <p className="p-8 text-[13px] text-bad">{failed}</p>
+        ) : !doc ? (
+          <div className="flex h-full items-center justify-center">
+            <Spinner />
+          </div>
+        ) : doc.tooLarge ? (
+          <p className="p-8 text-[13px] text-zinc-500">{t('notes.tooLarge')}</p>
+        ) : (
+          <>
+            {mode === 'read' ? (
+              <div ref={reader} className="absolute inset-0 overflow-y-auto px-8 pb-24 pt-8" data-note-reader>
+                <TitleField value={title} onChange={setTitle} onCommit={() => void rename()} problem={titleProblem} disabled={!writable} />
+                <NoteDocument path={path} text={text} onToggleTask={onToggleTask} />
+              </div>
+            ) : null}
+            {mode === 'edit' ? (
+              <div className="absolute inset-0 flex flex-col px-8">
+                <div className="mx-auto w-full max-w-[46rem] pt-8">
+                  <TitleField value={title} onChange={setTitle} onCommit={() => void rename()} problem={titleProblem} disabled={!writable} />
+                </div>
+                <div className="min-h-0 flex-1">
+                  <NoteEditor
+                    key={path}
+                    ref={editor}
+                    value={text}
+                    readOnly={!writable}
+                    empty={t('notes.editor.empty')}
+                    onChange={(next) => {
+                      current.current.text = next;
+                      setText(next);
+                    }}
+                    onSave={() => void save()}
+                    onOpenLink={openLink}
+                    choices={choices}
+                    jump={jump}
+                    live={!sourceMode}
+                    hooks={liveHooks}
+                  />
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+
+      <TemplatePicker index={useNotes.getState().index} open={picking} onClose={() => setPicking(false)} onPick={(from) => void putTemplate(from)} />
+      <div className="flex h-7 shrink-0 items-center gap-3 border-t border-zinc-100 px-4 text-[11px] text-zinc-400">
+        <span data-note-words={words}>{t('notes.words', { count: words })}</span>
+        <span>{t('notes.characters', { count: text.length })}</span>
+        <span>{t('notes.backlinks.count', { count: backlinks })}</span>
+      </div>
+    </div>
+  );
+}
+
+function Banner({ tone, data, children }: { tone: 'warn' | 'quiet'; data: string; children: React.ReactNode }) {
+  return (
+    <div
+      className={`flex shrink-0 items-center gap-3 border-b px-4 py-2 text-[12px] ${tone === 'warn' ? 'border-warn/30 bg-warn/10 text-darkDelegation' : 'border-zinc-100 bg-zinc-50 text-zinc-500'}`}
+      data-note-banner={data}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** The note's name above it, as Obsidian shows it, and where it is renamed: Enter or leaving the field renames it. */
+function TitleField({ value, onChange, onCommit, problem, disabled }: { value: string; onChange: (value: string) => void; onCommit: () => void; problem: string | null; disabled: boolean }) {
+  const t = useT();
+  return (
+    <div className="kg-note pb-5">
+      <input
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        onBlur={onCommit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            (event.target as HTMLInputElement).blur();
+          }
+        }}
+        aria-label={t('notes.title')}
+        data-note-title
+        className="w-full bg-transparent font-display text-[2rem] font-extrabold leading-tight tracking-tight text-darkDelegation outline-none placeholder:text-zinc-300 disabled:opacity-100"
+      />
+      {problem ? (
+        <p className="mt-1 text-[12px] text-bad" data-note-title-problem>
+          {problem}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Every note, by the name a link to it is written with: its name alone where no other note has it, else its path. */
+export function linkChoices(): { notes: LinkChoice[]; tags: string[] } {
+  const { index, paths } = useNotes.getState();
+  if (!index) return { notes: [], tags: [] };
+  const named = new Map<string, number>();
+  for (const note of index.notes) named.set(pathKey(noteTitle(note.path)), (named.get(pathKey(noteTitle(note.path))) ?? 0) + 1);
+  const notes = index.notes.map((note) => ({
+    title: noteTitle(note.path),
+    path: note.path,
+    folder: folderOf(note.path),
+    aliases: note.aliases,
+    link: (named.get(pathKey(noteTitle(note.path))) ?? 0) > 1 ? shortestLink(note.path, paths) : noteTitle(note.path),
+  }));
+  const tags = new Map<string, string>();
+  for (const note of index.notes) for (const tag of note.tags) if (!tags.has(pathKey(tag))) tags.set(pathKey(tag), tag);
+  return { notes, tags: [...tags.values()].sort((a, b) => a.localeCompare(b)) };
+}
+
+/** The first line of the note drawn at the top of the reading view. */
+function topLineOf(reader: HTMLElement | null): number {
+  if (!reader) return 0;
+  const top = reader.getBoundingClientRect().top;
+  let best = 0;
+  for (const element of reader.querySelectorAll<HTMLElement>('[data-line]')) {
+    const box = element.getBoundingClientRect();
+    if (box.bottom < top + 8) {
+      best = Number(element.dataset.line) || best;
+      continue;
+    }
+    return Number(element.dataset.line) || best;
+  }
+  return best;
+}
+
+/** The reading view scrolled to the block a line is in, flashed when the person asked for that line. */
+export function scrollReaderTo(reader: HTMLElement | null, line: number, flash: boolean): void {
+  if (!reader) return;
+  let found: HTMLElement | null = null;
+  for (const element of reader.querySelectorAll<HTMLElement>('[data-line]')) {
+    const at = Number(element.dataset.line);
+    if (at <= line && (!found || at >= Number(found.dataset.line))) found = element;
+  }
+  if (!found) return;
+  found.scrollIntoView({ block: flash ? 'center' : 'start' });
+  if (flash) {
+    found.classList.remove('kg-flash');
+    void found.offsetWidth;
+    found.classList.add('kg-flash');
+  }
+}

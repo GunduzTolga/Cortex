@@ -1,0 +1,27 @@
+{
+  // The window: src/, with shared/ and core/ it imports. Strict, as the main
+  // process is; Krewgent's renderer is not (it carries The Delegation's own
+  // settings), and its notes screen compiles under strict as it is.
+  "compilerOptions": {
+    "strict": true,
+    "noUnusedLocals": true,
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["shared/*"]
+    }
+  },
+  "include": ["src", "shared", "core"]
+}
