@@ -10,7 +10,6 @@ import { NotePane } from './NotePane';
 import { NotesNav, useMakers } from './NotesNav';
 import { NoteSidebar } from './NoteSidebar';
 import { QuickSwitcher } from './QuickSwitcher';
-import { NotesDialogs } from './NotesMenus';
 import { NotePeek } from './peek';
 import { imageOf } from './vaultCache';
 import { labelOf, useActiveTab, useNotes } from './notesStore';
@@ -189,7 +188,6 @@ export function NotesView({ visible, onGraph }: { visible: boolean; onGraph: () 
 
       <QuickSwitcher open={switching} onClose={() => setSwitching(false)} />
       <NotePeek />
-      <NotesDialogs />
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import type { ChatApi, ChatPush } from './chat';
 import type { AppLanguage } from './language';
 import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
 
@@ -69,8 +70,12 @@ export interface CortexApi {
     choose(): Promise<VaultStatus | null>;
   };
   notes: NotesApi;
+  /** The chat with the person's own AI CLIs (shared/chat.ts). */
+  chat: ChatApi;
   on: {
     /** The vault changed on disk, or another vault was chosen: read the index again. */
     notesChanged(handler: () => void): () => void;
+    /** A chat going on: an event, its state, its list entry. */
+    chat(handler: (push: ChatPush) => void): () => void;
   };
 }

@@ -24,6 +24,13 @@ const subscribe = (channel: string, handler: () => void): (() => void) => {
   return () => ipcRenderer.removeListener(channel, listener);
 };
 
+/** A channel that carries data: the payload is handed on, the event that brought it is not. */
+const listen = <T>(channel: string, handler: (payload: T) => void): (() => void) => {
+  const listener = (_event: unknown, payload: T) => handler(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+};
+
 const api: CortexApi = {
   bootstrap: () => invoke('app:bootstrap'),
   settings: {
@@ -52,8 +59,20 @@ const api: CortexApi = {
     asset: (path) => invoke('notes:asset', path),
     open: (path, how) => invoke('notes:open', path, how),
   },
+  chat: {
+    clis: () => invoke('chat:clis'),
+    list: () => invoke('chat:list'),
+    open: (id) => invoke('chat:open', id),
+    send: (id, cli, text) => invoke('chat:send', id, cli, text),
+    cancel: (id) => invoke('chat:cancel', id),
+    answer: (id, permission, option) => invoke('chat:answer', id, permission, option),
+    setOption: (id, option, value) => invoke('chat:setOption', id, option, value),
+    rename: (id, title) => invoke('chat:rename', id, title),
+    remove: (id) => invoke('chat:remove', id),
+  },
   on: {
     notesChanged: (handler) => subscribe('notes:changed', handler),
+    chat: (handler) => listen('chat:event', handler),
   },
 };
 

@@ -81,6 +81,10 @@ const launch = () =>
       // Electron refuses to be Electron with this set, and Playwright waits out its timeout on a launch that technically succeeded.
       ELECTRON_RUN_AS_NODE: undefined,
       NODE_ENV: 'production',
+      // Pyn's chat talks to a stand-in for an AI CLI (tests/fixtures/fake-acp-agent.mjs), never to one of the machine's.
+      CORTEX_TEST_AGENT: path.resolve('tests/fixtures/fake-acp-agent.mjs'),
+      CORTEX_TEST_CLAUDE: path.resolve('tests/fixtures/fake-claude.mjs'),
+      CORTEX_TEST_CODEX: path.resolve('tests/fixtures/fake-codex.mjs'),
     },
   });
 
@@ -156,7 +160,7 @@ const windowAlone = await page.evaluate(async () => {
   });
   return { node: typeof require + typeof process, bridge: Object.keys(window.cortex).sort(), fetched, image, opened: window.open('https://example.com/') === null };
 });
-check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,notes,on,settings,vault');
+check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,notes,on,settings,vault');
 check('it reaches nothing on the network: no request, no image', windowAlone.fetched === 'blocked' && windowAlone.image === 'blocked');
 check('and opens no window of its own', windowAlone.opened && app.windows().length === 1);
 
@@ -166,7 +170,9 @@ await app.evaluate(({ dialog }, dir) => {
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
 }, vaultDir);
 await page.locator('[data-welcome-choose]').click();
-check('a vault chosen, the notes open', await shownSoon(page.locator('[data-notes-view]'), 15_000));
+check('a vault chosen, Pyn opens first, where the person talks to their AI', await shownSoon(page.locator('[data-chat-view]'), 15_000));
+await page.locator('[data-app-view="notes"]').click();
+check('and the notes are one press away', await shownSoon(page.locator('[data-notes-view]'), 15_000));
 check('the window is told the vault by its name', (await page.locator('[data-vault-name]').textContent())?.trim() === path.basename(vaultDir));
 const indexNow = await page.evaluate(() => window.cortex.notes.index());
 // The folder the vault is in, as written and as JSON writes it (a Windows path's backslashes doubled).
@@ -353,6 +359,67 @@ check(
 );
 await notesView.locator('[data-notes-nav-tab="files"]').click();
 
+/*
+  Pyn (src/chat/, electron/services/chat.ts): the person writes, a CLI
+  started in the vault answers over ACP. Here the CLI is the stand-in.
+*/
+console.log('\nPyn');
+await page.locator('[data-app-view="pyn"]').click();
+check('Pyn opens on a new chat: the greeting and the field', await shownSoon(page.locator('[data-chat-empty] [data-chat-input]')));
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-choice="test"]').click();
+await page.locator('[data-chat-input]').fill('merhaba Pyn');
+await page.keyboard.press('Enter');
+check('a message gets its answer streamed in, its words first', await shownSoon(page.locator('[data-chat-text]', { hasText: 'Merhaba dünya' })));
+check('the chat is listed, named by its first words', await shownSoon(page.locator('[data-chat-item]', { hasText: 'merhaba Pyn' })));
+check(
+  'its steps folded into one line of activity, its context as a ring',
+  (await page.locator('[data-chat-fold="activity"]').count()) === 1 && (await page.locator('[data-chat-context]').count()) === 1,
+);
+check('and nothing on the page names where the vault is', !namesWhere(await page.evaluate(() => document.body.innerHTML)));
+await shoot('10-pyn.png');
+await page.locator('[data-chat-input]').fill('izin iste');
+await page.keyboard.press('Enter');
+check('a step the CLI asks leave for is a card over the field', await shownSoon(page.locator('[data-chat-permission]')));
+await shoot('11-permission.png');
+await page.locator('[data-chat-answer-option="allow_once"]').click();
+check('and the answer reaches the CLI', await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: once' })));
+await page.locator('[data-chat-send]').waitFor();
+await page.locator('[data-chat-input]').fill('yavaş olsun');
+await page.keyboard.press('Enter');
+await page.locator('[data-chat-stop]').click();
+check('Stop ends an answer, and says so', await shownSoon(page.locator('[data-chat-stopped="cancelled"]')));
+// Claude Code, in its own stream of JSON: a new chat with its stand-in.
+await page.locator('[data-chat-new]').click();
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-choice="test-claude"]').click();
+await page.locator('[data-chat-input]').fill('izin iste');
+await page.keyboard.press('Enter');
+check('Claude Code asks leave on the same card', await shownSoon(page.locator('[data-chat-permission]')));
+await page.locator('[data-chat-answer-option="allow_once"]').click();
+check(
+  'and answers, with the models it named on its chip',
+  (await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: allow' }))) && (await page.locator('[data-chat-chip="model"]').textContent())?.trim() === 'Default (recommended)',
+);
+await shoot('12-claude.png');
+// Codex, through its app server: a command it asks to run, and its final answer, which comes whole.
+await page.locator('[data-chat-new]').click();
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-choice="test-codex"]').click();
+await page.locator('[data-chat-input]').fill('izin iste');
+await page.keyboard.press('Enter');
+check('Codex asks to run a command on the same card', await shownSoon(page.locator('[data-chat-permission]')));
+await page.locator('[data-chat-answer-option="allow_once"]').click();
+check(
+  'and its final answer comes, on the model the server marks',
+  (await shownSoon(page.locator('[data-chat-text]', { hasText: 'komut: accept.' }))) && (await page.locator('[data-chat-chip="model"]').textContent())?.trim() === 'GPT-6-Luna',
+);
+await shoot('13-codex.png');
+await page.locator('[data-chat-text] .kg-wikilink', { hasText: 'Ideas' }).first().click();
+check(
+  'a note an answer links to opens in the notes',
+  (await shownSoon(notesView.locator('[data-note-pane="Personal/Ideas.md"]'))) && (await page.locator('[data-app-view="notes"]').getAttribute('aria-pressed')) === 'true',
+);
 await page.locator('[data-app-view="graph"]').click();
 await page.waitForTimeout(1_500);
 const graphSize = await page.locator('[data-notes-graph="vault"]').evaluate((element) => ({ nodes: Number(element.dataset.graphNodes), edges: Number(element.dataset.graphEdges) }));

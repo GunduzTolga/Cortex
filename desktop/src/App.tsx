@@ -1,35 +1,24 @@
-import { useEffect, useState } from 'react';
-import { BookOpen, FolderOpen, Network } from 'lucide-react';
+import { useEffect } from 'react';
+import { BookOpen, FolderOpen, MessageCircle, Network } from 'lucide-react';
 import seal from '../../tema/ananas/marka/pyn-muhur.svg';
 import { LANGUAGES, type Key } from './i18n';
 import { useLanguage, useT } from './i18n/useT';
+import { ChatView } from './chat/ChatView';
 import { NotesView } from './notes/NotesView';
 import { GraphView } from './notes/GraphView';
+import { NotesDialogs } from './notes/NotesMenus';
 import { useApp } from './store/app';
+import { useView, type View } from './store/view';
 import { Flag } from './ui/flags';
 import { Toasts } from './ui/Toasts';
 import { Button, Spinner } from './ui/ui';
 
 /**
- * The window: the vault chosen first, then its notes.
- *
- * Krewgent's Cortex side (src/cortex/CortexSide.tsx) without its terminal and
- * install pass, which are the second and third stages here: two views of one
- * vault, the notes (src/notes/) and the vault as a graph, each drawn from the
- * first time it is shown and kept after, so the graph is not laid out again at
- * every switch. Which one is in front is this window's storage, a convenience.
+ * The window: the vault chosen first, then its views - Pyn, where the person
+ * talks to their own AI (src/chat/), first; the notes (src/notes/); the vault
+ * as a graph - each drawn from the first time it is shown and kept after
+ * (src/store/view.ts), so the graph is not laid out again at every switch.
  */
-
-type View = 'notes' | 'graph';
-const VIEW_KEY = 'cortex.view';
-
-function savedView(): View {
-  try {
-    return localStorage.getItem(VIEW_KEY) === 'graph' ? 'graph' : 'notes';
-  } catch {
-    return 'notes';
-  }
-}
 
 export function App() {
   const t = useT();
@@ -62,6 +51,8 @@ export function App() {
       ) : (
         <VaultScreen name={vault.vault.name} missing={vault.missing} />
       )}
+      {/* The confirmations, prompts and menus every view asks with. */}
+      <NotesDialogs />
       <Toasts />
     </>
   );
@@ -132,17 +123,9 @@ function Welcome() {
 
 function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
   const t = useT();
-  const [view, setViewState] = useState<View>(savedView);
-  const [shown, setShown] = useState<Set<View>>(() => new Set([savedView()]));
-  const setView = (next: View) => {
-    setViewState(next);
-    setShown((before) => (before.has(next) ? before : new Set([...before, next])));
-    try {
-      localStorage.setItem(VIEW_KEY, next);
-    } catch {
-      /* for this run */
-    }
-  };
+  const view = useView((state) => state.view);
+  const shown = useView((state) => state.shown);
+  const setView = useView((state) => state.setView);
   const choose = () => void useApp.getState().chooseVault(t('app.vault.failed'));
 
   // A vault gone from disk is said when the window comes back to it too, not only at the start.
@@ -153,6 +136,7 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
   }, []);
 
   const views: Array<[View, React.ReactNode, Key]> = [
+    ['pyn', <MessageCircle key="pyn" size={13} />, 'app.view.pyn'],
     ['notes', <BookOpen key="notes" size={13} />, 'app.view.notes'],
     ['graph', <Network key="graph" size={13} />, 'app.view.graph'],
   ];
@@ -201,6 +185,11 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
               A view not in front is hidden; the one in front says nothing of
               its visibility, so nothing in the hidden one shows through.
             */}
+            {shown.has('pyn') ? (
+              <div className="kg-layer absolute inset-0" style={view === 'pyn' ? undefined : { visibility: 'hidden' }} aria-hidden={view !== 'pyn'}>
+                <ChatView visible={view === 'pyn'} />
+              </div>
+            ) : null}
             {shown.has('notes') ? (
               <div className="kg-layer absolute inset-0" style={view === 'notes' ? undefined : { visibility: 'hidden' }} aria-hidden={view !== 'notes'}>
                 <NotesView visible={view === 'notes'} onGraph={() => setView('graph')} />

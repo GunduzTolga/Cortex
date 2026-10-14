@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'el
 import type { BootstrapPayload, WindowSettings } from '../shared/api';
 import { readSettings, settingsUnreadable, updateSettings } from './services/settings';
 import { setVault, vaultStatus } from './services/vault';
+import * as chat from './services/chat';
 import * as vaultNotes from './services/vaultNotes';
 
 /**
@@ -75,6 +76,8 @@ export function registerIpc(): void {
     // The notes screen reads the vault now chosen, watched from its next read (services/vaultNotes.ts).
     if (before !== readSettings().vault) {
       vaultNotes.stopWatchingVault();
+      // The CLIs were started in the vault left: ended, to start again in this one.
+      chat.shutdownChats();
       broadcast('notes:changed', null);
     }
     return status;
@@ -103,8 +106,22 @@ export function registerIpc(): void {
   handle('notes:search', (query) => vaultNotes.searchVault(query));
   handle('notes:asset', (file) => vaultNotes.vaultAsset(file));
   handle('notes:open', (file, how) => vaultNotes.openVaultEntry(file, how));
+
+  // The chat with the person's own AI CLIs (services/chat.ts): the window names a CLI from the list it is given, never a program.
+  chat.onChatPush((payload) => broadcast('chat:event', payload));
+  handle('chat:clis', () => chat.listChatClis());
+  handle('chat:list', () => chat.listChats());
+  handle('chat:open', (id) => chat.openChat(id));
+  handle('chat:send', (id, cli, text) => chat.sendChat(id, cli, text));
+  handle('chat:cancel', (id) => chat.cancelChat(id));
+  handle('chat:answer', (id, permission, option) => chat.answerChat(id, permission, option));
+  handle('chat:setOption', (id, option, value) => chat.setChatOption(id, option, value));
+  handle('chat:rename', (id, title) => chat.renameChat(id, title));
+  handle('chat:remove', (id) => chat.removeChat(id));
 }
 
 export function stopWatching(): void {
   vaultNotes.stopWatchingVault();
+  // No CLI outlives the app.
+  chat.shutdownChats();
 }
