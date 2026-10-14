@@ -1,4 +1,5 @@
 import { _electron as electron } from 'playwright';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -51,6 +52,12 @@ write('Personal/Health.md', '# Health\n\nWalk every day.\n');
 write('Notes/Plan.md', '---\ntags: [plan]\n---\n# Plan\n\nSee [[Health]] and [[Missing note]].\n\n- [ ] first task\n\n> [!warning] Careful\n> The body.\n');
 write('Notes/Ideas.md', '# Ideas\n\nThe plan is here: [[Plan#Plan|the plan]]. #idea\n');
 fs.writeFileSync(vaultNote('Latin1.md'), Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]));
+// What Cortex's engine keeps, as it writes it: a receipt under the hash of its event_id, and the day's page generated from it.
+const receipt = `receipts/${createHash('sha256').update('cortex-ad-karari-20261013').digest('hex')}.md`;
+write(receipt, '---\n{\n  "kind": "receipt",\n  "event_id": "cortex-ad-karari-20261013"\n}\n---\nAd kararı verildi.\n');
+write('daily/v3/2026-10-13.md', `---\n{"generated": true, "kind": "receipt-index"}\n---\n# Recorded outcomes\n\nSource: [[${receipt}]]\n`);
+write('Notes/settings.json', '{\n  "theme": "ananas",\n  "count": 3\n}\n');
+const receiptBefore = fs.readFileSync(vaultNote(receipt), 'utf8');
 const hiddenBefore = fs.readFileSync(vaultNote('.hidden/Secret.md'), 'utf8');
 const obsidianBefore = fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'utf8');
 
@@ -59,7 +66,13 @@ const obsidianBefore = fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'u
   not handed to `capturePage` (UnknownVizError) unless Chromium draws in
   software. Windows, where CI runs, draws offscreen as it is.
 */
-const launchArgs = ['.', `--user-data-dir=${userData}`, ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-gpu'] : [])];
+/*
+  CORTEX_SOFTWARE=1 draws in software on Windows too: there a hidden window's
+  frames are not handed to `capturePage` either (UnknownVizError), and the
+  pictures are wanted without a window put in front of the person.
+*/
+const software = process.platform === 'linux' || process.env.CORTEX_SOFTWARE === '1';
+const launchArgs = ['.', `--user-data-dir=${userData}`, ...(process.platform === 'linux' ? ['--no-sandbox'] : []), ...(software ? ['--disable-gpu'] : [])];
 const launch = () =>
   electron.launch({
     args: launchArgs,
@@ -70,6 +83,23 @@ const launch = () =>
       NODE_ENV: 'production',
     },
   });
+
+/*
+  A run never opens the system's browser. The app hands an address the page
+  asks for (a new window, a navigation away) to the system's browser, which is
+  right for the person and wrong for a test: every run left example.com tabs
+  open on the machine (14 October). The main process's way to the browser is
+  stood in for, and what it was asked to open is read back and checked.
+*/
+async function holdBrowser() {
+  await app.evaluate(({ shell }) => {
+    globalThis.cortexOpened = [];
+    shell.openExternal = async (url) => {
+      globalThis.cortexOpened.push(url);
+    };
+  });
+}
+const openedOutside = () => app.evaluate(() => globalThis.cortexOpened ?? []);
 
 let app = await launch();
 
@@ -96,6 +126,8 @@ function listen(page) {
 let page = await app.firstWindow();
 listen(page);
 await page.waitForLoadState('domcontentloaded');
+// Once the window is there: asked of the main process before it, an evaluation can be lost while the app starts.
+await holdBrowser();
 const shownSoon = (locator, timeout = 10_000) => locator.first().waitFor({ timeout }).then(() => true, () => false);
 
 console.log('\nFirst opening');
@@ -105,7 +137,7 @@ check(
   (await page.locator('[data-welcome-choose]').textContent())?.trim() === 'Kasayı seç' && (await page.evaluate(() => document.documentElement.lang)) === 'tr',
 );
 await shoot('01-welcome-tr.png');
-await page.locator('[data-language]').selectOption('en');
+await page.locator('[data-language="en"]').click();
 check(
   'English is one choice away, and the choice is kept by the main process',
   (await shownSoon(page.getByRole('button', { name: 'Choose the vault' }))) &&
@@ -165,6 +197,10 @@ check(
     !indexNow.notes.some((note) => note.path.split('/').some((part) => part.startsWith('.'))) &&
     !indexNow.folders.some((folder) => folder.split('/').some((part) => part.startsWith('.'))),
 );
+// The left column keeps its own buttons: the fold button once crossed into the tabs beside it (14 October).
+const navBox = await notesView.locator('[data-notes-nav]').boundingBox();
+const foldBox = await notesView.locator('[data-notes-nav-fold]').boundingBox();
+check('the left column’s header holds its buttons inside it', Boolean(navBox && foldBox && foldBox.x + foldBox.width <= navBox.x + navBox.width + 0.5));
 check(
   'and the window cannot read past the vault or into what is hidden',
   (await page.evaluate(() => window.cortex.notes.read('../outside.md').then(() => 'read', () => 'refused'))) === 'refused' &&
@@ -240,6 +276,24 @@ check(
 );
 await notesView.locator('[data-tree-path="Latin1.md"]').click();
 check('bytes that are not UTF-8 are shown and not saved', await shownSoon(notesView.locator('[data-note-banner="read-only"]')));
+await notesView.locator('[data-tree-path="receipts"]').click();
+const receiptRow = notesView.locator(`[data-tree-path="${receipt}"]`);
+check('a receipt is shown by its event_id, not by the hash its file is named by', (await shownSoon(receiptRow)) && (await receiptRow.textContent())?.trim() === 'cortex-ad-karari-20261013');
+await receiptRow.click();
+check(
+  'and is read, not written: the screen says Cortex keeps it',
+  (await shownSoon(notesView.locator(`[data-note-pane="${receipt}"] [data-note-banner="read-only"]`))) &&
+    (await notesView.locator('[data-note-crumbs]').textContent())?.includes('cortex-ad-karari-20261013') &&
+    fs.readFileSync(vaultNote(receipt), 'utf8') === receiptBefore,
+);
+await shoot('07-receipt.png');
+await notesView.locator('[data-tree-path="Notes/settings.json"]').click();
+check(
+  'a JSON file is shown as the text it is, read only',
+  (await shownSoon(notesView.locator('[data-notes-file-text] [data-text-file="Notes/settings.json"]'))) &&
+    (await notesView.locator('[data-text-file="Notes/settings.json"]').textContent())?.includes('"theme": "ananas"'),
+);
+await shoot('08-text-file.png');
 await page.keyboard.press('Control+o');
 await notesView.locator('[data-notes-switcher-input]').fill('heal');
 await page.keyboard.press('Enter');
@@ -267,10 +321,47 @@ check(
   'Ctrl+Shift+N captures a note into Cortex’s inbox',
   await onDiskSoon(() => fs.readdirSync(vaultNote('📥 000-Inbox/Dump')).filter((name) => name.endsWith('.md')).length === inboxBefore.length + 1),
 );
+// Deleted from the tree: into the vault's own bin, with an Undo; and from the bin's list, back where it was.
+const healthText = fs.readFileSync(vaultNote('Personal/Health.md'), 'utf8');
+await notesView.locator('[data-tree-path="Personal/Health.md"]').click({ button: 'right' });
+await page.getByRole('menuitem', { name: 'Move to trash' }).click();
+check(
+  'a note deleted goes to the vault’s own bin, not away',
+  (await onDiskSoon(() => !fs.existsSync(vaultNote('Personal/Health.md')) && fs.existsSync(vaultNote('.trash/Health.md')))) &&
+    (await shownSoon(page.locator('[data-toast-action]'))),
+);
+await page.locator('[data-toast-action]').click();
+check(
+  'and Undo brings it back where it was, as it was',
+  (await onDiskSoon(() => fs.existsSync(vaultNote('Personal/Health.md')) && !fs.existsSync(vaultNote('.trash/Health.md')))) &&
+    fs.readFileSync(vaultNote('Personal/Health.md'), 'utf8') === healthText,
+);
+await notesView.locator('[data-tree-path="Personal/Health.md"]').click({ button: 'right' });
+await page.getByRole('menuitem', { name: 'Move to trash' }).click();
+await onDiskSoon(() => fs.existsSync(vaultNote('.trash/Health.md')));
+await notesView.locator('[data-notes-nav-tab="trash"]').click();
+check(
+  'the bin lists it, with a count on its tab',
+  (await shownSoon(notesView.locator('[data-bin-item="Health.md"]'))) && (await notesView.locator('[data-bin-count]').textContent())?.trim() === '1',
+);
+await shoot('09-bin.png');
+await notesView.locator('[data-bin-item="Health.md"]').hover();
+await notesView.locator('[data-bin-item="Health.md"] [data-bin-restore]').click();
+check(
+  'and restores it from there',
+  (await onDiskSoon(() => fs.existsSync(vaultNote('Personal/Health.md')))) && fs.readFileSync(vaultNote('Personal/Health.md'), 'utf8') === healthText,
+);
+await notesView.locator('[data-notes-nav-tab="files"]').click();
+
 await page.locator('[data-app-view="graph"]').click();
 await page.waitForTimeout(1_500);
 const graphSize = await page.locator('[data-notes-graph="vault"]').evaluate((element) => ({ nodes: Number(element.dataset.graphNodes), edges: Number(element.dataset.graphEdges) }));
 check('the graph draws the vault’s notes and the links between them', graphSize.nodes >= 4 && graphSize.edges >= 2);
+await page.locator('[data-notes-graph="vault"] [data-graph-toggle="receipts"]').click();
+await page.waitForTimeout(500);
+const withReceipts = await page.locator('[data-notes-graph="vault"]').evaluate((element) => Number(element.dataset.graphNodes));
+check('receipts are left out of the vault’s graph until asked for', withReceipts === graphSize.nodes + 1);
+await page.locator('[data-notes-graph="vault"] [data-graph-toggle="receipts"]').click();
 await shoot('06-graph.png');
 check(
   'nothing was written into what is hidden',
@@ -289,6 +380,7 @@ await page.evaluate(() => {
 await page.waitForTimeout(800);
 const stillAt = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((one) => one.webContents.getURL()));
 check('and the page does not navigate away', stillAt.length === 1 && stillAt[0].startsWith('file:') && stillAt[0].endsWith('/dist/index.html'));
+check('what it asked for went to the system’s browser instead (stood in for: nothing was opened)', (await openedOutside()).filter((url) => url === 'https://example.com/').length === 2);
 
 /*
   Closed and opened again: the vault and the language are the app's own
@@ -298,6 +390,8 @@ console.log('\nOpened again');
 await app.close();
 app = await launch();
 page = await app.firstWindow();
+await page.waitForLoadState('domcontentloaded');
+await holdBrowser();
 listen(page);
 check('the vault chosen is opened again, with nothing to choose', await shownSoon(page.locator('[data-notes-view]'), 30_000));
 check('in the language chosen', (await page.evaluate(() => document.documentElement.lang)) === 'en');

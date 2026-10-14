@@ -8,6 +8,7 @@ import {
   folderOf,
   freeName,
   isNotePath,
+  keptBy,
   makeResolver,
   nameProblem,
   noteTitle,
@@ -15,11 +16,14 @@ import {
   parseQuery,
   pathKey,
   proseOnly,
+  readProperties,
+  splitProperties,
   relink,
   landingOf,
   fillTemplate,
   retitle,
   baseName,
+  dayOf,
   searchNote,
   type IndexedNote,
   type NoteFacts,
@@ -27,7 +31,7 @@ import {
 } from '../../core/vaultNotes';
 import { foldForMatch } from '../../core/titles';
 import type { Moved } from '../../shared/api';
-import type { NoteBacklinks, NoteRead, NoteSaved, VaultIndex } from '../../shared/notes';
+import type { NoteBacklinks, NoteRead, NoteSaved, TextRead, TrashItem, VaultIndex } from '../../shared/notes';
 import { readSettings } from './settings';
 
 /**
@@ -68,6 +72,8 @@ const LIST_DEPTH = 32;
 const TEXT_CACHE_MAX = 64 * 1024 * 1024;
 /** An image drawn in a note is sent to the window whole, as a data URL; one larger than this is not drawn. */
 const ASSET_MAX = 12 * 1024 * 1024;
+/** A file that is not a note is shown as text up to this size: a config or a script, not a log or a dump. */
+export const TEXT_READ_MAX = 1024 * 1024;
 const IMAGE_TYPES: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -251,6 +257,7 @@ async function build(): Promise<VaultIndex> {
       if (to) links.add(to);
       else if (link.kind === 'wiki') unresolved.set(pathKey(link.target), link.target);
     }
+    const kept = cached.facts ? keptBy(file.path, cached.facts.properties) : null;
     notes.set(file.path, {
       path: file.path,
       modified: file.modified,
@@ -260,6 +267,8 @@ async function build(): Promise<VaultIndex> {
       links: [...links],
       unresolved: [...unresolved.values()],
       ...(cached.facts ? {} : { tooLarge: true }),
+      ...(kept ? { keeper: kept.keeper } : {}),
+      ...(kept?.label ? { label: kept.label } : {}),
     });
   }
   last = { files: paths, notes };
@@ -302,6 +311,9 @@ async function textFor(relative: string): Promise<string | null> {
 
 const hashOf = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 
+/** Whether Cortex's engine keeps the note this text is (`keptBy`), read from its properties alone. */
+const keeperOf = (inside: string, text: string) => keptBy(inside, readProperties(splitProperties(text).yaml).properties)?.keeper ?? null;
+
 export async function readVaultNote(relative: unknown): Promise<NoteRead> {
   const { file, relative: inside } = await onDisk(relative);
   if (!isNotePath(inside)) throw new VaultRefusal(`Not a note: ${inside}`);
@@ -310,7 +322,25 @@ export async function readVaultNote(relative: unknown): Promise<NoteRead> {
   if (stat.size > NOTE_READ_MAX) return { path: inside, text: null, hash: null, modified: stat.mtimeMs, tooLarge: true, readOnly: null };
   const bytes = await fs.readFile(file);
   const text = textOf(bytes);
-  return { path: inside, text: text ?? bytes.toString('utf8'), hash: hashOf(bytes), modified: stat.mtimeMs, tooLarge: false, readOnly: text === null ? 'encoding' : null };
+  const readOnly = text === null ? 'encoding' : keeperOf(inside, text);
+  return { path: inside, text: text ?? bytes.toString('utf8'), hash: hashOf(bytes), modified: stat.mtimeMs, tooLarge: false, readOnly };
+}
+
+/**
+ * A file of the vault that is not a note, as text to be read: a JSON, a
+ * script, a config. Shown and never written, and never run. Null text for
+ * what is not text - bytes that are not UTF-8, or a NUL among them - and for
+ * a file larger than TEXT_READ_MAX.
+ */
+export async function readVaultText(relative: unknown): Promise<TextRead> {
+  const { file, relative: inside } = await onDisk(relative);
+  if (isNotePath(inside)) throw new VaultRefusal(`A note is read as a note: ${inside}`);
+  const stat = await fs.stat(file);
+  if (!stat.isFile()) throw new VaultRefusal(`Not a file: ${inside}`);
+  if (stat.size > TEXT_READ_MAX) return { path: inside, text: null, modified: stat.mtimeMs, tooLarge: true };
+  const bytes = await fs.readFile(file);
+  const text = bytes.includes(0) ? null : textOf(bytes);
+  return { path: inside, text: text === null ? null : text.replace(/^﻿/, ''), modified: stat.mtimeMs, tooLarge: false };
 }
 
 /** A file written beside where it goes and renamed into place, so a note is never left half written. */
@@ -350,7 +380,9 @@ export async function saveVaultNote(relative: unknown, text: unknown, base: unkn
   if (!isNotePath(inside)) throw new VaultRefusal(`Not a note: ${inside}`);
   if (Buffer.byteLength(text, 'utf8') > NOTE_READ_MAX) throw new VaultRefusal('The note is larger than a note the screen keeps.');
   const now = await fs.readFile(file);
-  if (textOf(now) === null) throw new VaultRefusal(`${inside} is not UTF-8 text, and saving it here would change bytes the person did not touch.`);
+  const was = textOf(now);
+  if (was === null) throw new VaultRefusal(`${inside} is not UTF-8 text, and saving it here would change bytes the person did not touch.`);
+  if (keeperOf(inside, was)) throw new VaultRefusal(`Cortex keeps ${inside} itself: it is read here and not written.`);
   if (hashOf(now) !== base) {
     const stat = await fs.stat(file);
     return { saved: false, current: { text: textOf(now) ?? now.toString('utf8'), hash: hashOf(now), modified: stat.mtimeMs } };
@@ -404,6 +436,18 @@ export async function createVaultFolder(parent: unknown, name: unknown): Promise
 export type { Moved };
 
 /**
+ * Refused when Cortex's engine keeps this note, or the folder holds one it
+ * keeps: the engine finds a receipt by its name and a generated page by its
+ * path, so neither is moved, renamed or binned from here. Read against the
+ * index last built (`vaultIndex` first).
+ */
+function refuseKept(inside: string, what: string): void {
+  const kept = last ? [...last.notes.values()].find((note) => note.keeper && (note.path === inside || note.path.startsWith(`${inside}/`))) : undefined;
+  if (!kept) return;
+  throw new VaultRefusal(kept.path === inside ? `Cortex keeps ${inside} itself: it is not ${what} from here.` : `${inside} holds notes Cortex keeps (${kept.path}): it is not ${what} from here.`);
+}
+
+/**
  * A note, a file or a folder moved or renamed, and the links of the vault kept
  * finding what they found, as Obsidian keeps them: every note is read again
  * against the vault as it is now (`relink`, core/vaultNotes.ts), and one whose
@@ -432,6 +476,7 @@ async function moveEntry(fromRelative: unknown, toRelative: string): Promise<Mov
   }
   await vaultIndex();
   const before = last;
+  refuseKept(from, 'moved or renamed');
   await renameBusy(file, target);
   const updated: string[] = [];
   const skipped: string[] = [];
@@ -517,11 +562,227 @@ export async function moveVaultEntry(relative: unknown, folder: unknown): Promis
   return moveEntry(from, into ? `${into}/${baseName(from)}` : baseName(from));
 }
 
-/** A note, a file or a folder put in the system's bin, where the person can take it back from: nothing here deletes. */
-export async function trashVaultEntry(relative: unknown): Promise<void> {
+/* ------------------------------------------------------------------ */
+/* The vault's own bin                                                 */
+/* ------------------------------------------------------------------ */
+
+/*
+  What is deleted on this screen goes to the vault's own bin, `.trash/` - the
+  folder Obsidian's "move to Obsidian trash" uses - and comes back from it to
+  where it was: a delete is a move, taken back with one click, and nothing
+  here deletes. Each thing deleted is one entry at the bin's top under its own
+  name (a name already there gets the moment it was deleted after it), and
+  `.trash/.cortex.json` says where each came from and when. An entry that list
+  does not know - Obsidian's own, or one whose record was lost - is listed too,
+  and comes back at the vault's top.
+
+  `.trash` is the one hidden folder written here, and only by this part: the
+  index, the search and the links never see it, and Cortex's engine does not
+  read hidden folders (beyin_v3_sync.py skips them), so nothing in the bin is
+  in any assistant's memory. Deleted from the bin, an entry goes on to the
+  system's bin, from where it can still be taken back.
+*/
+
+const TRASH = '.trash';
+const TRASH_LIST = '.cortex.json';
+const FOLDER_COUNT_MAX = 10_000;
+
+interface TrashRecord {
+  id: string;
+  from: string;
+  kind: TrashItem['kind'];
+  deletedAt: number;
+}
+
+let binQueue: Promise<unknown> = Promise.resolve();
+
+/** One change to the bin at a time: its list is read, changed and written whole. */
+function serial<T>(work: () => Promise<T>): Promise<T> {
+  const next = binQueue.then(work, work);
+  binQueue = next.catch(() => undefined);
+  return next;
+}
+
+/** A name at the bin's top: one part, not hidden, nothing that climbs. */
+const isEntryName = (id: unknown): id is string => typeof id === 'string' && id.length > 0 && id.length <= 255 && !/[\\/]/.test(id) && !id.startsWith('.');
+
+/** The bin's folder, made when first needed: a folder of the vault's own, never a link. Null when there is none and none is to be made. */
+async function binDir(make: boolean): Promise<{ vault: string; dir: string } | null> {
+  const { vault } = await onDisk('');
+  const dir = path.join(vault, TRASH);
+  const stat = await fs.lstat(dir).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  });
+  if (!stat) {
+    if (!make) return null;
+    await fs.mkdir(dir);
+  } else if (!stat.isDirectory() || stat.isSymbolicLink() || !same(await fs.realpath(dir), dir)) {
+    throw new VaultRefusal(`${TRASH} in the vault is not a folder Cortex can keep its bin in.`);
+  }
+  return { vault, dir };
+}
+
+/** The bin's list. One that will not be read is kept beside, as the settings file is, and the bin goes on without it: its entries are still listed, as from the vault's top. */
+async function readRecords(dir: string): Promise<TrashRecord[]> {
+  const file = path.join(dir, TRASH_LIST);
+  let raw: string;
+  try {
+    raw = await fs.readFile(file, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw err;
+  }
+  try {
+    const items = (JSON.parse(raw) as { items?: unknown }).items;
+    if (!Array.isArray(items)) throw new Error('no items');
+    return items.filter(
+      (one): one is TrashRecord =>
+        typeof one === 'object' && one !== null && isEntryName(one.id) && typeof one.from === 'string' && ['note', 'file', 'folder'].includes(one.kind) && typeof one.deletedAt === 'number',
+    );
+  } catch {
+    await fs.copyFile(file, path.join(dir, `.cortex.broken-${Date.now()}.json`));
+    return [];
+  }
+}
+
+async function writeRecords(dir: string, records: TrashRecord[]): Promise<void> {
+  const there = new Set((await fs.readdir(dir)).filter((name) => !name.startsWith('.')));
+  // A record whose entry is gone - emptied by hand, or taken back in Obsidian - is let go.
+  const kept = records.filter((one) => there.has(one.id));
+  await writeInPlace(path.join(dir, TRASH_LIST), `${JSON.stringify({ version: 1, items: kept }, null, 2)}\n`);
+}
+
+const exists = (file: string) => fs.lstat(file).then(() => true, () => false);
+
+/** A name free in a folder: the one given, else the same with a number after it, before the extension of a file. */
+async function freeIn(dir: string, name: string, folder: boolean, mark: (n: number) => string): Promise<string> {
+  if (!(await exists(path.join(dir, name)))) return name;
+  const dot = folder ? -1 : name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  for (let n = 1; n < 1000; n += 1) {
+    const next = `${stem} ${mark(n)}${ext}`;
+    if (!(await exists(path.join(dir, next)))) return next;
+  }
+  throw new VaultRefusal(`No free name for ${name} was found.`);
+}
+
+async function filesIn(dir: string): Promise<number> {
+  let count = 0;
+  const visit = async (at: string): Promise<void> => {
+    for (const entry of await fs.readdir(at, { withFileTypes: true })) {
+      if (count >= FOLDER_COUNT_MAX) return;
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) await visit(path.join(at, entry.name));
+      else if (entry.isFile()) count += 1;
+    }
+  };
+  await visit(dir);
+  return count;
+}
+
+/** A note, a file or a folder moved into the vault's bin, to be taken back from there with one click. */
+export async function trashVaultEntry(relative: unknown): Promise<{ id: string }> {
   const { file, relative: inside } = await onDisk(relative);
   if (!inside) throw new VaultRefusal('The vault itself is not put in the bin from here.');
-  await shell.trashItem(file);
+  await vaultIndex();
+  refuseKept(inside, 'put in the bin');
+  return serial(async () => {
+    const { dir } = (await binDir(true))!;
+    const stat = await fs.lstat(file);
+    const kind: TrashItem['kind'] = stat.isDirectory() ? 'folder' : isNotePath(inside) ? 'note' : 'file';
+    const now = new Date();
+    const stamp = `(${dayOf(now)} ${String(now.getHours()).padStart(2, '0')}.${String(now.getMinutes()).padStart(2, '0')}.${String(now.getSeconds()).padStart(2, '0')})`;
+    const id = await freeIn(dir, baseName(inside), kind === 'folder', (n) => (n === 1 ? stamp : `${stamp} ${n}`));
+    await renameBusy(file, path.join(dir, id));
+    await writeRecords(dir, [...(await readRecords(dir)).filter((one) => one.id !== id), { id, from: inside, kind, deletedAt: now.getTime() }]);
+    return { id };
+  });
+}
+
+/** What is in the vault's bin, the last deleted first. */
+export async function listVaultTrash(): Promise<TrashItem[]> {
+  return serial(async () => {
+    const bin = await binDir(false);
+    if (!bin) return [];
+    const records = new Map((await readRecords(bin.dir)).map((one) => [one.id, one]));
+    const items: TrashItem[] = [];
+    for (const entry of await fs.readdir(bin.dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.') || entry.isSymbolicLink() || !(entry.isFile() || entry.isDirectory())) continue;
+      const full = path.join(bin.dir, entry.name);
+      const stat = await fs.lstat(full);
+      const record = records.get(entry.name);
+      items.push({
+        id: entry.name,
+        from: record?.from ?? entry.name,
+        kind: entry.isDirectory() ? 'folder' : isNotePath(entry.name) ? 'note' : 'file',
+        deletedAt: record?.deletedAt ?? stat.mtimeMs,
+        size: entry.isDirectory() ? await filesIn(full) : stat.size,
+        known: Boolean(record),
+      });
+    }
+    return items.sort((a, b) => b.deletedAt - a.deletedAt);
+  });
+}
+
+/**
+ * An entry of the bin put back where it was, the folders on the way made
+ * again where they are gone, never through a link. Where that place has been
+ * taken since, it comes back beside it under a free name (`Plan 1.md`): nothing
+ * is written over. Its links find it again by its name; none is rewritten.
+ */
+export async function restoreVaultTrash(id: unknown): Promise<{ path: string }> {
+  if (!isEntryName(id)) throw new VaultRefusal('Not something in the bin.');
+  return serial(async () => {
+    const bin = await binDir(false);
+    const source = bin ? path.join(bin.dir, id) : null;
+    const stat = source ? await fs.lstat(source).catch(() => null) : null;
+    if (!bin || !source || !stat || stat.isSymbolicLink()) throw new VaultRefusal(`${id} is not in the bin any more.`);
+    const records = await readRecords(bin.dir);
+    const parts = partsOf(records.find((one) => one.id === id)?.from ?? id);
+    const folder = parts.slice(0, -1);
+    for (let at = 1; at <= folder.length; at += 1) {
+      const dir = path.join(bin.vault, ...folder.slice(0, at));
+      const there = await fs.lstat(dir).catch(() => null);
+      if (!there) await fs.mkdir(dir);
+      else if (!there.isDirectory() || there.isSymbolicLink()) throw new VaultRefusal(`${folder.slice(0, at).join('/')} is not a folder any more.`);
+    }
+    const { file: home, relative } = await onDisk(folder.join('/'));
+    const name = await freeIn(home, parts[parts.length - 1], stat.isDirectory(), (n) => String(n));
+    await renameBusy(source, path.join(home, name));
+    await writeRecords(bin.dir, records.filter((one) => one.id !== id));
+    return { path: relative ? `${relative}/${name}` : name };
+  });
+}
+
+/** An entry of the bin sent on to the system's bin: gone from the vault, and still not deleted. */
+export async function deleteVaultTrash(id: unknown): Promise<void> {
+  if (!isEntryName(id)) throw new VaultRefusal('Not something in the bin.');
+  await serial(async () => {
+    const bin = await binDir(false);
+    const source = bin ? path.join(bin.dir, id) : null;
+    const stat = source ? await fs.lstat(source).catch(() => null) : null;
+    if (!bin || !source || !stat || stat.isSymbolicLink()) throw new VaultRefusal(`${id} is not in the bin any more.`);
+    await shell.trashItem(source);
+    await writeRecords(bin.dir, await readRecords(bin.dir));
+  });
+}
+
+/** Every entry of the bin sent on to the system's bin. How many went. */
+export async function emptyVaultTrash(): Promise<number> {
+  return serial(async () => {
+    const bin = await binDir(false);
+    if (!bin) return 0;
+    let sent = 0;
+    for (const entry of await fs.readdir(bin.dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.') || entry.isSymbolicLink()) continue;
+      await shell.trashItem(path.join(bin.dir, entry.name));
+      sent += 1;
+    }
+    await writeRecords(bin.dir, []);
+    return sent;
+  });
 }
 
 /* ------------------------------------------------------------------ */

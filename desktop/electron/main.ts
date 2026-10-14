@@ -48,10 +48,17 @@ function isOwnPage(url: string): boolean {
   return url.split(/[?#]/)[0] === pageUrl;
 }
 
-/** Pyn's seal (tema/ananas/marka), beside the bundle when packaged and in the repository when run from source. Linux reads it at runtime; Windows takes the exe's. */
+/**
+ * Pyn's seal (tema/ananas/marka), beside the bundle when packaged and in the
+ * repository when run from source. Windows gets the .ico: it holds every size
+ * from 16 to 256 already smoothed, and the frame takes the one that fits,
+ * where the 200px PNG was shrunk to 16-20px without smoothing and showed
+ * every pixel in the title bar.
+ */
 function windowIcon(): string | undefined {
-  const candidates = [path.join(process.resourcesPath ?? '', 'pyn-muhur-200.png'), path.join(rootDir, '..', 'tema', 'ananas', 'marka', 'pyn-muhur-200.png')];
-  return candidates.find((file) => fs.existsSync(file));
+  const file = process.platform === 'win32' ? 'pyn.ico' : 'pyn-muhur-200.png';
+  const candidates = [path.join(process.resourcesPath ?? '', file), path.join(rootDir, '..', 'tema', 'ananas', 'marka', file)];
+  return candidates.find((one) => fs.existsSync(one));
 }
 
 /**

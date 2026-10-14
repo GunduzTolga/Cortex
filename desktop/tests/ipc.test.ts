@@ -33,7 +33,7 @@ test('the channels are the ones the preload names, no more and no fewer', () => 
   const named = [...preload.matchAll(/invoke\('([^']+)'/g)].map((match) => match[1]).sort();
   assert.deepEqual([...handlers.keys()].sort(), named);
   const notes = named.filter((channel) => channel.startsWith('notes:'));
-  assert.deepEqual(notes, ['notes:asset', 'notes:backlinks', 'notes:create', 'notes:createFolder', 'notes:index', 'notes:move', 'notes:open', 'notes:read', 'notes:rename', 'notes:save', 'notes:search', 'notes:trash']);
+  assert.deepEqual(notes, ['notes:asset', 'notes:backlinks', 'notes:binDelete', 'notes:binEmpty', 'notes:binList', 'notes:binRestore', 'notes:create', 'notes:createFolder', 'notes:index', 'notes:move', 'notes:open', 'notes:read', 'notes:rename', 'notes:save', 'notes:search', 'notes:text', 'notes:trash']);
 });
 
 test('a frame that is not the page, or a page that is not the app’s, is refused before anything is read', async () => {

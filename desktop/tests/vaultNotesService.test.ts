@@ -10,7 +10,13 @@ import {
   createVaultFolder,
   createVaultNote,
   openVaultEntry,
+  deleteVaultTrash,
+  emptyVaultTrash,
+  listVaultTrash,
   readVaultNote,
+  readVaultText,
+  restoreVaultTrash,
+  TEXT_READ_MAX,
   moveVaultEntry,
   renameVaultEntry,
   saveVaultNote,
@@ -223,7 +229,7 @@ test('an image is a data URL; what is not an image, or is hidden, is not sent', 
   await assert.rejects(vaultAsset('.obsidian/workspace.json'));
 });
 
-test('outside the app a note opens in Obsidian or its folder, never by its own program, and the bin is the system’s', async () => {
+test('outside the app a note opens in Obsidian or its folder, never by its own program', async () => {
   const dir = vault();
   useVault(dir);
   shellCalls.length = 0;
@@ -235,9 +241,6 @@ test('outside the app a note opens in Obsidian or its folder, never by its own p
   await openVaultEntry('ekler/run.bat', 'folder');
   assert.deepEqual(shellCalls[1], ['showItemInFolder', path.join(dir, 'ekler', 'run.bat')]);
   await assert.rejects(openVaultEntry('ekler/run.bat', 'program'));
-  await trashVaultEntry('Ev/Liste.md');
-  assert.deepEqual(shellCalls[2], ['trashItem', path.join(dir, 'Ev', 'Liste.md')]);
-  await assert.rejects(trashVaultEntry(''), /vault itself/);
 });
 
 test("a new note made from Cortex's template is filled for the free name it got, and a rename brings its title along", async () => {
@@ -251,4 +254,140 @@ test("a new note made from Cortex's template is filled for the free name it got,
   assert.match(fs.readFileSync(path.join(dir, 'Adsız 1.md'), 'utf8'), /^---\ntitle: "Adsız 1"\ncreated: \d{4}-\d{2}-\d{2}\ntype: note\n---\n# Adsız 1\n$/);
   await renameVaultEntry('Adsız 1.md', 'Toplantı');
   assert.match(fs.readFileSync(path.join(dir, 'Toplantı.md'), 'utf8'), /^---\ntitle: "Toplantı"\ncreated: [\d-]+\ntype: note\n---\n# Toplantı\n$/);
+});
+
+test("what Cortex's engine keeps is read and never written, moved or binned from here: a receipt shown by its event_id, a generated page left as the engine wrote it", async () => {
+  const dir = vault();
+  const receipt = `receipts/${hashOf('cortex-ad-karari-20261013')}.md`;
+  const receiptText = '---\n{\n  "kind": "receipt",\n  "event_id": "cortex-ad-karari-20261013"\n}\n---\nAd kararı verildi.\n';
+  const day = 'daily/v3/2026-10-13.md';
+  const dayText = `---\n{"generated": true, "kind": "receipt-index"}\n---\n# Recorded outcomes\n\nSee [[Tadilat]]. Source: [[${receipt}]]\n`;
+  for (const [relative, text] of [[receipt, receiptText], [day, dayText]]) {
+    fs.mkdirSync(path.dirname(path.join(dir, relative)), { recursive: true });
+    fs.writeFileSync(path.join(dir, relative), text);
+  }
+  useVault(dir);
+
+  const index = await vaultIndex();
+  const kept = index.notes.find((note) => note.path === receipt);
+  assert.equal(kept?.keeper, 'receipt');
+  assert.equal(kept?.label, 'cortex-ad-karari-20261013');
+  assert.equal(index.notes.find((note) => note.path === day)?.keeper, 'generated');
+  assert.equal(index.notes.find((note) => note.path === 'Ev/Tadilat.md')?.keeper, undefined, "the person's notes are theirs");
+
+  const read = await readVaultNote(receipt);
+  assert.equal(read.readOnly, 'receipt');
+  assert.equal((await readVaultNote(day)).readOnly, 'generated');
+  await assert.rejects(saveVaultNote(receipt, 'changed', read.hash!), /Cortex keeps/);
+  assert.equal(fs.readFileSync(path.join(dir, receipt), 'utf8'), receiptText, 'nothing written');
+
+  await assert.rejects(renameVaultEntry(receipt, 'kisa'), /Cortex keeps/);
+  await assert.rejects(moveVaultEntry(receipt, 'Ev'), /Cortex keeps/);
+  await assert.rejects(renameVaultEntry('receipts', 'makbuzlar'), /holds notes Cortex keeps/);
+  await assert.rejects(moveVaultEntry('daily', 'Ev'), /holds notes Cortex keeps/);
+  shellCalls.length = 0;
+  await assert.rejects(trashVaultEntry(receipt), /Cortex keeps/);
+  await assert.rejects(trashVaultEntry('daily/v3'), /holds notes Cortex keeps/);
+  assert.deepEqual(shellCalls, [], 'nothing put in the bin');
+  assert.ok(fs.existsSync(path.join(dir, receipt)) && fs.existsSync(path.join(dir, day)));
+
+  // A note renamed that a generated page links to: the page is not written, and is named as not brought along.
+  const moved = await renameVaultEntry('Ev/Tadilat.md', 'Yenileme');
+  assert.equal(moved.path, 'Ev/Yenileme.md');
+  assert.ok(moved.skipped.includes(day));
+  assert.equal(fs.readFileSync(path.join(dir, day), 'utf8'), dayText);
+});
+
+test('a file that is not a note is read as text to be shown: not past its size, not when its bytes are not text, never hidden, never a note', async () => {
+  const dir = vault();
+  fs.writeFileSync(path.join(dir, 'ayar.json'), '﻿{"a": 1}\n');
+  fs.writeFileSync(path.join(dir, 'ekler', 'veri.bin'), Buffer.from([0x61, 0x00, 0x62]));
+  fs.writeFileSync(path.join(dir, 'büyük.txt'), 'x'.repeat(TEXT_READ_MAX + 1));
+  useVault(dir);
+  const json = await readVaultText('ayar.json');
+  assert.equal(json.text, '{"a": 1}\n', 'the byte order mark is not shown');
+  assert.equal(json.tooLarge, false);
+  assert.equal((await readVaultText('ekler/run.bat')).text, 'echo hi', 'a script is shown, and not run');
+  assert.equal((await readVaultText('ekler/veri.bin')).text, null, 'a NUL among the bytes: not text');
+  assert.equal((await readVaultText('ekler/çizim.png')).text, null);
+  const big = await readVaultText('büyük.txt');
+  assert.equal(big.text, null);
+  assert.equal(big.tooLarge, true);
+  await assert.rejects(readVaultText('Ev/Tadilat.md'), /read as a note/);
+  await assert.rejects(readVaultText('.obsidian/workspace.json'));
+  await assert.rejects(readVaultText('../dışarı.txt'));
+});
+
+test("a delete is a move into the vault's own bin, taken back from there to where it was, and nothing is written over or deleted outright", async () => {
+  const dir = vault();
+  useVault(dir);
+  const bin = path.join(dir, '.trash');
+  shellCalls.length = 0;
+  assert.deepEqual(await listVaultTrash(), [], 'no bin until something is deleted');
+
+  const first = await trashVaultEntry('Ev/Liste.md');
+  assert.equal(first.id, 'Liste.md');
+  assert.ok(!fs.existsSync(path.join(dir, 'Ev', 'Liste.md')) && fs.existsSync(path.join(bin, 'Liste.md')), 'moved, not deleted');
+  assert.deepEqual(shellCalls, [], 'the system bin is not used for a delete');
+  assert.ok(!(await vaultIndex()).notes.some((note) => note.path.startsWith('.trash')), 'the bin is never in the index');
+
+  // A second of the same name, from elsewhere, gets the moment it was deleted after its name.
+  fs.writeFileSync(path.join(dir, 'Liste.md'), '# Başka liste\n');
+  const second = await trashVaultEntry('Liste.md');
+  assert.match(second.id, /^Liste \(\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}\)\.md$/);
+  const listed = await listVaultTrash();
+  assert.deepEqual(listed.map((one) => [one.id, one.from, one.kind, one.known]), [
+    [second.id, 'Liste.md', 'note', true],
+    ['Liste.md', 'Ev/Liste.md', 'note', true],
+  ]);
+
+  // Back where it was; where that place is taken, beside it, and nothing written over.
+  assert.deepEqual(await restoreVaultTrash('Liste.md'), { path: 'Ev/Liste.md' });
+  assert.equal(fs.readFileSync(path.join(dir, 'Ev', 'Liste.md'), 'utf8'), 'Bu hafta tadilat bitmeli. [plan](../Proje%20plan%C4%B1.md)\n');
+  fs.writeFileSync(path.join(dir, 'Liste.md'), '# Yeni liste\n');
+  assert.deepEqual(await restoreVaultTrash(second.id), { path: 'Liste 1.md' });
+  assert.equal(fs.readFileSync(path.join(dir, 'Liste.md'), 'utf8'), '# Yeni liste\n');
+  assert.equal(fs.readFileSync(path.join(dir, 'Liste 1.md'), 'utf8'), '# Başka liste\n');
+
+  // A folder goes whole, and comes back with the folders on its way made again.
+  fs.mkdirSync(path.join(dir, 'Arşiv', '2026'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'Arşiv', '2026', 'Not.md'), '# Not\n');
+  const folder = await trashVaultEntry('Arşiv/2026');
+  fs.rmSync(path.join(dir, 'Arşiv'), { recursive: true });
+  const asListed = (await listVaultTrash()).find((one) => one.id === folder.id);
+  assert.equal(asListed?.kind, 'folder');
+  assert.equal(asListed?.size, 1, 'a folder is counted by its files');
+  assert.deepEqual(await restoreVaultTrash(folder.id), { path: 'Arşiv/2026' });
+  assert.equal(fs.readFileSync(path.join(dir, 'Arşiv', '2026', 'Not.md'), 'utf8'), '# Not\n');
+
+  // One the bin's list does not know (Obsidian's own) is listed, and comes back at the top.
+  fs.writeFileSync(path.join(bin, 'Obsidian sildi.md'), '# x\n');
+  assert.equal((await listVaultTrash()).find((one) => one.id === 'Obsidian sildi.md')?.known, false);
+  assert.deepEqual(await restoreVaultTrash('Obsidian sildi.md'), { path: 'Obsidian sildi.md' });
+
+  // Deleted from the bin: on to the system's bin, never deleted here.
+  await trashVaultEntry('Ev/Liste.md');
+  await deleteVaultTrash('Liste.md');
+  assert.deepEqual(shellCalls[0], ['trashItem', path.join(bin, 'Liste.md')]);
+  await trashVaultEntry('Liste.md');
+  await trashVaultEntry('Liste 1.md');
+  shellCalls.length = 0;
+  assert.equal(await emptyVaultTrash(), 2);
+  assert.deepEqual(shellCalls.map((one) => one[0]), ['trashItem', 'trashItem']);
+
+  // Only names at the bin's top: nothing hidden, nothing that climbs, not the bin's own list.
+  for (const bad of ['', '.cortex.json', '../Ev', 'a/b', '..']) await assert.rejects(restoreVaultTrash(bad), /Not something in the bin/);
+  await assert.rejects(deleteVaultTrash('Yok.md'), /not in the bin/);
+  await assert.rejects(trashVaultEntry(''), /vault itself/);
+});
+
+test("a bin list that will not be read is kept beside and the bin goes on: its entries are still there, to come back at the vault's top", async () => {
+  const dir = vault();
+  useVault(dir);
+  await trashVaultEntry('Ev/Liste.md');
+  fs.writeFileSync(path.join(dir, '.trash', '.cortex.json'), '{ not json');
+  const listed = await listVaultTrash();
+  assert.deepEqual(listed.map((one) => [one.id, one.known]), [['Liste.md', false]]);
+  assert.ok(fs.readdirSync(path.join(dir, '.trash')).some((name) => /^\.cortex\.broken-\d+\.json$/.test(name)), 'the unread list kept beside');
+  assert.deepEqual(await restoreVaultTrash('Liste.md'), { path: 'Liste.md' });
 });

@@ -1,4 +1,4 @@
-import type { IndexedNote, SearchHit } from '../core/vaultNotes';
+import type { IndexedNote, Keeper, SearchHit } from '../core/vaultNotes';
 
 /**
  * What the notes screen is told of the vault
@@ -32,8 +32,30 @@ export interface NoteRead {
   hash: string | null;
   modified: number;
   tooLarge: boolean;
-  /** Shown, not saved: `encoding` for bytes that are not UTF-8. */
-  readOnly: 'encoding' | null;
+  /** Shown, not saved: `encoding` for bytes that are not UTF-8; a receipt or a generated page for what Cortex's engine keeps (core/vaultNotes.ts, `keptBy`). */
+  readOnly: 'encoding' | Keeper | null;
+}
+
+/** Something in the vault's bin (`.trash/`), to be taken back or sent on to the system's bin. */
+export interface TrashItem {
+  /** Its name at the bin's top, which it is taken back or deleted by. */
+  id: string;
+  /** Where it was in the vault; its own name, at the vault's top, when the bin has no record of it (Obsidian's own, say). */
+  from: string;
+  kind: 'note' | 'file' | 'folder';
+  deletedAt: number;
+  /** Bytes for a note or a file; how many files a folder holds. */
+  size: number;
+  /** Whether the bin's list says where it came from. */
+  known: boolean;
+}
+
+/** A file of the vault that is not a note, read as text to be shown; null text for what is not text or is too large. */
+export interface TextRead {
+  path: string;
+  text: string | null;
+  modified: number;
+  tooLarge: boolean;
 }
 
 /** Saved; or not, because the note on disk is not the one that was read, which is handed back. */
@@ -47,4 +69,4 @@ export interface NoteBacklinks {
   unlinked: Array<{ from: string; lines: Array<{ line: number; text: string }> }>;
 }
 
-export type { IndexedNote, SearchHit };
+export type { IndexedNote, Keeper, SearchHit };

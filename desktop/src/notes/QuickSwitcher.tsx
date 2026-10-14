@@ -69,11 +69,12 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
       return [...notes]
         .sort((a, b) => b.modified - a.modified)
         .slice(0, SHOWN)
-        .map((note) => ({ path: note.path, title: noteTitle(note.path), alias: null, score: 0, indices: [] }));
+        .map((note) => ({ path: note.path, title: note.label ?? noteTitle(note.path), alias: null, score: 0, indices: [] }));
     }
     const out: Choice[] = [];
     for (const note of notes) {
-      const title = noteTitle(note.path);
+      // A receipt is found by its event_id, the name it is shown by (`labelOf`).
+      const title = note.label ?? noteTitle(note.path);
       const byTitle = fuzzyMatch(query, title);
       const byPath = byTitle ? null : fuzzyMatch(query, note.path.replace(/\.md$/i, ''));
       let best: Choice | null = byTitle ? { path: note.path, title, alias: null, score: byTitle.score + 50, indices: byTitle.indices } : byPath ? { path: note.path, title, alias: null, score: byPath.score, indices: [] } : null;

@@ -26,8 +26,9 @@ import { useT } from '../i18n/useT';
 import type { Key } from '../i18n';
 import { useApp } from '../store/app';
 import { Spinner } from '../ui/ui';
-import { useActiveTab, useNotes, type NavTab } from './notesStore';
-import { openContextMenu, useConfirm, usePrompt, type MenuItem } from './NotesMenus';
+import { labelOf, useActiveTab, useNotes, type NavTab } from './notesStore';
+import { openContextMenu, usePrompt, type MenuItem } from './NotesMenus';
+import { TrashPanel, useTrash } from './bin';
 
 /**
  * The notes screen's left column: the vault as a tree, a search over every
@@ -65,7 +66,7 @@ export const NAME_PROBLEM: Record<NonNullable<ReturnType<typeof nameProblem>>, K
   long: 'notes.name.long',
 };
 
-function buildTree(folders: string[], files: string[]): TreeNode {
+function buildTree(folders: string[], files: string[], labels: ReadonlyMap<string, string>): TreeNode {
   const root: TreeNode = { name: '', path: '', kind: 'folder', children: [] };
   const byPath = new Map<string, TreeNode>([['', root]]);
   const folder = (path: string): TreeNode => {
@@ -77,7 +78,8 @@ function buildTree(folders: string[], files: string[]): TreeNode {
     return node;
   };
   for (const one of folders) folder(one);
-  for (const one of files) folder(folderOf(one)).children.push({ name: isNotePath(one) ? noteTitle(one) : baseName(one), path: one, kind: isNotePath(one) ? 'note' : 'file', children: [] });
+  // A receipt by its event_id, and sorted by it, where its file's name is a hash (`labelOf`).
+  for (const one of files) folder(folderOf(one)).children.push({ name: labels.get(one) ?? (isNotePath(one) ? noteTitle(one) : baseName(one)), path: one, kind: isNotePath(one) ? 'note' : 'file', children: [] });
   const sort = (node: TreeNode) => {
     node.children.sort((a, b) => (a.kind === 'folder') !== (b.kind === 'folder') ? (a.kind === 'folder' ? -1 : 1) : collator.compare(sortName(a.name), sortName(b.name)));
     node.children.forEach(sort);
@@ -137,28 +139,47 @@ export function NotesNav({ onFold }: { onFold: () => void }) {
     { id: 'search', icon: <Search size={14} />, label: 'notes.nav.search' },
     { id: 'tags', icon: <Hash size={14} />, label: 'notes.nav.tags' },
   ];
+  const binCount = useNotes((state) => state.bin?.length ?? 0);
   return (
     <div className="flex h-full min-h-0 flex-col" data-notes-nav>
       <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-zinc-100 px-2">
-        {tabs.map((one) => (
-          <button
-            key={one.id}
-            type="button"
-            onClick={() => useNotes.getState().setNav(one.id)}
-            aria-pressed={nav === one.id}
-            title={t(one.label)}
-            data-notes-nav-tab={one.id}
-            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-bold transition-colors ${nav === one.id ? 'bg-zinc-100 text-darkDelegation' : 'text-zinc-400 hover:text-zinc-600'}`}
-          >
-            {one.icon}
-            <span className="hidden @[14rem]:inline">{t(one.label)}</span>
-          </button>
-        ))}
-        <button type="button" onClick={onFold} title={t('notes.nav.fold')} className="ml-auto rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation">
+        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden">
+          {tabs.map((one) => (
+            <button
+              key={one.id}
+              type="button"
+              onClick={() => useNotes.getState().setNav(one.id)}
+              aria-pressed={nav === one.id}
+              title={t(one.label)}
+              data-notes-nav-tab={one.id}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-bold transition-colors ${nav === one.id ? 'bg-zinc-100 text-darkDelegation' : 'text-zinc-400 hover:text-zinc-600'}`}
+            >
+              {one.icon}
+              <span className="hidden @[14rem]:inline">{t(one.label)}</span>
+            </button>
+          ))}
+        </div>
+        <button type="button" onClick={onFold} title={t('notes.nav.fold')} data-notes-nav-fold className="ml-1 shrink-0 rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation">
           <PanelLeftOpen size={14} className="rotate-180" />
         </button>
       </div>
-      <div className="min-h-0 flex-1">{nav === 'files' ? <FileTree /> : nav === 'search' ? <SearchPanel /> : <TagsPanel />}</div>
+      <div className="min-h-0 flex-1">{nav === 'files' ? <FileTree /> : nav === 'search' ? <SearchPanel /> : nav === 'tags' ? <TagsPanel /> : <TrashPanel />}</div>
+      {/* The bin at the column's foot, where a sidebar keeps it: a press opens it, a second goes back to the files. */}
+      <button
+        type="button"
+        onClick={() => useNotes.getState().setNav(nav === 'trash' ? 'files' : 'trash')}
+        aria-pressed={nav === 'trash'}
+        data-notes-nav-tab="trash"
+        className={`flex h-9 shrink-0 items-center gap-2 border-t border-zinc-100 px-3.5 text-[12px] font-semibold transition-colors ${nav === 'trash' ? 'bg-zinc-100 text-darkDelegation' : 'text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600'}`}
+      >
+        <Trash2 size={14} />
+        {t('notes.nav.trash')}
+        {binCount ? (
+          <span className="ml-auto rounded-full bg-zinc-200/70 px-1.5 text-[10px] font-semibold tabular-nums text-zinc-600" data-bin-count>
+            {binCount}
+          </span>
+        ) : null}
+      </button>
     </div>
   );
 }
@@ -238,7 +259,6 @@ export function useMakers() {
 function FileTree() {
   const t = useT();
   const toast = useApp((s) => s.toast);
-  const confirm = useConfirm();
   const index = useNotes((state) => state.index);
   const active = useActiveTab().path;
   const [filter, setFilter] = useState('');
@@ -246,14 +266,24 @@ function FileTree() {
   const makers = useMakers();
   const readOnly = Boolean(index?.readOnly);
   const paths = useNotes((state) => state.paths);
+  const labels = useNotes((state) => state.labels);
   const [dragging, setDragging] = useState<string | null>(null);
   const [target, setTarget] = useState<string | null>(null);
   const linkTo = (path: string) => shortestLink(path, paths);
 
   const tree = useMemo(
-    () => buildTree(index?.folders ?? [], [...(index?.notes.map((note) => note.path) ?? []), ...(index?.files.map((file) => file.path) ?? [])]),
-    [index],
+    () => buildTree(index?.folders ?? [], [...(index?.notes.map((note) => note.path) ?? []), ...(index?.files.map((file) => file.path) ?? [])], labels),
+    [index, labels],
   );
+  // What Cortex's engine keeps, and every folder on the way to it: not renamed, moved or binned from here (electron/services/vaultNotes.ts refuses it too).
+  const kept = useMemo(() => {
+    const out = new Set<string>();
+    for (const note of index?.notes ?? []) {
+      if (!note.keeper) continue;
+      for (let at = note.path; at; at = folderOf(at)) out.add(at);
+    }
+    return out;
+  }, [index]);
   const shown = useMemo(() => filterTree(tree, foldForMatch(filter.trim())), [tree, filter]);
 
   // The folders on the way to the note in front are opened, as Obsidian's "reveal" does.
@@ -281,17 +311,8 @@ function FileTree() {
       toast({ tone: 'error', title: t('notes.open.failed'), detail: messageOf(err) });
     }
   };
-  const trash = async (node: TreeNode) => {
-    const detail = node.kind === 'folder' ? t('notes.trash.folder', { count: node.children.length }) : t('notes.trash.detail');
-    if (!(await confirm({ title: t('notes.trash.title', { name: node.name }), detail, action: t('notes.trash.action') }))) return;
-    try {
-      await window.cortex.notes.trash(node.path);
-      useNotes.getState().removed(node.path);
-      await useNotes.getState().refresh();
-    } catch (err) {
-      toast({ tone: 'error', title: t('notes.trash.failed'), detail: messageOf(err) });
-    }
-  };
+  const trashEntry = useTrash();
+  const trash = (node: TreeNode) => trashEntry(node.path, node.kind === 'folder' ? { count: node.children.length } : undefined);
 
   const menuFor = (node: TreeNode): MenuItem[] => {
     const items: MenuItem[] = [];
@@ -301,11 +322,11 @@ function FileTree() {
     } else {
       items.push({ label: t('notes.open.tab'), icon: <FileText size={14} />, run: () => useNotes.getState().open(node.path, { newTab: true }) });
     }
-    if (node.path) items.push({ label: t('notes.rename'), icon: <PencilLine size={14} />, run: () => void makers.rename(node.path, node.kind), disabled: readOnly });
+    if (node.path) items.push({ label: t('notes.rename'), icon: <PencilLine size={14} />, run: () => void makers.rename(node.path, node.kind), disabled: readOnly || kept.has(node.path) });
     if (node.path) {
       items.push({ label: t('notes.open.folder'), icon: <FolderOpen size={14} />, run: () => void outside(node.path, 'folder') });
       if (node.kind === 'note') items.push({ label: t('notes.open.obsidian'), icon: <ExternalLink size={14} />, run: () => void outside(node.path, 'obsidian') });
-      items.push({ label: t('notes.trash'), icon: <Trash2 size={14} />, run: () => void trash(node), danger: true, disabled: readOnly });
+      items.push({ label: t('notes.trash'), icon: <Trash2 size={14} />, run: () => void trash(node), danger: true, disabled: readOnly || kept.has(node.path) });
     }
     return items;
   };
@@ -359,7 +380,7 @@ function FileTree() {
       <li key={node.path} {...dropHandlers(into)} className={node.kind === 'folder' && target === node.path ? 'rounded-md bg-accent/10 outline outline-1 outline-accent/40' : undefined}>
         <button
           type="button"
-          draggable={!readOnly}
+          draggable={!readOnly && !kept.has(node.path)}
           onDragStart={(event) => {
             event.dataTransfer.setData(TREE_DRAG, node.path);
             if (node.kind !== 'folder') event.dataTransfer.setData('text/plain', `${IMAGE.test(node.path) ? '!' : ''}[[${linkTo(node.path)}]]`);
@@ -512,7 +533,7 @@ function SearchPanel() {
                     onClick={(event) => useNotes.getState().open(hit.path, { newTab: event.ctrlKey || event.metaKey, line: hit.lines[0]?.line ?? null })}
                     className="w-full rounded-md px-2 py-1 text-left hover:bg-zinc-50"
                   >
-                    <span className="block truncate text-[13px] font-semibold text-darkDelegation">{noteTitle(hit.path)}</span>
+                    <span className="block truncate text-[13px] font-semibold text-darkDelegation">{labelOf(hit.path)}</span>
                     {folderOf(hit.path) ? <span className="block truncate text-[10.5px] text-zinc-400">{folderOf(hit.path)}</span> : null}
                   </button>
                   {hit.lines.map((line) => (

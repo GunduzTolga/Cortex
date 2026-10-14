@@ -355,6 +355,30 @@ export const baseName = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 export const noteTitle = (path: string) => baseName(path).replace(/\.md$/i, '');
 export const folderOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
 
+/**
+ * Notes Cortex's engine keeps itself, which this screen shows and never writes:
+ *
+ * - a receipt: `receipts/<sha256 of its event_id>.md`, `kind: receipt`. The
+ *   engine finds it by that hash (beyin_v3_sync.py refuses a receipt whose
+ *   name is not the hash of its event_id, and two devices meet on the name),
+ *   so it is never renamed or edited here; it is shown by the event_id it
+ *   carries, which is as unique as the hash and can be read.
+ * - a page the engine writes again from its records (`generated: true`: the
+ *   days in daily/v3, knowledge/v3/outcomes). An edit made to one stops the
+ *   engine writing it and is reported as a conflict at the next sync.
+ */
+export type Keeper = 'receipt' | 'generated';
+
+const RECEIPT_PATH = /^receipts\/[0-9a-f]{64}\.md$/;
+
+export function keptBy(path: string, properties: readonly NoteProperty[]): { keeper: Keeper; label: string | null } | null {
+  const prop = (key: string) => properties.find((one) => one.key === key)?.value;
+  const event = prop('event_id');
+  if (RECEIPT_PATH.test(path) && prop('kind') === 'receipt' && typeof event === 'string' && event.trim()) return { keeper: 'receipt', label: event.trim() };
+  if (prop('generated') === true) return { keeper: 'generated', label: null };
+  return null;
+}
+
 /** `a/b/../c` as `a/c`; null when it climbs out of the vault. */
 export function normalisePath(path: string): string | null {
   const out: string[] = [];
@@ -722,6 +746,10 @@ export interface IndexedNote {
   unresolved: string[];
   /** Too large to read: listed, not opened. */
   tooLarge?: boolean;
+  /** Kept by Cortex's engine, shown and never written (`keptBy`). */
+  keeper?: Keeper;
+  /** The name it is shown by where its file's name is not one to read: a receipt's event_id. */
+  label?: string;
 }
 
 export interface GraphNode {
@@ -749,6 +777,8 @@ export interface GraphOptions {
   tags: boolean;
   /** Attachments linked from notes. */
   files: boolean;
+  /** Cortex's receipts, one for every piece of work an assistant recorded: many, and linked only from the day they were made. Drawn unless false. */
+  receipts?: boolean;
 }
 
 /** The graph of the vault, or of the part of it around one note, from the index alone. */
@@ -756,7 +786,12 @@ export function vaultGraph(notes: readonly IndexedNote[], files: readonly string
   const nodes = new Map<string, GraphNode>();
   const edges: GraphEdge[] = [];
   const seenEdge = new Set<string>();
+  if (options.receipts === false) {
+    const receipts = new Set(notes.filter((note) => note.keeper === 'receipt').map((note) => note.path));
+    if (receipts.size) notes = notes.filter((note) => !receipts.has(note.path)).map((note) => ({ ...note, links: note.links.filter((to) => !receipts.has(to)) }));
+  }
   const notePaths = new Set(notes.map((note) => note.path));
+  const named = new Map(notes.map((note) => [note.path, note.label ?? noteTitle(note.path)]));
   const node = (id: string, label: string, kind: GraphNode['kind']) => {
     if (!nodes.has(id)) nodes.set(id, { id, label, kind, degree: 0 });
     return nodes.get(id)!;
@@ -769,10 +804,10 @@ export function vaultGraph(notes: readonly IndexedNote[], files: readonly string
     edges.push({ source: a, target: b });
   };
   for (const note of notes) {
-    node(note.path, noteTitle(note.path), 'note');
+    node(note.path, named.get(note.path)!, 'note');
     for (const to of note.links) {
       if (notePaths.has(to)) {
-        node(to, noteTitle(to), 'note');
+        node(to, named.get(to)!, 'note');
         edge(note.path, to);
       } else if (options.files) {
         node(to, baseName(to), 'file');

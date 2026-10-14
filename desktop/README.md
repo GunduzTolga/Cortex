@@ -15,6 +15,9 @@ Bu klasör **Aşama 1**: kasayı seçtiren ve notları Obsidian gibi okuyup yaza
   - geri bağlantılar, ana hat, arama, hızlı geçiş (Ctrl+O), grafik
   - şablonlar (`📋 Templates/Note.md`) ve Cortex'in gelen kutusuna hızlı not (Ctrl+Shift+N, `📥 000-Inbox/Dump`)
   - yeniden adlandırmada notun başlığı (`title:` ve ilk başlık) yeni adı izler
+  - Markdown olmayan metin dosyaları (JSON, betik, ayar) satır numaralı ve salt okunur gösterilir; JSON renklidir
+  - çöp kutusu: silinen not, dosya ve klasör kasanın `.trash/` klasörüne gider; bildirimdeki "Geri al" ya da sol sütundaki Çöp kutusu sekmesiyle geri gelir
+- **Cortex'in tuttukları:** Makbuzlar (`receipts/`) dosya adındaki hash yerine içlerindeki `event_id` ile gösterilir; motor onları bu hash'le bulduğu için dosya adı değişmez. Makbuzlar ve motorun ürettiği sayfalar (`generated: true`: `daily/v3`, `knowledge/v3/outcomes`) salt okunurdur: kaydedilmez, taşınmaz, yeniden adlandırılmaz, çöpe atılmaz. Grafikte makbuzlar "Makbuzlar" düğmesiyle açılır.
 - **Dosya biçimi değişmez:** Notlar düz Markdown kalır. Obsidian aynı kasada yanında açık durabilir. Diskte değişen not ekrana yeniden okunur.
 
 ### Kasaya nasıl dokunur
@@ -27,7 +30,7 @@ Bu kuralların her biri Krewgent'ta bir hatanın bedeli. Hepsi testlerle tutuluy
 - Kayıt, okunan sürümün hash'ine göre yapılır. Not geçici bir dosyaya yazılır, sonra yerine taşınır. Arada diskte değişen not geri verilir ve ekran bunu söyler. Değişen notun üstüne asla yazılmaz; hangisinin kalacağını sen seçersin.
 - Yeni not yalnız o adda dosya yoksa oluşturulur.
 - Taşıma ve yeniden adlandırmada yalnız dosyasını kaybedecek linkler yeniden yazılır. Her bağlantılı not az önce okunan hâline göre tutulur. Yeniden yazılamayan link söylenir.
-- Silinen her şey sistemin çöp kutusuna gider; geri alınabilir.
+- Silmek taşımaktır: silinen her şey kasanın `.trash/` klasörüne gider (Obsidian'ın kendi çöp klasörü), `.trash/.cortex.json` nereden geldiğini ve ne zaman silindiğini tutar. Geri yüklenen şey eski yerine döner; orası dolmuşsa yanına boş bir adla gelir, hiçbir şeyin üstüne yazılmaz. "Kalıcı olarak sil" ve "Çöpü boşalt" bile Windows Geri Dönüşüm Kutusu'na gönderir: uygulama hiçbir şeyi gerçekten silmez. `.trash` uygulamanın yazdığı tek gizli klasördür; indeks, arama ve linkler onu görmez, motorun senkronu da gizli klasörleri okumaz.
 - Bir dosya kendi programıyla açılmaz: klasöründe gösterilir ya da Obsidian'da açılır. Kasadaki bir betik çift tıklamayla çalışmaz.
 - UTF-8 olmayan dosya gösterilir ama kaydedilmez.
 
@@ -53,7 +56,7 @@ npm run dev          # Vite + Electron, değişiklikte yeniden başlar
 | Komut | Ne yapar |
 | --- | --- |
 | `npm run typecheck` | Üç TypeScript projesi: pencere, ana süreç, çekirdek tek başına |
-| `npm test` | `node:test`; testler esbuild ile gerçek kaynaktan paketlenir (90 test; biri yalnız Windows'ta çalışır, başka yerde atlanır) |
+| `npm test` | `node:test`; testler esbuild ile gerçek kaynaktan paketlenir (96 test; biri yalnız Windows'ta çalışır, başka yerde atlanır) |
 | `npm run e2e` | Derler ve gerçek Electron uygulamasını Playwright ile sürer. Pencere hiç gösterilmez: ekran dışında çizilir, `capturePage` ile fotoğraflanır (`e2e/screenshots/`). Linux'ta Xvfb altında çalışır. `CORTEX_SHOW=1` pencereyi gösterir. |
 | `npm run package` | Windows NSIS kurulum dosyası (`release/Cortex Setup X.Y.Z.exe`). Windows'ta çalıştır; Linux'ta son adım wine ister. |
 

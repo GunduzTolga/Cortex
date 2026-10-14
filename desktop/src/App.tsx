@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { BookOpen, FolderOpen, Network } from 'lucide-react';
 import seal from '../../tema/ananas/marka/pyn-muhur.svg';
-import { LANGUAGES, type Key, type Language } from './i18n';
+import { LANGUAGES, type Key } from './i18n';
 import { useLanguage, useT } from './i18n/useT';
 import { NotesView } from './notes/NotesView';
 import { GraphView } from './notes/GraphView';
 import { useApp } from './store/app';
+import { Flag } from './ui/flags';
 import { Toasts } from './ui/Toasts';
 import { Button, Spinner } from './ui/ui';
 
@@ -66,26 +67,42 @@ export function App() {
   );
 }
 
-function LanguagePicker() {
+/**
+ * The language, one press away: a flag and its code for each, the one in use
+ * raised on the paper and the other greyed until it is pointed at. Each is
+ * named in its own language for a screen reader, as LANGUAGES names them.
+ */
+function LanguageSwitch() {
   const t = useT();
   const language = useLanguage();
   return (
-    <label className="flex items-center gap-2 text-[11px] text-zinc-500">
-      <span className="sr-only">{t('app.language')}</span>
-      <select
-        value={language}
-        onChange={(event) => void useApp.getState().setLanguage(event.target.value as Language)}
-        aria-label={t('app.language')}
-        data-language
-        className="rounded-md border border-zinc-200 bg-white px-1.5 py-1 text-[11px] text-darkDelegation outline-none focus:border-zinc-400"
-      >
-        {LANGUAGES.map((one) => (
-          <option key={one.id} value={one.id}>
-            {one.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div role="group" aria-label={t('app.language')} className="flex items-center rounded-lg bg-zinc-100 p-0.5">
+      {LANGUAGES.map((one) => {
+        const current = one.id === language;
+        return (
+          <button
+            key={one.id}
+            type="button"
+            lang={one.id}
+            aria-label={one.label}
+            title={one.label}
+            aria-pressed={current}
+            data-language={one.id}
+            onClick={() => {
+              if (!current) void useApp.getState().setLanguage(one.id);
+            }}
+            className={`group flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-semibold tracking-widest transition-colors ${
+              current ? 'bg-paper-2 text-darkDelegation shadow-[0_1px_2px_rgba(27,23,18,0.12)]' : 'text-zinc-400 hover:text-darkDelegation'
+            }`}
+          >
+            <span className={current ? '' : 'opacity-60 grayscale transition group-hover:opacity-100 group-hover:grayscale-0'}>
+              <Flag language={one.id} />
+            </span>
+            {one.id.toUpperCase()}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -93,20 +110,20 @@ function LanguagePicker() {
 function Welcome() {
   const t = useT();
   return (
-    <div className="flex h-full items-center justify-center p-8" data-welcome>
+    <div className="relative flex h-full items-center justify-center p-8" data-welcome>
+      <div className="absolute right-4 top-3">
+        <LanguageSwitch />
+      </div>
       <div className="flex max-w-xl items-center gap-8">
         <img src={seal} alt="" className="h-32 w-32 shrink-0" />
-        <div className="space-y-4">
+        <div>
           <h1 className="font-display text-4xl text-darkDelegation">Cortex</h1>
-          <p className="text-[13px] leading-relaxed text-zinc-600">{t('welcome.intro')}</p>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button tone="primary" onClick={() => void useApp.getState().chooseVault(t('app.vault.failed'))} data-welcome-choose>
-              <FolderOpen size={14} />
-              {t('welcome.choose')}
-            </Button>
-            <LanguagePicker />
-          </div>
-          <p className="text-[11.5px] text-zinc-400">{t('welcome.private')}</p>
+          <p className="mt-2 text-[15px] text-zinc-700">{t('welcome.tagline')}</p>
+          <p className="mt-3 text-[13px] leading-relaxed text-zinc-600">{t('welcome.intro')}</p>
+          <Button tone="primary" className="mt-5" onClick={() => void useApp.getState().chooseVault(t('app.vault.failed'))} data-welcome-choose>
+            <FolderOpen size={14} />
+            {t('welcome.choose')}
+          </Button>
         </div>
       </div>
     </div>
@@ -166,7 +183,7 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
           <button type="button" onClick={choose} title={t('app.vault.change')} aria-label={t('app.vault.change')} className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation" data-vault-change>
             <FolderOpen size={14} />
           </button>
-          <LanguagePicker />
+          <LanguageSwitch />
         </div>
       </div>
       <div className="relative min-h-0 flex-1">

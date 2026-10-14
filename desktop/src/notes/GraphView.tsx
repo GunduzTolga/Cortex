@@ -42,15 +42,17 @@ export interface GraphSettings extends Omit<GraphOptions, 'around'> {
   labels: boolean;
 }
 
-const DEFAULTS: GraphSettings = { depth: 1, orphans: true, missing: false, tags: false, files: false, labels: true };
+// Receipts are many and each is linked only from its day: left out of the vault's graph until asked for, drawn around a note (a day shows its own).
+const DEFAULTS: GraphSettings = { depth: 1, orphans: true, missing: false, tags: false, files: false, receipts: false, labels: true };
+const LOCAL: Partial<GraphSettings> = { orphans: false, receipts: true };
 
 function useSettings(local: boolean): [GraphSettings, (next: GraphSettings) => void] {
   const key = `cortex.notes.graph.${local ? 'local' : 'vault'}`;
   const [settings, setSettings] = useState<GraphSettings>(() => {
     try {
-      return { ...DEFAULTS, ...(local ? { orphans: false } : {}), ...(JSON.parse(localStorage.getItem(key) ?? '{}') as Partial<GraphSettings>) };
+      return { ...DEFAULTS, ...(local ? LOCAL : {}), ...(JSON.parse(localStorage.getItem(key) ?? '{}') as Partial<GraphSettings>) };
     } catch {
-      return { ...DEFAULTS, ...(local ? { orphans: false } : {}) };
+      return { ...DEFAULTS, ...(local ? LOCAL : {}) };
     }
   });
   return [
@@ -66,6 +68,27 @@ function useSettings(local: boolean): [GraphSettings, (next: GraphSettings) => v
   ];
 }
 
+/** How far the view goes toward where it is headed in one frame: a zoom and a fit glide there; a pan follows the pointer as it is. */
+const GLIDE = 0.24;
+/** How much of the light a hovered point casts on what it touches comes or goes in one frame: about a tenth of a second either way. */
+const FADE = 0.18;
+const ZOOM_MIN = 0.15;
+const ZOOM_MAX = 4;
+
+interface View {
+  x: number;
+  y: number;
+  k: number;
+}
+
+const clampZoom = (k: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, k));
+
+/** A line's colour part of the way from the resting grey to the hovered violet. */
+function lineColour(lit: number, alpha: number): string {
+  const mix = (a: number, b: number) => Math.round(a + (b - a) * lit);
+  return `rgba(${mix(165, 122)},${mix(161, 106)},${mix(152, 158)},${alpha})`;
+}
+
 export function GraphView({ local = false, visible = true }: { local?: boolean; visible?: boolean }) {
   const t = useT();
   const index = useNotes((state) => state.index);
@@ -75,15 +98,48 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
   const [filter, setFilter] = useState('');
   const canvas = useRef<HTMLCanvasElement>(null);
   const box = useRef<HTMLDivElement>(null);
-  const view = useRef({ x: 0, y: 0, k: 1 });
+  // Where the view is drawn, and where it is headed: a zoom or a fit moves the goal, and each frame takes the view part of the way.
+  const view = useRef<View>({ x: 0, y: 0, k: 1 });
+  const goal = useRef<View>({ x: 0, y: 0, k: 1 });
+  // The canvas's size in CSS pixels, read when its box changes and not at every frame: reading it makes the browser lay the page out again.
+  const size = useRef({ width: 0, height: 0 });
   const hover = useRef<Point | null>(null);
+  // The point whose neighbours are lit, kept while its light fades out, and how lit they are, from 0 to 1.
+  const light = useRef<{ point: Point | null; amount: number }>({ point: null, amount: 0 });
   const sim = useRef<Simulation<Point, Line> | null>(null);
-  const draw = useRef<() => void>(() => undefined);
-  // Fitted to its box once the first layout has settled, unless the person moved the view first.
-  const fitLater = useRef<() => void>(() => undefined);
+  const frame = useRef(0);
+  const shown = useRef(visible);
+  shown.current = visible;
+  /** Draws the graph as it is now; true while something is still on its way (the view to its goal, a light coming or going). */
+  const paint = useRef<() => boolean>(() => false);
   const touched = useRef(false);
-  const fitted = useRef(false);
-  const [tick, setTick] = useState(0);
+
+  /**
+   * One drawing in the next frame, however often it is asked for before it:
+   * the simulation's tick, a wheel and a pointer moving in the same frame are
+   * drawn once, at the screen's own pace. Asked again while something moves.
+   */
+  const redraw = useRef(() => {
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      if (paint.current()) redraw();
+    });
+  }).current;
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+
+  const measure = () => {
+    const element = canvas.current;
+    if (!element) return size.current;
+    const { width, height } = element.getBoundingClientRect();
+    const ratio = window.devicePixelRatio || 1;
+    size.current = { width, height };
+    if (element.width !== Math.round(width * ratio) || element.height !== Math.round(height * ratio)) {
+      element.width = Math.round(width * ratio);
+      element.height = Math.round(height * ratio);
+    }
+    return size.current;
+  };
 
   const around = local ? live?.path ?? front ?? null : null;
   const graph = useMemo(() => {
@@ -100,6 +156,19 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
     const tops = [...new Set((index?.notes ?? []).map((note) => (note.path.includes('/') ? note.path.slice(0, note.path.indexOf('/')) : '')))].sort();
     return new Map(tops.map((top, at) => [top, COLOURS[at % COLOURS.length]]));
   }, [index]);
+
+  /** The view that shows every point, with a margin around them. */
+  const fitted = (): View | null => {
+    const nodes = sim.current?.nodes() ?? [];
+    const { width, height } = size.current.width ? size.current : measure();
+    if (!nodes.length || !width || !height) return null;
+    const xs = nodes.map((n) => n.x ?? 0);
+    const ys = nodes.map((n) => n.y ?? 0);
+    const w = Math.max(...xs) - Math.min(...xs) + 80;
+    const h = Math.max(...ys) - Math.min(...ys) + 80;
+    const k = clampZoom(Math.min(2, Math.min(width / w, height / h)));
+    return { k, x: -((Math.max(...xs) + Math.min(...xs)) / 2) * k, y: -((Math.max(...ys) + Math.min(...ys)) / 2) * k };
+  };
 
   // The simulation, made again when what is drawn changes; points already placed keep their place.
   useEffect(() => {
@@ -119,35 +188,75 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
       .force('y', forceY<Point>(0).strength(0.04))
       .force('center', forceCenter(0, 0))
       .alphaDecay(0.045)
-      .on('tick', () => {
-        // Fitted once, as the first layout settles, and left to the person after that.
-        if (!fitted.current && !touched.current && simulation.alpha() < 0.08) {
-          fitted.current = true;
-          fitLater.current();
-        }
-        draw.current();
-      });
-    if (before.size) simulation.alpha(0.4);
+      .stop();
     sim.current = simulation;
+    if (before.size) {
+      simulation.alpha(0.4);
+    } else {
+      /*
+        The first layout is worked out before anything is drawn, and the view
+        fitted to it at once: the points do not burst out of the middle, and
+        the view does not jump after them once they settle. Fewer steps for a
+        large vault, where each step costs more; it settles on screen from there.
+      */
+      simulation.tick(Math.min(160, Math.max(30, Math.round(40_000 / Math.max(1, nodes.length)))));
+      const fit = touched.current ? null : fitted();
+      if (fit) {
+        view.current = { ...fit };
+        goal.current = { ...fit };
+      }
+    }
+    // Made again around points already placed (a filter, another note in front): the view glides to the new layout once it has mostly settled, unless the person has moved it.
+    let refit = before.size > 0 && !touched.current;
+    simulation
+      .on('tick', () => {
+        if (refit && simulation.alpha() < 0.08) {
+          refit = false;
+          const to = touched.current ? null : fitted();
+          if (to) goal.current = to;
+        }
+        redraw();
+      })
+      .restart();
+    redraw();
     return () => {
       simulation.stop();
     };
+    // `fitted` and `redraw` read refs only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shape, folders, local]);
 
-  // Drawn on every tick and every change of view; sized to its box at the screen's density.
+  // What is drawn: lines, points, names. Made again when what it shows changes; called by `redraw`, never straight from an event.
   useEffect(() => {
     const element = canvas.current;
-    if (!element) return;
-    const context = element.getContext('2d');
-    if (!context) return;
+    const context = element?.getContext('2d');
+    if (!element || !context) return;
     const query = foldForMatch(filter.trim());
-    draw.current = () => {
+    paint.current = () => {
+      // Behind the notes, nothing is drawn; shown again, it is drawn whole (see `visible` below).
+      if (!shown.current) return false;
       const ratio = window.devicePixelRatio || 1;
-      const { width, height } = element.getBoundingClientRect();
-      if (element.width !== Math.round(width * ratio) || element.height !== Math.round(height * ratio)) {
-        element.width = Math.round(width * ratio);
-        element.height = Math.round(height * ratio);
+      // Measured again only when the canvas does not fit its box at this density: the window moved to another screen.
+      const { width, height } = size.current.width && element.width === Math.round(size.current.width * ratio) ? size.current : measure();
+      const v = view.current;
+      const g = goal.current;
+      const gliding = Math.abs(g.k - v.k) > 0.0005 || Math.abs(g.x - v.x) > 0.25 || Math.abs(g.y - v.y) > 0.25;
+      if (gliding) {
+        v.k += (g.k - v.k) * GLIDE;
+        v.x += (g.x - v.x) * GLIDE;
+        v.y += (g.y - v.y) * GLIDE;
+      } else {
+        view.current = { ...g };
       }
+      const lit = light.current;
+      if (hover.current) {
+        lit.point = hover.current;
+        lit.amount = Math.min(1, lit.amount + FADE);
+      } else {
+        lit.amount = Math.max(0, lit.amount - FADE);
+        if (!lit.amount) lit.point = null;
+      }
+      const fading = hover.current ? lit.amount < 1 : lit.amount > 0;
       const { x, y, k } = view.current;
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.clearRect(0, 0, width, height);
@@ -155,7 +264,8 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
       context.scale(k, k);
       const nodes = sim.current?.nodes() ?? [];
       const lines = (sim.current?.force('link') as ReturnType<typeof forceLink<Point, Line>> | undefined)?.links() ?? [];
-      const focus = hover.current;
+      const focus = lit.point;
+      const amount = lit.amount;
       const near = new Set<string>();
       if (focus) {
         near.add(focus.id);
@@ -166,22 +276,24 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
           if (b.id === focus.id) near.add(a.id);
         }
       }
-      const dim = (id: string) => (focus && !near.has(id)) || (query && !foldForMatch(nodes.find((n) => n.id === id)?.label ?? '').includes(query));
+      // Matched once a drawing, not once a point and a line.
+      const matches = query ? new Set(nodes.filter((node) => foldForMatch(node.label).includes(query)).map((node) => node.id)) : null;
+      const filtered = (id: string) => matches !== null && !matches.has(id);
+      const towards = (from: number, to: number) => from + (to - from) * amount;
       context.lineWidth = 1 / k;
       for (const line of lines) {
         const a = line.source as Point;
         const b = line.target as Point;
-        const lit = focus && (a.id === focus.id || b.id === focus.id);
-        context.strokeStyle = lit ? 'rgba(122,106,158,0.85)' : focus ? 'rgba(165,161,152,0.15)' : 'rgba(165,161,152,0.45)';
+        const onFocus = focus !== null && (a.id === focus.id || b.id === focus.id);
+        context.strokeStyle = onFocus ? lineColour(amount, towards(0.45, 0.85)) : lineColour(0, focus ? towards(0.45, 0.15) : 0.45);
         context.beginPath();
         context.moveTo(a.x ?? 0, a.y ?? 0);
         context.lineTo(b.x ?? 0, b.y ?? 0);
         context.stroke();
       }
       for (const node of nodes) {
-        const faded = dim(node.id);
         const isFront = node.id === around || node.id === front;
-        context.globalAlpha = faded ? 0.18 : 1;
+        context.globalAlpha = filtered(node.id) ? 0.18 : focus && !near.has(node.id) ? towards(1, 0.18) : 1;
         context.beginPath();
         context.arc(node.x ?? 0, node.y ?? 0, node.r, 0, Math.PI * 2);
         if (node.kind === 'missing') {
@@ -204,32 +316,40 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
       if (settings.labels) {
         context.textAlign = 'center';
         context.textBaseline = 'top';
-        const size = 11 / Math.max(k, 0.6);
-        context.font = `${size}px "Schibsted Grotesk Variable", system-ui, sans-serif`;
+        const fontSize = 11 / Math.max(k, 0.6);
+        context.font = `${fontSize}px "Schibsted Grotesk Variable", system-ui, sans-serif`;
+        context.fillStyle = '#433f39';
         for (const node of nodes) {
-          const show = k > 1.1 || near.has(node.id) || node.id === around || (k > 0.7 && node.degree > 3) || nodes.length < 40;
-          if (!show || dim(node.id)) continue;
-          context.globalAlpha = focus && !near.has(node.id) ? 0.2 : 0.9;
-          context.fillStyle = '#433f39';
+          const touching = focus !== null && near.has(node.id);
+          const show = k > 1.1 || touching || node.id === around || (k > 0.7 && node.degree > 3) || nodes.length < 40;
+          if (!show || filtered(node.id)) continue;
+          context.globalAlpha = focus && !touching ? towards(0.9, 0.2) : 0.9;
           context.fillText(node.label.length > 40 ? `${node.label.slice(0, 38)}…` : node.label, node.x ?? 0, (node.y ?? 0) + node.r + 3);
         }
       }
       context.globalAlpha = 1;
+      return gliding || fading;
     };
-    draw.current();
-  }, [filter, settings.labels, around, front, tick]);
+    redraw();
+    // `redraw` reads refs only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, settings.labels, around, front]);
 
-  // Redrawn when its box changes size: a side panel folded, the window resized.
+  // Its box resized - a side panel folded, the window resized - it is measured again and drawn.
   useEffect(() => {
     if (!box.current) return;
-    const watcher = new ResizeObserver(() => draw.current());
+    const watcher = new ResizeObserver(() => {
+      measure();
+      redraw();
+    });
     watcher.observe(box.current);
     return () => watcher.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (visible) setTick((n) => n + 1);
-  }, [visible]);
+    if (visible) redraw();
+  }, [visible, redraw]);
 
   // The pointer: drag the background to pan, a point to move it, the wheel to zoom, a click to open.
   useEffect(() => {
@@ -257,6 +377,8 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
     const down = (event: PointerEvent) => {
       touched.current = true;
       element.setPointerCapture(event.pointerId);
+      // A glide under way stops where it is: the pointer takes the view from there.
+      goal.current = { ...view.current };
       const node = pick(event);
       drag = { node, startX: event.clientX, startY: event.clientY, moved: false, viewX: view.current.x, viewY: view.current.y };
       if (node) {
@@ -271,7 +393,7 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
         if (node !== hover.current) {
           hover.current = node;
           element.style.cursor = node ? 'pointer' : 'grab';
-          draw.current();
+          redraw();
         }
         return;
       }
@@ -281,9 +403,11 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
         drag.node.fx = at.x;
         drag.node.fy = at.y;
       } else {
-        view.current.x = drag.viewX + event.clientX - drag.startX;
-        view.current.y = drag.viewY + event.clientY - drag.startY;
-        draw.current();
+        const x = drag.viewX + event.clientX - drag.startX;
+        const y = drag.viewY + event.clientY - drag.startY;
+        view.current = { ...view.current, x, y };
+        goal.current = { ...view.current };
+        redraw();
       }
     };
     const up = (event: PointerEvent) => {
@@ -302,18 +426,19 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
       event.preventDefault();
       touched.current = true;
       const rect = element.getBoundingClientRect();
-      const before = view.current.k;
-      const k = Math.min(4, Math.max(0.15, before * Math.exp(-event.deltaY * 0.0015)));
+      // A wheel's notch, a touchpad's stroke and a page all as pixels.
+      const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * rect.height : event.deltaY;
+      const g = goal.current;
+      const k = clampZoom(g.k * Math.exp(-delta * 0.0018));
+      // Toward the pointer: the point under it stays under it once the glide is done.
       const px = event.clientX - rect.left - rect.width / 2;
       const py = event.clientY - rect.top - rect.height / 2;
-      view.current.x = px - ((px - view.current.x) * k) / before;
-      view.current.y = py - ((py - view.current.y) * k) / before;
-      view.current.k = k;
-      draw.current();
+      goal.current = { k, x: px - ((px - g.x) * k) / g.k, y: py - ((py - g.y) * k) / g.k };
+      redraw();
     };
     const leave = () => {
       hover.current = null;
-      draw.current();
+      redraw();
     };
     element.addEventListener('pointerdown', down);
     element.addEventListener('pointermove', move);
@@ -327,37 +452,36 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
       element.removeEventListener('pointerleave', leave);
       element.removeEventListener('wheel', wheel);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Zoomed about the middle of the view, gliding there. */
   const zoom = (by: number) => {
-    view.current.k = Math.min(4, Math.max(0.15, view.current.k * by));
-    draw.current();
+    const g = goal.current;
+    const k = clampZoom(g.k * by);
+    goal.current = { k, x: (g.x * k) / g.k, y: (g.y * k) / g.k };
+    redraw();
   };
   const fit = () => {
-    const nodes = sim.current?.nodes() ?? [];
-    const rect = canvas.current?.getBoundingClientRect();
-    if (!nodes.length || !rect) return;
-    const xs = nodes.map((n) => n.x ?? 0);
-    const ys = nodes.map((n) => n.y ?? 0);
-    const w = Math.max(...xs) - Math.min(...xs) + 80;
-    const h = Math.max(...ys) - Math.min(...ys) + 80;
-    const k = Math.min(2, Math.max(0.15, Math.min(rect.width / w, rect.height / h)));
-    view.current = { k, x: -((Math.max(...xs) + Math.min(...xs)) / 2) * k, y: -((Math.max(...ys) + Math.min(...ys)) / 2) * k };
-    draw.current();
+    const to = fitted();
+    if (!to) return;
+    goal.current = to;
+    redraw();
   };
-  fitLater.current = fit;
 
   const toggles: Array<[keyof GraphSettings, Key]> = local
     ? [
         ['missing', 'notes.graph.missing'],
         ['tags', 'notes.graph.tags'],
         ['files', 'notes.graph.files'],
+        ['receipts', 'notes.graph.receipts'],
       ]
     : [
         ['orphans', 'notes.graph.orphans'],
         ['missing', 'notes.graph.missing'],
         ['tags', 'notes.graph.tags'],
         ['files', 'notes.graph.files'],
+        ['receipts', 'notes.graph.receipts'],
         ['labels', 'notes.graph.labels'],
       ];
 
@@ -389,6 +513,7 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
             key={key}
             type="button"
             aria-pressed={Boolean(settings[key])}
+            data-graph-toggle={key}
             onClick={() => setSettings({ ...settings, [key]: !settings[key] })}
             className={`rounded-md px-2 py-0.5 text-[11px] transition-colors ${settings[key] ? 'bg-darkDelegation text-white' : 'bg-white/90 text-zinc-500 hover:text-darkDelegation'}`}
           >

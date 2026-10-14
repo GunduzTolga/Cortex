@@ -86,6 +86,7 @@ export function registerIpc(): void {
     return vaultNotes.vaultIndex();
   });
   handle('notes:read', (file) => vaultNotes.readVaultNote(file));
+  handle('notes:text', (file) => vaultNotes.readVaultText(file));
   handle('notes:save', (file, text, base) => vaultNotes.saveVaultNote(file, text, base));
   handle('notes:create', (folder, name, options) =>
     vaultNotes.createVaultNote(folder, name, (options ?? {}) as { text?: unknown; unique?: unknown; template?: unknown }),
@@ -94,6 +95,10 @@ export function registerIpc(): void {
   handle('notes:rename', (file, name) => vaultNotes.renameVaultEntry(file, name));
   handle('notes:move', (file, folder) => vaultNotes.moveVaultEntry(file, folder));
   handle('notes:trash', (file) => vaultNotes.trashVaultEntry(file));
+  handle('notes:binList', () => vaultNotes.listVaultTrash());
+  handle('notes:binRestore', (id) => vaultNotes.restoreVaultTrash(id));
+  handle('notes:binDelete', (id) => vaultNotes.deleteVaultTrash(id));
+  handle('notes:binEmpty', () => vaultNotes.emptyVaultTrash());
   handle('notes:backlinks', (file) => vaultNotes.vaultBacklinks(file));
   handle('notes:search', (query) => vaultNotes.searchVault(query));
   handle('notes:asset', (file) => vaultNotes.vaultAsset(file));

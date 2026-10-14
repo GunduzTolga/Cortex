@@ -12,8 +12,9 @@ import { NoteEditor, type LinkChoice, type NoteEditorHandle } from './NoteEditor
 import type { LiveHooks } from './livePreview';
 import { imageOf } from './vaultCache';
 import { peekLeave, peekSoon } from './peek';
-import { useActiveTab, useNotes } from './notesStore';
-import { Menu, useConfirm } from './NotesMenus';
+import { useActiveTab, useLabel, useNotes } from './notesStore';
+import { Menu } from './NotesMenus';
+import { useTrash } from './bin';
 import { NAME_PROBLEM } from './NotesNav';
 
 /**
@@ -58,7 +59,6 @@ export function NotePane({ path }: { path: string }) {
   const readOnlyVault = useNotes((state) => state.index?.readOnly ?? null);
   const tab = useActiveTab();
   const target = useNotes((state) => state.target);
-  const confirm = useConfirm();
 
   const [doc, setDoc] = useState<NoteRead | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -69,6 +69,9 @@ export function NotePane({ path }: { path: string }) {
   const [jump, setJump] = useState<{ line: number; seq: number } | null>(null);
   const [title, setTitle] = useState(noteTitle(path));
   const [titleProblem, setTitleProblem] = useState<string | null>(null);
+  // A receipt is shown by its event_id: its file's name is the hash Cortex finds it by, and it is not renamed from here.
+  const label = useLabel(path);
+  const shownTitle = label !== noteTitle(path) ? label : title;
   const reader = useRef<HTMLDivElement>(null);
   const editor = useRef<NoteEditorHandle>(null);
   // What the save in flight and the last one read, for the callbacks that outlive a render.
@@ -267,16 +270,8 @@ export function NotePane({ path }: { path: string }) {
     void save();
   };
 
-  const trash = async () => {
-    if (!(await confirm({ title: t('notes.trash.title', { name: noteTitle(path) }), detail: t('notes.trash.detail'), action: t('notes.trash.action') }))) return;
-    try {
-      await window.cortex.notes.trash(path);
-      useNotes.getState().removed(path);
-      await useNotes.getState().refresh();
-    } catch (err) {
-      toast({ tone: 'error', title: t('notes.trash.failed'), detail: messageOf(err) });
-    }
-  };
+  const trashEntry = useTrash();
+  const trash = () => trashEntry(path);
 
   const openOutside = async (how: 'obsidian' | 'folder') => {
     try {
@@ -292,7 +287,16 @@ export function NotePane({ path }: { path: string }) {
   const words = useMemo(() => (doc ? parseNote(settled).words : 0), [doc, settled]);
   const backlinks = useNotes((state) => state.index?.notes.filter((note) => note.path !== path && note.links.includes(path)).length ?? 0);
   const folder = folderOf(path);
-  const reason = doc?.readOnly === 'encoding' ? t('notes.readOnly.encoding') : readOnlyVault ? t('notes.readOnly.vault') : null;
+  const reason =
+    doc?.readOnly === 'encoding'
+      ? t('notes.readOnly.encoding')
+      : doc?.readOnly === 'receipt'
+        ? t('notes.readOnly.receipt')
+        : doc?.readOnly === 'generated'
+          ? t('notes.readOnly.generated')
+          : readOnlyVault
+            ? t('notes.readOnly.vault')
+            : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-note-pane={path}>
@@ -310,7 +314,7 @@ export function NotePane({ path }: { path: string }) {
               <span className="mx-1.5">/</span>
             </>
           ) : null}
-          <span className="text-zinc-600">{noteTitle(path)}</span>
+          <span className="text-zinc-600">{label}</span>
         </p>
         <span className="mr-1 shrink-0 text-[11px] text-zinc-400" data-note-saving={saving}>
           {saving === 'saving' ? t('notes.saving') : saving === 'unsaved' ? t('notes.unsaved') : saving === 'failed' ? t('notes.save.failed') : null}
@@ -392,14 +396,14 @@ export function NotePane({ path }: { path: string }) {
           <>
             {mode === 'read' ? (
               <div ref={reader} className="absolute inset-0 overflow-y-auto px-8 pb-24 pt-8" data-note-reader>
-                <TitleField value={title} onChange={setTitle} onCommit={() => void rename()} problem={titleProblem} disabled={!writable} />
+                <TitleField value={shownTitle} onChange={setTitle} onCommit={() => void rename()} problem={titleProblem} disabled={!writable} />
                 <NoteDocument path={path} text={text} onToggleTask={onToggleTask} />
               </div>
             ) : null}
             {mode === 'edit' ? (
               <div className="absolute inset-0 flex flex-col px-8">
                 <div className="mx-auto w-full max-w-[46rem] pt-8">
-                  <TitleField value={title} onChange={setTitle} onCommit={() => void rename()} problem={titleProblem} disabled={!writable} />
+                  <TitleField value={shownTitle} onChange={setTitle} onCommit={() => void rename()} problem={titleProblem} disabled={!writable} />
                 </div>
                 <div className="min-h-0 flex-1">
                   <NoteEditor
@@ -483,7 +487,7 @@ export function linkChoices(): { notes: LinkChoice[]; tags: string[] } {
   const named = new Map<string, number>();
   for (const note of index.notes) named.set(pathKey(noteTitle(note.path)), (named.get(pathKey(noteTitle(note.path))) ?? 0) + 1);
   const notes = index.notes.map((note) => ({
-    title: noteTitle(note.path),
+    title: note.label ?? noteTitle(note.path),
     path: note.path,
     folder: folderOf(note.path),
     aliases: note.aliases,

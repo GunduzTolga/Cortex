@@ -1,5 +1,5 @@
 import type { AppLanguage } from './language';
-import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, VaultIndex } from './notes';
+import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
 
 /**
  * Everything the window can ask of the main process: the object the preload
@@ -36,12 +36,22 @@ export interface Moved {
 export interface NotesApi {
   index(): Promise<VaultIndex>;
   read(path: string): Promise<NoteRead>;
+  /** A file that is not a note, as text to be shown: read only, never run. */
+  text(path: string): Promise<TextRead>;
   save(path: string, text: string, base: string): Promise<NoteSaved>;
   create(folder: string, name: string, options?: { text?: string; unique?: boolean; template?: string }): Promise<{ path: string }>;
   createFolder(parent: string, name: string): Promise<{ path: string }>;
   rename(path: string, name: string): Promise<Moved>;
   move(path: string, folder: string): Promise<Moved>;
-  trash(path: string): Promise<void>;
+  /** Into the vault's bin (`.trash/`), to be taken back from there; its id there. */
+  trash(path: string): Promise<{ id: string }>;
+  binList(): Promise<TrashItem[]>;
+  /** Put back where it was, or beside it under a free name; where it is now. */
+  binRestore(id: string): Promise<{ path: string }>;
+  /** Sent on to the system's bin. */
+  binDelete(id: string): Promise<void>;
+  /** Everything sent on to the system's bin; how many went. */
+  binEmpty(): Promise<number>;
   backlinks(path: string): Promise<NoteBacklinks>;
   search(query: string): Promise<{ hits: SearchHit[]; more: boolean }>;
   asset(path: string): Promise<string | null>;

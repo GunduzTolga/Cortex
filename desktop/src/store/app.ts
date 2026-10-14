@@ -16,6 +16,8 @@ export interface Toast {
   detail?: string;
   /** Stays until the person closes it: for what must not be missed while they look elsewhere. */
   sticky?: boolean;
+  /** One thing to do about it, there and then: "Undo" after a delete. Pressed, the toast goes. */
+  action?: { label: string; run: () => void };
 }
 
 interface AppState {
