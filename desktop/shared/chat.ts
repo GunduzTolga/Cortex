@@ -14,6 +14,8 @@ export interface CliInfo {
   name: string;
   /** Whether it is installed on this machine. */
   available: boolean;
+  /** For a model server (LM Studio, Ollama): whether its server is up with a model now, or installed and off. */
+  local?: 'up' | 'off';
 }
 
 /** Whether an AI tool is signed in, and how it can be (electron/services/auth.ts). Never a key. */

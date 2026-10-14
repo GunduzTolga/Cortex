@@ -74,6 +74,7 @@ export const tr: Record<keyof typeof en, string> = {
   'chat.error.model': 'Bu model bu hesapla kullanılamıyor. Başka bir model seç.',
   'chat.error.stopped': 'Yapay zekâ aracı durdu.',
   'chat.error.unsupported': 'Yapay zekâ aracı bunu desteklemiyor.',
+  'chat.error.localOff': 'Model sunucusu açık değil. LM Studio ya da Ollama\'yı açıp bir model yükle (LM Studio\'da sunucuyu da başlat), sonra yeniden yaz.',
   'chat.error.other': 'Cevap tamamlanamadı.',
   'chat.stopped': 'Durduruldu.',
   'chat.end.length': 'Cevap uzunluk sınırına ulaştı.',

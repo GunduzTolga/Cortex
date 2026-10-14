@@ -170,8 +170,11 @@ export function testLaunch(id: TestId, env: NodeJS.ProcessEnv = process.env): La
 /** Every CLI the chat knows, and whether this machine has it. */
 export function listClis(env: NodeJS.ProcessEnv = process.env): CliInfo[] {
   const out: CliInfo[] = KNOWN.map((one) => ({ id: one.id, name: one.name, available: launchOf(one.id, env) !== null }));
-  // A model server is offered while it was last found up with a chat model.
-  for (const id of LOCAL_IDS) out.push({ id, name: LOCAL[id].name, available: lastSeen(id).models.length > 0 });
+  // A model server is offered where it is installed or found up: up with a chat model, or off, to be opened.
+  for (const id of LOCAL_IDS) {
+    const up = lastSeen(id).models.length > 0;
+    out.push({ id, name: LOCAL[id].name, available: up || onPathAny(LOCAL[id].tools, env), local: up ? 'up' : 'off' });
+  }
   if (testLaunch('test', env)) out.push({ id: 'test', name: 'Test agent', available: true });
   if (testLaunch('test-claude', env)) out.push({ id: 'test-claude', name: 'Test Claude', available: true });
   if (testLaunch('test-codex', env)) out.push({ id: 'test-codex', name: 'Test Codex', available: true });

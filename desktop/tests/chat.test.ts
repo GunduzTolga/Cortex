@@ -88,7 +88,12 @@ test('a CLI is found without a shell: an npm shim read for the program or the sc
   const listed = listClis({ PATH: bin, CORTEX_TEST_AGENT: AGENT });
   assert.deepEqual(listed.map((one) => one.id), ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'lmstudio', 'ollama', 'test']);
   assert.equal(listed.find((one) => one.id === 'qwen')?.available, false);
-  assert.equal(listed.find((one) => one.id === 'ollama')?.available, false, 'a model server not found up with a model is not offered');
+  assert.equal(listed.find((one) => one.id === 'ollama')?.available, false, 'a model server neither installed nor up is not offered');
+  // Installed, its server off: offered, said to be off (a red dot), to be opened.
+  const lms = fs.mkdtempSync(path.join(os.tmpdir(), 'lms-'));
+  fs.writeFileSync(path.join(lms, process.platform === 'win32' ? 'lms.exe' : 'lms'), '');
+  const withLms = listClis({ PATH: lms }).find((one) => one.id === 'lmstudio');
+  assert.deepEqual([withLms?.available, withLms?.local], [true, 'off']);
   assert.equal(listClis({ PATH: bin }).some((one) => one.id === 'test'), false, 'the test agent only when named');
 });
 

@@ -80,6 +80,7 @@ export const en = {
   'chat.error.model': 'This model cannot be used with this account. Choose another model.',
   'chat.error.stopped': 'The AI tool stopped.',
   'chat.error.unsupported': 'The AI tool does not support this.',
+  'chat.error.localOff': 'The model server is not running. Open LM Studio or Ollama, load a model (in LM Studio, start its server too), then write again.',
   'chat.error.other': 'The answer could not be completed.',
   'chat.stopped': 'Stopped.',
   'chat.end.length': 'The answer reached its length limit.',

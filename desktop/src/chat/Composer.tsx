@@ -19,8 +19,8 @@ import type { Asked } from './turns';
 interface Choice {
   value: string;
   name: string;
-  /** A tool's sign-in, as a dot beside its name. */
-  dot?: 'on' | 'off' | null;
+  /** A tool's state, as a dot beside its name: signed in or a server up, not signed in, a server off. */
+  dot?: 'on' | 'off' | 'down' | null;
 }
 
 /** A chip that opens a list over it: a long list - sixty models - gets a field to narrow it. */
@@ -102,7 +102,7 @@ function ChipSelect({
                 >
                   <span className="w-3.5 shrink-0 text-darkDelegation">{one.value === value ? <Check size={13} /> : null}</span>
                   <span className="truncate">{one.name}</span>
-                  {one.dot ? <span className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${one.dot === 'on' ? 'bg-good' : 'bg-gold'}`} data-chat-choice-dot={one.dot} /> : null}
+                  {one.dot ? <span className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${one.dot === 'on' ? 'bg-good' : one.dot === 'down' ? 'bg-bad' : 'bg-gold'}`} data-chat-choice-dot={one.dot} /> : null}
                 </button>
               </li>
             ))}
@@ -300,7 +300,7 @@ export function Composer({
             label={t('chat.chip.cli')}
             value={cli ?? ''}
             // A chat written to keeps its tool: its list is that tool alone, and still opens for the sign-ins under it.
-            choices={(cliFixed ? clis.filter((one) => one.id === cli) : available).map((one) => ({ value: one.id, name: one.name, dot: authDot(auth, one.id) }))}
+            choices={(cliFixed ? clis.filter((one) => one.id === cli) : available).map((one) => ({ value: one.id, name: one.name, dot: one.local ? (one.local === 'up' ? 'on' : 'down') : authDot(auth, one.id) }))}
             onChoose={(value) => onCli(value as CliId)}
             data="cli"
             footer={{ label: t('auth.manage'), run: onAuth }}

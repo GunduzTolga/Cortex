@@ -90,6 +90,7 @@ const ERRORS: Record<string, Key> = {
   model: 'chat.error.model',
   stopped: 'chat.error.stopped',
   unsupported: 'chat.error.unsupported',
+  'local-off': 'chat.error.localOff',
 };
 
 function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?: () => void }) {

@@ -35,7 +35,7 @@ function Status({ tool, refused }: { tool: CliAuth; refused: boolean }) {
     : tool.local
       ? tool.signedIn
         ? ['auth.status.running', 'bg-good/15 text-good']
-        : ['auth.status.off', 'bg-gold/25 text-darkDelegation']
+        : ['auth.status.off', 'bg-bad/10 text-bad']
       : refused && tool.signedIn !== false
       ? ['auth.status.refused', 'bg-bad/10 text-bad']
       : tool.signedIn === true
