@@ -542,6 +542,38 @@ const withReceipts = await page.locator('[data-notes-graph="vault"]').evaluate((
 check('receipts are left out of the vault’s graph until asked for', withReceipts === graphSize.nodes + 1);
 await page.locator('[data-notes-graph="vault"] [data-graph-toggle="receipts"]').click();
 await shoot('06-graph.png');
+
+/*
+  The office (src/office/): Claude Design's drawings and engine in their own
+  tab. A room clicked shows what goes on in it with the vault's own counts; a
+  character's chip opens its card; the gear, the office's settings.
+*/
+console.log('\nOffice');
+await page.locator('[data-app-view="office"]').click();
+check('the office opens in its own tab, its map drawn and its log begun', (await shownSoon(page.locator('[data-office-view] [data-ofis-canvas]'))) && (await page.locator('[data-ofis-line]').count()) >= 1);
+await page.waitForTimeout(1_500);
+await shoot('16-office.png');
+// The map is fitted to the canvas and centred: the mailroom's middle (tile 7, 8) is found from the canvas's size.
+const officeBox = await page.locator('[data-ofis-canvas]').boundingBox();
+if (officeBox) {
+  const zoom = Math.min(4, Math.min(officeBox.width / 976, officeBox.height / 672));
+  await page.mouse.click(officeBox.x + officeBox.width / 2 + (7 * 16 + 8 - 488) * zoom, officeBox.y + officeBox.height / 2 + (8 * 16 + 8 - 336) * zoom);
+}
+check(
+  'a room clicked says what goes on in it, counted from the vault',
+  (await shownSoon(page.locator('[data-ofis-room="posta"]'))) && /\d+ notes changed today/.test((await page.locator('[data-ofis-room-status]').textContent()) ?? ''),
+);
+await page.locator('[data-ofis-chip="defne"]').click();
+check(
+  'a character’s chip opens its card, with the tool it works with',
+  (await shownSoon(page.locator('[data-ofis-card="defne"]'))) && ((await page.locator('[data-ofis-card="defne"]').textContent()) ?? '').includes('Works with Claude'),
+);
+await page.waitForTimeout(800);
+await shoot('17-office-card.png');
+await page.locator('[data-ofis-gear]').click();
+check('the gear opens the office’s settings, live conversations off', (await shownSoon(page.locator('[data-ofis-settings]'))) && (await page.locator('[data-ofis-live]').getAttribute('aria-checked')) === 'false');
+await page.keyboard.press('Escape');
+check('and Escape closes them', await page.locator('[data-ofis-settings]').waitFor({ state: 'detached', timeout: 3_000 }).then(() => true, () => false));
 check(
   'nothing was written into what is hidden',
   fs.readFileSync(vaultNote('.hidden/Secret.md'), 'utf8') === hiddenBefore && fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'utf8') === obsidianBefore,

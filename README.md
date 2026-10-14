@@ -214,11 +214,12 @@ Sağlayıcı girişlerini OpenCode'da bir kez sen yaparsın: `opencode auth logi
 
 ## Masaüstü uygulaması
 
-`desktop/` klasöründe Cortex'in Windows uygulaması var. Önizleme aşamasında; kurulum dosyası henüz imzasız. Açınca kasanı seçersin, sonra üç ekran:
+`desktop/` klasöründe Cortex'in Windows uygulaması var. Önizleme aşamasında; kurulum dosyası henüz imzasız. Açınca kasanı seçersin, sonra dört ekran:
 
 - **Pyn (ilk ekran):** kasanın içinde, kendi aracınla sohbet. Araç kasada başladığı için hafızayı hook'lar tam olarak verir. Araçlar: Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code ve yerel modeller için LM Studio ile Ollama: modeli kendi uygulamasında yüklersin, Cortex onunla doğrudan konuşur ve Pyn'in hafızasını kasanın hook'undan verir. Aracın izin istediği adımlar kartla sorulur. Model, mod ve efor çiplerle seçilir. Sohbetin okuduğu ve değiştirdiği notlar yan panelde açılır.
 - **Notlar:** Obsidian'a gerek kalmadan okuma ve yazma: wiki linkleri, canlı önizleme, geri bağlantılar, arama, şablonlar, çöp kutusu. Makbuzlar ve motorun ürettiği sayfalar salt okunurdur.
 - **Grafik:** notlar ve aralarındaki linkler.
+- **Ofis:** piksel sanatıyla çizilmiş, yaşayan bir ofis. Patron Pyn, 12 ajan ve ofis kedisi Tekir dokuz odada çalışır; karakterlere ve odalara tıklanır. Sunucu odasının ışıkları araçlarının gerçek giriş durumunu, odalar kasanın sayılarını gösterir.
 
 Dil, kasa, dosya ağacının görünüşü ve araçların girişleri **Ayarlar**'da: üst çubuktaki dişli ya da Ctrl+, açar.
 

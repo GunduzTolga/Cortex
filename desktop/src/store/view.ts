@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 /**
  * Which of the vault's views is in front: Pyn, where the person talks to their
- * AI, first; the notes; the graph. Each is drawn from the first time it is
+ * AI, first; the notes; the graph; the office, where the agents work. Each is drawn from the first time it is
  * shown and kept after (App.tsx), so the graph is not laid out again at every
  * switch. A note opened from the chat brings the notes to the front.
  *
@@ -10,9 +10,9 @@ import { create } from 'zustand';
  * new with Pyn: everybody opens on Pyn once, whatever was in front before.
  */
 
-export type View = 'pyn' | 'notes' | 'graph';
+export type View = 'pyn' | 'notes' | 'graph' | 'office';
 const KEY = 'cortex.view.v2';
-const VIEWS: readonly View[] = ['pyn', 'notes', 'graph'];
+const VIEWS: readonly View[] = ['pyn', 'notes', 'graph', 'office'];
 
 function saved(): View {
   try {

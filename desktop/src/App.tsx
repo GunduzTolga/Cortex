@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BookOpen, FolderOpen, MessageCircle, Network, Settings } from 'lucide-react';
+import { BookOpen, Building2, FolderOpen, MessageCircle, Network, Settings } from 'lucide-react';
 import seal from '../../tema/ananas/marka/pyn-muhur.svg';
 import type { Key } from './i18n';
 import { useT } from './i18n/useT';
@@ -7,6 +7,7 @@ import { AuthDialog } from './chat/AuthDialog';
 import { ChatView } from './chat/ChatView';
 import { NotesView } from './notes/NotesView';
 import { GraphView } from './notes/GraphView';
+import { OfficeView } from './office/OfficeView';
 import { NotesDialogs } from './notes/NotesMenus';
 import { useNotes } from './notes/notesStore';
 import { useApp } from './store/app';
@@ -119,6 +120,7 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
     ['pyn', <MessageCircle key="pyn" size={13} />, 'app.view.pyn'],
     ['notes', <BookOpen key="notes" size={13} />, 'app.view.notes'],
     ['graph', <Network key="graph" size={13} />, 'app.view.graph'],
+    ['office', <Building2 key="office" size={13} />, 'app.view.office'],
   ];
 
   return (
@@ -188,6 +190,11 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
             {shown.has('graph') ? (
               <div className="kg-layer absolute inset-0" style={view === 'graph' ? undefined : { visibility: 'hidden' }} aria-hidden={view !== 'graph'}>
                 <GraphView visible={view === 'graph'} />
+              </div>
+            ) : null}
+            {shown.has('office') ? (
+              <div className="kg-layer absolute inset-0" style={view === 'office' ? undefined : { visibility: 'hidden' }} aria-hidden={view !== 'office'}>
+                <OfficeView visible={view === 'office'} />
               </div>
             ) : null}
           </>

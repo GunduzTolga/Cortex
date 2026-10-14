@@ -38,6 +38,11 @@ Bu klasör **Aşama 1** (notlar) ve **Aşama 2'nin büyük kısmı** (Pyn'in soh
   - yeniden adlandırmada notun başlığı (`title:` ve ilk başlık) yeni adı izler
   - Markdown olmayan metin dosyaları (JSON, betik, ayar) satır numaralı ve salt okunur gösterilir; JSON renklidir
   - çöp kutusu: silinen not, dosya ve klasör kasanın `.trash/` klasörüne gider; bildirimdeki "Geri al" ya da sol sütundaki Çöp kutusu sekmesiyle geri gelir
+- **Ofis:** dördüncü sekme. Piksel sanatıyla çizilmiş, yaşayan bir ofis: patron Pyn, 12 ajan ve ofis kedisi Tekir dokuz odada çalışıyor. Çizimleri ve arayüzü Claude Design yaptı (brif: `docs/ofis/claude-design-brifi.md`); çizimler `src/office/office-art.js`, motor `src/office/ofis-engine.js`, ikisi de teslim edildiği gibi, motora yalnız küçük ekler yapıldı.
+  - Karaktere tıklayınca kart (rol, ruh hali, ne yaptığı, Çay/Tokluk/Enerji, bugünkü sayaçlar), odaya tıklayınca oda paneli (canlı önizleme, içeridekiler) açılır. Tekerlek yakınlaştırır, sürükleme gezdirir; + − ⤢ Aa düğmeleri, kişi çipleri ve boyu değişen ofis günlüğü var.
+  - Gerçek olanlar: sunucu odasındaki kabinlerin ışıkları araçların kendi giriş durumudur; odalar kasanın notlarını, bağlantılarını, makbuzlarını ve bugün değişen notları sayar; ışık gerçek saate uyar (gece lambalar yanar); oda adları pencerenin dilindedir.
+  - Ajanların ne yaptığı şimdilik Claude Design prototipinin betiğidir. Kasadan gelen olaylar ve yapay zekâyla yazılan canlı konuşmalar sonraki adım.
+  - Sekme yalnız öndeyken çizilir; arkadayken motor durur. Yazı tipleri Pixelify Sans ve VT323 (OFL, `licenses/`), uygulamayla gelir.
 - **Cortex'in tuttukları:** Makbuzlar (`receipts/`) dosya adındaki hash yerine içlerindeki `event_id` ile gösterilir; motor onları bu hash'le bulduğu için dosya adı değişmez. Makbuzlar ve motorun ürettiği sayfalar (`generated: true`: `daily/v3`, `knowledge/v3/outcomes`) salt okunurdur: kaydedilmez, taşınmaz, yeniden adlandırılmaz, çöpe atılmaz. Grafikte makbuzlar "Makbuzlar" düğmesiyle açılır.
 - **Dosya biçimi değişmez:** Notlar düz Markdown kalır. Obsidian aynı kasada yanında açık durabilir. Diskte değişen not ekrana yeniden okunur.
 
@@ -80,7 +85,7 @@ npm run dev          # Vite + Electron, değişiklikte yeniden başlar
 | Komut | Ne yapar |
 | --- | --- |
 | `npm run typecheck` | Üç TypeScript projesi: pencere, ana süreç, çekirdek tek başına |
-| `npm test` | `node:test`; testler esbuild ile gerçek kaynaktan paketlenir (134 test; biri yalnız Windows'ta çalışır, başka yerde atlanır) |
+| `npm test` | `node:test`; testler esbuild ile gerçek kaynaktan paketlenir (139 test; biri yalnız Windows'ta çalışır, başka yerde atlanır) |
 | `npm run e2e` | Derler ve gerçek Electron uygulamasını Playwright ile sürer. Pencere hiç gösterilmez: ekran dışında çizilir, `capturePage` ile fotoğraflanır (`e2e/screenshots/`). Linux'ta Xvfb altında çalışır. `CORTEX_SHOW=1` pencereyi gösterir. |
 | `npm run package` | Windows NSIS kurulum dosyası (`release/Cortex Setup X.Y.Z.exe`). Windows'ta çalıştır; Linux'ta son adım wine ister. |
 
