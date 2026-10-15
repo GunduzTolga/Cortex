@@ -55,7 +55,7 @@ export class OfficeEngine {
     this.zoom = 1; this.camX = this.W / 2; this.camY = this.H / 2; this.camTarget = null;
     this.t = 0; this.speed = 1; this.mode = 'ogle'; this.font = "'Pixelify Sans'"; this.lang = 'tr';
     this.selected = null; this.hover = null; this.room = null; this.preview = null;
-    this.bubbles = []; this.meets = {}; this.led = { ...TOOL_STATUS }; this.userName = null;
+    this.bubbles = []; this.meets = {}; this.led = { ...TOOL_STATUS }; this.userName = null; this.talkQueue = []; this.talkT = 0;
     this.doorState = {}; this.elevator = { f: 0, open: false };
     this.objects = art.MAP.objects.map((o) => ({ ...o, s: art.SPRITES[o.sprite] }));
     this.seat = Object.fromEntries(art.MAP.seats.map((s) => [s.id, s]));
@@ -184,6 +184,14 @@ export class OfficeEngine {
       if (m.t >= 3.5) { m.t = 0; m.line++; if (m.line >= CONVO_DB.length) { for (const a of ['defne', 'baran']) { const ag = this.byId[a]; ag.meeting = null; ag.busy = false; ag.wait = 0; ag.pose = 'idle'; } delete this.meets[id]; continue; } this.speakLine(m); }
     }
   }
+  /** Bir modelin yazdığı konuşma: satırlar sırayla, kişi yerindeyken söylenir; günlüğe de düşer. */
+  speak(lines) { this.talkQueue.push(...lines.filter((l) => this.byId[l.who])); this.talkT = 3.4; }
+  updateTalk(dt) {
+    if (!this.talkQueue.length) return;
+    this.talkT += dt; if (this.talkT < 3.4) return;
+    this.talkT = 0; const line = this.talkQueue.shift(); const ag = this.byId[line.who];
+    this.say(ag, line.text, 3.4); this.log(null, line.text, null, line.who);
+  }
   speakLine(m) {
     const [who, text] = CONVO_DB[m.line], other = who === 'defne' ? 'baran' : 'defne';
     this.byId[who].pose = 'talk'; this.byId[other].pose = 'idle';
@@ -273,7 +281,7 @@ export class OfficeEngine {
     // A frame's time can come before the start's: dt never goes below zero.
     const dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000)) * this.speed; this.last = now; this.t += dt; this.rect = this.cv.getBoundingClientRect();
     for (const a of this.agents) this.updateAgent(a, dt);
-    this.updateMeets(dt);
+    this.updateMeets(dt); this.updateTalk(dt / this.speed);
     for (const b of this.bubbles) b.t += dt; this.bubbles = this.bubbles.filter((b) => b.t < b.dur);
     this.updateDoors(dt);
     if (this.camTarget) { const a = this.byId[this.camTarget]; const k = 1 - Math.pow(0.002, dt / this.speed); this.camX += (a.x - this.camX) * k; this.camY += (a.y - 12 - this.camY) * k; this.clampCam(); if (Math.hypot(a.x - this.camX, a.y - 12 - this.camY) < 1) this.camTarget = null; }

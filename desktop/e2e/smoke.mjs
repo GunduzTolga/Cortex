@@ -76,6 +76,11 @@ const lmStudio = http.createServer((request, response) => {
     if (request.url === '/api/v0/models') {
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ data: [{ id: 'qwen-e2e', type: 'llm', state: 'loaded', loaded_context_length: 16384 }] }));
+    } else if (request.url === '/v1/chat/completions' && JSON.parse(body).stream === false) {
+      // The office's live conversation: asked once, not streamed (electron/services/officeTalk.ts).
+      lmBodies.push(JSON.parse(body));
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ choices: [{ message: { content: '{"lines":[{"who":"defne","text":"«Plan» notuna dipnot lazım."},{"who":"pyn","text":"Hmm."}]}' } }] }));
     } else if (request.url === '/v1/chat/completions') {
       lmBodies.push(JSON.parse(body));
       response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -195,7 +200,7 @@ const windowAlone = await page.evaluate(async () => {
   });
   return { node: typeof require + typeof process, bridge: Object.keys(window.cortex).sort(), fetched, image, opened: window.open('https://example.com/') === null };
 });
-check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,notes,on,settings,setup,vault');
+check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,notes,office,on,settings,setup,vault');
 check('it reaches nothing on the network: no request, no image', windowAlone.fetched === 'blocked' && windowAlone.image === 'blocked');
 check('and opens no window of its own', windowAlone.opened && app.windows().length === 1);
 
@@ -637,6 +642,18 @@ await page.waitForTimeout(800);
 await shoot('17-office-card.png');
 await page.locator('[data-ofis-gear]').click();
 check('the gear opens the office’s settings, live conversations off', (await shownSoon(page.locator('[data-ofis-settings]'))) && (await page.locator('[data-ofis-live]').getAttribute('aria-checked')) === 'false');
+// Live conversations by a model chosen here: LM Studio's stand-in writes one about the vault's notes, and the team says it.
+await page.locator('[data-ofis-live]').click();
+await page.locator('[data-ofis-tool="lmstudio"]').click();
+check('the tool’s models are offered, the loaded one marked', await shownSoon(page.locator('[data-ofis-model="qwen-e2e"]')));
+await page.locator('[data-ofis-model="qwen-e2e"]').click();
+await page.locator('[data-ofis-talk]').click();
+check(
+  'and the model chosen writes the team a conversation, said in the office and logged',
+  (await shownSoon(page.locator('[data-ofis-line]', { hasText: '«Plan» notuna dipnot lazım.' }), 15_000)) &&
+    lmBodies.some((one) => one.stream === false && one.model === 'qwen-e2e' && JSON.stringify(one.messages).includes('Defne')),
+);
+await page.locator('[data-ofis-live]').click();
 await page.keyboard.press('Escape');
 check('and Escape closes them', await page.locator('[data-ofis-settings]').waitFor({ state: 'detached', timeout: 3_000 }).then(() => true, () => false));
 check(

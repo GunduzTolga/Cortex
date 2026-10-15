@@ -448,8 +448,9 @@
 .ofis-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  max-height: 62px;
+  gap: 3px;
+  /* Every chip shows: they are small enough to fit in two rows. */
+  max-height: none;
   overflow-y: auto;
   overflow-x: hidden;
   flex: none;
@@ -457,12 +458,13 @@
 .ofis-chip {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 7px;
+  gap: 3px;
+  padding: 1px 5px;
   border: 1px solid var(--ofis-cizgi);
   background: var(--ofis-panel);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 9px;
+  line-height: 13px;
   white-space: nowrap;
 }
 .ofis-chip:hover {
@@ -470,6 +472,18 @@
 }
 .ofis-chip[aria-pressed='true'] {
   border-color: var(--ofis-altin);
+}
+.ofis-chip-mood {
+  font-size: 9px;
+  line-height: 1;
+}
+.ofis-model-name {
+  display: inline-block;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 .ofis-chip i {
   width: 6px;

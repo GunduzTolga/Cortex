@@ -4,6 +4,7 @@ import { readSettings, settingsUnreadable, tidyName, updateSettings } from './se
 import { setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
+import * as officeTalk from './services/officeTalk';
 import * as setup from './services/setup';
 import * as vaultNotes from './services/vaultNotes';
 
@@ -136,6 +137,10 @@ export function registerIpc(): void {
     auth.forgetToolKey(cli);
     return auth.authStatuses();
   });
+
+  // The office's live conversations (services/officeTalk.ts): the window names a tool and a model it was offered.
+  handle('office:models', (tool) => officeTalk.talkModels(tool));
+  handle('office:talk', (request) => officeTalk.officeTalk(request));
 
   // Cortex's engine and voice typing set up from the app (services/setup.ts): the window names a job, never a program or a file.
   setup.onSetupPush((payload) => broadcast('setup:event', payload));

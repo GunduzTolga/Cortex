@@ -108,8 +108,8 @@ test('no circumflex: the Turkish is written the way the rest of the window write
 /* Every sentence thrown under electron/ has its Turkish               */
 /* ------------------------------------------------------------------ */
 
-/** Speaks Turkish already, and has its own tests (tests/setup.test.ts). */
-const TURKISH_ALREADY = new Set([path.join('electron', 'services', 'setup.ts')]);
+/** Speak the window's language themselves (`say(tr, en)`), and have their own tests. */
+const TURKISH_ALREADY = new Set([path.join('electron', 'services', 'setup.ts'), path.join('electron', 'services', 'officeTalk.ts')]);
 
 /**
  * Thrown, and never shown: each is caught where it is thrown, or answered to

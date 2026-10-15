@@ -74,6 +74,10 @@ const api: CortexApi = {
     setKey: (cli, key, baseUrl) => invoke('chat:setKey', cli, key, baseUrl),
     forgetKey: (cli) => invoke('chat:forgetKey', cli),
   },
+  office: {
+    models: (tool) => invoke('office:models', tool),
+    talk: (request) => invoke('office:talk', request),
+  },
   setup: {
     status: () => invoke('setup:status'),
     installPython: () => invoke('setup:installPython'),

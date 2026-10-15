@@ -1,6 +1,7 @@
 import type { ChatApi, ChatPush } from './chat';
 import type { AppLanguage } from './language';
 import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
+import type { OfficeApi } from './office';
 import type { SetupApi, SetupPush } from './setup';
 
 /**
@@ -83,6 +84,8 @@ export interface CortexApi {
   chat: ChatApi;
   /** Cortex's engine and voice typing set up from the app (shared/setup.ts). */
   setup: SetupApi;
+  /** The office's live conversations, written by the model chosen in its settings (shared/office.ts). */
+  office: OfficeApi;
   on: {
     /** The vault changed on disk, or another vault was chosen: read the index again. */
     notesChanged(handler: () => void): () => void;

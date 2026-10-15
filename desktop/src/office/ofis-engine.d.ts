@@ -60,6 +60,8 @@ export class OfficeEngine {
   zoomAt(factor: number, clientX?: number, clientY?: number): void;
   setPreview(canvas: HTMLCanvasElement | null, roomId: string | null): void;
   triggerConvo(): void;
+  /** A conversation a model wrote: said line by line where each person is, and logged. */
+  speak(lines: Array<{ who: string; text: string }>): void;
   snapshot(): AgentSnapshot[];
   setActive(on: boolean): void;
   setLeds(led: Partial<Record<Art.ToolId, Led>>): void;

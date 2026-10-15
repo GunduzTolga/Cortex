@@ -9,7 +9,8 @@ import * as art from './office-art.js';
 import type { ToolId } from './office-art.js';
 import { OfficeEngine, clockText, lightForHour, type AgentSnapshot, type Led, type LogEntry } from './ofis-engine.js';
 import { useChat } from '../chat/chatStore';
-import { useApp } from '../store/app';
+import { refusal, useApp } from '../store/app';
+import { TALK_TOOLS, type TalkTool } from '@shared/office';
 import { useNotes } from '../notes/notesStore';
 import { useLanguage, useT } from '../i18n/useT';
 import type { Key } from '../i18n';
@@ -38,9 +39,11 @@ interface Prefs {
   logHeight: number;
   live: boolean;
   tool: string | null;
+  /** The model the tool writes with; null for a server's loaded one, Claude Code's quickest. */
+  model: string | null;
   every: number;
 }
-const DEFAULTS: Prefs = { followClock: true, pixel: true, logHeight: 150, live: false, tool: null, every: 20 };
+const DEFAULTS: Prefs = { followClock: true, pixel: true, logHeight: 150, live: false, tool: null, model: null, every: 20 };
 
 function loadPrefs(): Prefs {
   try {
@@ -307,12 +310,59 @@ export function OfficeView({ visible }: { visible: boolean }) {
   ];
   const people = room ? snapshot.filter((one) => one.room === room) : [];
 
-  // The tools a live conversation could be written by: signed in, or a model server up.
+  // The tools a live conversation can be written by: a model server up on this machine, or Claude Code signed in.
   const liveTools = useMemo(() => {
-    const signed = (auth ?? []).filter((one) => !one.local && one.installed && one.signedIn).map((one) => one.id as string);
     const local = (clis ?? []).filter((one) => one.local === 'up').map((one) => one.id as string);
-    return [...signed, ...local];
+    const claude = (auth ?? []).some((one) => one.id === 'claude' && one.installed && one.signedIn !== false) ? ['claude'] : [];
+    return [...local, ...claude].filter((id): id is TalkTool => TALK_TOOLS.includes(id as TalkTool));
   }, [auth, clis]);
+
+  // The chosen tool's models, its loaded ones first: a different model can write the office's talk than the one chatting.
+  const [models, setModels] = useState<{ models: string[]; loaded: string[] } | null>(null);
+  useEffect(() => {
+    setModels(null);
+    if (!prefs.live || !prefs.tool || !TALK_TOOLS.includes(prefs.tool as TalkTool)) return;
+    let live = true;
+    window.cortex.office.models(prefs.tool as TalkTool).then(
+      (found) => live && setModels(found),
+      () => live && setModels({ models: [], loaded: [] }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [prefs.live, prefs.tool]);
+
+  // A conversation written by the chosen model, about the notes worked on last, said in the office.
+  const [writing, setWriting] = useState(false);
+  const writeTalk = async () => {
+    const tool = prefs.tool as TalkTool | null;
+    if (!tool || !TALK_TOOLS.includes(tool) || writing) return;
+    setWriting(true);
+    setLastTalk(t('office.settings.writing'));
+    const cast = Object.entries(art.CHARACTERS)
+      .filter(([, one]) => (one as { kind?: string }).kind !== 'cat')
+      .map(([id, one]) => {
+        const person = one as { name: string; role: string; roleEn: string; bio?: string };
+        return { id, name: person.name, role: language === 'en' ? person.roleEn : person.role, bio: person.bio ?? '' };
+      });
+    try {
+      const lines = await window.cortex.office.talk({ tool, model: prefs.model, cast, language: language === 'en' ? 'en' : 'tr' });
+      engineRef.current?.speak(lines);
+      setLastTalk(t('office.settings.lastNow', { tool: (TOOL_NAME[tool] ?? tool) + (prefs.model ? ` · ${prefs.model}` : '') }));
+    } catch (err) {
+      setLastTalk(t('office.settings.failed', { reason: refusal(err instanceof Error ? err.message : String(err)) }));
+    } finally {
+      setWriting(false);
+    }
+  };
+  const writeRef = useRef(writeTalk);
+  writeRef.current = writeTalk;
+  // Every few minutes while the office is in front; a hidden tab spends no tokens.
+  useEffect(() => {
+    if (!prefs.live || !prefs.tool || !visible) return;
+    const timer = setInterval(() => void writeRef.current(), prefs.every * 60_000);
+    return () => clearInterval(timer);
+  }, [prefs.live, prefs.tool, prefs.every, visible]);
 
   const pickCharacter = (id: string) => {
     engineRef.current?.focus(id);
@@ -412,7 +462,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
                   {liveTools.length ? (
                     <div className="ofis-tools">
                       {liveTools.map((id) => (
-                        <button key={id} type="button" className="ofis-tool" aria-pressed={prefs.tool === id} onClick={() => change({ tool: id })}>
+                        <button key={id} type="button" className="ofis-tool" aria-pressed={prefs.tool === id} onClick={() => change({ tool: id, model: null })} data-ofis-tool={id}>
                           <i style={{ background: '#5BD77A' }} />
                           {TOOL_NAME[id] ?? id}
                         </button>
@@ -422,6 +472,28 @@ export function OfficeView({ visible }: { visible: boolean }) {
                     <div className="ofis-hint-text">{t('office.settings.tool.none')}</div>
                   )}
                 </div>
+                {prefs.tool && liveTools.includes(prefs.tool as TalkTool) ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }} data-ofis-models>
+                    <span className="ofis-small-label">{t('office.settings.model')}</span>
+                    {!models ? (
+                      <div className="ofis-hint-text">{t('office.settings.model.loading')}</div>
+                    ) : models.models.length ? (
+                      <div className="ofis-tools">
+                        <button type="button" className="ofis-tool" aria-pressed={prefs.model === null} onClick={() => change({ model: null })} data-ofis-model="">
+                          {t(prefs.tool === 'claude' ? 'office.settings.model.quick' : 'office.settings.model.loaded')}
+                        </button>
+                        {models.models.map((name) => (
+                          <button key={name} type="button" className="ofis-tool" aria-pressed={prefs.model === name} onClick={() => change({ model: name })} title={name} data-ofis-model={name}>
+                            {models.loaded.includes(name) ? <i style={{ background: '#5BD77A' }} /> : null}
+                            <span className="ofis-model-name">{name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="ofis-hint-text">{t('office.settings.model.none')}</div>
+                    )}
+                  </div>
+                ) : null}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   <span className="ofis-small-label">{t('office.settings.every')}</span>
                   <div className="ofis-segments">
@@ -432,15 +504,8 @@ export function OfficeView({ visible }: { visible: boolean }) {
                     ))}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className="ofis-cta"
-                  onClick={() => {
-                    engineRef.current?.triggerConvo();
-                    setLastTalk(t('office.settings.lastNow', { tool: TOOL_NAME[prefs.tool ?? ''] ?? '—' }));
-                  }}
-                >
-                  {t('office.settings.now')}
+                <button type="button" className="ofis-cta" disabled={writing || !prefs.tool || !liveTools.includes(prefs.tool as TalkTool)} onClick={() => void writeTalk()} data-ofis-talk>
+                  {t(writing ? 'office.settings.writing' : 'office.settings.now')}
                 </button>
                 {lastTalk ? <div className="ofis-hint-text">{lastTalk}</div> : null}
               </div>
@@ -618,8 +683,8 @@ export function OfficeView({ visible }: { visible: boolean }) {
                 <button key={id} type="button" className="ofis-chip" aria-pressed={selected === id} onClick={() => pickCharacter(id)} data-ofis-chip={id}>
                   <i style={{ background: character.color }} />
                   <span style={{ fontWeight: 700 }}>{character.name}</span>
-                  <span>{byId[id]?.mood ?? '🙂'}</span>
-                  <span className="ofis-dim">{act.length > 22 ? `${act.slice(0, 21)}…` : act}</span>
+                  <span className="ofis-chip-mood">{byId[id]?.mood ?? '🙂'}</span>
+                  <span className="ofis-dim" title={act}>{act.length > 12 ? `${act.slice(0, 11)}…` : act}</span>
                 </button>
               );
             })}
