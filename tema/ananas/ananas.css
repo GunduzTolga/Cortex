@@ -522,6 +522,10 @@ button.mod-cta:active {
   background: var(--ananas-pyn-yuz) center / contain no-repeat;
 }
 
+.theme-dark .workspace-leaf-content[data-type="empty"] .empty-state-container::before {
+  background-image: var(--ananas-pyn-yuz-koyu);
+}
+
 .workspace-leaf-content[data-type="empty"] .empty-state-action-list::before {
   content: 'Pyn burada.';
   display: block;

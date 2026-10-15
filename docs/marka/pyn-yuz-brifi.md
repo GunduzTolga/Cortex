@@ -1,5 +1,7 @@
 # Pyn'in yüzü: Claude Design brifi
 
+> **Teslim alındı (1.0.9):** çizimler `tema/ananas/marka/pyn-yuz/` içinde; PNG'yi `py -3 scripts/marka_uret.py yuz <teslim>/pyn-yuz` üretir.
+
 Bu brifi Claude Design'a ver. Ek olarak iki dosyayı yükle:
 - **`tema/ananas/marka/pyn-muhur-200.png` (mühür):** çizgi kalınlığı ve renkler için **örnek alınacak** görsel.
 - **`tema/ananas/marka/pyn-yuz-256.png` (bugünkü yüz):** **bırakılacak** olanın örneği. Karakter aynı kalıyor, çizim baştan yapılıyor.

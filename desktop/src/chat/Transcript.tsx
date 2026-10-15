@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Brain, Check, ChevronRight, FileText, Globe, ListChecks, PencilLine, Search, Terminal, Wrench, X } from 'lucide-react';
-import face from '../../../tema/ananas/marka/pyn-yuz-256.png';
+// The small face: drawn for 24-32 px. While Pyn is still writing, the thinking one.
+import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz-kucuk.svg';
+import thinkingFace from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz-kucuk-dusunuyor.svg';
 import type { Key } from '../i18n';
 import { useT } from '../i18n/useT';
 import { NoteMarkdown } from '../notes/NoteMarkdown';
@@ -99,7 +101,7 @@ function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?
   const answered = turn.asked.filter((one) => one.answer !== undefined);
   return (
     <div className="flex gap-3" data-chat-answer>
-      <img src={face} alt="" className="mt-0.5 h-7 w-7 shrink-0 rounded-full" />
+      <img src={working ? thinkingFace : face} alt="" className="mt-0.5 h-7 w-7 shrink-0" data-chat-face={working ? 'thinking' : 'idle'} />
       <div className="min-w-0 flex-1">
         {turn.thought ? (
           <Fold data="thought" icon={<Brain size={12} />} label={t(working && !turn.text ? 'chat.thinking' : 'chat.thought')} busy={working && !turn.text}>

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" stroke-linecap="round" stroke-linejoin="round">
+<defs><clipPath id="kafes-kirp"><path d="M128.2,68.8C86.1,68.8 58.1,112.2 58.1,167.4C58.1,208.7 86.1,241.1 128.2,241.1C170.2,241.1 198.2,208.7 198.2,167.4C198.2,112.2 170.2,68.8 128.2,68.8Z"></path></clipPath></defs>
+<g id="dis-hat"><path fill="#e8b23a" stroke="#e8b23a" stroke-width="15.4" d="M89.5,78.9Q73.9,60.2 58,39.9Q84.8,51.3 110.7,66.8ZM145.3,66.8Q171.2,51.3 198,39.9Q182.1,60.2 166.5,78.9ZM98.7,70.5Q92.4,41.1 87.5,12.6Q103.7,33.9 117.9,57.6ZM138.1,57.6Q152.3,33.9 168.5,12.6Q163.6,41.1 157.3,70.5ZM111.7,68.8Q119.6,37.5 128,8.2Q136.4,37.5 144.3,68.8Z"></path></g>
+<g id="halka"><circle cx="128" cy="128" r="119" fill="#f3efe4" stroke="#e8b23a" stroke-width="13.1"></circle></g>
+<g id="tac">
+<path fill="#5c6b4a" d="M89.5,78.9Q73.9,60.2 58,39.9Q84.8,51.3 110.7,66.8Z"></path><path fill="#a3b48a" d="M89.5,78.9Q73.9,60.2 58,39.9L100.1,72.9Z"></path><path fill="none" stroke="#1b1712" stroke-width="9.4" d="M89.5,78.9Q73.9,60.2 58,39.9Q84.8,51.3 110.7,66.8Z"></path>
+<path fill="#5c6b4a" d="M145.3,66.8Q171.2,51.3 198,39.9Q182.1,60.2 166.5,78.9Z"></path><path fill="#a3b48a" d="M145.3,66.8Q171.2,51.3 198,39.9L155.9,72.9Z"></path><path fill="none" stroke="#1b1712" stroke-width="9.4" d="M145.3,66.8Q171.2,51.3 198,39.9Q182.1,60.2 166.5,78.9Z"></path>
+<path fill="#5c6b4a" d="M98.7,70.5Q92.4,41.1 87.5,12.6Q103.7,33.9 117.9,57.6Z"></path><path fill="#a3b48a" d="M98.7,70.5Q92.4,41.1 87.5,12.6L108.3,64.1Z"></path><path fill="none" stroke="#1b1712" stroke-width="9.4" d="M98.7,70.5Q92.4,41.1 87.5,12.6Q103.7,33.9 117.9,57.6Z"></path>
+<path fill="#5c6b4a" d="M138.1,57.6Q152.3,33.9 168.5,12.6Q163.6,41.1 157.3,70.5Z"></path><path fill="#a3b48a" d="M138.1,57.6Q152.3,33.9 168.5,12.6L147.7,64.1Z"></path><path fill="none" stroke="#1b1712" stroke-width="9.4" d="M138.1,57.6Q152.3,33.9 168.5,12.6Q163.6,41.1 157.3,70.5Z"></path>
+<path fill="#5c6b4a" d="M111.7,68.8Q119.6,37.5 128,8.2Q136.4,37.5 144.3,68.8Z"></path><path fill="#a3b48a" d="M111.7,68.8Q119.6,37.5 128,8.2L128,68.8Z"></path><path fill="none" stroke="#1b1712" stroke-width="9.4" d="M111.7,68.8Q119.6,37.5 128,8.2Q136.4,37.5 144.3,68.8Z"></path>
+</g>
+<g id="govde">
+<path fill="#c98a2e" d="M128.2,68.8C86.1,68.8 58.1,112.2 58.1,167.4C58.1,208.7 86.1,241.1 128.2,241.1C170.2,241.1 198.2,208.7 198.2,167.4C198.2,112.2 170.2,68.8 128.2,68.8Z"></path>
+<path fill="#e8b23a" d="M128.2,68.8C86.1,68.8 58.1,112.2 58.1,167.4C58.1,208.7 86.1,241.1 128.2,241.1C158.1,241.1 178.1,208.7 178.1,167.4C178.1,112.2 158.1,68.8 128.2,68.8Z"></path>
+<g id="kafes" clip-path="url(#kafes-kirp)"><path fill="none" stroke="#1b1712" stroke-opacity=".2" stroke-width="7.4" d="M32.5,60.1L198.7,251.2M122.9,60.1L-43.2,251.2M82.8,60.1L249,251.2M173.2,60.1L7,251.2M133.1,60.1L299.2,251.2M223.5,60.1L57.3,251.2"></path></g>
+<path fill="none" stroke="#1b1712" stroke-width="10.4" d="M128.2,68.8C86.1,68.8 58.1,112.2 58.1,167.4C58.1,208.7 86.1,241.1 128.2,241.1C170.2,241.1 198.2,208.7 198.2,167.4C198.2,112.2 170.2,68.8 128.2,68.8Z"></path>
+</g>
+<g id="yuz">
+<path id="kaslar" fill="none" stroke="#1b1712" stroke-width="10.4" stroke-linecap="butt" d="M80.2,111.4L117.6,111.4M138.9,111.4L176.3,111.4"></path>
+<g id="goz-sol"><path fill="none" stroke="#1b1712" stroke-width="10.4" d="M78.9,142.2Q97,157.3 115.1,142.2"></path></g>
+<g id="goz-sag"><path fill="none" stroke="#1b1712" stroke-width="10.4" d="M141.4,142.2Q159.5,157.3 177.6,142.2"></path></g>
+<g id="gozluk" fill="none" stroke="#1b1712" stroke-width="9.4"><circle cx="93.1" cy="146.9" r="24.5"></circle><circle cx="160.7" cy="146.9" r="24.5"></circle><path d="M117.6,143.6Q127.2,136.9 136.2,143.6M69.7,140.6L62.5,135.5M184.1,140.6L193.5,135.5"></path></g>
+<g id="burun"><path fill="none" stroke="#1b1712" stroke-width="9.7" d="M123.8,150.6L123.8,190.9L138.9,190.9"></path></g>
+<g id="agiz"><path fill="none" stroke="#1b1712" stroke-width="9.7" d="M116.3,209.6L139.7,209.6"></path></g>
+</g></svg>

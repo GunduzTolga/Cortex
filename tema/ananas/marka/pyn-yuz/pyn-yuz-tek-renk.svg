@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" stroke-linecap="round" stroke-linejoin="round">
+<defs><clipPath id="kafes-kirp"><path clip-rule="evenodd" d="M128.2,85.6C89.5,85.6 63.8,125.5 63.8,176.2C63.8,214.1 89.5,243.9 128.2,243.9C166.8,243.9 192.5,214.1 192.5,176.2C192.5,125.5 166.8,85.6 128.2,85.6ZM71.9,157.4A24,24 0 1 0 120,157.4A24,24 0 1 0 71.9,157.4ZM134,157.4A24,24 0 1 0 182.1,157.4A24,24 0 1 0 134,157.4ZM98,206.2A31.6,25.4 0 1 0 161.1,206.2A31.6,25.4 0 1 0 98,206.2Z"></path></clipPath></defs>
+<g id="halka"><circle cx="128" cy="140" r="109.3" fill="none" stroke="#1b1712" stroke-width="7.4"></circle></g>
+<g id="tac">
+<path fill="none" stroke="#1b1712" stroke-width="6.2" d="M92.6,94.9Q67.9,72.7 47.2,46Q82.3,61 112.1,83.8Z"></path><path fill="none" stroke="#1b1712" stroke-width="3.7" d="M47.2,46L88.6,78.5"></path>
+<path fill="none" stroke="#1b1712" stroke-width="6.2" d="M143.9,83.8Q173.7,61 208.9,46Q188.1,72.7 163.4,94.9Z"></path><path fill="none" stroke="#1b1712" stroke-width="3.7" d="M208.9,46L167.4,78.5"></path>
+<path fill="none" stroke="#1b1712" stroke-width="6.2" d="M101.1,87.2Q89,51.1 82.6,13.7Q103.8,41.6 118.8,75.3Z"></path><path fill="none" stroke="#1b1712" stroke-width="3.7" d="M82.6,13.7L103.1,64.3"></path>
+<path fill="none" stroke="#1b1712" stroke-width="6.2" d="M137.2,75.3Q152.2,41.6 173.4,13.7Q167,51.1 155,87.2Z"></path><path fill="none" stroke="#1b1712" stroke-width="3.7" d="M173.4,13.7L152.9,64.3"></path>
+<path fill="none" stroke="#1b1712" stroke-width="6.2" d="M113.1,85.6Q116.9,44.5 128,6Q139.1,44.5 142.9,85.6Z"></path><path fill="none" stroke="#1b1712" stroke-width="3.7" d="M128,6L128,65.7"></path>
+</g>
+<g id="govde">
+<g id="kafes" clip-path="url(#kafes-kirp)"><path fill="none" stroke="#1b1712" stroke-width="1.8" d="M-79.1,77.6L73.6,253.2M4,77.6L-148.7,253.2M-46,77.6L106.7,253.2M37.1,77.6L-115.6,253.2M-12.8,77.6L139.8,253.2M70.2,77.6L-82.5,253.2M20.3,77.6L172.9,253.2M103.3,77.6L-49.4,253.2M53.4,77.6L206,253.2M136.4,77.6L-16.3,253.2M86.5,77.6L239.1,253.2M169.5,77.6L16.9,253.2M119.6,77.6L272.3,253.2M202.6,77.6L50,253.2M152.7,77.6L305.4,253.2M235.7,77.6L83.1,253.2M185.8,77.6L338.5,253.2M268.8,77.6L116.2,253.2M218.9,77.6L371.6,253.2M302,77.6L149.3,253.2M252,77.6L404.7,253.2M335.1,77.6L182.4,253.2"></path></g>
+<path fill="none" stroke="#1b1712" stroke-width="6.2" d="M128.2,85.6C89.5,85.6 63.8,125.5 63.8,176.2C63.8,214.1 89.5,243.9 128.2,243.9C166.8,243.9 192.5,214.1 192.5,176.2C192.5,125.5 166.8,85.6 128.2,85.6Z"></path>
+</g>
+<g id="yuz">
+<path id="kaslar" fill="none" stroke="#1b1712" stroke-width="5.9" stroke-linecap="butt" d="M84.1,128.7L118.5,128.7M137.7,128.9Q155.7,115.5 172.7,126.3"></path>
+<g id="goz-sol"><circle cx="99.8" cy="158.9" r="5.1" fill="#1b1712"></circle><path fill="none" stroke="#1b1712" stroke-width="4.3" d="M82.9,153.1Q101.1,175.4 116.1,153.1"></path><path fill="none" stroke="#1b1712" stroke-width="6.2" d="M82.9,153.1Q99.5,148.1 116.1,153.1"></path></g>
+<g id="goz-sag"><circle cx="156.5" cy="158.9" r="5.1" fill="#1b1712"></circle><path fill="none" stroke="#1b1712" stroke-width="4.3" d="M140.3,153.1Q158.5,175.4 173.6,153.1"></path><path fill="none" stroke="#1b1712" stroke-width="6.2" d="M140.3,153.1Q157,148.1 173.6,153.1"></path></g>
+<g id="gozluk" fill="none" stroke="#1b1712" stroke-width="4.6"><circle cx="96" cy="157.4" r="21.6"></circle><circle cx="158" cy="157.4" r="21.6"></circle><path d="M117.5,154.3Q127.2,148.1 136.5,154.3M75.3,151.5L67.8,146.9M178.7,151.5L188.2,146.9"></path></g>
+<g id="burun"><path fill="none" stroke="#1b1712" stroke-width="4.6" d="M124.2,156.8L124.2,200L137.2,200"></path></g>
+<g id="agiz"><path fill="none" stroke="#1b1712" stroke-width="4.6" d="M107.5,214.7C122.6,216.5 141.1,215.9 150.3,207.3"></path><path fill="none" stroke="#1b1712" stroke-width="4.6" d="M150.6,197.7C156.5,198.3 159.9,202.7 158.8,208.5"></path><path fill="none" stroke="#1b1712" stroke-width="4.6" d="M120.3,224.4Q128,227.8 136.8,223.1"></path></g>
+</g></svg>
