@@ -628,7 +628,7 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
         self.assertIn('8×5 · az önce · Tab ile çıkar', texts)
         self.assertEqual(len(Photo.opened), 1)
         self.assertFalse(Path(Photo.opened[0]).parent.exists())
-        self.assertIn('✓  Beyne atıldı', root.canvas.texts())
+        self.assertIn('✓  Kaydedildi', root.canvas.texts())
 
     def test_tab_takes_the_picture_off_and_the_typed_line_is_the_note(self):
         result, root, _ = self.popup(self.shot_file(age=40), self.bitmap, [('key', '<Tab>'), ('look', None), ('type', 'yarın ara'), ('key', '<Return>')])

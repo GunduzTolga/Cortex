@@ -375,7 +375,7 @@ class FakeWorker:
 
 
 class PopupVoiceTest(unittest.TestCase):
-    """The Beyne at window with a microphone, built on a hidden Tk root and never shown."""
+    """The capture window ("Not al") with a microphone, built on a hidden Tk root and never shown."""
 
     def setUp(self):
         try:
@@ -406,6 +406,65 @@ class PopupVoiceTest(unittest.TestCase):
         self.root.update_idletasks()
         return win
 
+    @staticmethod
+    def texts(win):
+        canvas = next(child for child in win.winfo_children() if child.winfo_class() == 'Canvas')
+        return [canvas.itemcget(item, 'text') for item in canvas.find_all() if canvas.type(item) == 'text']
+
+    def cards(self):
+        return list((self.vault / yakala.INBOX).glob('*.md'))
+
+    def test_it_is_named_for_what_it_does_and_says_what_to_do_while_it_listens(self):
+        self.link.ready = True
+        win = self.window()
+        texts = self.texts(win)
+        self.assertIn('Not al', texts)
+        self.assertNotIn('Beyne at', texts)
+        self.assertIn('Konuş', texts, 'the microphone says what a press does')
+        self.assertTrue(any('Sesli komutlar' in text and '“kaydet”' in text for text in texts), 'the spoken commands are written down')
+        win.voice_toggle()
+        win.voice_event({'olay': 'dinliyor'})
+        texts = self.texts(win)
+        self.assertIn('Dinliyorum', texts)
+        self.assertTrue(any('Susunca yazarım' in text and 'Enter' in text and 'Esc' in text for text in texts),
+                        'how to stop is said while it listens')
+
+    def test_it_listens_as_it_opens_and_typing_lets_the_microphone_go(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        self.assertEqual(self.link.worker.sent, ['dinle'], 'listening at once')
+        win.voice_event({'olay': 'dinliyor'})
+        win.typed()
+        self.assertEqual(self.link.worker.sent, ['dinle', 'iptal'], 'a key typed: the microphone goes')
+        self.assertTrue(any('Yazmaya başladın' in text for text in self.texts(win)))
+        # What the helper still says about that recording changes nothing.
+        for event in ({'olay': 'dinliyor'}, {'olay': 'metin', 'metin': '', 'komut': None}):
+            win.voice_event(event)
+        self.assertIn('Konuş', self.texts(win))
+        win.voice_toggle()
+        self.assertEqual(self.link.worker.sent, ['dinle', 'iptal', 'dinle'], 'and a press listens again')
+
+    def test_opened_before_the_model_is_loaded_it_listens_once_it_is(self):
+        win = self.window(auto_listen=True)
+        self.assertEqual(self.link.worker.sent, [])
+        self.assertIn('Hazırlanıyor', self.texts(win))
+        self.link.ready = True
+        win.voice_event({'olay': 'hazir', 'aciklama': 'large-v3-turbo (ekran kartı, Vulkan)'})
+        self.assertEqual(self.link.worker.sent, ['dinle'])
+
+    def test_enter_while_it_listens_ends_it_and_saves_what_was_said(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        win.voice_event({'olay': 'dinliyor'})
+        win.enter()
+        self.assertEqual(self.link.worker.sent, ['dinle', 'bitir'])
+        self.assertEqual(self.cards(), [], 'not saved before the words are written')
+        win.voice_event({'olay': 'ceviriyor'})
+        win.voice_event({'olay': 'metin', 'metin': 'Cuma sunum provası', 'komut': None})
+        cards = self.cards()
+        self.assertEqual(len(cards), 1)
+        self.assertIn('Cuma sunum provası', cards[0].read_text(encoding='utf-8'))
+
     def test_what_is_said_is_written_into_the_field_and_kaydet_at_the_end_saves_it(self):
         self.link.ready = True
         win = self.window()
@@ -431,12 +490,14 @@ class PopupVoiceTest(unittest.TestCase):
     def test_until_the_model_is_loaded_the_microphone_waits_and_a_failure_is_said(self):
         win = self.window()
         win.voice_toggle()
-        self.assertEqual(self.link.worker.sent, [], 'not ready: nothing is recorded')
+        self.assertEqual(self.link.worker.sent, [], 'not ready: nothing is recorded yet')
         self.link.ready = True
         win.voice_event({'olay': 'hazir', 'aciklama': 'large-v3-turbo (işlemci)'})
+        self.assertEqual(self.link.worker.sent, ['dinle'], 'pressed while loading: it listens once loaded')
         win.voice_event({'olay': 'hata', 'neden': 'mikrofon', 'mesaj': 'Mikrofon açılamadı'})
+        self.assertIn('Ses: Mikrofon açılamadı', self.texts(win))
         win.voice_toggle()
-        self.assertEqual(self.link.worker.sent, ['dinle'], 'ready again after the failure')
+        self.assertEqual(self.link.worker.sent, ['dinle', 'dinle'], 'ready again after the failure')
         win.voice_event({'olay': 'metin', 'metin': 'sil bunu', 'komut': None})
         win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'sil'})
         win.voice_event({'olay': 'bitti'})

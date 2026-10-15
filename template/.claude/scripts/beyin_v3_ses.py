@@ -79,6 +79,7 @@ DEFAULTS = {
     'model': 'large-v3-turbo',      # on an NVIDIA card
     'cpu_model': 'large-v3-turbo',  # on the processor; 'small' is faster and less accurate
     'uyandirma': False,             # "Pyn, not al" opens the window: the microphone stays open
+    'otomatik_dinle': True,         # the window listens as it opens; typing lets the microphone go
     'uyandirma_sozu': 'pyn not al',
     'sessizlik_sn': 1.4,            # after speech, this much silence ends the recording
     'en_uzun_sn': 120,
@@ -488,7 +489,8 @@ def status(state):
         pass
     config = load_config(state)
     return {'kurulu': installed(state), 'acik': bool(config['acik']), 'uyandirma': bool(config['uyandirma']),
-            'uyandirma_sozu': config['uyandirma_sozu'], 'model': marker.get('model'), 'ekran_karti': marker.get('ekran_karti'),
+            'uyandirma_sozu': config['uyandirma_sozu'], 'otomatik_dinle': bool(config['otomatik_dinle']),
+            'model': marker.get('model'), 'ekran_karti': marker.get('ekran_karti'),
             'motor': engine_in_use(state, config), 'klasor': str(ses_dir(state))}
 
 
@@ -615,6 +617,7 @@ def main(argv=None, vault=None, state=None):
     sub.add_parser('kaldir', help='Sanal ortamı ve modelleri sil')
     setting = sub.add_parser('ayar', help='Ayarları değiştir')
     setting.add_argument('--uyandirma', choices=('ac', 'kapat'), help='"Pyn, not al" ile açılsın mı (mikrofon sürekli açık kalır)')
+    setting.add_argument('--otomatik', choices=('ac', 'kapat'), help='Pencere açılınca kendiliğinden dinlesin mi')
     setting.add_argument('--ses', choices=('ac', 'kapat'), help='Sesle yazmayı aç ya da kapat')
     setting.add_argument('--model', help='Whisper modeli, örnek: large-v3-turbo, small')
     setting.add_argument('--motor', choices=('otomatik',) + ENGINES, help='Yazan motor: otomatik, cuda, vulkan ya da islemci')
@@ -648,6 +651,8 @@ def main(argv=None, vault=None, state=None):
         result['dinleyici'] = restart_listener(state)
     elif args.command == 'ayar':
         config = load_config(state)
+        if args.otomatik:
+            config['otomatik_dinle'] = args.otomatik == 'ac'
         if args.uyandirma:
             config['uyandirma'] = args.uyandirma == 'ac'
         if args.ses:

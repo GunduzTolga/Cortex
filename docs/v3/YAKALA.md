@@ -86,10 +86,16 @@ Pencereye konuşarak yazarsın; ses bilgisayardan çıkmaz, çeviriyi yerelde Wh
 - Kurulum bitince yakala dinleyicisi yeniden başlar.
 
 **Kullanım:**
-1. Ctrl+Alt+B ile pencereyi aç.
-2. Metin kutusunun sağındaki **mikrofona** tıkla ya da **Ctrl+Alt+B'ye yeniden bas**, konuş.
-3. Susunca (1,4 saniye) söylediğin kutuya yazılır. Sonda **"kaydet"** dersen yazılır ve kart kaydedilir.
-4. Tek başına **"sil"** kutuyu temizler; tek başına **"iptal"** ya da **"vazgeç"** pencereyi kapatır.
+1. Ctrl+Alt+B ile **Not al** penceresini aç. Pencere dinler halde açılır ("Dinliyorum"); konuş.
+2. Bitirmek için:
+   - Sus (1,4 saniye): söylediğin kutuya yazılır.
+   - **Enter**'a bas: yazılır ve kaydedilir.
+   - **Ctrl+Alt+B**'ye yeniden bas: dinleme biter, söylediğin yazılır.
+3. Sonda **"kaydet"** dersen yazılır ve kart kaydedilir.
+4. Tek başına **"sil"** kutuyu temizler. Tek başına **"iptal"** ya da **"vazgeç"** pencereyi kapatır. **Esc**, duyduğunu bırakır ve pencereyi kapatır.
+5. Klavyeyle yazmaya başlarsan mikrofon kapanır. Yeniden konuşmak için **Konuş** düğmesine tıkla.
+
+Pencere alanın hemen altında o an ne yapacağını yazar. Kendiliğinden dinlemeyi kapatmak için: masaüstü uygulamasında Ayarlar → Sesle yazma → "Pencere açılınca dinle" ya da `beyin.py ses ayar --otomatik kapat`.
 
 Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya da "bu satırı sil" olduğu gibi yazılır.
 
