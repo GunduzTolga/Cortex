@@ -159,7 +159,12 @@ def usable(state):
 # --------------------------------------------------------------- words --
 _FOLD = str.maketrans('ışğüöç', 'isguoc')
 # How recognizers spell the name they hear as "pin".
-NAME_SPELLINGS = {'pyn', 'pin', 'pinn', 'pen', 'pine', 'bin', 'fin'}
+NAME_SPELLINGS = {'pyn', 'pin', 'pinn', 'pen', 'pine', 'bin', 'fin', 'pay', 'bayan'}
+# Words of the small Turkish model's own vocabulary that sound like "Pyn" said as "payn" or "pin".
+# The model can only write words it knows, and "pyn", "payn", "pin" are not among them: listening
+# freely, it wrote "payn not al" as "aynen" or "pan am". Given the phrase as a grammar it hears
+# one of these instead (tried on synthesized "payn not al": "pay not al", every time).
+WAKE_NAMES = ('pay', 'bin', 'bayan')
 
 
 def tr_lower(text):
@@ -186,6 +191,18 @@ def wake_heard(text, phrase=DEFAULTS['uyandirma_sozu']):
         if window[0] == head or window[0] in NAME_SPELLINGS or difflib.SequenceMatcher(None, window[0], head).ratio() >= 0.6:
             return True
     return False
+
+
+def wake_grammar(phrase=DEFAULTS['uyandirma_sozu']):
+    """What the wake listener may hear, as a Vosk grammar (JSON): the wake phrase with Pyn's name
+    and the sound-alikes the model knows, everything else "[unk]". A grammar also keeps other
+    speech from looking like the phrase: "bunu not al" and "not al" alone are not it."""
+    said = words(phrase)
+    if not said:
+        return json.dumps(['[unk]'])
+    head, tail = said[0], ' '.join(said[1:])
+    names = [head] + [name for name in WAKE_NAMES if name != head]
+    return json.dumps([(name + ' ' + tail).strip() for name in names] + ['[unk]'], ensure_ascii=False)
 
 
 def _without_last_words(text, count):
@@ -1005,7 +1022,8 @@ class Wake:
         SetLogLevel(-1)
         self.phrase = config['uyandirma_sozu']
         self.model = Model(str(ses.ses_dir(state) / ses.VOSK_DIR))
-        self.recognizer = KaldiRecognizer(self.model, RATE)
+        # A grammar, not free listening: the model knows no "Pyn" and would never write it.
+        self.recognizer = KaldiRecognizer(self.model, RATE, ses.wake_grammar(self.phrase))
         self.audio = queue.Queue()
         self.recorder = Recorder(config)
 

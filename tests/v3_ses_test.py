@@ -32,6 +32,16 @@ class WordsTest(unittest.TestCase):
         for said in ('not al', 'pyn not', 'bunu not alma', 'pyn notları aç', 'pin kodunu al'):
             self.assertFalse(ses.wake_heard(said), said)
 
+    def test_the_wake_listener_hears_a_grammar_of_the_phrase_and_its_sound_alikes(self):
+        grammar = json.loads(ses.wake_grammar())
+        self.assertEqual(grammar[0], 'pyn not al')
+        self.assertIn('pay not al', grammar, '"payn not al" as the small model hears it')
+        self.assertEqual(grammar[-1], '[unk]', 'anything else is nothing')
+        self.assertNotIn('not al', grammar, 'never the command without the name')
+        for heard in ('pay not al', 'bin not al', 'bayan not al'):
+            self.assertTrue(ses.wake_heard(heard), heard)
+        self.assertEqual(json.loads(ses.wake_grammar('hey pyn not al'))[1], 'pay pyn not al')
+
     def test_kaydet_counts_at_the_end_sil_and_iptal_only_alone(self):
         self.assertEqual(ses.command_of('Toplantı notu, kaydet.'), ('kaydet', 'Toplantı notu'))
         self.assertEqual(ses.command_of('Kaydet'), ('kaydet', ''))
