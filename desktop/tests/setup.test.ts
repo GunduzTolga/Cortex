@@ -10,6 +10,7 @@ import { updateSettings } from '../electron/services/settings';
 import {
   bundledPackage,
   compareVersions,
+  engineStep,
   PYTHON_INSTALL_ARGS,
   installEngine,
   installPython,
@@ -135,9 +136,7 @@ test('voice typing is set up from the app: yakala first if it is not, then the e
   assert.equal(after.job, null);
   assert.deepEqual(
     pushes.filter((one): one is { job: 'voice'; step: string } => 'step' in one).map((one) => one.step),
-    ['Yakala kuruluyor (Ctrl+Alt+B)…', 'Motor: AMD/Intel ekran kartı (Vulkan, whisper.cpp)', 'whisper.cpp modeli indiriliyor (yaklaşık 1,6 GB)…', '%50 (812 / 1624 MB)', '%100 (1624 / 1624 MB)'].map((step) =>
-      step.startsWith('%') ? `  ${step}` : step,
-    ),
+    ['Yakala kuruluyor (Ctrl+Alt+C)…', 'Motor: AMD/Intel ekran kartı (Vulkan, whisper.cpp)', 'whisper.cpp modeli indiriliyor (yaklaşık 1,6 GB)…', '%50 (812 / 1624 MB)', '%100 (1624 / 1624 MB)'],
   );
   assert.deepEqual(pushes[pushes.length - 1], { job: 'voice', done: true, ok: true });
   // The status asked before and after aside: what the job itself ran, in order.
@@ -233,4 +232,12 @@ test('the Python that came with the app is run only as python.org signed it: a f
     delete process.env.CORTEX_PYTHON_INSTALLERS;
   }
   assert.ok(PYTHON_INSTALL_ARGS.includes('InstallAllUsers=0') && PYTHON_INSTALL_ARGS.includes('PrependPath=0'), 'for this user only, the PATH left alone');
+});
+
+test('the engine’s Turkish steps are said in English in an English window, the numbers kept, and left alone in Turkish', () => {
+  assert.equal(engineStep('  %50 (812 / 1624 MB)', 'en'), '50% (812 / 1624 MB)');
+  assert.equal(engineStep('Motor: AMD/Intel ekran kartı (Vulkan, whisper.cpp)', 'en'), 'Engine: AMD / Intel graphics card (Vulkan, whisper.cpp)');
+  assert.equal(engineStep('whisper.cpp modeli indiriliyor (yaklaşık 1,6 GB)…', 'en'), 'Downloading the whisper.cpp model (about 1.6 GB)…');
+  assert.equal(engineStep('  %50 (812 / 1624 MB)', 'tr'), '%50 (812 / 1624 MB)');
+  assert.equal(engineStep('Bilinmeyen bir satır', 'en'), 'Bilinmeyen bir satır', 'an unknown line as it was');
 });

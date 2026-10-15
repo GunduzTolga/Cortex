@@ -1,7 +1,7 @@
 {
   "name": "cortex-desktop",
   "productName": "Cortex",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Cortex'in masaüstü uygulaması: kasayı Obsidian gibi okur ve yazar.",
   "private": true,
   "type": "module",
@@ -102,7 +102,7 @@
         "from": "python-paket",
         "to": "python",
         "filter": [
-          "python-*.exe"
+          "python-*.exe.paket"
         ]
       },
       {
@@ -129,8 +129,7 @@
       "installerHeader": "build/installerHeader.bmp",
       "uninstallerIcon": "../tema/ananas/marka/pyn.ico",
       "installerLanguages": [
-        "tr_TR",
-        "en_US"
+        "tr_TR"
       ],
       "language": "1055"
     }

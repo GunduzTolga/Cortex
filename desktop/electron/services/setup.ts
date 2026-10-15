@@ -35,6 +35,41 @@ const STATUS_TIMEOUT = 60_000;
 const JOB_TIMEOUT = 3 * 60 * 60_000;
 
 let current: SetupJob | null = null;
+
+/** A sentence in the window's language: the setup speaks as the window does, never both at once. */
+function say(tr: string, en: string): string {
+  return readSettings().language === 'en' ? en : tr;
+}
+
+/**
+ * What the vault's engine says while it installs voice typing is Turkish (beyin.py speaks
+ * Turkish); in an English window its steps are said in English, the numbers kept.
+ */
+const ENGINE_STEPS: Array<[RegExp, string]> = [
+  [/^Python: (.+)$/, 'Python: $1'],
+  [/^Motor: NVIDIA ekran kartı \(CUDA\)$/, 'Engine: NVIDIA graphics card (CUDA)'],
+  [/^Motor: AMD\/Intel ekran kartı \(Vulkan, whisper\.cpp\)$/, 'Engine: AMD / Intel graphics card (Vulkan, whisper.cpp)'],
+  [/^Motor: işlemci$/, 'Engine: the processor'],
+  [/^Vulkan derlemesi bu sürümde henüz yayımlanmadı\.$/, 'The Vulkan build is not published for this version yet.'],
+  [/^whisper\.cpp \(Vulkan\) indiriliyor…$/, 'Downloading whisper.cpp (Vulkan)…'],
+  [/^whisper\.cpp \(Vulkan\) indirilemedi: (.+)$/, 'whisper.cpp (Vulkan) could not be downloaded: $1'],
+  [/^İşlemciye geçiliyor\.$/, 'Going on with the processor.'],
+  [/^whisper\.cpp modeli indiriliyor \(yaklaşık 1,6 GB\)…$/, 'Downloading the whisper.cpp model (about 1.6 GB)…'],
+  [/^Sanal ortam kuruluyor…$/, 'Setting up its own environment…'],
+  [/^Paketler yükleniyor \(ilk kurulumda birkaç dakika sürer\): (.+)$/, 'Installing packages (a few minutes the first time): $1'],
+  [/^Uyandırma modeli indiriliyor \(yaklaşık 40 MB\)…$/, 'Downloading the wake-word model (about 40 MB)…'],
+  [/^Whisper modeli hazırlanıyor \(ilk seferde yaklaşık 1,6 GB iner\)…$/, 'Preparing the Whisper model (about 1.6 GB the first time)…'],
+  [/^Whisper modeli hazırlanıyor…$/, 'Preparing the Whisper model…'],
+  [/^%(\d+) \((\d+) \/ (\d+) MB\)$/, '$1% ($2 / $3 MB)'],
+];
+
+/** An engine step in the window's language. */
+export function engineStep(line: string, language: 'tr' | 'en' | null = readSettings().language): string {
+  const text = line.trim();
+  if (language !== 'en') return text;
+  for (const [pattern, english] of ENGINE_STEPS) if (pattern.test(text)) return text.replace(pattern, english);
+  return text;
+}
 let push: (message: SetupPush) => void = () => undefined;
 
 export function onSetupPush(listener: (message: SetupPush) => void): void {
@@ -82,8 +117,15 @@ function packageDirs(): string[] {
 function pythonInstaller(): string | null {
   const dirs = [path.join(process.resourcesPath ?? '', 'python'), path.join(app.getAppPath(), 'python-paket')];
   if (process.env.CORTEX_PYTHON_INSTALLERS) dirs.unshift(process.env.CORTEX_PYTHON_INSTALLERS);
-  return dirs.map((dir) => path.join(dir, pythonPin.file)).find((file) => fs.existsSync(file)) ?? null;
+  // Carried as `.paket`: a signed build signs every .exe among its resources, and signing this one
+  // again would change the bytes its SHA-256 is pinned to.
+  const names = [PYTHON_PACKED, pythonPin.file];
+  for (const dir of dirs) for (const name of names) if (fs.existsSync(path.join(dir, name))) return path.join(dir, name);
+  return null;
 }
+
+/** The name the Python installer travels under inside the app. */
+export const PYTHON_PACKED = `${pythonPin.file}.paket`;
 
 /**
  * How python.org's installer is run: quietly, for this user only (no administrator), with the
@@ -200,7 +242,7 @@ export function runPython(
   options: { cwd: string; timeout: number; onStep?: (step: string) => void; python?: { command: string; args: string[] } | null },
 ): Promise<Record<string, unknown>> {
   const python = options.python === undefined ? pythonOf() : options.python;
-  if (!python) return Promise.reject(new Error('Python bulunamadı.'));
+  if (!python) return Promise.reject(new Error(say('Python bulunamadı.', 'Python was not found.')));
   return new Promise((resolve, reject) => {
     const child = spawn(python.command, [...python.args, ...args], {
       cwd: options.cwd,
@@ -279,11 +321,11 @@ export async function setupStatus(): Promise<SetupStatus> {
 
 /** A job, the only one going on: its steps and its end pushed to the window, the status after it returned. */
 async function job(kind: SetupJob, work: (vault: string, step: (text: string) => void) => Promise<void>): Promise<SetupStatus> {
-  if (current) throw new Error('Başka bir kurulum sürüyor.');
+  if (current) throw new Error(say('Başka bir kurulum sürüyor.', 'Another setup is going on.'));
   // Python is installed before there is a vault, or a Python, to need.
   const vault = vaultOrNull();
-  if (kind !== 'python' && !vault) throw new Error('Önce bir kasa seç.');
-  if (kind !== 'python' && !pythonOf()) throw new Error('Python bulunamadı.');
+  if (kind !== 'python' && !vault) throw new Error(say('Önce bir kasa seç.', 'Choose a vault first.'));
+  if (kind !== 'python' && !pythonOf()) throw new Error(say('Python bulunamadı.', 'Python was not found.'));
   current = kind;
   try {
     await work(vault ?? '', (text) => push({ job: kind, step: text }));
@@ -301,17 +343,29 @@ async function job(kind: SetupJob, work: (vault: string, step: (text: string) =>
 /** The Python that came with the app, installed for this user where the machine has none. */
 export function installPython(): Promise<SetupStatus> {
   return job('python', async (_vault, step) => {
-    if (process.platform !== 'win32') throw new Error("Python yalnız Windows'ta uygulamayla gelir.");
+    if (process.platform !== 'win32') throw new Error(say("Python yalnız Windows'ta uygulamayla gelir.", 'Python comes with the app on Windows only.'));
     if (pythonOf()) return;
     const file = pythonInstaller();
-    if (!file) throw new Error('Uygulamayla gelen Python bulunamadı.');
-    step(`Python ${pythonPin.version} doğrulanıyor…`);
-    if ((await sha256Of(file)) !== pythonPin.sha256) throw new Error('Python kurucusu beklenen dosya değil (SHA-256 tutmadı); çalıştırılmadı.');
-    step(`Python ${pythonPin.version} kuruluyor (yalnız senin kullanıcın için)…`);
-    const code = await runInstaller(file, PYTHON_INSTALL_ARGS, JOB_TIMEOUT);
-    if (code === 1602) throw new Error('Python kurulumu iptal edildi.');
-    if (code !== 0 && code !== 3010) throw new Error(`Python kurulamadı (çıkış kodu ${code}).`);
-    if (!pythonOf()) throw new Error('Python kuruldu ama bulunamadı; uygulamayı yeniden aç.');
+    if (!file) throw new Error(say('Uygulamayla gelen Python bulunamadı.', 'The Python that came with the app was not found.'));
+    step(say(`Python ${pythonPin.version} doğrulanıyor…`, `Checking Python ${pythonPin.version}…`));
+    if ((await sha256Of(file)) !== pythonPin.sha256) {
+      throw new Error(say('Python kurucusu beklenen dosya değil (SHA-256 tutmadı); çalıştırılmadı.', 'The Python installer is not the expected file (its SHA-256 differs); it was not run.'));
+    }
+    step(say(`Python ${pythonPin.version} kuruluyor (yalnız senin kullanıcın için)…`, `Installing Python ${pythonPin.version} (for you only)…`));
+    // Run under its own name from a folder of its own: the bytes just checked, as python.org signed them.
+    const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-python-'));
+    let code: number;
+    try {
+      const runnable = path.join(folder, pythonPin.file);
+      fs.copyFileSync(file, runnable);
+      if ((await sha256Of(runnable)) !== pythonPin.sha256) throw new Error(say('Python kurucusu kopyalanırken değişti; çalıştırılmadı.', 'The Python installer changed while copied; it was not run.'));
+      code = await runInstaller(runnable, PYTHON_INSTALL_ARGS, JOB_TIMEOUT);
+    } finally {
+      fs.rmSync(folder, { recursive: true, force: true });
+    }
+    if (code === 1602) throw new Error(say('Python kurulumu iptal edildi.', 'The Python setup was cancelled.'));
+    if (code !== 0 && code !== 3010) throw new Error(say(`Python kurulamadı (çıkış kodu ${code}).`, `Python could not be installed (exit code ${code}).`));
+    if (!pythonOf()) throw new Error(say('Python kuruldu ama bulunamadı; uygulamayı yeniden aç.', 'Python was installed but not found; open the app again.'));
   });
 }
 
@@ -330,38 +384,38 @@ const UNPACK = [
 export function installEngine(): Promise<SetupStatus> {
   return job('engine', async (vault, step) => {
     const bundled = bundledPackage(packageDirs());
-    if (!bundled) throw new Error('Uygulamayla gelen Cortex paketi bulunamadı.');
+    if (!bundled) throw new Error(say('Uygulamayla gelen Cortex paketi bulunamadı.', 'The Cortex package that came with the app was not found.'));
     const installed = installedVersion(vault);
     if (installed) {
       if (compareVersions(installed, bundled.version) >= 0) return;
-      step(`Cortex ${installed} → ${bundled.version} güncelleniyor…`);
+      step(say(`Cortex ${installed} → ${bundled.version} güncelleniyor…`, `Updating Cortex ${installed} → ${bundled.version}…`));
       await runPython([path.join(vault, 'beyin.py'), 'update', '--package', bundled.file], { cwd: vault, timeout: JOB_TIMEOUT });
       return;
     }
     // No engine yet: the package's own installer, from a copy of it taken apart in a folder of its own.
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-kurulum-'));
     try {
-      step(`Cortex ${bundled.version} kasaya kuruluyor…`);
+      step(say(`Cortex ${bundled.version} kasaya kuruluyor…`, `Setting Cortex ${bundled.version} up in the vault…`));
       await runPython(['-I', '-c', UNPACK, bundled.file, folder], { cwd: folder, timeout: STATUS_TIMEOUT });
       await runPython(['-I', path.join(folder, 'scripts', 'install_v3.py'), '--vault', vault], { cwd: vault, timeout: JOB_TIMEOUT });
     } finally {
       fs.rmSync(folder, { recursive: true, force: true });
     }
-    if (!installedVersion(vault)) throw new Error('Kurulum bitti ama kasada Cortex görünmüyor.');
+    if (!installedVersion(vault)) throw new Error(say('Kurulum bitti ama kasada Cortex görünmüyor.', 'The setup ended but Cortex is not in the vault.'));
   });
 }
 
 /** Yakala, if it is not set up yet, then voice typing; each step as the engine says it. */
 export function installVoice(): Promise<SetupStatus> {
   return job('voice', async (vault, step) => {
-    if (process.platform !== 'win32') throw new Error('Sesle yazma yalnız Windows\'ta.');
+    if (process.platform !== 'win32') throw new Error(say("Sesle yazma yalnız Windows'ta.", 'Voice typing is for Windows only.'));
     const beyin = path.join(vault, 'beyin.py');
     const capture = await runPython([beyin, 'yakala', 'durum'], { cwd: vault, timeout: STATUS_TIMEOUT });
     if (capture.kurulu !== true) {
-      step('Yakala kuruluyor (Ctrl+Alt+B)…');
+      step(say('Yakala kuruluyor (Ctrl+Alt+C)…', 'Setting up yakala (Ctrl+Alt+C)…'));
       await runPython([beyin, 'yakala', 'kur'], { cwd: vault, timeout: STATUS_TIMEOUT * 5 });
     }
-    await runPython([beyin, 'ses', 'kur'], { cwd: vault, timeout: JOB_TIMEOUT, onStep: step });
+    await runPython([beyin, 'ses', 'kur'], { cwd: vault, timeout: JOB_TIMEOUT, onStep: (line) => step(engineStep(line)) });
   });
 }
 
@@ -374,7 +428,7 @@ export async function setVoice(patch: unknown): Promise<SetupStatus> {
   if (typeof asked.auto === 'boolean') args.push('--otomatik', asked.auto ? 'ac' : 'kapat');
   const vault = vaultOrNull();
   if (!args.length || !vault) return setupStatus();
-  if (current) throw new Error('Başka bir kurulum sürüyor.');
+  if (current) throw new Error(say('Başka bir kurulum sürüyor.', 'Another setup is going on.'));
   await runPython([path.join(vault, 'beyin.py'), 'ses', 'ayar', ...args], { cwd: vault, timeout: STATUS_TIMEOUT });
   return setupStatus();
 }

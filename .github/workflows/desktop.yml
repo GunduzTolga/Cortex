@@ -86,8 +86,14 @@ jobs:
       - name: Python
         run: npm run python-paket
 
+      # Signed when a code-signing certificate is kept in the repository's secrets
+      # (desktop/README.md, "İmza"): WIN_CSC_LINK, the .pfx as base64, and its
+      # password. Without them the installer is built unsigned, as before.
       - name: Kurulum dosyasi
         run: npx electron-builder --win nsis --publish never
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - uses: actions/upload-artifact@v4
         with:

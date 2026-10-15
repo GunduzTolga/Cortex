@@ -20,7 +20,8 @@ interface SetupState {
   voice(patch: { on?: boolean; wake?: boolean; auto?: boolean }): Promise<void>;
 }
 
-const percent = (line: string) => line.trimStart().startsWith('%');
+/** A download's progress line, as the engine says it ("%40 (650 / 1624 MB)") or in English ("40% (…)"). */
+const percent = (line: string) => /^%?\d+%? \(\d+ \/ \d+ MB\)$/.test(line.trim());
 let listening = false;
 
 const DONE = { python: 'setup.python.done', engine: 'setup.engine.done', voice: 'setup.voice.done' } as const;

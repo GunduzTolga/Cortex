@@ -11,7 +11,8 @@ import { OfficeView } from './office/OfficeView';
 import { Onboarding } from './onboarding/Onboarding';
 import { NotesDialogs } from './notes/NotesMenus';
 import { useNotes } from './notes/notesStore';
-import { useApp } from './store/app';
+import { refusal, useApp } from './store/app';
+import { useSetup } from './store/setup';
 import { useView, type View } from './store/view';
 import { LanguageSwitch } from './ui/LanguageSwitch';
 import { SettingsDialog } from './ui/SettingsDialog';
@@ -52,7 +53,7 @@ export function App() {
   return (
     <>
       {bootError ? (
-        <p className="p-8 text-[13px] text-bad">{bootError}</p>
+        <p className="p-8 text-[13px] text-bad">{refusal(bootError)}</p>
       ) : !ready ? (
         <div className="flex h-full items-center justify-center">
           <Spinner label={t('app.loading')} />
@@ -101,6 +102,28 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
   const shown = useView((state) => state.shown);
   const setView = useView((state) => state.setView);
   const choose = () => void useApp.getState().chooseVault(t('app.vault.failed'));
+
+  // An older Cortex in the vault than the one the app brought: said once, with the button that updates it.
+  const updatable = useSetup((s) => {
+    const engine = s.status?.engine;
+    return Boolean(engine?.installed && engine.bundled && engine.bundled.localeCompare(engine.installed, undefined, { numeric: true }) > 0);
+  });
+  useEffect(() => {
+    void (async () => {
+      await useSetup.getState().refresh();
+      const engine = useSetup.getState().status?.engine;
+      if (!engine?.installed || !engine.bundled || engine.bundled.localeCompare(engine.installed, undefined, { numeric: true }) <= 0) return;
+      useApp.getState().toast({
+        tone: 'info',
+        title: t('setup.update.title', { installed: engine.installed, bundled: engine.bundled }),
+        detail: t('setup.update.detail'),
+        sticky: true,
+        action: { label: t('setup.update.action'), run: () => void useSetup.getState().run('engine') },
+      });
+    })();
+    // Once per vault opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name]);
 
   // A vault gone from disk is said when the window comes back to it too, not only at the start.
   useEffect(() => {
@@ -162,7 +185,12 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
             className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation"
             data-settings-open
           >
-            <Settings size={14} />
+            <span className="relative block">
+              <Settings size={14} />
+              {updatable ? (
+                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full border border-darkDelegation bg-gold" title={t('setup.update.dot')} data-settings-update-dot />
+              ) : null}
+            </span>
           </button>
           <LanguageSwitch />
         </div>

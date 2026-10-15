@@ -8,11 +8,13 @@ import path from 'node:path';
  * The app runs it, quietly and for this user only, when the machine has no
  * Python for Cortex's engine (electron/services/setup.ts, the first-run
  * screen). It goes among the app's resources as `python/` (package.json,
- * extraResources); a file already here with the right digest is kept.
+ * extraResources), named `.paket`; a file already here with the right digest is kept.
  */
 const pin = JSON.parse(fs.readFileSync('python.json', 'utf8'));
 const out = path.resolve('python-paket');
-const target = path.join(out, pin.file);
+// `.paket`, not `.exe`: a signed build signs every .exe among the resources, and that would change
+// the bytes the app checks (electron/services/setup.ts runs it from a copy named .exe).
+const target = path.join(out, pin.file + '.paket');
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 fs.mkdirSync(out, { recursive: true });

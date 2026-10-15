@@ -101,7 +101,7 @@ function NameField() {
   };
   return (
     <input
-      className={`${inputClass} h-8 w-48`}
+      className={`${inputClass.replace('w-full', '')} h-8 w-56 shrink-0`}
       value={name}
       maxLength={40}
       placeholder={t('settings.name.placeholder')}
