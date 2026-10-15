@@ -124,6 +124,9 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Cortex",
       "installerIcon": "../tema/ananas/marka/pyn.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/uninstallerSidebar.bmp",
+      "installerHeader": "build/installerHeader.bmp",
       "uninstallerIcon": "../tema/ananas/marka/pyn.ico",
       "installerLanguages": [
         "tr_TR",

@@ -231,6 +231,14 @@ check('Pyn’s memory comes next, each step said before it is done', await shown
 await shoot('01c-onboarding-engine.png');
 await onward();
 check('then the AI tools', await shownSoon(page.locator('[data-onboarding-step="tools"]')));
+check(
+  'a sign-in the tool keeps is not called ready: it may have run out, and signing in again is offered',
+  (await shownSoon(page.locator('[data-onboarding-tool-state="onboarding.tools.kept"]'))) &&
+    (await page.locator('[data-onboarding-tool="claude"] [data-onboarding-tool-login]').count()) === 1 &&
+    // A model server asked just now, its model loaded, is what counts as ready without a sign-in.
+    (await page.locator('[data-onboarding-tool="lmstudio"] [data-onboarding-tool-state="onboarding.tools.serving"]').count()) === 1,
+);
+await shoot('01c2-onboarding-tools.png');
 await onward();
 if (process.platform === 'win32') {
   check('then voice typing', await shownSoon(page.locator('[data-onboarding-step="voice"]')));

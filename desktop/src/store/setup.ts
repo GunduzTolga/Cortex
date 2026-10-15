@@ -17,7 +17,7 @@ interface SetupState {
   error: { job: SetupJob; text: string } | null;
   refresh(): Promise<void>;
   run(job: SetupJob): Promise<void>;
-  voice(patch: { on?: boolean; wake?: boolean }): Promise<void>;
+  voice(patch: { on?: boolean; wake?: boolean; auto?: boolean }): Promise<void>;
 }
 
 const percent = (line: string) => line.trimStart().startsWith('%');

@@ -8,6 +8,10 @@ Pillow ister; yalnız tasarım değiştiğinde elle çalıştırılır, testler 
 - pyn.ico                  : Windows kısayol ikonu (16-256 px)
 - pyn-yuz/*.svg            : Pyn'in yüzü, vektör (sohbet, Obsidian'da boş sekme); `yuz` adımı
 - pyn-yuz-256.png          : aynı yüzün PNG'si, SVG okumayan yerler için; `yuz` adımı
+
+`kurulum` adımı masaüstü uygulamasının Windows kurulum sihirbazının görsellerini yazar
+(`desktop/build/`, electron-builder'ın kaynak klasörü): kenar görseli (164x314) ve üst başlık
+(150x57), Pyn'in yüzü ve mühürüyle, Ananas renklerinde.
 - pyn-muhur.six            : `pyn` karşılama kutusundaki mühür (Sixel, terminalde gerçek resim)
 - pyn-muhur-200.png        : Windows Terminal Pyn profilinin köşe filigranı
 
@@ -15,6 +19,7 @@ Ardından: py -3 scripts/ananas_tema.py uret
 
     py -3 scripts/marka_uret.py "C:\\...\\Pyn Tasarım\\docs\\design\\logo"
     py -3 scripts/marka_uret.py yuz "C:\\...\\Pyn'in Yüz Tasarımı\\pyn-yuz"
+    py -3 scripts/marka_uret.py kurulum
 
 `yuz`, Claude Design'ın teslim ettiği SVG'leri (docs/marka/pyn-yuz-brifi.md) alır; PNG'yi
 Edge'in görünmez (headless) kipiyle çizer, pencere açmaz.
@@ -110,8 +115,51 @@ def face(source):
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
 
 
+PAPER, INK, GOLD, MUTED = '#f3efe4', '#1b1712', '#e8b23a', '#75716a'
+FONTS = ROOT / 'tema' / 'ananas' / 'fonts-ttf'
+DESKTOP_BUILD = ROOT / 'desktop' / 'build'
+
+
+def installer_images():
+    """The installer's sidebar (welcome and finish pages) and header, drawn at three times their
+    size and brought down, saved as the 24-bit BMPs NSIS takes."""
+    from PIL import ImageDraw, ImageFont
+    k = 3
+    DESKTOP_BUILD.mkdir(parents=True, exist_ok=True)
+
+    def font(name, size):
+        return ImageFont.truetype(str(FONTS / name), size * k)
+
+    # Sidebar, 164x314: Pyn's face, the name, what it is; a gold band at the foot; an ink edge.
+    w, h = 164 * k, 314 * k
+    side = Image.new('RGB', (w, h), PAPER)
+    face = Image.open(OUT / 'pyn-yuz-256.png').convert('RGBA').resize((116 * k, 116 * k), Image.LANCZOS)
+    side.paste(face, ((w - face.width) // 2, 52 * k), face)
+    d = ImageDraw.Draw(side)
+    d.text((w // 2, 198 * k), 'Cortex', fill=INK, font=font('Fraunces-Bold.ttf', 27), anchor='mm')
+    for i, line in enumerate(('Notların ve yapay zekâ', 'araçların için ortak hafıza')):
+        d.text((w // 2, (228 + i * 15) * k), line, fill=MUTED, font=font('SchibstedGrotesk-Regular.ttf', 11), anchor='mm')
+    d.rectangle([0, 288 * k, w, h], fill=GOLD)
+    d.rectangle([0, 288 * k, w, 288 * k + 2 * k], fill=INK)
+    d.rectangle([w - 2 * k, 0, w, h], fill=INK)
+    side = side.resize((164, 314), Image.LANCZOS)
+    for name in ('installerSidebar.bmp', 'uninstallerSidebar.bmp'):
+        side.save(DESKTOP_BUILD / name)
+
+    # Header, 150x57: the seal at its right, on paper.
+    w, h = 150 * k, 57 * k
+    head = Image.new('RGB', (w, h), PAPER)
+    seal = Image.open(OUT / 'pyn-muhur-200.png').convert('RGBA').resize((42 * k, 42 * k), Image.LANCZOS)
+    head.paste(seal, (w - seal.width - 8 * k, (h - seal.height) // 2), seal)
+    head.resize((150, 57), Image.LANCZOS).save(DESKTOP_BUILD / 'installerHeader.bmp')
+    for path in sorted(DESKTOP_BUILD.glob('*.bmp')):
+        print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
+
+
 if __name__ == '__main__':
-    if sys.argv[1:2] == ['yuz']:
+    if sys.argv[1:2] == ['kurulum']:
+        installer_images()
+    elif sys.argv[1:2] == ['yuz']:
         face(sys.argv[2] if len(sys.argv) > 2 else '.')
     else:
         main(sys.argv[1] if len(sys.argv) > 1 else '.')

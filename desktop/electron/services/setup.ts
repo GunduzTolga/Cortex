@@ -162,6 +162,7 @@ export function voiceOf(result: Record<string, unknown>): VoiceStatus | null {
     installed: result.kurulu,
     on: result.acik !== false,
     wake: result.uyandirma === true,
+    auto: result.otomatik_dinle !== false,
     engine,
     // The model's name only: where it runs is said by `engine`, not twice (`large-v3-turbo (ekran kartı, Vulkan)`).
     model: typeof result.model === 'string' ? result.model.replace(/\s*\([^)]*\)\s*$/, '') : null,
@@ -370,6 +371,7 @@ export async function setVoice(patch: unknown): Promise<SetupStatus> {
   const args: string[] = [];
   if (typeof asked.on === 'boolean') args.push('--ses', asked.on ? 'ac' : 'kapat');
   if (typeof asked.wake === 'boolean') args.push('--uyandirma', asked.wake ? 'ac' : 'kapat');
+  if (typeof asked.auto === 'boolean') args.push('--otomatik', asked.auto ? 'ac' : 'kapat');
   const vault = vaultOrNull();
   if (!args.length || !vault) return setupStatus();
   if (current) throw new Error('Başka bir kurulum sürüyor.');

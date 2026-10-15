@@ -15,6 +15,8 @@ export interface VoiceStatus {
   on: boolean;
   /** "Pyn, not al" opens yakala; while on, the microphone listens all the time. */
   wake: boolean;
+  /** Yakala's window listens as it opens; typing lets the microphone go. */
+  auto: boolean;
   engine: VoiceEngine;
   /** The model and where it runs, as the engine says it: `large-v3-turbo (ekran kartı, Vulkan)`. */
   model: string | null;
@@ -54,5 +56,5 @@ export interface SetupApi {
   installEngine(): Promise<SetupStatus>;
   /** Voice typing set up: its own environment, its models, the engine fit for the graphics card. */
   installVoice(): Promise<SetupStatus>;
-  voice(patch: { on?: boolean; wake?: boolean }): Promise<SetupStatus>;
+  voice(patch: { on?: boolean; wake?: boolean; auto?: boolean }): Promise<SetupStatus>;
 }

@@ -109,6 +109,7 @@ function VoiceSection({ status }: { status: SetupStatus }) {
       ) : voice.installed ? (
         <>
           <Switch checked={voice.on} onChange={(on) => void set({ on })} label={t('setup.voice.on')} hint={t('setup.voice.on.hint')} data-setup-voice-on />
+          <Switch checked={voice.auto} onChange={(auto) => void set({ auto })} label={t('setup.voice.auto')} hint={t('setup.voice.auto.hint')} data-setup-voice-auto />
           <Switch checked={voice.wake} onChange={(wake) => void set({ wake })} label={t('setup.voice.wake')} hint={t('setup.voice.wake.hint')} data-setup-voice-wake />
           <Note data="engine">{t('setup.voice.engine', { engine: t(ENGINE_NAME[voice.engine]), model: voice.model ?? '' })}</Note>
         </>

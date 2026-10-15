@@ -57,10 +57,11 @@ test('what a job says is read line by line: steps, then its result, written on o
 });
 
 test('the voice status is the engine’s, the model by its name only', () => {
-  assert.deepEqual(voiceOf({ kurulu: true, acik: true, uyandirma: false, motor: 'vulkan', model: 'large-v3-turbo (ekran kartı, Vulkan)' }), {
+  assert.deepEqual(voiceOf({ kurulu: true, acik: true, uyandirma: false, otomatik_dinle: false, motor: 'vulkan', model: 'large-v3-turbo (ekran kartı, Vulkan)' }), {
     installed: true,
     on: true,
     wake: false,
+    auto: false,
     engine: 'vulkan',
     model: 'large-v3-turbo',
   });

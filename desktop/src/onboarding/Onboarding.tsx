@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, Download, FolderOpen, KeyRound, Mic, RefreshCw, SkipForward } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, Check, Download, FolderOpen, KeyRound, LogIn, Mic, RefreshCw, SkipForward } from 'lucide-react';
 import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz.svg';
-import type { CliAuth } from '@shared/chat';
+import type { CliAuth, CliId } from '@shared/chat';
 import type { SetupStatus } from '@shared/setup';
-import { AuthDialog } from '../chat/AuthDialog';
+import { AuthDialog, TOOL_NAMES } from '../chat/AuthDialog';
 import { useChat } from '../chat/chatStore';
 import type { Key } from '../i18n';
 import { useT } from '../i18n/useT';
@@ -38,8 +38,11 @@ const TITLE: Record<StepId, Key> = {
 /** The vault and the name are the person's to give; the rest can wait for the settings. */
 const OPTIONAL = new Set<StepId>(['name', 'python', 'engine', 'tools', 'voice']);
 
-/** A tool Pyn can talk through now: signed in, or a model server with a model loaded. */
-const ready = (tool: CliAuth) => tool.signedIn === true || Boolean(tool.local?.loaded.length);
+/**
+ * A model server with a model loaded is ready: it was just asked. A sign-in the tool keeps is
+ * not proof - it may have run out - so a tool counts only once it is signed in to here.
+ */
+const serving = (tool: CliAuth) => Boolean(tool.local && tool.signedIn && tool.local.loaded.length);
 
 function newerBundled(status: SetupStatus | null): boolean {
   const { installed, bundled } = status?.engine ?? { installed: null, bundled: null };
@@ -58,6 +61,28 @@ export function Onboarding() {
   const [skipped, setSkipped] = useState<Set<StepId>>(new Set());
   // Python's step stays in the list once it was needed, so it can be seen done.
   const [neededPython, setNeededPython] = useState(false);
+  // The tools signed in to from here: a sign-in window opened for them closed with the tool signed in.
+  const [fresh, setFresh] = useState<Set<CliId>>(new Set());
+  const trying = useRef<Set<CliId>>(new Set());
+  useEffect(
+    () =>
+      window.cortex.on.authChanged(() => {
+        void useChat
+          .getState()
+          .loadAuth()
+          .then(() => {
+            const now = useChat.getState().auth ?? [];
+            const signed = [...trying.current].filter((id) => now.find((tool) => tool.id === id)?.signedIn === true);
+            trying.current.clear();
+            if (signed.length) setFresh((before) => new Set([...before, ...signed]));
+          });
+      }),
+    [],
+  );
+  const login = (id: CliId) => {
+    trying.current.add(id);
+    void window.cortex.chat.login(id).catch(() => trying.current.delete(id));
+  };
 
   useEffect(() => {
     void useSetup.getState().refresh();
@@ -81,7 +106,7 @@ export function Onboarding() {
     vault: Boolean(vault),
     python: Boolean(status?.python),
     engine: Boolean(status?.engine.installed) && !newerBundled(status),
-    tools: Boolean(auth?.some(ready)),
+    tools: fresh.size > 0 || Boolean(auth?.some(serving)),
     voice: Boolean(status?.voice?.installed),
     done: false,
   };
@@ -136,7 +161,7 @@ export function Onboarding() {
           {at === 'vault' ? <VaultStep name={vault?.name ?? null} /> : null}
           {at === 'python' ? <PythonStep status={status} /> : null}
           {at === 'engine' ? <EngineStep status={status} /> : null}
-          {at === 'tools' ? <ToolsStep auth={auth} /> : null}
+          {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} onLogin={login} /> : null}
           {at === 'voice' ? <VoiceStep status={status} /> : null}
           {at === 'done' ? <DoneStep order={order} done={done} skipped={skipped} canFinish={Boolean(vault)} /> : null}
 
@@ -341,19 +366,53 @@ function EngineStep({ status }: { status: SetupStatus | null }) {
   );
 }
 
-function ToolsStep({ auth }: { auth: CliAuth[] | null }) {
+function ToolsStep({ auth, fresh, onLogin }: { auth: CliAuth[] | null; fresh: Set<CliId>; onLogin: (id: CliId) => void }) {
   const t = useT();
-  const count = auth?.filter(ready).length ?? 0;
+  const refused = useChat((s) => s.authFailed);
+  const tools = (auth ?? []).filter((tool) => tool.installed);
+  const state = (tool: CliAuth): [Key, string] =>
+    tool.local
+      ? serving(tool)
+        ? ['onboarding.tools.serving', 'bg-good/15 text-good']
+        : ['onboarding.tools.noModel', 'bg-zinc-100 text-zinc-500']
+      : fresh.has(tool.id)
+        ? ['onboarding.tools.fresh', 'bg-good/15 text-good']
+        : refused.includes(tool.id)
+          ? ['auth.status.refused', 'bg-bad/10 text-bad']
+          : tool.signedIn === true
+            ? ['onboarding.tools.kept', 'bg-gold/25 text-darkDelegation']
+            : tool.signedIn === false
+              ? ['auth.status.out', 'bg-zinc-100 text-zinc-600']
+              : ['auth.status.unknown', 'bg-zinc-100 text-zinc-500'];
   return (
     <div>
       <Heading title={t('onboarding.tools.title')}>
         <p>{t('onboarding.tools.body')}</p>
-        <p className="text-[12.5px] text-zinc-500">{t('onboarding.tools.private')}</p>
+        <p className="text-[12.5px] text-zinc-500">{t('onboarding.tools.honest')}</p>
       </Heading>
-      {count ? <Done>{t('onboarding.tools.ready', { count })}</Done> : null}
-      <Button tone={count ? 'ghost' : 'primary'} className="mt-5" onClick={() => useChat.getState().openAuth()} data-onboarding-tools>
-        <KeyRound size={14} />
-        {t('auth.manage')}
+      {auth && !tools.length ? <p className="mt-5 text-[13px] text-zinc-600">{t('onboarding.tools.none')}</p> : null}
+      <ul className="mt-5 divide-y divide-zinc-100 rounded-xl border border-darkDelegation/15 bg-white" data-onboarding-tool-list>
+        {tools.map((tool) => {
+          const [words, colours] = state(tool);
+          return (
+            <li key={tool.id} className="flex items-center gap-3 px-3 py-2.5" data-onboarding-tool={tool.id}>
+              <span className="min-w-0 flex-1 text-[13px] font-semibold text-darkDelegation">{TOOL_NAMES[tool.id] ?? tool.id}</span>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${colours}`} data-onboarding-tool-state={words}>
+                {t(words)}
+              </span>
+              {tool.canLogin && !fresh.has(tool.id) ? (
+                <Button tone={tool.signedIn === true ? 'ghost' : 'primary'} className="h-8 shrink-0" onClick={() => onLogin(tool.id)} data-onboarding-tool-login={tool.id}>
+                  <LogIn size={12} />
+                  {t(tool.signedIn === true ? 'onboarding.tools.again' : 'onboarding.tools.signIn')}
+                </Button>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      <Button tone="quiet" className="mt-3" onClick={() => useChat.getState().openAuth()} data-onboarding-tools>
+        <KeyRound size={13} />
+        {t('onboarding.tools.keys')}
       </Button>
     </div>
   );
