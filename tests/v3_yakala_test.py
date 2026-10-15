@@ -357,5 +357,24 @@ class YakalaInstalledTest(unittest.TestCase):
         self.assertEqual(own.read_text(encoding='utf-8'), 'kendi skill\'im\n')
 
 
+class ListenerRestartTest(unittest.TestCase):
+    def test_an_update_that_changes_only_a_module_it_loaded_restarts_the_listener(self):
+        import types
+        with tempfile.TemporaryDirectory(prefix='v3-dinleyici-') as tmp:
+            folder = Path(tmp).resolve()
+            script, voice, other = folder / 'beyin_v3_yakala.py', folder / 'beyin_v3_ses.py', Path(tmp).resolve().parent / 'baska.py'
+            for path in (script, voice):
+                path.write_text('', encoding='utf-8')
+            module = types.ModuleType('beyin_v3_ses_dinleyici_testi')
+            module.__file__ = str(voice)
+            with patch.dict(sys.modules, {module.__name__: module}):
+                stamps = yakala._own_modules(script)
+            self.assertEqual(set(stamps), {script, voice}, 'its own script and what it loaded from the engine, nothing else')
+            self.assertNotIn(other, stamps)
+            self.assertEqual(yakala._own_modules(script, list(stamps)), stamps)
+            os.utime(voice, (stamps[voice] + 5, stamps[voice] + 5))
+            self.assertNotEqual(yakala._own_modules(script, list(stamps)), stamps, 'the voice module changed: restart')
+
+
 if __name__ == '__main__':
     unittest.main()

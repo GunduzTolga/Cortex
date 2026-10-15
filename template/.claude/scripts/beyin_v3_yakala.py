@@ -1943,6 +1943,15 @@ def _write_listener_state(state, **values):
     path.write_text(json.dumps(data) + '\n', encoding='utf-8')
 
 
+def _own_modules(script, paths=None):
+    """The listener's script and the engine's modules it loaded, by when each last changed: an
+    update that changes only one of them (the voice, the brand) still restarts the listener."""
+    if paths is None:
+        paths = {script} | {Path(module.__file__).resolve() for module in list(sys.modules.values())
+                            if getattr(module, '__file__', None) and Path(module.__file__).resolve().parent == script.parent}
+    return {path: path.stat().st_mtime for path in paths}
+
+
 def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name=LISTENER_STOP):
     """Resident hotkey on Windows: Tk is warm before the key, so the window opens at once.
 
@@ -2020,7 +2029,7 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
         kernel32.CloseHandle(lock)
         return 1
     script = Path(__file__).resolve()
-    stamp = script.stat().st_mtime
+    stamps = _own_modules(script)
     windows, ticks = [], [0]
 
     def finish(restart=False):
@@ -2042,7 +2051,7 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
         ticks[0] += 1
         if ticks[0] % 80 == 0 and not windows:  # about every two seconds
             try:
-                if script.stat().st_mtime != stamp:
+                if _own_modules(script, list(stamps)) != stamps:
                     return finish(restart=True)
             except OSError:
                 pass
