@@ -1,7 +1,7 @@
 {
   "name": "cortex-desktop",
   "productName": "Cortex",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Cortex'in masaüstü uygulaması: kasayı Obsidian gibi okur ve yazar.",
   "private": true,
   "type": "module",
