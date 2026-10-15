@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import test from 'node:test';
 import * as art from '../src/office/office-art.js';
+import { loopFrame } from '../src/office/ofis-engine.js';
 
 /**
  * The office's drawings as Claude Design delivered them (src/office/office-art.js),
@@ -93,4 +94,15 @@ test('the server racks’ lights are their own layer, coloured from the tools’
     const { ctx } = recorder();
     led.paint(ctx, 0, { led: art.LED.ok });
   }
+});
+
+test('an animation shows one of its own frames at any time, a clock not yet running included', () => {
+  // The first frame of a reopened office can be timed before the loop's start: t was below 0 and
+  // the water cooler asked for frame -1, which it does not have.
+  for (const t of [-0.004, -1, 0, 0.2, 7.9, 1e6, Number.NaN]) {
+    const frame = loopFrame(t, 3, 3, 0.4);
+    assert.ok(Number.isInteger(frame) && frame >= 0 && frame < 3, `t=${t}: ${frame}`);
+  }
+  assert.equal(loopFrame(1, 3, 3), 0);
+  assert.equal(loopFrame(1.4, 3, 3), 1);
 });

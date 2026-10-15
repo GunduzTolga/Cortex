@@ -12,6 +12,7 @@ export type Led = 'ok' | 'wait' | 'off';
 export const LIGHT_MODES: Array<[LightMode, string]>;
 export function lightForHour(hour: number): LightMode;
 export function clockText(date?: Date): string;
+export function loopFrame(t: number, fps: number, frames: number, offset?: number): number;
 export const TOOL_STATUS: Record<Art.ToolId, Led>;
 export const TOOL_LABEL: Record<Led, string>;
 

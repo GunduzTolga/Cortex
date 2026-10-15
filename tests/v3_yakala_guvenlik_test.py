@@ -166,7 +166,8 @@ class YakalaWindowsShortcutTest(unittest.TestCase):
     def test_link_keeps_unicode_paths_icon_and_key(self):
         import subprocess
         with tempfile.TemporaryDirectory(prefix='v3-lnk-') as tmp:
-            folder = Path(tmp) / 'Şifre 📥 Gelen'
+            # By its long name: a runner's temp folder comes as C:\Users\RUNNER~1, the shell answers the long one.
+            folder = Path(os.path.realpath(tmp)) / 'Şifre 📥 Gelen'
             folder.mkdir()
             target = folder / 'çalıştır.exe'
             target.write_bytes(b'')

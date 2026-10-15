@@ -8,6 +8,11 @@ export const LIGHT_MODES = [['sabah', 'Sabah'], ['ogle', 'Öğle'], ['aksam', 'A
 export function lightForHour(h) { return h >= 6 && h < 10 ? 'sabah' : h >= 10 && h < 17 ? 'ogle' : h >= 17 && h < 20 ? 'aksam' : 'gece'; }
 const pad = (n) => String(n).padStart(2, '0');
 export const clockText = (d = new Date()) => pad(d.getHours()) + ':' + pad(d.getMinutes());
+/** The frame an animation shows at time t: always one it has, even for a clock that is not yet running (t < 0, NaN). */
+export function loopFrame(t, fps, frames, offset = 0) {
+  const n = Math.floor(t * fps + offset);
+  return Number.isFinite(n) ? ((n % frames) + frames) % frames : 0;
+}
 
 const TOOL_NAME = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini', qwen: 'Qwen' };
 export const TOOL_STATUS = { claude: 'ok', codex: 'ok', opencode: 'wait', gemini: 'ok', qwen: 'off' };
@@ -252,7 +257,7 @@ export class OfficeEngine {
   destroy() { this.active = false; cancelAnimationFrame(this.raf); const cv = this.cv; cv.removeEventListener('wheel', this.onWheel); cv.removeEventListener('pointerdown', this.onDown); cv.removeEventListener('pointermove', this.onMove); cv.removeEventListener('pointerup', this.onUp); cv.removeEventListener('pointerleave', this.onLeave); }
   // ── Döngü
   loop = (now) => {
-    const dt = Math.min(0.05, (now - this.last) / 1000) * this.speed; this.last = now; this.t += dt; this.rect = this.cv.getBoundingClientRect();
+    const dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000)) * this.speed; // a frame's time can come before the start's this.last = now; this.t += dt; this.rect = this.cv.getBoundingClientRect();
     for (const a of this.agents) this.updateAgent(a, dt);
     this.updateMeets(dt);
     for (const b of this.bubbles) b.t += dt; this.bubbles = this.bubbles.filter((b) => b.t < b.dur);
@@ -277,7 +282,7 @@ export class OfficeEngine {
     if (o.sprite === 'door_glass') return Math.round(this.doorState[o.id] || 0);
     if (o.sprite === 'elevator') return Math.round(this.elevator.f);
     if (o.sprite === 'desk_lamp') return 0;
-    if (s.frames > 1 && s.fps) return Math.floor(this.t * s.fps + (o.left * 0.013)) % s.frames;
+    if (s.frames > 1 && s.fps) return loopFrame(this.t, s.fps, s.frames, o.left * 0.013);
     return 0;
   }
   renderWorld() {
