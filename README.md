@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.9" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.9-E8B23A">
+  <img alt="Sürüm 1.0.10" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.10-E8B23A">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
   <img alt="Telemetri yok" src="https://img.shields.io/badge/telemetri-yok-1B1712">
@@ -214,14 +214,23 @@ Sağlayıcı girişlerini OpenCode'da bir kez sen yaparsın: `opencode auth logi
 
 ## Masaüstü uygulaması
 
-`desktop/` klasöründe Cortex'in Windows uygulaması var. Önizleme aşamasında; kurulum dosyası henüz imzasız. Açınca kasanı seçersin, sonra dört ekran:
+`desktop/` klasöründe Cortex'in Windows uygulaması var. Önizleme aşamasında; kurulum dosyası henüz imzasız.
+
+**İlk açılış:** terminal gerekmez. Pyn önce sana nasıl hitap edeceğini sorar, sonra kurulacakları sırayla gösterir:
+1. Kasa (notlarının klasörü).
+2. Python, bilgisayarda yoksa: kurulum dosyasıyla gelir, yalnız senin kullanıcın için kurulur.
+3. Pyn'in hafızası: Cortex kasaya kurulur.
+4. Yapay zekâ aracın: girişler.
+5. Sesle yazma.
+
+Her adımda ne yaptığı yazar; isteğe bağlı olanlar "Atla" ile geçilir, sonra Ayarlar'dan kurulur. Ardından dört ekran:
 
 - **Pyn (ilk ekran):** kasanın içinde, kendi aracınla sohbet. Araç kasada başladığı için hafızayı hook'lar tam olarak verir. Araçlar: Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code ve yerel modeller için LM Studio ile Ollama: modeli kendi uygulamasında yüklersin, Cortex onunla doğrudan konuşur ve Pyn'in hafızasını kasanın hook'undan verir. Aracın izin istediği adımlar kartla sorulur. Model, mod ve efor çiplerle seçilir. Sohbetin okuduğu ve değiştirdiği notlar yan panelde açılır.
 - **Notlar:** Obsidian'a gerek kalmadan okuma ve yazma: wiki linkleri, canlı önizleme, geri bağlantılar, arama, şablonlar, çöp kutusu. Makbuzlar ve motorun ürettiği sayfalar salt okunurdur.
 - **Grafik:** notlar ve aralarındaki linkler.
 - **Ofis:** piksel sanatıyla çizilmiş, yaşayan bir ofis. Patron Pyn, 12 ajan ve ofis kedisi Tekir dokuz odada çalışır; karakterlere ve odalara tıklanır. Sunucu odasının ışıkları araçlarının gerçek giriş durumunu, odalar kasanın sayılarını gösterir.
 
-Dil, kasa, dosya ağacının görünüşü ve araçların girişleri **Ayarlar**'da: üst çubuktaki dişli ya da Ctrl+, açar.
+Dil, hitap, kasa, dosya ağacının görünüşü, araçların girişleri, kasadaki Cortex'in güncellenmesi ve sesle yazma **Ayarlar**'da: üst çubuktaki dişli ya da Ctrl+, açar. İlk kurulum ekranı da oradan yeniden açılır.
 
 **Girişler ve anahtarlar:**
 - Her araç bu bilgisayarda kayıtlı kendi girişini kullanır; terminaldekiyle aynı giriş. Uygulama bu giriş dosyalarını okumaz, yalnız araca durumunu sorar.
@@ -370,6 +379,7 @@ Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama ya da her s
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.10](docs/v3/releases/1.0.10.md) | Masaüstü uygulaması her şeyi kendisi kurar: ilk kurulum ekranı (hitap, kasa, Python, Pyn'in hafızası, yapay zekâ aracı, sesle yazma), kurulum dosyasıyla gelen Python, Ayarlar'da Cortex ve sesle yazma. Ofis kullanıcıya adıyla seslenir. |
 | [1.0.9](docs/v3/releases/1.0.9.md) | Sesle yazma AMD Radeon ve Intel Arc kartlarda da ekran kartında (whisper.cpp, Vulkan); NVIDIA'da CUDA, olmazsa işlemci. Pyn'in yeni yüzü: Claude Design'ın vektör çizimi, sohbette ve Obsidian'da. |
 | [1.0.8](docs/v3/releases/1.0.8.md) | Masaüstü uygulaması (önizleme): Pyn sohbeti (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code; yerel modeller için LM Studio ve Ollama), Obsidian'sız notlar, grafik, araç girişleri ve API anahtarları, ayarlar. Yakala'da isteğe bağlı sesle yazma ve "Pyn, not al" (yerel Whisper). |
 | [1.0.7](docs/v3/releases/1.0.7.md) | Yakala güvenliği (yalnız herkese açık adresler, Windows komut satırı koruması), Türkçe karakterli kısayollar, `Win+Shift+S` ekran görüntüsü; daha hızlı senkron; `pyn` yeni sürümü haber verir, `pyn guncelle`; marka kuralları. |
