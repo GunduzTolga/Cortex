@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { BookOpen, PencilLine, Plus, Trash2 } from 'lucide-react';
-import seal from '../../../tema/ananas/marka/pyn-muhur.svg';
+// Pyn's own face in the chat, where Pyn is the one talking; the seal stays the app's mark.
+import face from '../../../tema/ananas/marka/pyn-yuz-256.png';
 import type { ChatSummary } from '@shared/chat';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
@@ -220,7 +221,7 @@ export function ChatView({ visible }: { visible: boolean }) {
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10" data-chat-empty>
             <div className="w-full max-w-[46rem]">
               <div className="mb-6 flex items-center gap-4">
-                <img src={seal} alt="" className="h-14 w-14 shrink-0" />
+                <img src={face} alt="" className="h-14 w-14 shrink-0 rounded-full" data-chat-face />
                 <div>
                   <h1 className="font-display text-3xl text-darkDelegation">{t('chat.hello')}</h1>
                   <p className="mt-1 text-[13.5px] text-zinc-500">{t('chat.hello.sub')}</p>
