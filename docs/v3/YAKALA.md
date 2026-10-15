@@ -75,6 +75,45 @@ Son 10 dakikada alınmış görüntü ekli gelir; daha eski ya da kaynağı bili
 pencerede görünür ama `Tab` ile eklemeden karta girmez. Panoda metin ya da bağlantı varsa
 pencere eskisi gibi onu yakalar.
 
+## Sesle yazma (Windows, isteğe bağlı)
+
+Pencereye konuşarak yazarsın; ses bilgisayardan çıkmaz, çeviriyi yerelde Whisper yapar.
+
+**Kurulum (bir kez):** `py -3 beyin.py ses kur`
+- Kendi sanal ortamını kurar, paketleri yükler ve iki modeli indirir. İşlemci için yaklaşık 2 GB; NVIDIA kart varsa onun kütüphaneleriyle daha fazla.
+- Hepsi durum klasöründe (`state/ses/`) durur, kasaya ve senkrona girmez.
+- Motorun kendisi yine yalnız Python'un standart kütüphanesini kullanır; ses ayrı bir süreçte çalışır.
+- Kurulum bitince yakala dinleyicisi yeniden başlar.
+
+**Kullanım:**
+1. Ctrl+Alt+B ile pencereyi aç.
+2. Metin kutusunun sağındaki **mikrofona** tıkla ya da **Ctrl+Alt+B'ye yeniden bas**, konuş.
+3. Susunca (1,4 saniye) söylediğin kutuya yazılır. Sonda **"kaydet"** dersen yazılır ve kart kaydedilir.
+4. Tek başına **"sil"** kutuyu temizler; tek başına **"iptal"** ya da **"vazgeç"** pencereyi kapatır.
+
+Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya da "bu satırı sil" olduğu gibi yazılır.
+
+**"Pyn, not al" ile açma:** `py -3 beyin.py ses ayar --uyandirma ac`
+- Bu sözü duyunca pencere açılır ve dinlemeye başlar.
+- Başta kapalıdır, çünkü açıkken mikrofon sürekli dinler.
+- Sözü küçük bir Türkçe Vosk modeli yakalar; Whisper yalnız asıl yazmada çalışır, böylece işlemci boşuna yorulmaz.
+- Bluetooth kulaklıkta mikrofon açıkken müzik ve video sesi kötüleşir; bu özelliği USB ya da dahili mikrofonla kullan.
+
+**Hız:**
+- NVIDIA kartta cümle başına bir saniyenin altında.
+- İşlemcide birkaç saniye. Daha hızlı ama daha az doğru bir model için: `beyin.py ses ayar --model small`.
+- AMD kartlar için Whisper'ın hazır bir Windows sürümü yok; çeviri işlemcide yapılır.
+
+**Diğer komutlar:**
+| Komut | Ne yapar |
+|---|---|
+| `ses durum` | Kurulu mu, hangi model, uyandırma açık mı |
+| `ses dene --sn 5` | Beş saniye kaydedip yazıya çevirir |
+| `ses ayar --ses kapat` | Sesi kapatır |
+| `ses kaldir` | Ortamı ve modelleri siler |
+
+Ayarlar `state/ses/ayar.json` içinde; sorun olursa `state/ses/isci.log` dosyasına bak.
+
 ## İşleme nasıl çalışır
 
 `python3 beyin.py yakala isle` bekleyen kartların metnini çıkarır, sonra ajan dersleri
@@ -107,6 +146,7 @@ Hiçbiri zorunlu değil; varsa işleme genişler, yoksa elde olanla devam edilir
 - Ağ yalnız `isle` adımında ve yalnız yakaladığın kaynaklar için kullanılır. Defuddle,
   X gönderisi sayfada yoksa gönderi adresini FxTwitter API'sine sorar.
 - Mail, pano metni ve dosya kartları `visibility: private` ile yazılır.
+- Sesle yazmada ses yalnız bellekte tutulur, yazıya çevrilince atılır; hiçbir yere gönderilmez ve diske yazılmaz.
 - Kaldırmak için `python3 beyin.py yakala kaldir`: kısayol, skill ve bildirim gider, kartların kalır.
 
 ## Güvenlik

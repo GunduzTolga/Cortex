@@ -2,7 +2,7 @@
 
 Cortex'in Windows masaüstü uygulaması. İlk ekranı Pyn: kendi yapay zekâ araçlarınla kasanın hafızası üzerinden konuştuğun sohbet. Yanında kasanı Obsidian'a gerek kalmadan okuyup yazan not ekranı ve grafik var. Sonraki aşamada Cortex'i kendisi kuracak.
 
-Bu klasör **Aşama 1** (notlar) ve **Aşama 2'nin büyük kısmı** (Pyn'in sohbeti, araç girişleri, yerel modeller, ayarlar). Motor (`beyin.py`, `template/`, `scripts/`) bu iş için değişmedi: sohbetteki araç kasada başlatılır, hafızayı motorun oradaki hook'ları verir.
+Bu klasör **Aşama 1** (notlar) ve **Aşama 2'nin büyük kısmı** (Pyn'in sohbeti, araç girişleri, yerel modeller, ayarlar). Uygulama motora dokunmaz: sohbetteki araç kasada başlatılır, hafızayı motorun oradaki hook'ları verir.
 
 ## Ne yapar
 
