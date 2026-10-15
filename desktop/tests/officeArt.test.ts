@@ -106,3 +106,15 @@ test('an animation shows one of its own frames at any time, a clock not yet runn
   assert.equal(loopFrame(1, 3, 3), 0);
   assert.equal(loopFrame(1.4, 3, 3), 1);
 });
+
+test('the loop keeps its clock: no comment swallows the statements written after it on a line', async () => {
+  // A `//` put in the middle of the loop's one-line statements once commented out `this.last = now`:
+  // every frame then took the longest step, and the office ran seven times too fast on a 144 Hz screen.
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../src/office/ofis-engine.js', import.meta.url), 'utf8');
+  for (const statement of ['this.last = now', 'this.t += dt']) {
+    const lines = source.split(/\r?\n/).filter((line) => line.includes(statement));
+    assert.ok(lines.length > 0, statement);
+    for (const line of lines) assert.ok(!line.slice(0, line.indexOf(statement)).includes('//'), `${statement} is code, not a comment: ${line.trim()}`);
+  }
+});

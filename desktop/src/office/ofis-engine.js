@@ -270,7 +270,8 @@ export class OfficeEngine {
   destroy() { this.active = false; cancelAnimationFrame(this.raf); const cv = this.cv; cv.removeEventListener('wheel', this.onWheel); cv.removeEventListener('pointerdown', this.onDown); cv.removeEventListener('pointermove', this.onMove); cv.removeEventListener('pointerup', this.onUp); cv.removeEventListener('pointerleave', this.onLeave); }
   // ── Döngü
   loop = (now) => {
-    const dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000)) * this.speed; // a frame's time can come before the start's this.last = now; this.t += dt; this.rect = this.cv.getBoundingClientRect();
+    // A frame's time can come before the start's: dt never goes below zero.
+    const dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000)) * this.speed; this.last = now; this.t += dt; this.rect = this.cv.getBoundingClientRect();
     for (const a of this.agents) this.updateAgent(a, dt);
     this.updateMeets(dt);
     for (const b of this.bubbles) b.t += dt; this.bubbles = this.bubbles.filter((b) => b.t < b.dur);

@@ -11,7 +11,7 @@ import { useApp } from '../store/app';
 import { useSetup } from '../store/setup';
 import { LanguageSwitch } from '../ui/LanguageSwitch';
 import { Progress } from '../ui/SetupSections';
-import { Button, inputClass } from '../ui/ui';
+import { Button, Switch, inputClass } from '../ui/ui';
 
 /**
  * The first thing the app shows, until it has been gone through once: Pyn
@@ -431,7 +431,14 @@ function VoiceStep({ status }: { status: SetupStatus | null }) {
       {!status ? null : !status.engine.installed ? (
         <p className="mt-5 text-[13px] text-zinc-600">{t('setup.voice.needsEngine')}</p>
       ) : voice?.installed ? (
-        <Done>{t('onboarding.voice.ready')}</Done>
+        <>
+          <Done>{t('onboarding.voice.ready')}</Done>
+          {/* The always-listening mode chosen here, where it is explained: not found later in the settings. */}
+          <div className="mt-4 rounded-xl border border-darkDelegation/15 bg-white py-1">
+            <Switch checked={voice.wake} onChange={(wake) => void useSetup.getState().voice({ wake })} label={t('setup.voice.wake')} hint={t('setup.voice.wake.hint')} data-onboarding-voice-wake />
+            <Switch checked={voice.auto} onChange={(auto) => void useSetup.getState().voice({ auto })} label={t('setup.voice.auto')} hint={t('setup.voice.auto.hint')} data-onboarding-voice-auto />
+          </div>
+        </>
       ) : voice || status.job === 'voice' ? (
         <Button tone="primary" className="mt-5" disabled={Boolean(status.job)} onClick={() => void run('voice')} data-onboarding-voice>
           <Mic size={14} />

@@ -28,7 +28,7 @@
   --ofis-font-mono-okunakli: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, Consolas, monospace;
   --ofis-font: var(--ofis-font-piksel);
   --ofis-font-mono: var(--ofis-font-mono-piksel);
-  --ofis-fs-gunluk: 19px;
+  --ofis-fs-gunluk: 16px;
 
   height: 100%;
   display: flex;
@@ -42,7 +42,7 @@
 .ofis[data-ofis-font='okunakli'] {
   --ofis-font: var(--ofis-font-okunakli);
   --ofis-font-mono: var(--ofis-font-mono-okunakli);
-  --ofis-fs-gunluk: 13px;
+  --ofis-fs-gunluk: 12px;
 }
 .ofis *,
 .ofis *::before,
@@ -448,8 +448,8 @@
 .ofis-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
-  max-height: 64px;
+  gap: 4px;
+  max-height: 62px;
   overflow-y: auto;
   overflow-x: hidden;
   flex: none;
@@ -457,12 +457,12 @@
 .ofis-chip {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
+  gap: 5px;
+  padding: 3px 7px;
   border: 1px solid var(--ofis-cizgi);
   background: var(--ofis-panel);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
   white-space: nowrap;
 }
 .ofis-chip:hover {
@@ -522,9 +522,9 @@
 }
 .ofis-line {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: baseline;
-  line-height: 1.25;
+  line-height: 1.2;
   font-size: var(--ofis-fs-gunluk);
 }
 .ofis-line.is-new {
