@@ -80,7 +80,7 @@ pencere eskisi gibi onu yakalar.
 Pencereye konuşarak yazarsın; ses bilgisayardan çıkmaz, çeviriyi yerelde Whisper yapar.
 
 **Kurulum (bir kez):** `py -3 beyin.py ses kur`
-- Kendi sanal ortamını kurar, paketleri yükler ve iki modeli indirir. İşlemci için yaklaşık 2 GB; NVIDIA kart varsa onun kütüphaneleriyle daha fazla.
+- Bilgisayardaki en hızlı yolu kendisi seçer (aşağıda **Hız**), kendi sanal ortamını kurar, paketleri yükler ve modelleri indirir: yaklaşık 2 GB, NVIDIA kart varsa onun kütüphaneleriyle daha fazla.
 - Hepsi durum klasöründe (`state/ses/`) durur, kasaya ve senkrona girmez.
 - Motorun kendisi yine yalnız Python'un standart kütüphanesini kullanır; ses ayrı bir süreçte çalışır.
 - Kurulum bitince yakala dinleyicisi yeniden başlar.
@@ -99,15 +99,27 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
 - Sözü küçük bir Türkçe Vosk modeli yakalar; Whisper yalnız asıl yazmada çalışır, böylece işlemci boşuna yorulmaz.
 - Bluetooth kulaklıkta mikrofon açıkken müzik ve video sesi kötüleşir; bu özelliği USB ya da dahili mikrofonla kullan.
 
-**Hız:**
-- NVIDIA kartta cümle başına bir saniyenin altında.
-- İşlemcide birkaç saniye. Daha hızlı ama daha az doğru bir model için: `beyin.py ses ayar --model small`.
-- AMD kartlar için Whisper'ın hazır bir Windows sürümü yok; çeviri işlemcide yapılır.
+**Hız:** `ses kur` bilgisayardaki ekran kartına bakıp yazan motoru seçer.
+
+| Kart | Motor | Cümle başına |
+|---|---|---|
+| NVIDIA | faster-whisper, CUDA ile | bir saniyenin altında |
+| AMD Radeon, Intel Arc | whisper.cpp, Vulkan ile | bir saniyenin altında (RX 7800 XT'de 11 saniyelik kayıt 0,3 saniyede) |
+| Hiçbiri | faster-whisper, işlemcide | birkaç saniye |
+
+- **NVIDIA:** CUDA'nın kütüphaneleri pip'ten gelir; ayrıca CUDA kurman gerekmez. Kart açılamazsa işlemciye geçilir ve nedeni `state/ses/isci.log` dosyasına yazılır.
+- **AMD ve Intel Arc:**
+  - whisper.cpp Windows için Vulkan sürümü yayımlamıyor; Cortex onu kendi GitHub iş akışında (`whisper-vulkan`) derler. `ses kur` derlemeyi bu ön sürümden indirir ve SHA-256'sıyla doğrular.
+  - Model (yaklaşık 1,6 GB) ekran kartında hazır tutulur; ilk cümle de beklemesin diye açılışta bir kez ısıtılır.
+  - whisper.cpp yalnız bu bilgisayardan erişilen bir adreste (127.0.0.1) çalışır ve yakala kapanınca onunla kapanır.
+  - Kart açılamazsa whisper.cpp işlemcide yazar.
+- **Motoru elle seçmek:** `beyin.py ses ayar --motor islemci` (ya da `cuda`, `vulkan`, `otomatik`), ardından `beyin.py ses kur`.
+- Daha hızlı ama daha az doğru bir model için (CUDA ve işlemci): `beyin.py ses ayar --model small`.
 
 **Diğer komutlar:**
 | Komut | Ne yapar |
 |---|---|
-| `ses durum` | Kurulu mu, hangi model, uyandırma açık mı |
+| `ses durum` | Kurulu mu, hangi model ve motor, uyandırma açık mı |
 | `ses dene --sn 5` | Beş saniye kaydedip yazıya çevirir |
 | `ses ayar --ses kapat` | Sesi kapatır |
 | `ses kaldir` | Ortamı ve modelleri siler |

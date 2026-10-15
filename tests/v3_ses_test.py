@@ -4,6 +4,7 @@ Offline and silent: nothing is installed, downloaded or recorded. The helper pro
 in for by a small script that speaks the same protocol, and the installer's commands are
 recorded instead of run.
 """
+import importlib.util
 import io
 import json
 import os
@@ -12,7 +13,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
+from unittest import mock
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -85,9 +88,50 @@ class SetupTest(unittest.TestCase):
         self.assertTrue(plan['ekran_karti'])
         self.assertIn('nvidia-cublas-cu12', plan['paketler'])
         self.assertTrue(plan['klasor'].endswith(ses.SES_DIR), 'everything under state/ses, outside the vault')
-        plan = ses.install_plan(self.state, which={'py': None}.get, run=run)
+        self.assertEqual(plan['motor'], 'cuda')
+        plan = ses.install_plan(self.state, which={'py': None}.get, run=run, system=self.tmp.name)
         self.assertFalse(plan['ekran_karti'])
+        self.assertEqual(plan['motor'], 'islemci')
         self.assertNotIn('nvidia-cublas-cu12', plan['paketler'])
+        self.assertIn('faster-whisper>=1.2', plan['paketler'])
+
+    @unittest.skipUnless(os.name == 'nt', 'graphics cards are looked up the Windows way')
+    def test_an_amd_or_intel_arc_card_with_vulkan_writes_with_whisper_cpp_and_integrated_intel_does_not(self):
+        system = Path(self.tmp.name) / 'Windows'
+        cards = []
+
+        def run(command, **_options):
+            if command[0] == 'powershell':
+                return subprocess.CompletedProcess(command, 0, '\n'.join(cards) + '\n', '')
+            return subprocess.CompletedProcess(command, 1, '', '')
+
+        cards[:] = ['AMD Radeon(TM) Graphics', 'AMD Radeon RX 7800 XT']
+        self.assertEqual(ses.engine_for(which={}.get, run=run, system=system), 'islemci', 'no Vulkan loader, no Vulkan')
+        (system / 'System32').mkdir(parents=True)
+        (system / 'System32' / 'vulkan-1.dll').write_bytes(b'')
+        self.assertEqual(ses.engine_for(which={}.get, run=run, system=system), 'vulkan')
+        plan = ses.install_plan(self.state, which={}.get, run=run, system=system)
+        self.assertEqual(plan['paketler'], list(ses.BASE_PACKAGES), 'whisper.cpp writes: no faster-whisper, no CUDA')
+        cards[:] = ['Intel(R) Arc(TM) A770 Graphics']
+        self.assertEqual(ses.engine_for(which={}.get, run=run, system=system), 'vulkan')
+        cards[:] = ['Intel(R) UHD Graphics 770', 'Intel(R) Iris(R) Xe Graphics']
+        self.assertEqual(ses.engine_for(which={}.get, run=run, system=system), 'islemci')
+        nvidia = {'nvidia-smi': 'C:\\nvidia-smi.exe'}.get
+        found = lambda command, **_options: subprocess.CompletedProcess(command, 0, 'GPU 0: RTX', '')
+        self.assertEqual(ses.engine_for(which=nvidia, run=found, system=system), 'cuda', 'an NVIDIA card goes first')
+        ses.save_config(self.state, dict(ses.load_config(self.state), motor='islemci'))
+        self.assertEqual(ses.install_plan(self.state, which={}.get, run=run, system=system)['motor'], 'islemci', 'a chosen engine wins')
+
+    def test_the_engine_in_use_is_the_chosen_one_else_the_installed_one_and_a_1_0_8_install_keeps_cuda(self):
+        folder = ses.ses_dir(self.state)
+        folder.mkdir(parents=True)
+        self.assertEqual(ses.engine_in_use(self.state), 'islemci', 'nothing installed: the processor')
+        (folder / ses.MARKER).write_text(json.dumps({'schema': 1, 'ekran_karti': True}), encoding='utf-8')
+        self.assertEqual(ses.engine_in_use(self.state), 'cuda', 'before engines, the NVIDIA flag said CUDA')
+        (folder / ses.MARKER).write_text(json.dumps({'schema': 1, 'motor': 'vulkan', 'ekran_karti': True}), encoding='utf-8')
+        self.assertEqual(ses.engine_in_use(self.state), 'vulkan')
+        ses.save_config(self.state, dict(ses.load_config(self.state), motor='islemci'))
+        self.assertEqual(ses.engine_in_use(self.state), 'islemci')
 
     def test_install_builds_the_environment_fetches_both_models_and_says_each_step(self):
         archive = Path(self.tmp.name) / 'vosk.zip'
@@ -125,12 +169,105 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(ses.uninstall(self.state)['status'], 'kaldirildi')
         self.assertFalse(ses.ses_dir(self.state).exists())
 
+    def vulkan_install(self, fetched, build=None):
+        """An install with the Vulkan engine chosen; downloads and commands recorded, not run."""
+        ses.save_config(self.state, dict(ses.load_config(self.state), motor='vulkan'))
+        (ses.ses_dir(self.state) / ses.VOSK_DIR).mkdir(parents=True, exist_ok=True)  # the wake model is not this test's
+        commands, said = [], []
+
+        def run(command, **_options):
+            commands.append(command)
+            if '-m' in command and 'venv' in command:
+                python = ses.venv_python(self.state)
+                python.parent.mkdir(parents=True, exist_ok=True)
+                python.write_text('')
+            if '--indir' in command:
+                engine = json.loads((ses.ses_dir(self.state) / ses.MARKER).read_text(encoding='utf-8'))['motor']
+                return subprocess.CompletedProcess(command, 0, 'large-v3-turbo (%s)\n' % engine, '')
+            return subprocess.CompletedProcess(command, 0, '', '')
+
+        def download_checked(url, target, sha256, say=print):
+            fetched.append((url, sha256))
+            Path(target).parent.mkdir(parents=True, exist_ok=True)
+            Path(target).write_bytes(build.read_bytes() if url == ses.VULKAN_BUILD['url'] else b'ggml')
+            return target
+
+        result = ses.install(self.state, say=said.append, run=run, download=None, which={}.get, download_checked=download_checked)
+        return result, next(c for c in commands if 'pip' in c), said
+
+    def test_with_whisper_cpp_in_place_the_vulkan_install_fetches_its_model_by_digest_and_no_faster_whisper(self):
+        exe = ses.server_exe(self.state)
+        exe.parent.mkdir(parents=True)
+        exe.write_bytes(b'MZ')  # a build put there by hand, as before the pre-release is published
+        fetched = []
+        result, pip, _said = self.vulkan_install(fetched)
+        self.assertEqual((result['motor'], result['model']), ('vulkan', 'large-v3-turbo (vulkan)'), 'the trial load ran on Vulkan')
+        self.assertEqual(fetched, [(ses.GGML_MODEL['url'], ses.GGML_MODEL['sha256'])])
+        self.assertNotIn('faster-whisper>=1.2', pip)
+        self.assertIn('vosk>=0.3.45', pip)
+        self.assertEqual(ses.engine_in_use(self.state), 'vulkan')
+
+    def test_whisper_cpp_comes_from_its_pre_release_and_without_one_the_processor_writes(self):
+        fetched = []
+        with mock.patch.dict(ses.VULKAN_BUILD, sha256=None):
+            result, pip, said = self.vulkan_install(fetched)
+        self.assertEqual(result['motor'], 'islemci')
+        self.assertIn('faster-whisper>=1.2', pip, 'the processor writes with faster-whisper')
+        self.assertTrue(any('İşlemciye' in line for line in said))
+        self.assertEqual(fetched, [], 'nothing fetched for an engine that is not used')
+        build = Path(self.tmp.name) / 'whisper-vulkan-win-x64.zip'
+        with zipfile.ZipFile(build, 'w') as zipped:  # as the workflow packs it: the files at the top
+            zipped.writestr(ses.SERVER_EXE, b'MZ')
+            zipped.writestr('LICENSE-whisper.cpp.txt', b'MIT')
+        fetched.clear()
+        with mock.patch.dict(ses.VULKAN_BUILD, sha256='ab' * 32):
+            result, _pip, _said = self.vulkan_install(fetched, build)
+        self.assertEqual(result['motor'], 'vulkan')
+        self.assertEqual(fetched[0], (ses.VULKAN_BUILD['url'], 'ab' * 32), 'the build is checked by its digest')
+        self.assertTrue(ses.server_exe(self.state).is_file())
+        self.assertFalse((ses.ses_dir(self.state) / 'whisper-vulkan.zip').exists(), 'the archive is removed')
+
+    def test_a_failed_reinstall_leaves_the_working_install_as_it_was(self):
+        folder = ses.ses_dir(self.state)
+        (folder / ses.VOSK_DIR).mkdir(parents=True)
+        before = json.dumps({'schema': 1, 'motor': 'islemci', 'ekran_karti': False, 'model': 'small (işlemci)'})
+        (folder / ses.MARKER).write_text(before, encoding='utf-8')
+        python = ses.venv_python(self.state)
+        python.parent.mkdir(parents=True)
+        python.write_text('')
+
+        def run(command, **_options):
+            failed = '--indir' in command
+            return subprocess.CompletedProcess(command, 1 if failed else 0, '', 'CUDA failed' if failed else '')
+
+        with self.assertRaises(RuntimeError):
+            ses.install(self.state, say=lambda _text: None, run=run, which={}.get, system=self.tmp.name)
+        self.assertEqual((folder / ses.MARKER).read_text(encoding='utf-8'), before)
+
+    def test_a_download_whose_digest_does_not_match_never_takes_the_name(self):
+        folder = Path(self.tmp.name) / 'indirme'
+        target = folder / 'model.bin'
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+        with mock.patch('urllib.request.urlopen', lambda url, timeout: Response(b'not the model')):
+            with self.assertRaises(ValueError):
+                ses._download_checked('https://example.invalid/model.bin', target, '0' * 64)
+        self.assertEqual(list(folder.iterdir()), [], 'neither the name nor a partial file is left')
+        with self.assertRaises(ValueError):
+            ses._download_checked('http://example.invalid/model.bin', target, None)
+
     def test_an_archive_that_reaches_outside_its_folder_is_refused(self):
         archive = Path(self.tmp.name) / 'kotu.zip'
         with zipfile.ZipFile(archive, 'w') as zipped:
             zipped.writestr('../../disari.txt', b'x')
         with self.assertRaises(ValueError):
-            ses._unpack_vosk(archive, Path(self.tmp.name) / 'model')
+            ses._unpack(archive, Path(self.tmp.name) / 'model')
         self.assertFalse((Path(self.tmp.name).parent / 'disari.txt').exists())
 
     def test_the_command_line_says_when_it_is_not_installed(self):
@@ -271,6 +408,105 @@ class PopupVoiceTest(unittest.TestCase):
         win.voice_event({'olay': 'metin', 'metin': 'sil bunu', 'komut': None})
         win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'sil'})
         win.voice_event({'olay': 'bitti'})
+
+
+# whisper.cpp's server stood in for: the same flags, GET / when ready, POST /inference with a WAV.
+FAKE_SERVER = r'''
+import json, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+record, args = sys.argv[1], sys.argv[2:]
+with open(record, 'a', encoding='utf-8') as log:
+    log.write(json.dumps({'argv': args}) + '\n')
+if 'kart-yok' in args and '-dev' in args:
+    print('ggml_vulkan: no devices found', file=sys.stderr, flush=True)
+    sys.exit(3)
+port = int(args[args.index('--port') + 1])
+
+
+class Answer(BaseHTTPRequestHandler):
+    def log_message(self, *_args):
+        pass
+
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'ok')
+
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers['Content-Length']))
+        silent = body.count(b'\x00' * 64) > 100
+        with open(record, 'a', encoding='utf-8') as log:
+            log.write(json.dumps({'yol': self.path, 'wav': b'RIFF' in body and b'WAVEfmt' in body,
+                                  'json': b'name="response_format"\r\n\r\njson' in body, 'sessiz': silent}) + '\n')
+        text = ' [BLANK_AUDIO]\n' if silent else ' Merhaba\n dünya\n'
+        payload = json.dumps({'text': text}).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
+HTTPServer(('127.0.0.1', port), Answer).serve_forever()
+'''
+
+
+class VulkanServerTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-sunucu-')
+        self.addCleanup(self.tmp.cleanup)
+        self.folder = Path(self.tmp.name)
+        (self.folder / 'sunucu.py').write_text(FAKE_SERVER, encoding='utf-8')
+        self.record = self.folder / 'kayit.jsonl'
+        # The helper as it runs: written into a voice folder and loaded from there.
+        spec = importlib.util.spec_from_file_location('isci_sunucu_testi', ses.write_worker(self.folder / 'state'))
+        self.helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.helper)
+        self.helper.ses = ses
+
+    def stand_in(self, *extra):
+        return [sys.executable, str(self.folder / 'sunucu.py'), str(self.record), *extra]
+
+    def seen(self):
+        return [json.loads(line) for line in self.record.read_text(encoding='utf-8').splitlines()]
+
+    def test_whisper_cpp_starts_on_a_local_port_is_warmed_up_and_is_asked_with_a_wav(self):
+        import threading
+        config = dict(ses.DEFAULTS, ipucu='Pyn, Cortex')
+        server = self.helper.Server(self.stand_in(), self.folder / 'model.bin', config, self.folder / 'sunucu.log')
+        try:
+            text = self.helper.transcribe(server, b'\x10\x00\xf0\xff' * 8000, config, threading.Lock())
+        finally:
+            self.helper.release(server)
+        self.assertEqual(text, 'Merhaba dünya', 'its lines joined, its spaces trimmed')
+        self.assertIsNotNone(server.process.poll(), 'released with the helper')
+        launch, warm, asked = self.seen()
+        argv = launch['argv']
+        self.assertEqual(argv[argv.index('--host') + 1], '127.0.0.1', 'only this machine can reach it')
+        self.assertEqual(argv[argv.index('-l') + 1], 'tr')
+        self.assertEqual(argv[argv.index('--prompt') + 1], 'Pyn, Cortex')
+        self.assertEqual(argv[argv.index('-dev') + 1], '0')
+        self.assertIn('-nt', argv)
+        self.assertEqual((warm['yol'], warm['sessiz']), ('/inference', True), 'warmed up on silence before the first sentence')
+        self.assertEqual((asked['wav'], asked['json'], asked['sessiz']), (True, True, False))
+
+    def test_a_card_that_fails_is_said_and_whisper_cpp_writes_on_the_processor(self):
+        from contextlib import redirect_stderr
+        stand_in = self.stand_in('kart-yok')
+        self.helper.ses = types.SimpleNamespace(
+            engine_in_use=lambda _state, _config: 'vulkan', server_exe=lambda _state: stand_in,
+            ggml_model=lambda _state: self.folder / 'ggml-large-v3-turbo.bin', ses_dir=lambda _state: self.folder,
+            GGML_MODEL=ses.GGML_MODEL)
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            model, what = self.helper.load_model(self.folder, dict(ses.DEFAULTS))
+        self.helper.release(model)
+        self.assertEqual(what, 'large-v3-turbo (işlemci, whisper.cpp)')
+        self.assertIn('Vulkan açılamadı', errors.getvalue())
+        self.assertIn('no devices found', errors.getvalue(), 'why, from whisper.cpp itself (isci.log)')
+        first, second = [entry['argv'] for entry in self.seen() if 'argv' in entry]
+        self.assertIn('-dev', first)
+        self.assertIn('-ng', second)
 
 
 class HelperModuleTest(unittest.TestCase):

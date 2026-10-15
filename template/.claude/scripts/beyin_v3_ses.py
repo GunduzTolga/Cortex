@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 """Optional voice typing for yakala ("ses"): speak into the Beyne at window, or say "Pyn, not al".
 
-Speech never leaves this machine. Whisper (faster-whisper) writes what is said: on an NVIDIA
-card when there is one, else on the processor. A small Turkish Vosk model listens only for the
-wake phrase, so the processor is not kept busy by Whisper while nobody is talking to Pyn.
+Speech never leaves this machine. Whisper writes what is said, on the best engine the machine
+has (`engine_for`):
+
+- an NVIDIA card: faster-whisper on CUDA, its libraries from pip, no CUDA install needed;
+- an AMD or Intel card: whisper.cpp's own server, built for Vulkan by Cortex's whisper-vulkan
+  workflow (whisper.cpp ships no Vulkan build for Windows), the model held warm on the card;
+- neither: faster-whisper on the processor, a few seconds a sentence.
+
+A small Turkish Vosk model listens only for the wake phrase, so the processor is not kept busy by
+Whisper while nobody is talking to Pyn.
 
 The engine stays standard-library only: the voice runs in its own virtual environment, as a
 helper process that yakala's resident listener talks to one JSON line at a time. The helper's
 source is WORKER_SOURCE below, a string: written out into state/ses with the environment it
-runs in, so its packages are never imported by the engine. Nothing is installed unless the user runs `ses kur`; everything it installs (the
-environment, the Whisper model, the Vosk model) lives under state/ses, outside the vault, so a
-synced vault never carries gigabytes of models or one machine's packages to another.
+runs in, so its packages are never imported by the engine. Nothing is installed unless the
+user runs `ses kur`; everything it installs (the environment, whisper.cpp, the models) lives
+under state/ses, outside the vault, so a synced vault never carries gigabytes of models or one
+machine's packages to another.
 """
 import argparse
 import difflib
@@ -34,15 +42,39 @@ LOG = 'isci.log'
 VOSK_DIR = 'vosk-tr'
 VOSK_MODEL_URL = 'https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip'
 WORKER = 'isci.py'
-PACKAGES = ('faster-whisper>=1.2', 'sounddevice>=0.5', 'numpy', 'vosk>=0.3.45')
+ENGINES = ('cuda', 'vulkan', 'islemci')
+# Recording and the wake word, for every engine.
+BASE_PACKAGES = ('sounddevice>=0.5', 'numpy', 'vosk>=0.3.45')
+# Writing on CUDA or on the processor; the Vulkan engine is whisper.cpp and needs neither.
+FASTER_PACKAGES = ('faster-whisper>=1.2',)
 # Only with an NVIDIA card: CUDA's own libraries, from pip, so no CUDA install is needed.
 NVIDIA_PACKAGES = ('nvidia-cublas-cu12', 'nvidia-cudnn-cu12>=9,<10')
+PACKAGES = FASTER_PACKAGES + BASE_PACKAGES  # the processor's set
+VULKAN_DIR = 'whisper-vulkan'
+SERVER_EXE = 'whisper-server.exe'
+GGML_DIR = 'ggml'
+# whisper.cpp's own model file for the Vulkan engine, pinned by its digest.
+GGML_MODEL = {
+    'ad': 'ggml-large-v3-turbo.bin',
+    'url': 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin',
+    'sha256': '1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69',
+    'boyut': 1624555275,
+}
+# whisper.cpp built for Vulkan by .github/workflows/whisper-vulkan.yml, a pre-release of its own.
+# Until it is published (sha256 None), a build put in state/ses/whisper-vulkan by hand is used.
+VULKAN_BUILD = {
+    'surum': '1.9.5',
+    'url': 'https://github.com/GunduzTolga/Cortex/releases/download/whisper-vulkan-1.9.5/whisper-vulkan-win-x64.zip',
+    'sha256': None,
+}
 # The voice packages publish wheels for these first; a newer Python may have none yet.
 PYTHON_VERSIONS = ('3.12', '3.13', '3.11', '3.10')
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
 DEFAULTS = {
     'acik': True,
+    'motor': 'otomatik',            # or 'cuda', 'vulkan', 'islemci'; otomatik: what `kur` found
+    'gpu': 0,                       # the Vulkan device whisper.cpp writes on
     'dil': 'tr',
     'model': 'large-v3-turbo',      # on an NVIDIA card
     'cpu_model': 'large-v3-turbo',  # on the processor; 'small' is faster and less accurate
@@ -217,13 +249,78 @@ def has_nvidia(which=shutil.which, run=subprocess.run):
         return False
 
 
-def install_plan(state, which=shutil.which, run=subprocess.run):
-    gpu = has_nvidia(which, run)
+def video_cards(run=subprocess.run):
+    """The names of the machine's graphics adapters (Windows), as the system knows them."""
+    if os.name != 'nt':
+        return []
+    try:
+        done = _run(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+                     '(Get-CimInstance Win32_VideoController).Name'], timeout=30, run=run)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [line.strip() for line in (done.stdout or '').splitlines() if line.strip()] if done.returncode == 0 else []
+
+
+def has_vulkan_card(run=subprocess.run, system=None):
+    """An AMD or Intel card with the system's Vulkan loader: whisper.cpp's Vulkan build runs on it."""
+    if os.name != 'nt':
+        return False
+    root = Path(system or os.environ.get('SystemRoot', r'C:\Windows'))
+    if not (root / 'System32' / 'vulkan-1.dll').is_file():
+        return False
+    # whisper.cpp writes on a discrete card when there is one (an APU's Radeon only without one);
+    # Intel's integrated graphics stay on the processor, which is not slower there.
+    return any(re.search(r'\b(radeon|amd|intel\(r\) arc|arc)\b', name.lower()) for name in video_cards(run))
+
+
+def engine_for(which=shutil.which, run=subprocess.run, system=None):
+    """The fastest engine this machine has: NVIDIA's CUDA, then Vulkan, then the processor."""
+    if has_nvidia(which, run):
+        return 'cuda'
+    if has_vulkan_card(run, system):
+        return 'vulkan'
+    return 'islemci'
+
+
+def installed_engine(state):
+    """The engine `kur` set up, as its marker says; the processor when it says none."""
+    try:
+        marker = json.loads((ses_dir(state) / MARKER).read_text(encoding='utf-8'))
+        engine = marker.get('motor') or ('cuda' if marker.get('ekran_karti') else None)
+    except (OSError, ValueError, AttributeError):
+        engine = None
+    return engine if engine in ENGINES else 'islemci'
+
+
+def engine_in_use(state, config=None):
+    """The engine the helper writes with: the one chosen in the settings, else the installed one."""
+    chosen = (config or load_config(state)).get('motor')
+    return chosen if chosen in ENGINES else installed_engine(state)
+
+
+def server_exe(state):
+    return ses_dir(state) / VULKAN_DIR / SERVER_EXE
+
+
+def ggml_model(state):
+    return ses_dir(state) / GGML_DIR / GGML_MODEL['ad']
+
+
+def packages_for(engine):
+    if engine == 'vulkan':
+        return list(BASE_PACKAGES)
+    return list(FASTER_PACKAGES) + list(BASE_PACKAGES) + (list(NVIDIA_PACKAGES) if engine == 'cuda' else [])
+
+
+def install_plan(state, which=shutil.which, run=subprocess.run, system=None):
+    chosen = load_config(state).get('motor')
+    engine = chosen if chosen in ENGINES else engine_for(which, run, system)
     return {
         'klasor': str(ses_dir(state)),
         'python': python_for_env(which, run),
-        'paketler': list(PACKAGES) + (list(NVIDIA_PACKAGES) if gpu else []),
-        'ekran_karti': gpu,
+        'motor': engine,
+        'paketler': packages_for(engine),
+        'ekran_karti': engine in ('cuda', 'vulkan'),
         'vosk_modeli': VOSK_MODEL_URL,
     }
 
@@ -239,8 +336,42 @@ def _download(url, target):
         return Path(out.name)
 
 
-def _unpack_vosk(archive, folder):
-    """The Vosk archive's one top folder becomes `folder`; nothing is written outside it."""
+def _download_checked(url, target, sha256, say=print):
+    """A file over HTTPS, its digest checked before it takes its name; a wrong one is removed."""
+    import hashlib
+    from urllib.request import urlopen
+    if not url.startswith('https://'):
+        raise ValueError('Yalnız HTTPS adresinden indirilir: ' + url)
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    part = target.with_name(target.name + '.part')
+    digest = hashlib.sha256()
+    with urlopen(url, timeout=60) as response, open(part, 'wb') as out:
+        while True:
+            chunk = response.read(1 << 20)
+            if not chunk:
+                break
+            digest.update(chunk)
+            out.write(chunk)
+    if sha256 and digest.hexdigest() != sha256:
+        part.unlink(missing_ok=True)
+        raise ValueError('İndirilen dosya beklenen dosya değil (SHA-256 tutmadı): ' + target.name)
+    os.replace(part, target)
+    return target
+
+
+def _sha256(path):
+    import hashlib
+    digest = hashlib.sha256()
+    with open(path, 'rb') as source:
+        for chunk in iter(lambda: source.read(1 << 20), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _unpack(archive, folder):
+    """The archive's one top folder (Vosk's) or its files (whisper-vulkan's) become `folder`;
+    nothing is written outside it."""
     import zipfile
     folder = Path(folder)
     staging = folder.with_name(folder.name + '.acilan')
@@ -266,12 +397,43 @@ def worker_env(state):
     return env
 
 
-def install(state, say=print, run=subprocess.run, download=_download, which=shutil.which):
-    """Build the environment, install the packages, fetch both models. Each step says what it does."""
-    plan = install_plan(state, which, run)
+def _vulkan_ready(state, say, download_checked):
+    """whisper.cpp's Vulkan server and its model in place; False when the build cannot be had."""
+    exe = server_exe(state)
+    if not exe.is_file():
+        if not VULKAN_BUILD['sha256']:
+            say('Vulkan derlemesi bu sürümde henüz yayımlanmadı.')
+            return False
+        say('whisper.cpp (Vulkan) indiriliyor…')
+        archive = ses_dir(state) / 'whisper-vulkan.zip'
+        try:
+            download_checked(VULKAN_BUILD['url'], archive, VULKAN_BUILD['sha256'], say)
+            _unpack(archive, exe.parent)  # the same guarded unpack: nothing outside the folder
+        except Exception as exc:
+            say('whisper.cpp (Vulkan) indirilemedi: ' + str(exc)[:200])
+            return False
+        finally:
+            archive.unlink(missing_ok=True)
+        if not exe.is_file():
+            return False
+    model = ggml_model(state)
+    if not (model.is_file() and model.stat().st_size == GGML_MODEL['boyut']):
+        say('whisper.cpp modeli indiriliyor (yaklaşık 1,6 GB)…')
+        download_checked(GGML_MODEL['url'], model, GGML_MODEL['sha256'], say)
+    return True
+
+
+def install(state, say=print, run=subprocess.run, download=_download, which=shutil.which, download_checked=_download_checked, system=None):
+    """Build the environment, install the packages, fetch the models. Each step says what it does."""
+    plan = install_plan(state, which, run, system)
     folder = ses_dir(state)
     folder.mkdir(parents=True, exist_ok=True)
     say('Python: ' + plan['python'])
+    say('Motor: ' + {'cuda': 'NVIDIA ekran kartı (CUDA)', 'vulkan': 'AMD/Intel ekran kartı (Vulkan, whisper.cpp)',
+                     'islemci': 'işlemci'}[plan['motor']])
+    if plan['motor'] == 'vulkan' and not _vulkan_ready(state, say, download_checked):
+        say('İşlemciye geçiliyor.')
+        plan.update(motor='islemci', paketler=packages_for('islemci'), ekran_karti=False)
     if not venv_python(state).is_file():
         say('Sanal ortam kuruluyor…')
         done = _run([plan['python'], '-m', 'venv', str(folder / 'venv')], timeout=600, run=run)
@@ -286,20 +448,31 @@ def install(state, say=print, run=subprocess.run, download=_download, which=shut
         say('Uyandırma modeli indiriliyor (yaklaşık 40 MB)…')
         archive = download(VOSK_MODEL_URL, folder / 'vosk.zip')
         try:
-            _unpack_vosk(archive, folder / VOSK_DIR)
+            _unpack(archive, folder / VOSK_DIR)
         finally:
             Path(archive).unlink(missing_ok=True)
-    say('Whisper modeli hazırlanıyor (ilk seferde yaklaşık 1,6 GB iner)…')
+    # The marker first, so the helper's trial load below writes with the engine just set up.
+    if not (folder / CONFIG).is_file():
+        save_config(state, load_config(state))
+    marker = {'schema': 1, 'python': plan['python'], 'motor': plan['motor'], 'ekran_karti': plan['ekran_karti']}
+    try:
+        previous = (folder / MARKER).read_text(encoding='utf-8')  # a working install stays working if this one fails
+    except OSError:
+        previous = None
+    (folder / MARKER).write_text(json.dumps(marker, ensure_ascii=False) + '\n', encoding='utf-8')
+    say('Whisper modeli hazırlanıyor' + (' (ilk seferde yaklaşık 1,6 GB iner)…' if plan['motor'] != 'vulkan' else '…'))
     done = run(worker_command(state, '--indir'), capture_output=True, text=True, encoding='utf-8', errors='replace',
                timeout=7200, env=worker_env(state), creationflags=NO_WINDOW)
     if done.returncode:
+        if previous is None:
+            (folder / MARKER).unlink(missing_ok=True)
+        else:
+            (folder / MARKER).write_text(previous, encoding='utf-8')
         raise RuntimeError('Whisper modeli hazırlanamadı: ' + (done.stderr or done.stdout).strip()[-600:])
     model = (done.stdout or '').strip().splitlines()[-1:] or ['']
-    if not (folder / CONFIG).is_file():
-        save_config(state, load_config(state))
-    (folder / MARKER).write_text(json.dumps({'schema': 1, 'python': plan['python'], 'ekran_karti': plan['ekran_karti'],
-                                             'model': model[0]}, ensure_ascii=False) + '\n', encoding='utf-8')
-    return {'status': 'kuruldu', 'klasor': str(folder), 'ekran_karti': plan['ekran_karti'], 'model': model[0]}
+    marker['model'] = model[0]
+    (folder / MARKER).write_text(json.dumps(marker, ensure_ascii=False) + '\n', encoding='utf-8')
+    return {'status': 'kuruldu', 'klasor': str(folder), 'motor': plan['motor'], 'ekran_karti': plan['ekran_karti'], 'model': model[0]}
 
 
 def status(state):
@@ -311,7 +484,7 @@ def status(state):
     config = load_config(state)
     return {'kurulu': installed(state), 'acik': bool(config['acik']), 'uyandirma': bool(config['uyandirma']),
             'uyandirma_sozu': config['uyandirma_sozu'], 'model': marker.get('model'), 'ekran_karti': marker.get('ekran_karti'),
-            'klasor': str(ses_dir(state))}
+            'motor': engine_in_use(state, config), 'klasor': str(ses_dir(state))}
 
 
 def uninstall(state):
@@ -416,12 +589,13 @@ def human(result, command):
         if not result['kurulu']:
             return 'Sesle yazma kurulu değil. Kurmak için: beyin.py ses kur'
         return ('Sesle yazma kurulu · ' + ('açık' if result['acik'] else 'kapalı') + ' · model ' + str(result.get('model')) +
-                (' · ekran kartı' if result.get('ekran_karti') else ' · işlemci') +
+                ' · motor ' + {'cuda': 'NVIDIA (CUDA)', 'vulkan': 'Vulkan (whisper.cpp)', 'islemci': 'işlemci'}.get(result.get('motor'), '?') +
                 ' · uyandırma ' + ('açık ("' + result['uyandirma_sozu'] + '")' if result['uyandirma'] else 'kapalı'))
     if command == 'kaldir':
         return 'Sesle yazma kaldırıldı.' if result['status'] == 'kaldirildi' else 'Sesle yazma zaten kurulu değil.'
     if command == 'ayar':
-        return 'Ayar kaydedildi.' + (' Yakala dinleyicisi yeniden başlatıldı.' if result.get('dinleyici') else '')
+        return ('Ayar kaydedildi.' + (' Yakala dinleyicisi yeniden başlatıldı.' if result.get('dinleyici') else '') +
+                (' Bu motor kurulu değil; kurmak için: beyin.py ses kur' if result.get('kur_gerekli') else ''))
     if command == 'dene':
         return result.get('metin') or '(bir şey duyulmadı)'
     return json.dumps(result, ensure_ascii=False)
@@ -438,6 +612,7 @@ def main(argv=None, vault=None, state=None):
     setting.add_argument('--uyandirma', choices=('ac', 'kapat'), help='"Pyn, not al" ile açılsın mı (mikrofon sürekli açık kalır)')
     setting.add_argument('--ses', choices=('ac', 'kapat'), help='Sesle yazmayı aç ya da kapat')
     setting.add_argument('--model', help='Whisper modeli, örnek: large-v3-turbo, small')
+    setting.add_argument('--motor', choices=('otomatik',) + ENGINES, help='Yazan motor: otomatik, cuda, vulkan ya da islemci')
     trial = sub.add_parser('dene', help='Birkaç saniye kaydedip yazıya çevir')
     trial.add_argument('--sn', type=float, default=5.0)
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -468,8 +643,13 @@ def main(argv=None, vault=None, state=None):
             config['acik'] = args.ses == 'ac'
         if args.model:
             config['model'] = config['cpu_model'] = args.model
+        if args.motor:
+            config['motor'] = args.motor
         save_config(state, config)
-        result = {'status': 'kaydedildi', **status(state), 'dinleyici': restart_listener(state) if args.ses or args.model else False}
+        result = {'status': 'kaydedildi', **status(state),
+                  'dinleyici': restart_listener(state) if args.ses or args.model or args.motor else False}
+        if args.motor in ENGINES and installed(state) and args.motor != installed_engine(state):
+            result['kur_gerekli'] = True  # another engine's packages or whisper.cpp: `kur` sets them up
     else:
         if not installed(state):
             raise SystemExit('Sesle yazma kurulu değil. Kurmak için: beyin.py ses kur')
@@ -492,8 +672,8 @@ def main(argv=None, vault=None, state=None):
 WORKER_SOURCE = r'''"""Voice helper for yakala: runs in state/ses/venv, never in the engine's own Python.
 
 Commands arrive on stdin and events leave on stdout, one JSON object a line (see
-beyin_v3_ses.Worker). It loads Whisper (an NVIDIA card first, else the processor), records the
-microphone on `dinle`, ends on silence, on "kaydet" at the end or on `bitir`, writes what was
+beyin_v3_ses.Worker). It loads Whisper on the engine `ses kur` set up (whisper.cpp's server on a
+Vulkan card, faster-whisper on CUDA, else on the processor), records the microphone on `dinle`, ends on silence, on "kaydet" at the end or on `bitir`, writes what was
 said, and, when the wake word is on and nothing is being recorded, listens with a small Vosk
 model for "Pyn, not al" and starts recording by itself. No audio is kept or sent anywhere.
 
@@ -501,6 +681,7 @@ Modes for the command line: `--indir` loads the model once (the install fetches 
 `--dene N` records N seconds, writes them and exits.
 """
 import argparse
+import io
 import json
 import os
 from pathlib import Path
@@ -544,21 +725,167 @@ def _open(name, device, compute):
         return WhisperModel(name, device=device, compute_type=compute, cpu_threads=threads)
 
 
-def load_model(config):
-    """(model, what it is): the NVIDIA card first, then the processor."""
+def _tie(process):
+    """The process dies with this helper, even when the helper itself is killed (a Windows job)."""
+    if os.name != 'nt':
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class Basic(ctypes.Structure):
+        _fields_ = [('PerProcessUserTimeLimit', ctypes.c_longlong), ('PerJobUserTimeLimit', ctypes.c_longlong),
+                    ('LimitFlags', wintypes.DWORD), ('MinimumWorkingSetSize', ctypes.c_size_t),
+                    ('MaximumWorkingSetSize', ctypes.c_size_t), ('ActiveProcessLimit', wintypes.DWORD),
+                    ('Affinity', ctypes.c_size_t), ('PriorityClass', wintypes.DWORD), ('SchedulingClass', wintypes.DWORD)]
+
+    class Extended(ctypes.Structure):
+        _fields_ = [('BasicLimitInformation', Basic), ('IoInfo', ctypes.c_ulonglong * 6),
+                    ('ProcessMemoryLimit', ctypes.c_size_t), ('JobMemoryLimit', ctypes.c_size_t),
+                    ('PeakProcessMemoryUsed', ctypes.c_size_t), ('PeakJobMemoryUsed', ctypes.c_size_t)]
+
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
+    kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    job = kernel32.CreateJobObjectW(None, None)
+    if not job:
+        return None
+    limits = Extended()
+    limits.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    kernel32.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits))
+    kernel32.AssignProcessToJobObject(job, int(process._handle))
+    return job  # kept by the caller: when the last handle closes, the process goes with it
+
+
+class Server:
+    """whisper.cpp's own server, the model held warm on the card, on a free port of this machine only.
+
+    It is asked like faster-whisper's model (`write`), so recording does not care which engine writes.
+    """
+
+    def __init__(self, exe, model, config, log, gpu=True):
+        # exe: whisper-server.exe, or a command that starts a stand-in (the tests)
+        import socket
+        import subprocess
+        from urllib.request import ProxyHandler, build_opener
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', 0))
+            self.port = probe.getsockname()[1]
+        self.url = 'http://127.0.0.1:%d' % self.port
+        self.opener = build_opener(ProxyHandler({}))  # a system proxy never sees speech
+        threads = max(1, min(8, (os.cpu_count() or 4) // 2))
+        start = list(exe) if isinstance(exe, (list, tuple)) else [str(exe)]
+        command = start + ['-m', str(model), '--host', '127.0.0.1', '--port', str(self.port),
+                           '-l', config.get('dil') or 'auto', '-t', str(threads), '-nt']
+        if config.get('ipucu'):
+            command += ['--prompt', config['ipucu']]
+        command += ['-dev', str(int(config.get('gpu') or 0))] if gpu else ['-ng']
+        self.log = Path(log)
+        with open(self.log, 'wb') as sink:
+            self.process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
+                                            creationflags=0x08000000 if os.name == 'nt' else 0)
+        self.job = _tie(self.process)
+        try:
+            self._wait()
+            self.write(bytes(2 * RATE), config)  # the first answer builds the card's pipelines: not on the user's sentence
+        except Exception:
+            self.close()
+            raise
+
+    def _wait(self, limit=180):
+        deadline = time.time() + limit
+        while time.time() < deadline:
+            if self.process.poll() is not None:
+                raise RuntimeError('whisper.cpp kapandı: ' + self._tail())
+            try:
+                with self.opener.open(self.url + '/', timeout=2):
+                    return
+            except OSError:
+                time.sleep(0.25)
+        raise RuntimeError('whisper.cpp hazır olmadı: ' + self._tail())
+
+    def _tail(self):
+        try:
+            return self.log.read_text(encoding='utf-8', errors='replace').strip()[-400:]
+        except OSError:
+            return ''
+
+    def write(self, audio, config):
+        import uuid
+        import wave
+        from urllib.request import Request
+        if isinstance(audio, bytes):
+            pcm = audio  # already 16-bit samples
+        else:
+            import numpy as np
+            pcm = (np.clip(audio, -1, 1) * 32767).astype('<i2').tobytes()
+        sound = io.BytesIO()
+        with wave.open(sound, 'wb') as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(RATE)
+            wav.writeframes(pcm)
+        boundary = uuid.uuid4().hex
+        body = b''
+        for name, value in (('response_format', 'json'), ('temperature', '0.0')):
+            body += ('--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (boundary, name, value)).encode()
+        body += ('--%s\r\nContent-Disposition: form-data; name="file"; filename="ses.wav"\r\n'
+                 'Content-Type: audio/wav\r\n\r\n' % boundary).encode() + sound.getvalue() + ('\r\n--%s--\r\n' % boundary).encode()
+        request = Request(self.url + '/inference', data=body,
+                          headers={'Content-Type': 'multipart/form-data; boundary=' + boundary})
+        with self.opener.open(request, timeout=300) as response:
+            answer = json.loads(response.read().decode('utf-8'))
+        if 'error' in answer:
+            raise RuntimeError('whisper.cpp: ' + str(answer['error'])[:300])
+        return ' '.join(line.strip() for line in str(answer.get('text', '')).splitlines() if line.strip())
+
+    def close(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except Exception:
+                self.process.kill()
+
+
+def _silence():
     import numpy as np
-    try:
-        _cuda_dirs()
-        model = _open(config['model'], 'cuda', 'float16')
-        list(model.transcribe(np.zeros(RATE, dtype='float32'), language=config['dil'])[0])  # CUDA loads on first use
-        return model, config['model'] + ' (ekran kartı)'
-    except Exception:
-        pass
+    return np.zeros(RATE, dtype='float32')
+
+
+def load_model(state, config):
+    """(model, what it is), on the engine `ses kur` set up; a failed card says why on stderr (isci.log)."""
+    engine = ses.engine_in_use(state, config)
+    if engine == 'vulkan':
+        exe, model, log = ses.server_exe(state), ses.ggml_model(state), ses.ses_dir(state) / 'whisper-server.log'
+        name = ses.GGML_MODEL['ad'][len('ggml-'):-len('.bin')]
+        try:
+            return Server(exe, model, config, log), name + ' (ekran kartı, Vulkan)'
+        except Exception as exc:
+            print('Vulkan açılamadı, işlemciye geçiliyor: ' + str(exc)[:400], file=sys.stderr, flush=True)
+        # This environment has no faster-whisper: whisper.cpp itself writes on the processor.
+        return Server(exe, model, config, log, gpu=False), name + ' (işlemci, whisper.cpp)'
+    if engine == 'cuda':
+        try:
+            _cuda_dirs()
+            model = _open(config['model'], 'cuda', 'float16')
+            list(model.transcribe(_silence(), language=config['dil'])[0])  # CUDA loads on first use
+            return model, config['model'] + ' (ekran kartı, CUDA)'
+        except Exception as exc:
+            print('CUDA açılamadı, işlemciye geçiliyor: ' + str(exc)[:400], file=sys.stderr, flush=True)
     return _open(config['cpu_model'], 'cpu', 'int8'), config['cpu_model'] + ' (işlemci)'
+
+
+def release(model):
+    """whisper.cpp's server stops with the helper; faster-whisper's model needs nothing."""
+    if isinstance(model, Server):
+        model.close()
 
 
 def transcribe(model, audio, config, lock):
     with lock:
+        if isinstance(model, Server):
+            return model.write(audio, config)
         segments, _info = model.transcribe(audio, language=config['dil'] or None, vad_filter=True, beam_size=5,
                                            initial_prompt=config.get('ipucu') or None, condition_on_previous_text=False)
         return ' '.join(s.text.strip() for s in segments).strip()
@@ -682,7 +1009,7 @@ def serve(state, config):
 
     def load():
         try:
-            loaded['model'], what = load_model(config)
+            loaded['model'], what = load_model(state, config)
             out(olay='hazir', aciklama=what)
         except Exception as exc:
             out(olay='hata', neden='model', mesaj=str(exc)[:300])
@@ -739,6 +1066,7 @@ def serve(state, config):
                     recorder.stop()
                 if wake is not None and wake.running:
                     wake.stop()
+                release(loaded.get('model'))
                 return 0
             if name == 'dinle' and mode == 'bos':
                 begin()
@@ -789,17 +1117,21 @@ def main(argv=None):
     state = Path(args.state)
     config = ses.load_config(state)
     if args.indir:
-        _model, what = load_model(config)
+        model, what = load_model(state, config)
+        release(model)
         print(what, flush=True)
         return 0
     if args.dene:
-        model, what = load_model(config)
-        recorder = Recorder(config)
-        recorder.start()
-        time.sleep(args.dene)
-        audio = recorder.stop()
-        started = time.time()
-        text = transcribe(model, audio, config, threading.Lock())
+        model, what = load_model(state, config)
+        try:
+            recorder = Recorder(config)
+            recorder.start()
+            time.sleep(args.dene)
+            audio = recorder.stop()
+            started = time.time()
+            text = transcribe(model, audio, config, threading.Lock())
+        finally:
+            release(model)
         print(json.dumps({'metin': text, 'model': what, 'sure_sn': round(time.time() - started, 2)}, ensure_ascii=False), flush=True)
         return 0
     return serve(state, config)
