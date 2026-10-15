@@ -290,8 +290,8 @@ def install(state, say=print, run=subprocess.run, download=_download, which=shut
         finally:
             Path(archive).unlink(missing_ok=True)
     say('Whisper modeli hazırlanıyor (ilk seferde yaklaşık 1,6 GB iner)…')
-    done = run(worker_command(state, '--indir'), capture_output=True, text=True, timeout=7200, env=worker_env(state),
-               creationflags=NO_WINDOW)
+    done = run(worker_command(state, '--indir'), capture_output=True, text=True, encoding='utf-8', errors='replace',
+               timeout=7200, env=worker_env(state), creationflags=NO_WINDOW)
     if done.returncode:
         raise RuntimeError('Whisper modeli hazırlanamadı: ' + (done.stderr or done.stdout).strip()[-600:])
     model = (done.stdout or '').strip().splitlines()[-1:] or ['']
@@ -707,7 +707,8 @@ def serve(state, config):
     def finish(keep=True):
         nonlocal mode
         audio = recorder.stop()
-        if not keep or len(audio) < RATE * 0.3 or 'model' not in loaded:
+        # Nothing said (no speech above the room's noise): Whisper given silence makes words up.
+        if not keep or not recorder.spoke or len(audio) < RATE * 0.3 or 'model' not in loaded:
             mode = 'bos'
             out(olay='metin', metin='', komut=None)
             return
