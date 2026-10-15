@@ -6,3 +6,4 @@ release/
 *.log
 # Pictures the e2e run takes of the hidden window: output, not source.
 e2e/screenshots/
+cortex-paket/

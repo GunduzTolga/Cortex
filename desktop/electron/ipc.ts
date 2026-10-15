@@ -4,6 +4,7 @@ import { readSettings, settingsUnreadable, updateSettings } from './services/set
 import { setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
+import * as setup from './services/setup';
 import * as vaultNotes from './services/vaultNotes';
 
 /**
@@ -133,6 +134,13 @@ export function registerIpc(): void {
     auth.forgetToolKey(cli);
     return auth.authStatuses();
   });
+
+  // Cortex's engine and voice typing set up from the app (services/setup.ts): the window names a job, never a program or a file.
+  setup.onSetupPush((payload) => broadcast('setup:event', payload));
+  handle('setup:status', () => setup.setupStatus());
+  handle('setup:installEngine', () => setup.installEngine());
+  handle('setup:installVoice', () => setup.installVoice());
+  handle('setup:voice', (patch) => setup.setVoice(patch));
 }
 
 export function stopWatching(): void {

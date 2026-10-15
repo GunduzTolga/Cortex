@@ -20,6 +20,8 @@ if (bundle) fs.rmSync(userData, { recursive: true, force: true });
 export const app = {
   getPath: () => userData,
   getVersion: () => '0.0.0-test',
+  // Where the app's own files are: an empty folder here, so nothing beside it is taken for the app's.
+  getAppPath: () => path.join(userData, 'app'),
   on: noop,
   whenReady: async () => undefined,
   requestSingleInstanceLock: () => true,

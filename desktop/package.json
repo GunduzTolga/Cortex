@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.core.json",
     "test": "node scripts/test.mjs",
     "e2e": "npm run build && node scripts/e2e.mjs",
+    "cortex-paket": "node scripts/cortex-paket.mjs",
     "package": "npm run build && electron-builder --win",
     "package:dir": "npm run build && electron-builder --win --dir"
   },
@@ -88,6 +89,13 @@
       {
         "from": "../LICENSE",
         "to": "LICENSE"
+      },
+      {
+        "from": "cortex-paket",
+        "to": "cortex",
+        "filter": [
+          "beyin-v3-*.zip"
+        ]
       },
       {
         "from": "../MARKA.md",

@@ -1,6 +1,7 @@
 import type { ChatApi, ChatPush } from './chat';
 import type { AppLanguage } from './language';
 import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
+import type { SetupApi, SetupPush } from './setup';
 
 /**
  * Everything the window can ask of the main process: the object the preload
@@ -76,6 +77,8 @@ export interface CortexApi {
   notes: NotesApi;
   /** The chat with the person's own AI CLIs (shared/chat.ts). */
   chat: ChatApi;
+  /** Cortex's engine and voice typing set up from the app (shared/setup.ts). */
+  setup: SetupApi;
   on: {
     /** The vault changed on disk, or another vault was chosen: read the index again. */
     notesChanged(handler: () => void): () => void;
@@ -83,5 +86,7 @@ export interface CortexApi {
     chat(handler: (push: ChatPush) => void): () => void;
     /** A sign-in window was closed: ask the tools' statuses again. */
     authChanged(handler: () => void): () => void;
+    /** A setup job going on: a step, or its end. */
+    setup(handler: (push: SetupPush) => void): () => void;
   };
 }

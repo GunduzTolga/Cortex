@@ -6,8 +6,9 @@ name: desktop
 # the platform the app is for.
 #
 # Only when the app or what it reads changes: desktop/ itself, this file, the
-# template the end-to-end run lays its vault out from, and Pyn's seal, which
-# the window and the installer carry. The engine's own workflows are untouched.
+# template the end-to-end run lays its vault out from, the engine the installer
+# carries (scripts/, VERSION), and Pyn's seal, which the window and the
+# installer carry. The engine's own workflows are untouched.
 on:
   push:
     branches: [main]
@@ -15,12 +16,16 @@ on:
       - 'desktop/**'
       - '.github/workflows/desktop.yml'
       - 'template/**'
+      - 'scripts/**'
+      - 'VERSION'
       - 'tema/ananas/marka/**'
   pull_request:
     paths:
       - 'desktop/**'
       - '.github/workflows/desktop.yml'
       - 'template/**'
+      - 'scripts/**'
+      - 'VERSION'
       - 'tema/ananas/marka/**'
   workflow_dispatch:
 
@@ -71,6 +76,11 @@ jobs:
       # The installer, unsigned: Windows SmartScreen warns before it runs until
       # the app is signed (desktop/README.md). Not a release: a week's copy of
       # what this commit builds, to try by hand.
+      # The engine the app sets up in a vault from its settings, carried inside
+      # it (electron/services/setup.ts): this commit's own, built as a release is.
+      - name: Cortex paketi
+        run: npm run cortex-paket
+
       - name: Kurulum dosyasi
         run: npx electron-builder --win nsis --publish never
 

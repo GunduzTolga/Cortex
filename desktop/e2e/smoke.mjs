@@ -36,6 +36,9 @@ const check = (label, condition) => {
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-'));
 const vaultDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-vault-')));
 const vaultNote = (relative) => path.join(vaultDir, ...relative.split('/'));
+// The engine package the app came with, stood in for: the settings offer it, the run never installs it.
+const enginePackages = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-paket-'));
+fs.writeFileSync(path.join(enginePackages, 'beyin-v3-9.9.9.zip'), '');
 const write = (relative, text) => {
   fs.mkdirSync(path.dirname(vaultNote(relative)), { recursive: true });
   fs.writeFileSync(vaultNote(relative), text);
@@ -116,6 +119,7 @@ const launch = () =>
       // The model servers: LM Studio's stand-in, and Ollama where nothing answers; never the machine's own.
       CORTEX_TEST_LMSTUDIO: lmStudioBase,
       CORTEX_TEST_OLLAMA: 'http://127.0.0.1:9',
+      CORTEX_ENGINE_PACKAGES: enginePackages,
     },
   });
 
@@ -191,7 +195,7 @@ const windowAlone = await page.evaluate(async () => {
   });
   return { node: typeof require + typeof process, bridge: Object.keys(window.cortex).sort(), fetched, image, opened: window.open('https://example.com/') === null };
 });
-check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,notes,on,settings,vault');
+check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,notes,on,settings,setup,vault');
 check('it reaches nothing on the network: no request, no image', windowAlone.fetched === 'blocked' && windowAlone.image === 'blocked');
 check('and opens no window of its own', windowAlone.opened && app.windows().length === 1);
 
@@ -336,6 +340,20 @@ check(
 );
 await page.locator('[data-settings-open]').click();
 check('the gear in the top bar opens the settings', await shownSoon(page.locator('[data-settings]')));
+/*
+  Cortex set up from the app (src/ui/SetupSections.tsx): this vault, a copy of
+  the template, has no engine; the settings offer the one the app came with,
+  and voice typing waits for it. Nothing is installed by the run.
+*/
+check(
+  'a vault without Cortex’s memory is offered it, from the package the app came with (or told Python is needed)',
+  (await shownSoon(page.locator('[data-settings-section="cortex"] [data-setup-note="none"], [data-settings-section="cortex"] [data-setup-note="no-python"]'))) &&
+    ((await page.locator('[data-setup-note="no-python"]').count()) === 1 || (await page.locator('[data-setup-engine]').count()) === 1),
+);
+check(
+  'and voice typing waits for the memory',
+  process.platform !== 'win32' || (await shownSoon(page.locator('[data-settings-section="voice"] [data-setup-note="needs-engine"]'))),
+);
 await page.waitForTimeout(400);
 await shoot('07b-settings.png');
 await page.locator('[data-settings-all-files]').click();

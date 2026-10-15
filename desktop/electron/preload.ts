@@ -74,10 +74,17 @@ const api: CortexApi = {
     setKey: (cli, key, baseUrl) => invoke('chat:setKey', cli, key, baseUrl),
     forgetKey: (cli) => invoke('chat:forgetKey', cli),
   },
+  setup: {
+    status: () => invoke('setup:status'),
+    installEngine: () => invoke('setup:installEngine'),
+    installVoice: () => invoke('setup:installVoice'),
+    voice: (patch) => invoke('setup:voice', patch),
+  },
   on: {
     notesChanged: (handler) => subscribe('notes:changed', handler),
     chat: (handler) => listen('chat:event', handler),
     authChanged: (handler) => subscribe('chat:authChanged', handler),
+    setup: (handler) => listen('setup:event', handler),
   },
 };
 
