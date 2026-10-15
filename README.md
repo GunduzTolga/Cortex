@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.12" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.12-E8B23A">
+  <img alt="Sürüm 1.0.13" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.13-E8B23A">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
   <img alt="Telemetri yok" src="https://img.shields.io/badge/telemetri-yok-1B1712">
@@ -379,6 +379,7 @@ Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama ya da her s
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.13](docs/v3/releases/1.0.13.md) | "Pyn, not al" "payn" diye söylenince de tutar (dar gramerli dinleme); ofisin hızlanması ve büyük yazıları düzeldi; ilk kurulumda "Sürekli dinle" anahtarı; beynin içindeki ofis için Claude Design brifi. |
 | [1.0.12](docs/v3/releases/1.0.12.md) | Not al baştan tasarlandı (geniş, yumuşak kenarlı mikrofon, mikrofon adı ve ses düzeyi, "mikrofondan ses gelmiyor" uyarısı); "Pyn, kaydet" diyene kadar kesintisiz dikte, sürekli dinleme; kısayol Ctrl+Alt+C; ana ekranda Cortex güncelleme bildirimi; Türkçe arayüzde İngilizce cümle kalmadı. |
 | [1.0.11](docs/v3/releases/1.0.11.md) | Ctrl+Alt+B penceresi yenilendi: "Not al", yazılı mikrofon düğmesi, pencere dinler halde açılır ve ne yapacağını söyler, Enter yazıp kaydeder. İlk kurulum ekranı kayıtlı girişleri "hazır" saymaz; kurulum sihirbazı Pyn'in görselleriyle. |
 | [1.0.10](docs/v3/releases/1.0.10.md) | Masaüstü uygulaması her şeyi kendisi kurar: ilk kurulum ekranı (hitap, kasa, Python, Pyn'in hafızası, yapay zeka aracı, sesle yazma), kurulum dosyasıyla gelen Python, Ayarlar'da Cortex ve sesle yazma. Ofis kullanıcıya adıyla seslenir. |
