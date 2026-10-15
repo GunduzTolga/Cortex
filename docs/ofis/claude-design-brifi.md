@@ -6,9 +6,9 @@ Bu brifi Claude Design'a ver. Ekli ekran görüntüleri (Kantan.Game) **yalnız 
 
 ## 1. Ne yapıyoruz
 
-**Cortex** bir masaüstü not uygulaması (Electron + React). Üstte dört sekme olacak: **Pyn** (yapay zekâ sohbeti), **Notlar**, **Grafik** ve yeni sekme **Ofis**.
+**Cortex** bir masaüstü not uygulaması (Electron + React). Üstte dört sekme olacak: **Pyn** (yapay zeka sohbeti), **Notlar**, **Grafik** ve yeni sekme **Ofis**.
 
-**Ofis**, piksel sanatıyla çizilmiş, yaşayan bir ofis. İçinde adı, yüzü, masası ve huyu olan yapay zekâ ajanları çalışıyor. Kendi aralarında kullanıcının notları ve projeleri hakkında konuşuyorlar, çay içiyorlar, toplantıya giriyorlar, dosya taşıyorlar. İşlevsel bir araç değil; **güzel ve canlı** olması için var. Kullanıcı karakterlere ve odalara tıklayıp onların ne yaptığına bakıyor.
+**Ofis**, piksel sanatıyla çizilmiş, yaşayan bir ofis. İçinde adı, yüzü, masası ve huyu olan yapay zeka ajanları çalışıyor. Kendi aralarında kullanıcının notları ve projeleri hakkında konuşuyorlar, çay içiyorlar, toplantıya giriyorlar, dosya taşıyorlar. İşlevsel bir araç değil; **güzel ve canlı** olması için var. Kullanıcı karakterlere ve odalara tıklayıp onların ne yaptığına bakıyor.
 
 Patron **Pyn**: uygulamanın maskotu, huysuz bakışlı bir **ananas** (sarı-turuncu, baklava desenli kabuk, tepesinde yeşil yapraklar, yarı kapalı gözler, büyük burun, düz ağız).
 
@@ -210,7 +210,7 @@ Ofisin kalbi.
   - Masada su şişeleri, defterler, bir hoparlör (konferans telefonu).
   - Köşelerde bitkiler.
 
-### 5.8 Sunucu odası (x 31–44, y 32–40; yapay zekâ araçlarının "evi")
+### 5.8 Sunucu odası (x 31–44, y 32–40; yapay zeka araçlarının "evi")
 - **Zemin:** koyu, delikli yükseltilmiş döşeme karoları.
 - **Kuzey duvarı:** **5 sunucu kabini** yan yana; her biri bir aracın: Claude, Codex, OpenCode, Gemini, Qwen.
   - Her kabinin önünde yanıp sönen LED'ler (4 karelik animasyon).
@@ -450,7 +450,7 @@ Odanın boş bir yerine tıklanınca açılır; sağ üstte, yaklaşık 300 px.
 Küçük bir açılır kutu, başlığı `Ofis ayarları`.
 
 - **`Canlı konuşmalar`** anahtarı, **başta kapalı.** Altında açıklama:
-  > Açıkken seçtiğin yapay zekâ aracı belli aralıklarla notların hakkında kısa atışmalar yazar. Not başlıkları ve son düzenlenen notlardan kısa parçalar o araca gider; biraz kota harcar.
+  > Açıkken seçtiğin yapay zeka aracı belli aralıklarla notların hakkında kısa atışmalar yazar. Not başlıkları ve son düzenlenen notlardan kısa parçalar o araca gider; biraz kota harcar.
 - Açılınca görünenler:
   - `Araç` seçimi: yalnız giriş yapılmış araçlar, durum noktalarıyla.
   - `Model` seçimi.
