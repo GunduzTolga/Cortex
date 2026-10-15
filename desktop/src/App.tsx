@@ -8,6 +8,7 @@ import { ChatView } from './chat/ChatView';
 import { NotesView } from './notes/NotesView';
 import { GraphView } from './notes/GraphView';
 import { OfficeView } from './office/OfficeView';
+import { Onboarding } from './onboarding/Onboarding';
 import { NotesDialogs } from './notes/NotesMenus';
 import { useNotes } from './notes/notesStore';
 import { useApp } from './store/app';
@@ -18,7 +19,8 @@ import { Toasts } from './ui/Toasts';
 import { Button, Spinner } from './ui/ui';
 
 /**
- * The window: the vault chosen first, then its views - Pyn, where the person
+ * The window: the first-run screen until it has been gone through once
+ * (src/onboarding/), the vault chosen, then its views - Pyn, where the person
  * talks to their own AI (src/chat/), first; the notes (src/notes/); the vault
  * as a graph - each drawn from the first time it is shown and kept after
  * (src/store/view.ts), so the graph is not laid out again at every switch.
@@ -31,6 +33,7 @@ export function App() {
   const vault = useApp((s) => s.vault);
   const unreadable = useApp((s) => s.settingsUnreadable);
   const nameIcons = useApp((s) => s.settings.nameIcons);
+  const onboarded = useApp((s) => s.settings.onboarded);
 
   useEffect(() => {
     void useApp.getState().boot();
@@ -54,6 +57,8 @@ export function App() {
         <div className="flex h-full items-center justify-center">
           <Spinner label={t('app.loading')} />
         </div>
+      ) : !onboarded ? (
+        <Onboarding />
       ) : !vault.vault ? (
         <Welcome />
       ) : (

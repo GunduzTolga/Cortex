@@ -10,7 +10,9 @@ import { updateSettings } from '../electron/services/settings';
 import {
   bundledPackage,
   compareVersions,
+  PYTHON_INSTALL_ARGS,
   installEngine,
+  installPython,
   installVoice,
   installedVersion,
   onSetupPush,
@@ -202,4 +204,32 @@ test('a vault without an engine gets one by the package’s own installer, taken
   } finally {
     delete process.env.CORTEX_ENGINE_PACKAGES;
   }
+});
+
+test('the Python that came with the app is run only as python.org signed it: a file that is not it is refused unrun', { skip: process.platform !== 'win32' }, async () => {
+  const installers = fs.mkdtempSync(path.join(os.tmpdir(), 'python-paket-'));
+  // Named as the pinned installer, but not it: a script that would leave a mark if it ever ran.
+  const mark = path.join(installers, 'calisti.txt');
+  fs.writeFileSync(path.join(installers, 'python-3.12.10-amd64.exe'), `echo ran > "${mark}"`);
+  const saved = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, BEYIN_PYTHON: process.env.BEYIN_PYTHON };
+  // A machine without Python, as this one is made to look.
+  process.env.PATH = installers;
+  process.env.LOCALAPPDATA = installers;
+  delete process.env.BEYIN_PYTHON;
+  process.env.CORTEX_PYTHON_INSTALLERS = installers;
+  const pushes: SetupPush[] = [];
+  onSetupPush((one) => pushes.push(one));
+  try {
+    const before = await setupStatus();
+    assert.equal(before.python, false);
+    assert.equal(before.pythonBundled, '3.12.10');
+    await assert.rejects(installPython(), /SHA-256/);
+    assert.equal(fs.existsSync(mark), false, 'never run');
+    assert.deepEqual(pushes.filter((one) => 'step' in one).length, 1, 'checked, and stopped there');
+  } finally {
+    Object.assign(process.env, saved);
+    if (saved.BEYIN_PYTHON === undefined) delete process.env.BEYIN_PYTHON;
+    delete process.env.CORTEX_PYTHON_INSTALLERS;
+  }
+  assert.ok(PYTHON_INSTALL_ARGS.includes('InstallAllUsers=0') && PYTHON_INSTALL_ARGS.includes('PrependPath=0'), 'for this user only, the PATH left alone');
 });

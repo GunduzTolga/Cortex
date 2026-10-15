@@ -80,14 +80,23 @@ function saveSession(session: Session): void {
   }
 }
 
-/** Python as the vault's engine is run: BEYIN_PYTHON where it is set, else Windows' `py -3`, else a `python3` on the PATH. Never the Store's stand-in, which opens the Store. */
+/**
+ * Python as the vault's engine is run: BEYIN_PYTHON where it is set, else Windows' `py -3`, else a `python3` on the PATH.
+ * Never the Store's stand-in, which opens the Store. On Windows, where python.org's installer puts a Python for this user
+ * too: the one the first-run screen installs is found at once, without the PATH this process started with knowing it.
+ */
 export function pythonOf(env: NodeJS.ProcessEnv = process.env): { command: string; args: string[] } | null {
   if (env.BEYIN_PYTHON) return { command: env.BEYIN_PYTHON, args: [] };
   if (process.platform === 'win32') {
     const launcher = onPathFile(['py.exe'], env);
     if (launcher) return { command: launcher, args: ['-3'] };
     const python = onPathFile(['python.exe'], env, (file) => !/\\WindowsApps\\/i.test(file));
-    return python ? { command: python, args: [] } : null;
+    if (python) return { command: python, args: [] };
+    const own = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'Programs', 'Python') : null;
+    if (!own) return null;
+    if (fs.existsSync(path.join(own, 'Launcher', 'py.exe'))) return { command: path.join(own, 'Launcher', 'py.exe'), args: ['-3'] };
+    const installed = ['Python313', 'Python312', 'Python311'].map((name) => path.join(own, name, 'python.exe')).find((file) => fs.existsSync(file));
+    return installed ? { command: installed, args: [] } : null;
   }
   const python = onPathFile(['python3', 'python'], env);
   return python ? { command: python, args: [] } : null;
@@ -131,9 +140,17 @@ export function hookContext(vault: string, event: 'SessionStart' | 'UserPromptSu
 
 /** What the model is told it is, in the window's language: Pyn, on a model of this machine, with no tools. */
 function preamble(): string {
-  return readSettings().language === 'en'
-    ? "You are Pyn, the user's thinking partner, talking with them in the Cortex desktop app. You run on a model on their own computer and have no tools: you cannot read or change files. What their vault remembers is given below and with their messages."
-    : 'Sen Pyn\'sin: kullanıcının düşünme ortağı. Onunla Cortex masaüstü uygulamasında konuşuyorsun. Kendi bilgisayarındaki bir modelde çalışıyorsun ve aracın yok: dosya okuyamaz, değiştiremezsin. Kasasının hatırladıkları aşağıda ve mesajlarının yanında verilir.';
+  const { language, userName } = readSettings();
+  if (language === 'en') {
+    return (
+      "You are Pyn, the user's thinking partner, talking with them in the Cortex desktop app. You run on a model on their own computer and have no tools: you cannot read or change files. What their vault remembers is given below and with their messages." +
+      (userName ? ` Address them as "${userName}".` : '')
+    );
+  }
+  return (
+    'Sen Pyn\'sin: kullanıcının düşünme ortağı. Onunla Cortex masaüstü uygulamasında konuşuyorsun. Kendi bilgisayarındaki bir modelde çalışıyorsun ve aracın yok: dosya okuyamaz, değiştiremezsin. Kasasının hatırladıkları aşağıda ve mesajlarının yanında verilir.' +
+    (userName ? ` Ona "${userName}" diye hitap et.` : '')
+  );
 }
 
 /** The model's chip: the server's models, the loaded ones first and said so. */

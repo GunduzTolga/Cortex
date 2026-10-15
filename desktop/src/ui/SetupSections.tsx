@@ -29,13 +29,13 @@ function Note({ children, tone = 'muted', data }: { children: React.ReactNode; t
 }
 
 /** What a job said last, its spinner beside it. */
-function Progress({ job, lines }: { job: SetupJob; lines: string[] }) {
+export function Progress({ job, lines }: { job: SetupJob; lines: string[] }) {
   const t = useT();
   return (
     <div className="mx-3 mt-2 rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-2" data-setup-progress={job}>
       <div className="flex items-center gap-2 text-[12px] font-semibold text-darkDelegation">
         <Spinner size={12} label={t('setup.working')} />
-        {t(job === 'engine' ? 'setup.engine.working' : 'setup.voice.working')}
+        {t(job === 'python' ? 'setup.python.working' : job === 'engine' ? 'setup.engine.working' : 'setup.voice.working')}
       </div>
       {lines.length ? (
         <ul className="mt-1.5 space-y-0.5 font-mono text-[11px] text-zinc-500">

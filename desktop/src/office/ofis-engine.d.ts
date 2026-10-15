@@ -63,5 +63,10 @@ export class OfficeEngine {
   snapshot(): AgentSnapshot[];
   setActive(on: boolean): void;
   setLeds(led: Partial<Record<Art.ToolId, Led>>): void;
+  /** How the person is addressed; `{kim}` / `{Kim}` in the office's lines take it. */
+  setUserName(name: string | null): void;
+  who(text: string): string;
+  /** The office opened: a line in the log, a word from Pyn. */
+  greet(): void;
   destroy(): void;
 }

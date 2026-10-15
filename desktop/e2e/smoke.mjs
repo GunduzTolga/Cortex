@@ -170,16 +170,16 @@ await holdBrowser();
 const shownSoon = (locator, timeout = 10_000) => locator.first().waitFor({ timeout }).then(() => true, () => false);
 
 console.log('\nFirst opening');
-check('a first run opens on choosing the vault', await shownSoon(page.locator('[data-welcome]'), 30_000));
+check('a first run opens on the first-run screen, Pyn asking how to address the person', await shownSoon(page.locator('[data-onboarding-step="name"]'), 30_000));
 check(
   'in Turkish, unless chosen otherwise, cased as Turkish',
-  (await page.locator('[data-welcome-choose]').textContent())?.trim() === 'Kasayı seç' && (await page.evaluate(() => document.documentElement.lang)) === 'tr',
+  (await page.locator('[data-onboarding-next]').textContent())?.trim() === 'Devam' && (await page.evaluate(() => document.documentElement.lang)) === 'tr',
 );
 await shoot('01-welcome-tr.png');
 await page.locator('[data-language="en"]').click();
 check(
   'English is one choice away, and the choice is kept by the main process',
-  (await shownSoon(page.getByRole('button', { name: 'Choose the vault' }))) &&
+  (await shownSoon(page.getByRole('button', { name: 'Next' }))) &&
     (await page.evaluate(() => document.documentElement.lang)) === 'en' &&
     (await page.evaluate(() => window.cortex.bootstrap())).settings.language === 'en',
 );
@@ -204,8 +204,46 @@ console.log('\nThe vault');
 await app.evaluate(({ dialog }, dir) => {
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
 }, vaultDir);
+/*
+  The first-run screen (src/onboarding/): the name first, then each thing to
+  set up in turn, each skippable but the vault; nothing is installed here.
+*/
+const onward = async () => {
+  const skip = page.locator('[data-onboarding-skip]');
+  await ((await skip.count()) ? skip : page.locator('[data-onboarding-next]')).click();
+};
+await page.locator('[data-onboarding-name]').fill('Tolga');
+check('a name alone is offered with Bey and Hanım', await shownSoon(page.locator('[data-onboarding-name-chip="Tolga Bey"]')));
+await page.locator('[data-onboarding-name-chip="Tolga Bey"]').click();
+await page.locator('[data-onboarding-next]').click();
+check(
+  'how to address the person is kept by the main process',
+  await page.waitForFunction(async () => (await window.cortex.bootstrap()).settings.userName === 'Tolga Bey', null, { timeout: 5_000 }).then(() => true, () => false),
+);
+check('and the next step says it', (await shownSoon(page.locator('[data-onboarding-step="vault"]'))) && (await page.locator('[data-onboarding] h1').textContent())?.includes('Tolga Bey'));
+check('the vault cannot be skipped: Next waits for it', (await page.locator('[data-onboarding-skip]').count()) === 0 && (await page.locator('[data-onboarding-next]').isDisabled()));
 await page.locator('[data-welcome-choose]').click();
-check('a vault chosen, Pyn opens first, where the person talks to their AI', await shownSoon(page.locator('[data-chat-view]'), 15_000));
+check('a vault chosen there is said by its name', await shownSoon(page.locator('[data-onboarding-ready]')));
+await shoot('01b-onboarding-vault.png');
+await page.locator('[data-onboarding-next]').click();
+if (await page.locator('[data-onboarding-step="python"]').count()) await onward();
+check('Pyn’s memory comes next, each step said before it is done', await shownSoon(page.locator('[data-onboarding-step="engine"] [data-onboarding] h1, [data-onboarding-step="engine"] h1')));
+await shoot('01c-onboarding-engine.png');
+await onward();
+check('then the AI tools', await shownSoon(page.locator('[data-onboarding-step="tools"]')));
+await onward();
+if (process.platform === 'win32') {
+  check('then voice typing', await shownSoon(page.locator('[data-onboarding-step="voice"]')));
+  await onward();
+}
+check(
+  'the last step lists what was left, to be set up later from the settings',
+  (await shownSoon(page.locator('[data-onboarding-step="done"]'))) && (await page.locator('[data-onboarding-summary="engine"]').textContent())?.includes('skipped'),
+);
+await shoot('01d-onboarding-done.png');
+await page.locator('[data-onboarding-finish]').click();
+check('then Pyn opens, where the person talks to their AI', await shownSoon(page.locator('[data-chat-view]'), 15_000));
+check('and the first-run screen is gone through for good', (await page.evaluate(() => window.cortex.bootstrap())).settings.onboarded === true);
 await page.locator('[data-app-view="notes"]').click();
 check('and the notes are one press away', await shownSoon(page.locator('[data-notes-view]'), 15_000));
 check('the window is told the vault by its name', (await page.locator('[data-vault-name]').textContent())?.trim() === path.basename(vaultDir));
@@ -569,6 +607,7 @@ await shoot('06-graph.png');
 console.log('\nOffice');
 await page.locator('[data-app-view="office"]').click();
 check('the office opens in its own tab, its map drawn and its log begun', (await shownSoon(page.locator('[data-office-view] [data-ofis-canvas]'))) && (await page.locator('[data-ofis-line]').count()) >= 1);
+check('and greets the person as they asked to be addressed', (await page.locator('[data-ofis-line]').allTextContents()).some((line) => line.includes('Tolga Bey')));
 await page.waitForTimeout(1_500);
 await shoot('16-office.png');
 // The map is fitted to the canvas and centred: the mailroom's middle (tile 7, 8) is found from the canvas's size.

@@ -48,14 +48,19 @@ test('a frame that is not the page, or a page that is not the app’s, is refuse
 
 test('the window may set the language and how the tree shows the vault, and never the vault', async () => {
   firstRun();
-  const off = { allFiles: false, nameIcons: false };
+  const off = { allFiles: false, nameIcons: false, userName: null, onboarded: false };
   assert.deepEqual(await call('settings:set', { language: 'en', vault: '/etc' }), { language: 'en', ...off });
   assert.equal(readSettings().vault, null);
   assert.deepEqual(await call('settings:set', { language: 'de' }), { language: 'en', ...off }, 'a language the app does not have changes nothing');
   assert.deepEqual(await call('settings:set', { language: null }), { language: null, ...off });
-  assert.deepEqual(await call('settings:set', { allFiles: true }), { language: null, allFiles: true, nameIcons: false }, 'one setting changed leaves the others');
-  assert.deepEqual(await call('settings:set', { nameIcons: 'yes', allFiles: 0 }), { language: null, allFiles: true, nameIcons: false }, 'what is not a yes or a no changes nothing');
-  assert.deepEqual(await call('settings:set', null), { language: null, allFiles: true, nameIcons: false });
+  assert.deepEqual(await call('settings:set', { allFiles: true }), { language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false }, 'one setting changed leaves the others');
+  assert.deepEqual(await call('settings:set', { nameIcons: 'yes', allFiles: 0 }), { language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false }, 'what is not a yes or a no changes nothing');
+  assert.deepEqual(await call('settings:set', null), { language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false });
+  // How Pyn addresses the person, and the first-run screen gone through: from the window, as values they can be.
+  const named = (await call('settings:set', { userName: '  Tolga   Bey ', onboarded: true })) as { userName: string | null; onboarded: boolean };
+  assert.deepEqual([named.userName, named.onboarded], ['Tolga Bey', true]);
+  const cleared = (await call('settings:set', { userName: '', onboarded: 'no' })) as { userName: string | null; onboarded: boolean };
+  assert.deepEqual([cleared.userName, cleared.onboarded], [null, true], 'an empty name is none; what is not a yes or a no changes nothing');
 });
 
 test('the vault comes through the dialog, and what the window is told of it holds no path', async () => {

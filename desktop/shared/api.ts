@@ -16,6 +16,10 @@ export interface WindowSettings {
   allFiles: boolean;
   /** Names are shown with the emoji they start with on disk (`📥 000-Inbox`); off, without it. */
   nameIcons: boolean;
+  /** How Pyn and the office address the person ("Tolga Bey"); null until they say. */
+  userName: string | null;
+  /** The first-run screen has been gone through. */
+  onboarded: boolean;
 }
 
 /** The vault by its folder's name, and whether that folder is still there; never its path. */

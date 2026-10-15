@@ -81,6 +81,11 @@ jobs:
       - name: Cortex paketi
         run: npm run cortex-paket
 
+      # Python for a machine without one: python.org's signed installer, pinned
+      # by its SHA-256 (desktop/python.json), run by the app for this user only.
+      - name: Python
+        run: npm run python-paket
+
       - name: Kurulum dosyasi
         run: npx electron-builder --win nsis --publish never
 

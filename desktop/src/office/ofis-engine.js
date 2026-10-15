@@ -38,7 +38,7 @@ const SCRIPTS = {
   sena: [{ sit: 'sena', pose: 'type', dur: 18, act: 'başlıkları düzeltiyor', notes: 1 }, { act: 'phone', dur: 5, label: 'telefonuna bakıyor' }, { sit: 'sena', pose: 'type', dur: 12, act: 'kırmızı kalemle okuyor' }, { act: 'talk', dir: 'down', dur: 3, label: 'başlığa itiraz ediyor', say: 'Bu başlık olmamış.', icon: 'anger' }],
   kaan: [{ sit: 'kaan', pose: 'type', dur: 18, act: 'makbuzları mühürlüyor' }, { go: 'filing', label: 'dosya dolabına gidiyor' }, { act: 'idle', dir: 'up', dur: 4, label: 'dosya dolabını karıştırıyor' }, { carry: 'folder' }, { go: [41, 6], label: 'dosya taşıyor', files: 1 }, { carry: null }, { log: ['🧾', 'Kaan makbuzu arşive kaldırdı: «Toplantı notları»', null] }, { sit: 'kaan', pose: 'type', dur: 16, act: 'arşiv defterini dolduruyor' }],
   elif: [{ sit: 'elif', pose: 'type', dur: 20, act: 'notlar arasında bağlantı kuruyor', notes: 1 }, { go: 'corkboard', label: 'mantar panoya gidiyor' }, { act: 'idle', dir: 'up', dur: 5, label: 'iplere yeni not bağlıyor', say: 'Bu not şununla bağlantılı!', icon: 'idea' }, { sit: 'elif', pose: 'type', dur: 18, act: 'grafiği düzenliyor' }],
-  umut: [{ sit: 'umut', pose: 'idle', dur: 10, act: 'zarfları ayırıyor' }, { fn: 'elevatorOpen' }, { go: 'elevator', label: 'asansöre gidiyor' }, { act: 'idle', dir: 'up', dur: 2, label: 'yeni notu alıyor' }, { fn: 'elevatorClose' }, { log: ['📬', 'Gelen kutusuna yeni not düştü: «Toplantı notları»', '#F2C14E'] }, { carry: 'envelope' }, { go: [51, 10], label: 'Pyn\'e not götürüyor', files: 1 }, { act: 'carry', dir: 'up', dur: 3, label: 'Pyn\'e not veriyor', say: 'Patron, yeni not geldi!' }, { fn: 'pynApprove' }, { carry: null }, { act: 'idle', dir: 'up', dur: 2, label: 'onayı bekliyor' }, { sit: 'umut', pose: 'idle', dur: 18, act: 'kargo kolilerini sayıyor' }],
+  umut: [{ sit: 'umut', pose: 'idle', dur: 10, act: 'zarfları ayırıyor' }, { fn: 'elevatorOpen' }, { go: 'elevator', label: 'asansöre gidiyor' }, { act: 'idle', dir: 'up', dur: 2, label: 'yeni notu alıyor' }, { fn: 'elevatorClose' }, { log: ['📬', '{Kim} gelen kutusuna yeni not attı: «Toplantı notları»', '#F2C14E'] }, { carry: 'envelope' }, { go: [51, 10], label: 'Pyn\'e not götürüyor', files: 1 }, { act: 'carry', dir: 'up', dur: 3, label: 'Pyn\'e not veriyor', say: 'Patron, {kim} yeni not göndermiş!' }, { fn: 'pynApprove' }, { carry: null }, { act: 'idle', dir: 'up', dur: 2, label: 'onayı bekliyor' }, { sit: 'umut', pose: 'idle', dur: 18, act: 'kargo kolilerini sayıyor' }],
   melis: [{ sit: 'melis', pose: 'type', dur: 20, act: 'araçların kayıtlarına bakıyor' }, { go: 'rack_codex', label: 'Codex kabinine gidiyor' }, { fn: 'codexDown' }, { act: 'idle', dir: 'up', dur: 5, label: 'Codex sunucusunu yeniden başlatıyor', icon: 'alert' }, { fn: 'codexUp' }, { act: 'idle', dir: 'up', dur: 3, label: 'kabloları topluyor', say: 'Kim yine sunucuya çay döktü?' }, { sit: 'melis', pose: 'type', dur: 24, act: 'terminalde' }],
   husnu: [{ go: 'tea', label: 'çay köşesine gidiyor' }, { act: 'idle', dir: 'up', dur: 4, label: 'çay demliyor' }, { carry: 'tray' }, { log: ['☕', 'Hüsnü amca çay dağıtıyor', null] }, { go: [6, 24], label: 'çay dağıtıyor' }, { act: 'carry', dir: 'up', dur: 3, label: 'çay dağıtıyor', say: 'Çaylar taze!', serve: ['toprak', 'asya', 'berk'] }, { go: [17, 18], label: 'çay dağıtıyor' }, { go: [41, 21], label: 'çay dağıtıyor' }, { act: 'carry', dir: 'up', dur: 3, label: 'Sena\'ya çay veriyor', say: 'Buyur evladım.', serve: ['sena'] }, { go: [8, 18], label: 'çay dağıtıyor' }, { act: 'carry', dir: 'down', dur: 3, label: 'çay dağıtıyor', serve: ['defne', 'baran', 'ilgin'] }, { go: 'tea', label: 'mutfağa dönüyor' }, { carry: null }, { sit: 'husnu', pose: 'sleep', dur: 14, act: 'uyukluyor', icon: 'zzz', mood: '😴' }],
   pyn: [{ sit: 'pyn', pose: 'type', dur: 24, act: 'onay bekleyen notlara bakıyor' }, { sit: 'pyn', pose: 'sleep', dur: 9, act: 'gözlerini dinlendiriyor', icon: 'zzz', mood: '😴' }, { sit: 'pyn', pose: 'sit', dur: 6, act: 'düşünüyor', say: 'Hmm.' }],
@@ -55,7 +55,7 @@ export class OfficeEngine {
     this.zoom = 1; this.camX = this.W / 2; this.camY = this.H / 2; this.camTarget = null;
     this.t = 0; this.speed = 1; this.mode = 'ogle'; this.font = "'Pixelify Sans'"; this.lang = 'tr';
     this.selected = null; this.hover = null; this.room = null; this.preview = null;
-    this.bubbles = []; this.meets = {}; this.led = { ...TOOL_STATUS };
+    this.bubbles = []; this.meets = {}; this.led = { ...TOOL_STATUS }; this.userName = null;
     this.doorState = {}; this.elevator = { f: 0, open: false };
     this.objects = art.MAP.objects.map((o) => ({ ...o, s: art.SPRITES[o.sprite] }));
     this.seat = Object.fromEntries(art.MAP.seats.map((s) => [s.id, s]));
@@ -71,6 +71,19 @@ export class OfficeEngine {
     this.active = on;
     cancelAnimationFrame(this.raf);
     if (on) { this.last = performance.now(); this.resize(); this.raf = requestAnimationFrame(this.loop); }
+  }
+  /** Kullanıcının hitabı ("Tolga Bey"): satırlardaki {kim} / {Kim} onunla dolar; yoksa "kasanın sahibi". */
+  setUserName(name) { this.userName = name || null; }
+  who(text) {
+    const name = this.userName || (this.lang === 'en' ? 'the owner' : 'kasanın sahibi');
+    const upper = name.charAt(0).toLocaleUpperCase(this.lang === 'en' ? 'en' : 'tr') + name.slice(1);
+    return String(text).replace(/\{Kim\}/g, upper).replace(/\{kim\}/g, name);
+  }
+  /** Ofis açıldığında: günlükte bir satır, Pyn'den bir selam. */
+  greet() {
+    const en = this.lang === 'en';
+    this.log('👋', en ? '{Kim} dropped by the office' : '{Kim} ofise uğradı', '#F2C14E');
+    const pyn = this.byId && this.byId.pyn; if (pyn) this.say(pyn, en ? 'Welcome, {kim}.' : 'Hoş geldin, {kim}.', 4);
   }
   /** Sunucu kabinlerinin LED'leri: { claude: 'ok' | 'wait' | 'off', … }, araçların gerçek giriş durumundan. */
   setLeds(led) { this.led = { ...this.led, ...led }; }
@@ -187,9 +200,9 @@ export class OfficeEngine {
     setTimeout(() => this.log('✅', 'Pyn onayladı: «Toplantı notları»', '#5BD77A'), 1200 / this.speed);
     setTimeout(() => this.log('📰', 'Yayında: «Toplantı notları»', '#5BD77A'), 9000 / this.speed);
   }
-  say(ag, text, dur = 3.2) { this.bubbles = this.bubbles.filter((b) => b.ag !== ag); this.bubbles.push({ ag, text, t: 0, dur }); }
+  say(ag, text, dur = 3.2) { this.bubbles = this.bubbles.filter((b) => b.ag !== ag); this.bubbles.push({ ag, text: this.who(text), t: 0, dur }); }
   status(ag, icon, dur = 3) { this.bubbles = this.bubbles.filter((b) => b.ag !== ag || b.text); this.bubbles.push({ ag, icon, t: 0, dur }); }
-  log(icon, text, color, who) { this.cb.onLog && this.cb.onLog({ time: clockText(), icon, text, color, who }); }
+  log(icon, text, color, who) { this.cb.onLog && this.cb.onLog({ time: clockText(), icon, text: this.who(text), color, who }); }
   updateAgent(ag, dt) {
     ag.animT += dt;
     for (const k of ['tea', 'food', 'energy']) ag.needs[k] = Math.max(8, ag.needs[k] - dt * (k === 'tea' ? 0.35 : 0.18));

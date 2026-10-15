@@ -9,6 +9,7 @@ import * as art from './office-art.js';
 import type { ToolId } from './office-art.js';
 import { OfficeEngine, clockText, lightForHour, type AgentSnapshot, type Led, type LogEntry } from './ofis-engine.js';
 import { useChat } from '../chat/chatStore';
+import { useApp } from '../store/app';
 import { useNotes } from '../notes/notesStore';
 import { useLanguage, useT } from '../i18n/useT';
 import type { Key } from '../i18n';
@@ -149,6 +150,10 @@ export function OfficeView({ visible }: { visible: boolean }) {
       onInteract: () => setHint(false),
     });
     engineRef.current = engine;
+    // Greeted in the window's language, before its own effect below has set it.
+    engine.lang = useApp.getState().settings.language === 'en' ? 'en' : 'tr';
+    engine.setUserName(useApp.getState().settings.userName);
+    engine.greet();
     setSnapshot(engine.snapshot());
     const resized = new ResizeObserver(() => engine.resize());
     resized.observe(map);
@@ -197,6 +202,9 @@ export function OfficeView({ visible }: { visible: boolean }) {
     return out;
   }, [auth]);
   useEffect(() => engineRef.current?.setLeds(leds), [leds]);
+  // Addressed as the person asked, from the first-run screen or the settings.
+  const userName = useApp((s) => s.settings.userName);
+  useEffect(() => engineRef.current?.setUserName(userName), [userName]);
 
   // The light by the hour, or day all day; the face the canvas writes in.
   const night = prefs.followClock && (now.getHours() >= 20 || now.getHours() < 8);

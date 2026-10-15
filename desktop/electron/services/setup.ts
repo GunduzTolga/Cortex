@@ -1,9 +1,11 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { app } from 'electron';
 import type { SetupJob, SetupPush, SetupStatus, VoiceEngine, VoiceStatus } from '../../shared/setup';
+import pythonPin from '../../python.json';
 import { childEnv } from './acp';
 import { pythonOf } from './localChat';
 import { readSettings } from './settings';
@@ -14,6 +16,9 @@ import { readSettings } from './settings';
  * command line does - the app only starts it, without a shell, and passes on
  * what it says:
  *
+ * - Python, where the machine has none (Windows): python.org's signed
+ *   installer that came with the app (desktop/python.json), checked by its
+ *   SHA-256 and run quietly for this user only;
  * - the engine: the package that came with the app (`cortex/beyin-v3-X.Y.Z.zip`
  *   among its resources) installed into the vault by its own installer, or
  *   the vault's engine updated from it (`beyin.py update --package`);
@@ -71,6 +76,56 @@ export function bundledPackage(dirs: string[]): { file: string; version: string 
 function packageDirs(): string[] {
   const dirs = [path.join(process.resourcesPath ?? '', 'cortex'), path.join(app.getAppPath(), 'cortex-paket')];
   return process.env.CORTEX_ENGINE_PACKAGES ? [process.env.CORTEX_ENGINE_PACKAGES, ...dirs] : dirs;
+}
+
+/** The Python installer that came with the app, beside it or where the desktop build puts it while developing. */
+function pythonInstaller(): string | null {
+  const dirs = [path.join(process.resourcesPath ?? '', 'python'), path.join(app.getAppPath(), 'python-paket')];
+  if (process.env.CORTEX_PYTHON_INSTALLERS) dirs.unshift(process.env.CORTEX_PYTHON_INSTALLERS);
+  return dirs.map((dir) => path.join(dir, pythonPin.file)).find((file) => fs.existsSync(file)) ?? null;
+}
+
+/**
+ * How python.org's installer is run: quietly, for this user only (no administrator), with the
+ * `py` launcher the engine is started by; the PATH, file types and Start menu left as they are.
+ */
+export const PYTHON_INSTALL_ARGS = [
+  '/quiet',
+  'InstallAllUsers=0',
+  'InstallLauncherAllUsers=0',
+  'Include_launcher=1',
+  'PrependPath=0',
+  'AssociateFiles=0',
+  'Shortcuts=0',
+  'Include_doc=0',
+  'Include_test=0',
+];
+
+/** A file's SHA-256, read in pieces. */
+export function sha256Of(file: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    fs.createReadStream(file)
+      .on('data', (chunk) => hash.update(chunk))
+      .on('error', reject)
+      .on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+/** The installer run and waited for; its exit code (python.org's: 0 done, 3010 done after a restart, 1602 cancelled). */
+function runInstaller(file: string, args: string[], timeout: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { windowsHide: true, stdio: 'ignore' });
+    const timer = setTimeout(() => child.kill(), timeout);
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve(code ?? -1);
+    });
+  });
 }
 
 /** The version the vault's engine says it is, from the stamp its installer writes; null without an engine. */
@@ -212,6 +267,7 @@ export async function setupStatus(): Promise<SetupStatus> {
   }
   return {
     python: python !== null,
+    pythonBundled: process.platform === 'win32' && pythonInstaller() ? pythonPin.version : null,
     vault: vault !== null,
     engine: { installed, bundled: bundledPackage(packageDirs())?.version ?? null },
     voice,
@@ -223,12 +279,13 @@ export async function setupStatus(): Promise<SetupStatus> {
 /** A job, the only one going on: its steps and its end pushed to the window, the status after it returned. */
 async function job(kind: SetupJob, work: (vault: string, step: (text: string) => void) => Promise<void>): Promise<SetupStatus> {
   if (current) throw new Error('Başka bir kurulum sürüyor.');
+  // Python is installed before there is a vault, or a Python, to need.
   const vault = vaultOrNull();
-  if (!vault) throw new Error('Önce bir kasa seç.');
-  if (!pythonOf()) throw new Error('Python bulunamadı.');
+  if (kind !== 'python' && !vault) throw new Error('Önce bir kasa seç.');
+  if (kind !== 'python' && !pythonOf()) throw new Error('Python bulunamadı.');
   current = kind;
   try {
-    await work(vault, (text) => push({ job: kind, step: text }));
+    await work(vault ?? '', (text) => push({ job: kind, step: text }));
     current = null;
     push({ job: kind, done: true, ok: true });
   } catch (err) {
@@ -238,6 +295,23 @@ async function job(kind: SetupJob, work: (vault: string, step: (text: string) =>
     throw err instanceof Error ? err : new Error(error);
   }
   return setupStatus();
+}
+
+/** The Python that came with the app, installed for this user where the machine has none. */
+export function installPython(): Promise<SetupStatus> {
+  return job('python', async (_vault, step) => {
+    if (process.platform !== 'win32') throw new Error("Python yalnız Windows'ta uygulamayla gelir.");
+    if (pythonOf()) return;
+    const file = pythonInstaller();
+    if (!file) throw new Error('Uygulamayla gelen Python bulunamadı.');
+    step(`Python ${pythonPin.version} doğrulanıyor…`);
+    if ((await sha256Of(file)) !== pythonPin.sha256) throw new Error('Python kurucusu beklenen dosya değil (SHA-256 tutmadı); çalıştırılmadı.');
+    step(`Python ${pythonPin.version} kuruluyor (yalnız senin kullanıcın için)…`);
+    const code = await runInstaller(file, PYTHON_INSTALL_ARGS, JOB_TIMEOUT);
+    if (code === 1602) throw new Error('Python kurulumu iptal edildi.');
+    if (code !== 0 && code !== 3010) throw new Error(`Python kurulamadı (çıkış kodu ${code}).`);
+    if (!pythonOf()) throw new Error('Python kuruldu ama bulunamadı; uygulamayı yeniden aç.');
+  });
 }
 
 /** The package taken apart into a folder, nothing written outside it; one JSON line says it is done. */

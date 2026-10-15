@@ -15,6 +15,7 @@
     "test": "node scripts/test.mjs",
     "e2e": "npm run build && node scripts/e2e.mjs",
     "cortex-paket": "node scripts/cortex-paket.mjs",
+    "python-paket": "node scripts/python-paket.mjs",
     "package": "npm run build && electron-builder --win",
     "package:dir": "npm run build && electron-builder --win --dir"
   },
@@ -95,6 +96,13 @@
         "to": "cortex",
         "filter": [
           "beyin-v3-*.zip"
+        ]
+      },
+      {
+        "from": "python-paket",
+        "to": "python",
+        "filter": [
+          "python-*.exe"
         ]
       },
       {

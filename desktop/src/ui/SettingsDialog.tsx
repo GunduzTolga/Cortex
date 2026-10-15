@@ -1,11 +1,12 @@
-import { FolderOpen, KeyRound } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { FolderOpen, KeyRound, ListChecks } from 'lucide-react';
 import { useChat } from '../chat/chatStore';
 import { useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 import { LanguageSwitch } from './LanguageSwitch';
 import { SetupSections } from './SetupSections';
 import { Row, Section } from './settingsParts';
-import { Button, Modal, Switch } from './ui';
+import { Button, Modal, Switch, inputClass } from './ui';
 
 /**
  * The app's settings, from the gear in the top bar or Ctrl+,: the language
@@ -29,6 +30,9 @@ export function SettingsDialog() {
         <Section title={t('settings.general')} data="general">
           <Row label={t('settings.language')}>
             <LanguageSwitch />
+          </Row>
+          <Row label={t('settings.name')}>
+            <NameField />
           </Row>
           {vault ? (
             <Row label={t('settings.vault')}>
@@ -63,10 +67,50 @@ export function SettingsDialog() {
           </div>
         </Section>
         <SetupSections open={open} />
+        <Section title={t('settings.onboarding')} data="onboarding">
+          <div className="px-3">
+            <Button
+              tone="ghost"
+              onClick={() => {
+                close();
+                void set({ onboarded: false });
+              }}
+              data-settings-onboarding
+            >
+              <ListChecks size={13} />
+              {t('settings.onboarding.open')}
+            </Button>
+          </div>
+        </Section>
         <Section title={t('settings.about')} data="about">
           <p className="px-3 font-mono text-[12px] text-zinc-500">{t('settings.version', { version })}</p>
         </Section>
       </div>
     </Modal>
+  );
+}
+
+/** How Pyn and the office address the person: kept when the field is left or Enter is pressed. */
+function NameField() {
+  const t = useT();
+  const saved = useApp((s) => s.settings.userName);
+  const [name, setName] = useState(saved ?? '');
+  useEffect(() => setName(saved ?? ''), [saved]);
+  const keep = () => {
+    if (name.trim() !== (saved ?? '')) void useApp.getState().setSettings({ userName: name.trim() || null });
+  };
+  return (
+    <input
+      className={`${inputClass} h-8 w-48`}
+      value={name}
+      maxLength={40}
+      placeholder={t('settings.name.placeholder')}
+      onChange={(event) => setName(event.target.value)}
+      onBlur={keep}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') keep();
+      }}
+      data-settings-name
+    />
   );
 }

@@ -20,11 +20,13 @@ export interface VoiceStatus {
   model: string | null;
 }
 
-export type SetupJob = 'engine' | 'voice';
+export type SetupJob = 'python' | 'engine' | 'voice';
 
 export interface SetupStatus {
   /** A Python the engine can run on was found; without one nothing below can run. */
   python: boolean;
+  /** The version of the Python the app came with, to install where there is none; null when it has none with it. */
+  pythonBundled: string | null;
   /** A vault is chosen. */
   vault: boolean;
   engine: {
@@ -46,6 +48,8 @@ export type SetupPush = { job: SetupJob; step: string } | { job: SetupJob; done:
 
 export interface SetupApi {
   status(): Promise<SetupStatus>;
+  /** The Python that came with the app installed for this user (Windows): quietly, without asking for an administrator. */
+  installPython(): Promise<SetupStatus>;
   /** The vault's engine installed, or updated, from the package that came with the app. */
   installEngine(): Promise<SetupStatus>;
   /** Voice typing set up: its own environment, its models, the engine fit for the graphics card. */

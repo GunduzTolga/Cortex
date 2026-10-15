@@ -23,7 +23,9 @@ interface SetupState {
 const percent = (line: string) => line.trimStart().startsWith('%');
 let listening = false;
 
-function said(key: 'setup.engine.done' | 'setup.voice.done' | 'setup.failed', values?: Record<string, string>): string {
+const DONE = { python: 'setup.python.done', engine: 'setup.engine.done', voice: 'setup.voice.done' } as const;
+
+function said(key: (typeof DONE)[SetupJob] | 'setup.failed', values?: Record<string, string>): string {
   return translate(useApp.getState().settings.language ?? 'tr', key, values);
 }
 
@@ -41,7 +43,7 @@ export const useSetup = create<SetupState>((set, get) => {
         return;
       }
       if (push.ok) {
-        useApp.getState().toast({ tone: 'success', title: said(push.job === 'engine' ? 'setup.engine.done' : 'setup.voice.done') });
+        useApp.getState().toast({ tone: 'success', title: said(DONE[push.job]) });
       } else {
         useApp.getState().toast({ tone: 'error', title: said('setup.failed'), detail: push.error, sticky: true });
       }
@@ -67,7 +69,8 @@ export const useSetup = create<SetupState>((set, get) => {
       const status = get().status;
       set({ error: null, steps: { job, lines: [] }, status: status && { ...status, job } });
       try {
-        const after = job === 'engine' ? await window.cortex.setup.installEngine() : await window.cortex.setup.installVoice();
+        const api = window.cortex.setup;
+        const after = job === 'python' ? await api.installPython() : job === 'engine' ? await api.installEngine() : await api.installVoice();
         set({ status: after, steps: null });
       } catch (err) {
         set({ error: { job, text: messageOf(err) }, steps: null });

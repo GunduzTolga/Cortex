@@ -47,7 +47,7 @@ let toastSeq = 0;
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
   bootError: null,
-  settings: { language: null, allFiles: false, nameIcons: false },
+  settings: { language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false },
   vault: { vault: null, missing: false },
   settingsUnreadable: null,
   version: '',

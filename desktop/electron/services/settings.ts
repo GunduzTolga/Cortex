@@ -34,9 +34,23 @@ export interface Settings {
   allFiles: boolean;
   /** Names are shown with the emoji they start with; off by default. */
   nameIcons: boolean;
+  /** How Pyn and the office address the person ("Tolga", "Tolga Bey"); null until they say. */
+  userName: string | null;
+  /** The first-run screen has been gone through; until then it is what the app opens on. */
+  onboarded: boolean;
 }
 
-const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false };
+/** The longest name kept: a way of addressing somebody, not a paragraph. */
+export const NAME_LIMIT = 40;
+
+/** A name as it is kept: its spaces tidied, cut to the limit; nothing for an empty one. */
+export function tidyName(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const name = value.replace(/\s+/g, ' ').trim().slice(0, NAME_LIMIT).trim();
+  return name || null;
+}
+
+const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false };
 
 let cache: Settings | null = null;
 let keepOff = false;
@@ -52,6 +66,8 @@ function hydrate(raw: Record<string, unknown>): Settings {
     language: raw.language === 'en' || raw.language === 'tr' ? raw.language : null,
     allFiles: raw.allFiles === true,
     nameIcons: raw.nameIcons === true,
+    userName: tidyName(raw.userName),
+    onboarded: raw.onboarded === true,
   };
 }
 
