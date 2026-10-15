@@ -137,8 +137,12 @@ class SetupTest(unittest.TestCase):
         out = io.StringIO()
         from contextlib import redirect_stdout
         with redirect_stdout(out):
-            ses.main(['durum'], state=self.state)
+            ses.main(['durum', '--human'], state=self.state)
         self.assertIn('kurulu değil', out.getvalue())
+        out = io.StringIO()
+        with redirect_stdout(out):
+            ses.main(['durum'], state=self.state)
+        self.assertFalse(json.loads(out.getvalue())['kurulu'], 'read by a program, not a terminal: JSON')
         out = io.StringIO()
         with redirect_stdout(out):
             ses.main(['durum', '--json'], state=self.state)

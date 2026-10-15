@@ -441,9 +441,14 @@ def main(argv=None, vault=None, state=None):
     trial = sub.add_parser('dene', help='Birkaç saniye kaydedip yazıya çevir')
     trial.add_argument('--sn', type=float, default=5.0)
     argv = list(sys.argv[1:] if argv is None else argv)
-    as_json = '--json' in argv  # accepted before or after the command, as the other tools take it
-    args = parser.parse_args([one for one in argv if one != '--json'])
+    # As beyin.py and yakala decide: text for a terminal, JSON for anything reading the output;
+    # --json and --human say it outright, before or after the command.
+    as_json = '--json' in argv or ('--human' not in argv and not (sys.stdout and sys.stdout.isatty()))
+    args = parser.parse_args([one for one in argv if one not in ('--json', '--human')])
     args.json = as_json
+    if not as_json and hasattr(sys.stdout, 'reconfigure'):
+        # A piped Windows console is cp1252, which has no dotless i: such a letter prints as '?'.
+        sys.stdout.reconfigure(errors='replace')
     if state is None:
         raise SystemExit('Durum klasörü bilinmiyor; beyin.py ses ile çalıştırın.')
     state = Path(state)
@@ -473,7 +478,12 @@ def main(argv=None, vault=None, state=None):
         if done.returncode:
             raise SystemExit((done.stderr or done.stdout).strip()[-600:])
         result = json.loads(done.stdout.strip().splitlines()[-1])
-    print(json.dumps(result, ensure_ascii=False) if args.json else human(result, args.command))
+    if args.json:
+        # Literal letters only where the stream writes UTF-8; ASCII escapes elsewhere (as yakala does).
+        utf8 = (getattr(sys.stdout, 'encoding', '') or '').lower().replace('-', '') in ('utf8', 'utf8sig')
+        print(json.dumps(result, ensure_ascii=not utf8))
+    else:
+        print(human(result, args.command))
     return 0
 
 
