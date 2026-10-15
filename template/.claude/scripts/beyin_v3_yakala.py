@@ -1312,6 +1312,48 @@ def _hotkey_hint(vault):
     return (label + ' ile her yerden açılır') if label else 'İkinci beynine kaydedilir'
 
 
+def _bring_to_front(window):
+    """Windows: put the popup in front of the app the key was pressed in, with the keyboard focus.
+
+    Windows hands the foreground only to the thread that owns it. The listener's popup opened
+    behind the active window (still there in Alt+Tab), and focus_force() alone cannot change
+    that. Attaching to the foreground window's input thread for the moment of the switch is the
+    usual way a hotkey launcher takes the front the user asked for. True when the popup is in
+    front; elsewhere, or on any failure, False and the window stays as Tk left it.
+    """
+    if os.name != 'nt':
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32, kernel32 = ctypes.WinDLL('user32'), ctypes.WinDLL('kernel32')
+        user32.GetAncestor.argtypes, user32.GetAncestor.restype = [wintypes.HWND, wintypes.UINT], wintypes.HWND
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.c_void_p]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+        user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_int, wintypes.UINT]
+        user32.BringWindowToTop.argtypes = user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        hwnd = user32.GetAncestor(window.winfo_id(), 2)  # GA_ROOT: the top-level window Tk wraps the widget in
+        if not hwnd:
+            return False
+        front = user32.GetForegroundWindow()
+        own, other = kernel32.GetCurrentThreadId(), user32.GetWindowThreadProcessId(front, None) if front else 0
+        attached = bool(other and other != own and user32.AttachThreadInput(own, other, True))
+        try:
+            # HWND_TOPMOST, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
+            user32.SetWindowPos(hwnd, wintypes.HWND(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+        finally:
+            if attached:
+                user32.AttachThreadInput(own, other, False)
+        return user32.GetForegroundWindow() == hwnd
+    except Exception:
+        return False
+
+
 def with_spoken(current, spoken):
     """The field after something was said into it: what was typed, then the spoken words."""
     spoken = (spoken or '').strip()
@@ -1666,8 +1708,12 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         _style_mac(focus=not snapshot)
     if not snapshot:
         root.lift()
+        _bring_to_front(root)
         root.focus_force()
         entry.focus_set()
+        # Once more after the window is on screen: the app the key was pressed in can take the
+        # front back while the popup is still being mapped.
+        root.after(60, lambda: (_bring_to_front(root), entry.focus_set()))
 
     if snapshot and sys.platform == 'darwin':
         # Development aid: capture only this window's rectangle without taking focus, then close.
@@ -2034,6 +2080,7 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
         if context is not None:
             if windows:  # a second press brings the open window back instead of stacking another
                 windows[-1].lift()
+                _bring_to_front(windows[-1])
                 windows[-1].focus_force()
                 if link is not None and hasattr(windows[-1], 'voice_toggle'):
                     windows[-1].voice_toggle()  # and, with the voice, starts or ends listening

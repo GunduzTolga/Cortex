@@ -218,7 +218,7 @@ class PopupVoiceTest(unittest.TestCase):
             patcher = patch(target, lambda *_a, **_k: None)
             patcher.start()
             self.addCleanup(patcher.stop)
-        for name, value in (('_clipboard', lambda _root: ''), ('clipboard_image', lambda *_a: None)):
+        for name, value in (('_clipboard', lambda _root: ''), ('clipboard_image', lambda *_a: None), ('_bring_to_front', lambda *_a: False)):
             patcher = patch.object(yakala, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
