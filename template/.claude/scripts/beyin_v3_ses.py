@@ -345,14 +345,19 @@ def _download_checked(url, target, sha256, say=print):
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     part = target.with_name(target.name + '.part')
-    digest = hashlib.sha256()
+    digest, done, told = hashlib.sha256(), 0, 0
     with urlopen(url, timeout=60) as response, open(part, 'wb') as out:
+        total = int(response.headers.get('Content-Length') or 0) if getattr(response, 'headers', None) else 0
         while True:
             chunk = response.read(1 << 20)
             if not chunk:
                 break
             digest.update(chunk)
             out.write(chunk)
+            done += len(chunk)
+            if total and done * 10 // total > told:  # every tenth: a big model is not silence for minutes
+                told = done * 10 // total
+                say('  %%%d (%d / %d MB)' % (told * 10, done >> 20, total >> 20))
     if sha256 and digest.hexdigest() != sha256:
         part.unlink(missing_ok=True)
         raise ValueError('İndirilen dosya beklenen dosya değil (SHA-256 tutmadı): ' + target.name)
@@ -628,7 +633,13 @@ def main(argv=None, vault=None, state=None):
         raise SystemExit('Durum klasörü bilinmiyor; beyin.py ses ile çalıştırın.')
     state = Path(state)
     if args.command == 'kur':
-        result = install(state, say=(lambda _text: None) if args.json else (lambda text: print(text, flush=True)))
+        if args.json:
+            # Each step its own line ({"adim": ...}), the result the last: the desktop app shows them as they come.
+            utf8 = (getattr(sys.stdout, 'encoding', '') or '').lower().replace('-', '') in ('utf8', 'utf8sig')
+            say = lambda text: print(json.dumps({'adim': text.strip()}, ensure_ascii=not utf8), flush=True)
+        else:
+            say = lambda text: print(text, flush=True)
+        result = install(state, say=say)
         result['dinleyici'] = restart_listener(state)
     elif args.command == 'durum':
         result = status(state)

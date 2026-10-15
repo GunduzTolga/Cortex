@@ -262,6 +262,38 @@ class SetupTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ses._download_checked('http://example.invalid/model.bin', target, None)
 
+    def test_a_big_download_says_how_far_it_is_and_the_install_says_each_step_as_a_line(self):
+        data = os.urandom(3 << 20)
+
+        class Response(io.BytesIO):
+            headers = {'Content-Length': str(len(data))}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+        import hashlib
+        said = []
+        with mock.patch('urllib.request.urlopen', lambda url, timeout: Response(data)):
+            ses._download_checked('https://example.invalid/m.bin', Path(self.tmp.name) / 'm.bin', hashlib.sha256(data).hexdigest(), said.append)
+        self.assertEqual(said[-1].strip(), '%100 (3 / 3 MB)')
+        self.assertLessEqual(len(said), 10, 'a tenth at a time, not a line a megabyte')
+
+        def install(state, say):
+            say('Motor: işlemci')
+            say('  %50 (800 / 1600 MB)')
+            return {'status': 'kuruldu', 'motor': 'islemci'}
+
+        out = io.StringIO()
+        from contextlib import redirect_stdout
+        with mock.patch.object(ses, 'install', install), mock.patch.object(ses, 'restart_listener', lambda _state: True), redirect_stdout(out):
+            ses.main(['kur', '--json'], state=self.state)
+        lines = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual(lines[:2], [{'adim': 'Motor: işlemci'}, {'adim': '%50 (800 / 1600 MB)'}])
+        self.assertEqual((lines[-1]['status'], lines[-1]['dinleyici']), ('kuruldu', True), 'the result is the last line')
+
     def test_an_archive_that_reaches_outside_its_folder_is_refused(self):
         archive = Path(self.tmp.name) / 'kotu.zip'
         with zipfile.ZipFile(archive, 'w') as zipped:
