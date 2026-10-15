@@ -60,12 +60,12 @@ GGML_MODEL = {
     'sha256': '1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69',
     'boyut': 1624555275,
 }
-# whisper.cpp built for Vulkan by .github/workflows/whisper-vulkan.yml, a pre-release of its own.
-# Until it is published (sha256 None), a build put in state/ses/whisper-vulkan by hand is used.
+# whisper.cpp built for Vulkan by .github/workflows/whisper-vulkan.yml, a pre-release of its own
+# (published 2026-10-15). A build already in state/ses/whisper-vulkan is used as it is.
 VULKAN_BUILD = {
     'surum': '1.9.5',
     'url': 'https://github.com/GunduzTolga/Cortex/releases/download/whisper-vulkan-1.9.5/whisper-vulkan-win-x64.zip',
-    'sha256': None,
+    'sha256': '720c36dcce8f2bc007af973aa065ab9f06a1575ba18ae84756afea0ff2f5506e',
 }
 # The voice packages publish wheels for these first; a newer Python may have none yet.
 PYTHON_VERSIONS = ('3.12', '3.13', '3.11', '3.10')
