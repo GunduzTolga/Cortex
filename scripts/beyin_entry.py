@@ -460,6 +460,10 @@ def main(argv=None):
             # Optional capture tool: its own small CLI, no index or sync engine.
             import beyin_v3_yakala as yakala
             return yakala.main(argv[1:], vault=vault, state=state)
+        if argv and argv[0] == 'ses':
+            # Optional voice typing for yakala: its own environment under state/ses, its own CLI.
+            import beyin_v3_ses as ses
+            return ses.main(argv[1:], vault=vault, state=state)
         if argv and argv[0] == 'pyn':
             # Open Pyn in a chosen AI client inside this vault; its own small CLI.
             import beyin_v3_pyn as pyn

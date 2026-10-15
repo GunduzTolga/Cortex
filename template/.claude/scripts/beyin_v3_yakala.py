@@ -1312,12 +1312,77 @@ def _hotkey_hint(vault):
     return (label + ' ile her yerden açılır') if label else 'İkinci beynine kaydedilir'
 
 
-def popup(vault, context=None, master=None, state=None):
+def _bring_to_front(window):
+    """Windows: put the popup in front of the app the key was pressed in, with the keyboard focus.
+
+    Windows hands the foreground only to the thread that owns it. The listener's popup opened
+    behind the active window (still there in Alt+Tab), and focus_force() alone cannot change
+    that. Attaching to the foreground window's input thread for the moment of the switch is the
+    usual way a hotkey launcher takes the front the user asked for. True when the popup is in
+    front; elsewhere, or on any failure, False and the window stays as Tk left it.
+    """
+    if os.name != 'nt':
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32, kernel32 = ctypes.WinDLL('user32'), ctypes.WinDLL('kernel32')
+        user32.GetAncestor.argtypes, user32.GetAncestor.restype = [wintypes.HWND, wintypes.UINT], wintypes.HWND
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.c_void_p]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+        user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_int, wintypes.UINT]
+        user32.BringWindowToTop.argtypes = user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        hwnd = user32.GetAncestor(window.winfo_id(), 2)  # GA_ROOT: the top-level window Tk wraps the widget in
+        if not hwnd:
+            return False
+        front = user32.GetForegroundWindow()
+        own, other = kernel32.GetCurrentThreadId(), user32.GetWindowThreadProcessId(front, None) if front else 0
+        attached = bool(other and other != own and user32.AttachThreadInput(own, other, True))
+        try:
+            # HWND_TOPMOST, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
+            user32.SetWindowPos(hwnd, wintypes.HWND(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+        finally:
+            if attached:
+                user32.AttachThreadInput(own, other, False)
+        return user32.GetForegroundWindow() == hwnd
+    except Exception:
+        return False
+
+
+def with_spoken(current, spoken):
+    """The field after something was said into it: what was typed, then the spoken words."""
+    spoken = (spoken or '').strip()
+    current = (current or '').rstrip()
+    if not spoken:
+        return current
+    return current + ' ' + spoken if current else spoken
+
+
+class VoiceLink:
+    """What a window knows of the voice helper (beyin_v3_ses.Worker): it, and whether its model is loaded."""
+
+    def __init__(self, worker):
+        self.worker = worker
+        self.ready = False
+        self.what = ''
+
+
+def popup(vault, context=None, master=None, state=None, voice=None, listening=False):
     """Command-palette window: what will be saved, one line for why, Enter saves, Esc closes.
 
     Alone it owns a Tk root and returns the capture result when the window closes. With
     `master` (the resident Windows listener's warm root) it opens a Toplevel on it and
     returns that window at once; the listener's own loop keeps it running.
+
+    With `voice` (a VoiceLink, from a listener whose voice helper runs) the field has a
+    microphone: a click, or the hotkey pressed again, records; what was said is written into
+    the field, and "kaydet" said at the end saves. `listening`: opened by "Pyn, not al", the
+    helper is already recording.
     """
     context = dict(context or {})
     try:
@@ -1375,7 +1440,8 @@ def popup(vault, context=None, master=None, state=None):
     y = 64
     entry = tk.Entry(root, font=_font(21), fg=P['text'], bg=P['bg'], insertbackground=P['text'], insertwidth=2,
                      relief='flat', bd=0, highlightthickness=0)
-    canvas.create_window(pad, y, window=entry, anchor='nw', width=W - 2 * pad, height=40)
+    mic_room = 50 if voice is not None else 0  # the microphone sits at the field's right end
+    canvas.create_window(pad, y, window=entry, anchor='nw', width=W - 2 * pad - mic_room, height=40)
     placeholder_text = 'Neden kaydediyorsun?' if (url or files or clip_text) else 'Aklındakini yaz…'
     hint = {'on': False}
 
@@ -1528,9 +1594,104 @@ def popup(vault, context=None, master=None, state=None):
         root.after(520, close)
         return 'break'
 
+    voice_mode = {'now': None}
+    if voice is not None:
+        # The microphone: a drawn ink button like the rest of the sheet. Its states: not ready
+        # (the model still loading), ready, listening (gold, a ring that grows with the voice),
+        # writing (three dots).
+        mx, my, mr = W - pad - 22, 84, 17
+        ring = canvas.create_oval(mx - mr, my - mr, mx + mr, my + mr, outline=P['accent'], width=3, state='hidden')
+        disc = canvas.create_oval(mx - mr, my - mr, mx + mr, my + mr, fill=P['card'], outline=P['card_line'], width=1.5)
+        glyph = [
+            canvas.create_oval(mx - 4, my - 11, mx + 4, my - 3, width=0),
+            canvas.create_rectangle(mx - 4, my - 7, mx + 4, my + 1, width=0),
+            canvas.create_oval(mx - 4, my - 3, mx + 4, my + 5, width=0),
+            canvas.create_arc(mx - 8, my - 9, mx + 8, my + 7, start=200, extent=140, style='arc', width=2),
+            canvas.create_line(mx, my + 7, mx, my + 11, width=2),
+            canvas.create_line(mx - 4, my + 11, mx + 4, my + 11, width=2),
+        ]
+        dots = canvas.create_text(mx, my - 1, text='…', font=_font(16, 'bold'), state='hidden')
+        idle_status = canvas.itemcget(status, 'text')
+
+        def paint(colour):
+            for part in glyph:
+                # An arc's stroke is its outline; every other part of the glyph is filled.
+                canvas.itemconfigure(part, **({'outline': colour} if canvas.type(part) == 'arc' else {'fill': colour}))
+
+        def voice_set(mode, message=None, tone='muted'):
+            voice_mode['now'] = mode
+            listening_now = mode in ('bekliyor', 'dinliyor')
+            canvas.itemconfigure(disc, fill=P['accent'] if listening_now else P['card'],
+                                 outline=P['faint'] if mode == 'yok' else P['card_line'])
+            paint(P['faint'] if mode == 'yok' else P['text'])
+            for part in glyph:
+                canvas.itemconfigure(part, state='hidden' if mode == 'ceviriyor' else 'normal')
+            canvas.itemconfigure(dots, state='normal' if mode == 'ceviriyor' else 'hidden')
+            canvas.itemconfigure(ring, state='normal' if listening_now else 'hidden')
+            text = message or {'yok': 'Ses hazırlanıyor…', 'bekliyor': '● Dinliyorum…',
+                               'dinliyor': '● Dinliyorum… · sus ya da sonda "kaydet" de',
+                               'ceviriyor': 'Yazıya çeviriyorum…'}.get(mode, idle_status)
+            canvas.itemconfigure(status, text=_fit(canvas, text, _font(12), 300), fill=P[tone])
+
+        def voice_toggle(_event=None):
+            if voice_mode['now'] == 'hazir':
+                if voice.worker.send('dinle'):
+                    voice_set('bekliyor')
+            elif voice_mode['now'] in ('bekliyor', 'dinliyor'):
+                voice.worker.send('bitir')
+            return 'break'
+
+        def voice_event(event):
+            kind = event.get('olay')
+            if kind == 'hazir' and voice_mode['now'] == 'yok':
+                voice_set('hazir')
+            elif kind in ('dinliyor', 'uyandi'):
+                voice_set('dinliyor')
+            elif kind == 'seviye' and voice_mode['now'] == 'dinliyor':
+                grow = mr + 2 + round(9 * float(event.get('deger') or 0))
+                canvas.coords(ring, mx - grow, my - grow, mx + grow, my + grow)
+            elif kind == 'ceviriyor':
+                voice_set('ceviriyor')
+            elif kind == 'metin':
+                voice_set('hazir')
+                spoken, command = event.get('metin') or '', event.get('komut')
+                if spoken:
+                    if hint['on']:
+                        entry.delete(0, 'end')
+                        entry.configure(fg=P['text'])
+                        hint['on'] = False
+                    merged = with_spoken(entry.get(), spoken)
+                    entry.delete(0, 'end')
+                    entry.insert(0, merged)
+                    entry.icursor('end')
+                if command == 'kaydet':
+                    save()
+                elif command == 'sil':
+                    show_hint()
+                elif command == 'iptal':
+                    close()
+            elif kind == 'hata':
+                voice_set('hazir' if voice.ready else 'yok', 'Ses: ' + (event.get('mesaj') or event.get('neden') or 'bir sorun oldu'), 'bad')
+            elif kind == 'bitti':
+                voice_set('yok', 'Ses yardımcısı kapandı', 'bad')
+
+        for part in [disc, ring, dots, *glyph]:
+            canvas.tag_bind(part, '<Button-1>', voice_toggle)
+        root.voice_event = voice_event
+        root.voice_toggle = voice_toggle
+        voice_set('dinliyor' if listening else 'hazir' if voice.ready else 'yok',
+                  None if listening or not voice.ready else 'Konuşmak için mikrofona tıkla ya da Ctrl+Alt+B')
+
+    def leave(_event=None):
+        # A window closed while it listens lets the microphone go and keeps nothing it heard.
+        if voice is not None and voice_mode['now'] in ('bekliyor', 'dinliyor'):
+            voice.worker.send('iptal')
+        close()
+
     root.bind('<Return>', save)
     root.bind('<KP_Enter>', save)
-    root.bind('<Escape>', lambda _e: close())
+    root.bind('<Escape>', leave)
+    root.leave = leave  # what Esc does, for whoever holds the window
 
     root.update_idletasks()
     x = (root.winfo_screenwidth() - W) // 2
@@ -1547,8 +1708,12 @@ def popup(vault, context=None, master=None, state=None):
         _style_mac(focus=not snapshot)
     if not snapshot:
         root.lift()
+        _bring_to_front(root)
         root.focus_force()
         entry.focus_set()
+        # Once more after the window is on screen: the app the key was pressed in can take the
+        # front back while the popup is still being mapped.
+        root.after(60, lambda: (_bring_to_front(root), entry.focus_set()))
 
     if snapshot and sys.platform == 'darwin':
         # Development aid: capture only this window's rectangle without taking focus, then close.
@@ -1816,6 +1981,15 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
     root.withdraw()
     _font(12)  # resolve the faces now, not when the key is pressed
     pressed, ready, started = queue.Queue(), {}, threading.Event()
+    # The voice helper (beyin_v3_ses), where it is installed and on: started with the listener so
+    # its model is warm before the first word. Without it the window is as it always was.
+    link, voice_config = None, {'mtime': None}
+    try:
+        import beyin_v3_ses as ses
+        if ses.usable(state):
+            link = VoiceLink(ses.Worker(state))
+    except Exception:
+        link = None
 
     def watch():
         import time
@@ -1850,6 +2024,8 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
     windows, ticks = [], [0]
 
     def finish(restart=False):
+        if link is not None:
+            link.worker.close(1.5)
         user32.PostThreadMessageW(ready['tid'], 0x0012, 0, 0)  # WM_QUIT ends the hotkey thread
         kernel32.CloseHandle(lock)
         kernel32.CloseHandle(stop)
@@ -1870,6 +2046,33 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
                     return finish(restart=True)
             except OSError:
                 pass
+        def open_window(context, listening=False):
+            opened = popup(vault, context, master=root, state=state, voice=link, listening=listening)
+            if opened is not None and not isinstance(opened, dict):
+                windows.append(opened)
+            _write_listener_state(state, son_pencere=time_now())
+
+        if link is not None:
+            if ticks[0] % 80 == 0:  # the wake word switched on or off with `ses ayar`
+                try:
+                    path = ses.ses_dir(state) / ses.CONFIG
+                    mtime = path.stat().st_mtime if path.exists() else None
+                    if mtime != voice_config['mtime']:
+                        voice_config['mtime'] = mtime
+                        link.worker.send('uyandirma', acik=bool(ses.load_config(state).get('uyandirma')))
+                except OSError:
+                    pass
+            for event in link.worker.take():
+                kind = event.get('olay')
+                if kind == 'hazir':
+                    link.ready, link.what = True, event.get('aciklama') or ''
+                elif kind == 'bitti':
+                    link.ready = False
+                if kind == 'uyandi' and not windows:
+                    open_window(windows_context(), listening=True)  # "Pyn, not al": the window opens listening
+                    continue
+                if windows and hasattr(windows[-1], 'voice_event'):
+                    windows[-1].voice_event(event)
         try:
             context = pressed.get_nowait()
         except queue.Empty:
@@ -1877,12 +2080,12 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
         if context is not None:
             if windows:  # a second press brings the open window back instead of stacking another
                 windows[-1].lift()
+                _bring_to_front(windows[-1])
                 windows[-1].focus_force()
+                if link is not None and hasattr(windows[-1], 'voice_toggle'):
+                    windows[-1].voice_toggle()  # and, with the voice, starts or ends listening
             else:
-                opened = popup(vault, context, master=root, state=state)
-                if opened is not None and not isinstance(opened, dict):
-                    windows.append(opened)
-                _write_listener_state(state, son_pencere=time_now())
+                open_window(context)
         root.after(25, poll)
 
     root.after(25, poll)

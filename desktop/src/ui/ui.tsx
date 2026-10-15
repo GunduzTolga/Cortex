@@ -79,6 +79,21 @@ export function Modal({
   );
 }
 
+/** An on/off setting: a switch beside its name and what it does, the whole row the thing pressed. */
+export function Switch({ checked, onChange, label, hint, ...data }: { checked: boolean; onChange: (checked: boolean) => void; label: string; hint?: string } & { [key: `data-${string}`]: string | boolean }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)} className="group flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-zinc-50" {...data}>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[13px] font-semibold text-darkDelegation">{label}</span>
+        {hint ? <span className="mt-0.5 block text-[11.5px] leading-relaxed text-zinc-500">{hint}</span> : null}
+      </span>
+      <span className={`mt-0.5 flex h-5 w-9 shrink-0 items-center rounded-full border-[1.5px] border-darkDelegation p-0.5 transition-colors ${checked ? 'bg-gold' : 'bg-zinc-100'}`} aria-hidden>
+        <span className={`h-3.5 w-3.5 rounded-full bg-darkDelegation transition-transform ${checked ? 'translate-x-3.5' : ''}`} />
+      </span>
+    </button>
+  );
+}
+
 export const inputClass =
   'w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-darkDelegation outline-none transition-colors placeholder:text-zinc-400 focus:border-zinc-400';
 

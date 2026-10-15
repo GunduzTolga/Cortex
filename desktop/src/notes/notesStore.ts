@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import type { VaultIndex } from '@shared/notes';
+import type { TrashItem, VaultIndex } from '@shared/notes';
 import { messageOf } from '@shared/ipcError';
-import { isNotePath, makeResolver, pathKey, type Resolve } from '../../core/vaultNotes';
+import { withoutIcon } from '../../core/titles';
+import { isNotePath, makeResolver, noteTitle, pathKey, type Resolve } from '../../core/vaultNotes';
 
 /**
  * What the notes screen holds between its parts: the vault's index as the main
@@ -34,8 +35,8 @@ export interface NoteTarget {
 
 export type NoteMode = 'read' | 'edit';
 
-/** What the left column shows: the vault's tree, a search, or its tags. */
-export type NavTab = 'files' | 'search' | 'tags';
+/** What the left column shows: the vault's tree, a search, its tags, or its bin. */
+export type NavTab = 'files' | 'search' | 'tags' | 'trash';
 
 interface NotesState {
   index: VaultIndex | null;
@@ -45,6 +46,15 @@ interface NotesState {
   paths: string[];
   /** Notes by `pathKey`, for a lookup by any case. */
   byKey: Map<string, string>;
+  /** The notes shown by a name other than their file's: a receipt by its event_id, a name without its leading emoji (`labelOf`). */
+  labels: Map<string, string>;
+  /** Of those, the ones Cortex's engine names: a receipt by its event_id, never renamed from here. */
+  keptLabels: Map<string, string>;
+  /** Names shown with the emoji they start with on disk (the window's settings, `setNameIcons`). */
+  nameIcons: boolean;
+  setNameIcons(on: boolean): void;
+  /** What is in the vault's bin (`.trash/`), the last deleted first; null before it is read. */
+  bin: TrashItem[] | null;
   tabs: NoteTab[];
   active: string;
   mode: NoteMode;
@@ -67,6 +77,8 @@ interface NotesState {
   /** A note shown over the page while a link to it is hovered (peek.tsx), by where the link is on screen. */
   peek: { path: string; subpath: string | null; x: number; y: number; below: number } | null;
   refresh(): Promise<void>;
+  /** Read the vault's bin again: after something went in or came out of it. */
+  refreshBin(): Promise<void>;
   open(path: string, options?: { newTab?: boolean; line?: number | null; subpath?: string | null; edit?: boolean }): void;
   back(): void;
   forward(): void;
@@ -139,6 +151,16 @@ export const useNotes = create<NotesState>((set, get) => {
     resolve: () => null,
     paths: [],
     byKey: new Map(),
+    labels: new Map(),
+    keptLabels: new Map(),
+    nameIcons: false,
+
+    setNameIcons(on) {
+      if (on === get().nameIcons) return;
+      const index = get().index;
+      set((state) => ({ nameIcons: on, ...(index ? labelsOf(index, on) : {}), revision: state.revision + 1 }));
+    },
+    bin: null,
     tabs: [first],
     active: first.id,
     mode: 'read',
@@ -162,7 +184,7 @@ export const useNotes = create<NotesState>((set, get) => {
       const paths = [...index.notes.map((note) => note.path), ...index.files.map((file) => file.path)];
       const byKey = new Map(index.notes.map((note) => [pathKey(note.path), note.path]));
       const vault = index.vault?.name ?? null;
-      set((state) => ({ index, error: null, paths, byKey, resolve: makeResolver(paths), revision: state.revision + 1 }));
+      set((state) => ({ index, error: null, paths, byKey, ...labelsOf(index, state.nameIcons), resolve: makeResolver(paths), revision: state.revision + 1 }));
       if (vault && loadedFor !== vault) {
         loadedFor = vault;
         const saved = loadSaved(vault);
@@ -173,6 +195,16 @@ export const useNotes = create<NotesState>((set, get) => {
       const there = new Set(paths);
       const tabs = get().tabs.map((tab) => (tab.path && !there.has(tab.path) ? { ...tab, path: null } : tab));
       if (tabs.some((tab, at) => tab !== get().tabs[at])) update({ tabs });
+      void get().refreshBin();
+    },
+
+    async refreshBin() {
+      try {
+        set({ bin: await window.cortex.notes.binList() });
+      } catch {
+        // A bin that will not be read is not the notes' business: the tab says nothing is in it.
+        set({ bin: [] });
+      }
     },
 
     open(path, options = {}) {
@@ -283,6 +315,42 @@ export const useActiveTab = () => useNotes((state) => state.tabs.find((tab) => t
 /** Whether a path is a note the index has, by any case. */
 export function noteFor(path: string): string | null {
   return useNotes.getState().byKey.get(pathKey(path)) ?? null;
+}
+
+/**
+ * The name a note or a file is shown by: a receipt by the event_id it
+ * carries, where its file's name is a hash Cortex's engine finds it by
+ * (core/vaultNotes.ts, `keptBy`); anything else by its file's name.
+ */
+export function labelOf(path: string): string {
+  return useNotes.getState().labels.get(path) ?? noteTitle(path);
+}
+
+/** `labelOf`, kept current for a component that shows it. */
+export const useLabel = (path: string) => useNotes((state) => state.labels.get(path) ?? noteTitle(path));
+
+/** The names notes are shown by: the engine's for what it keeps, and a name without its leading emoji unless those are asked for. */
+function labelsOf(index: VaultIndex, nameIcons: boolean): Pick<NotesState, 'labels' | 'keptLabels'> {
+  const keptLabels = new Map(index.notes.flatMap((note) => (note.label ? [[note.path, note.label] as const] : [])));
+  const labels = new Map(keptLabels);
+  if (!nameIcons) {
+    for (const note of index.notes) {
+      const title = noteTitle(note.path);
+      const shown = withoutIcon(title);
+      if (!labels.has(note.path) && shown !== title) labels.set(note.path, shown);
+    }
+  }
+  return { labels, keptLabels };
+}
+
+/** A folder's or a file's own name as shown: without its leading emoji unless those are asked for. */
+export function nameLabel(name: string): string {
+  return useNotes.getState().nameIcons ? name : withoutIcon(name);
+}
+
+/** A folder path as shown, each folder by `nameLabel`. */
+export function folderLabel(folder: string): string {
+  return useNotes.getState().nameIcons ? folder : folder.split('/').map(withoutIcon).join('/');
 }
 
 export { isNotePath };

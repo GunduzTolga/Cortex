@@ -32,8 +32,9 @@ test('the channels are the ones the preload names, no more and no fewer', () => 
   const preload = fs.readFileSync('electron/preload.ts', 'utf8');
   const named = [...preload.matchAll(/invoke\('([^']+)'/g)].map((match) => match[1]).sort();
   assert.deepEqual([...handlers.keys()].sort(), named);
+  assert.deepEqual(named.filter((channel) => channel.startsWith('chat:')), ['chat:answer', 'chat:auth', 'chat:cancel', 'chat:clis', 'chat:forgetKey', 'chat:list', 'chat:login', 'chat:open', 'chat:remove', 'chat:rename', 'chat:send', 'chat:setKey', 'chat:setOption']);
   const notes = named.filter((channel) => channel.startsWith('notes:'));
-  assert.deepEqual(notes, ['notes:asset', 'notes:backlinks', 'notes:create', 'notes:createFolder', 'notes:index', 'notes:move', 'notes:open', 'notes:read', 'notes:rename', 'notes:save', 'notes:search', 'notes:trash']);
+  assert.deepEqual(notes, ['notes:asset', 'notes:backlinks', 'notes:binDelete', 'notes:binEmpty', 'notes:binList', 'notes:binRestore', 'notes:create', 'notes:createFolder', 'notes:index', 'notes:move', 'notes:open', 'notes:read', 'notes:rename', 'notes:save', 'notes:search', 'notes:text', 'notes:trash']);
 });
 
 test('a frame that is not the page, or a page that is not the app’s, is refused before anything is read', async () => {
@@ -45,12 +46,16 @@ test('a frame that is not the page, or a page that is not the app’s, is refuse
   await assert.throws(() => listener({ sender: { mainFrame }, senderFrame: null }), /not the app/);
 });
 
-test('the window may set the language, and never the vault', async () => {
+test('the window may set the language and how the tree shows the vault, and never the vault', async () => {
   firstRun();
-  assert.deepEqual(await call('settings:set', { language: 'en', vault: '/etc' }), { language: 'en' });
+  const off = { allFiles: false, nameIcons: false };
+  assert.deepEqual(await call('settings:set', { language: 'en', vault: '/etc' }), { language: 'en', ...off });
   assert.equal(readSettings().vault, null);
-  assert.deepEqual(await call('settings:set', { language: 'de' }), { language: 'en' }, 'a language the app does not have changes nothing');
-  assert.deepEqual(await call('settings:set', { language: null }), { language: null });
+  assert.deepEqual(await call('settings:set', { language: 'de' }), { language: 'en', ...off }, 'a language the app does not have changes nothing');
+  assert.deepEqual(await call('settings:set', { language: null }), { language: null, ...off });
+  assert.deepEqual(await call('settings:set', { allFiles: true }), { language: null, allFiles: true, nameIcons: false }, 'one setting changed leaves the others');
+  assert.deepEqual(await call('settings:set', { nameIcons: 'yes', allFiles: 0 }), { language: null, allFiles: true, nameIcons: false }, 'what is not a yes or a no changes nothing');
+  assert.deepEqual(await call('settings:set', null), { language: null, allFiles: true, nameIcons: false });
 });
 
 test('the vault comes through the dialog, and what the window is told of it holds no path', async () => {

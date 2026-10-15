@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { TextRead } from '@shared/notes';
 import { CalendarDays, FilePlus2, FileText, FolderOpen, LayoutDashboard, Network, PanelLeftOpen, PanelRightOpen, Plus, Search, X, Zap } from 'lucide-react';
 import { messageOf } from '@shared/ipcError';
 import { baseName, dayOf, folderOf, isNotePath, noteTitle } from '../../core/vaultNotes';
@@ -8,11 +9,11 @@ import { Button, Spinner } from '../ui/ui';
 import { NotePane } from './NotePane';
 import { NotesNav, useMakers } from './NotesNav';
 import { NoteSidebar } from './NoteSidebar';
-import { NotesDialogs } from './NotesMenus';
 import { QuickSwitcher } from './QuickSwitcher';
 import { NotePeek } from './peek';
 import { imageOf } from './vaultCache';
-import { useActiveTab, useNotes } from './notesStore';
+import { folderLabel, labelOf, nameLabel, useActiveTab, useNotes } from './notesStore';
+import { TextFile } from './TextFile';
 import './notes.css';
 
 /**
@@ -120,7 +121,7 @@ export function NotesView({ visible, onGraph }: { visible: boolean; onGraph: () 
   }
   if (index.missing) return <p className="p-8 text-[13px] text-bad">{index.missing}</p>;
 
-  const titleOf = (path: string | null) => (path ? (isNotePath(path) ? noteTitle(path) : baseName(path)) : t('notes.tab.new'));
+  const titleOf = (path: string | null) => (path ? labelOf(path) : t('notes.tab.new'));
 
   return (
     <div className="@container flex h-full min-h-0" data-notes-view>
@@ -187,7 +188,6 @@ export function NotesView({ visible, onGraph }: { visible: boolean; onGraph: () 
 
       <QuickSwitcher open={switching} onClose={() => setSwitching(false)} />
       <NotePeek />
-      <NotesDialogs />
     </div>
   );
 }
@@ -264,8 +264,8 @@ function NotesHome({ onSwitch, onGraph, onNew, onCapture }: { onSwitch: () => vo
                   <button type="button" onClick={(event) => useNotes.getState().open(note.path, { newTab: event.ctrlKey || event.metaKey })} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-zinc-50">
                     <FileText size={14} className="shrink-0 text-zinc-400" />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13.5px] font-semibold text-darkDelegation">{noteTitle(note.path)}</span>
-                      {folderOf(note.path) ? <span className="block truncate text-[11px] text-zinc-400">{folderOf(note.path)}</span> : null}
+                      <span className="block truncate text-[13.5px] font-semibold text-darkDelegation">{labelOf(note.path)}</span>
+                      {folderOf(note.path) ? <span className="block truncate text-[11px] text-zinc-400">{folderLabel(folderOf(note.path))}</span> : null}
                     </span>
                     <span className="shrink-0 text-[11px] text-zinc-400">{new Date(note.modified).toLocaleDateString()}</span>
                   </button>
@@ -282,12 +282,17 @@ function NotesHome({ onSwitch, onGraph, onNew, onCapture }: { onSwitch: () => vo
   );
 }
 
-/** A file of the vault that is not a note: an image drawn, anything else named, with its folder a click away. Nothing is run. */
+/**
+ * A file of the vault that is not a note: an image drawn, a text file (a JSON,
+ * a script, a config) shown read only with its lines numbered, anything else
+ * named; its folder a click away. Nothing is run.
+ */
 function FileView({ path }: { path: string }) {
   const t = useT();
   const toast = useApp((s) => s.toast);
   const file = useNotes((state) => state.index?.files.find((one) => one.path === path) ?? null);
   const [url, setUrl] = useState<string | null | undefined>(undefined);
+  const [read, setRead] = useState<TextRead | null | undefined>(undefined);
   const image = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(path);
   useEffect(() => {
     if (!image || !file) return;
@@ -297,13 +302,55 @@ function FileView({ path }: { path: string }) {
       live = false;
     };
   }, [image, path, file]);
+  // Read again when the file changes on disk, as a note is.
+  useEffect(() => {
+    if (image || !file) return;
+    let live = true;
+    window.cortex.notes.text(path).then(
+      (got) => live && setRead(got),
+      () => live && setRead(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [image, path, file?.modified]);
   const show = () =>
     window.cortex.notes.open(path, 'folder').catch((err) => toast({ tone: 'error', title: t('notes.open.failed'), detail: messageOf(err) }));
+  const size = file ? t('notes.file.size', { size: Math.max(1, Math.round(file.size / 1024)) }) : null;
+
+  if (!image && read === undefined) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Spinner />
+      </div>
+    );
+  }
+  if (!image && read?.text != null) {
+    return (
+      <div className="flex h-full min-h-0 flex-col" data-notes-file={path} data-notes-file-text>
+        <div className="flex h-10 shrink-0 items-center gap-3 border-b border-zinc-100 px-4">
+          <p className="min-w-0 truncate text-[12px] text-zinc-400">
+            {folderOf(path) ? `${folderLabel(folderOf(path)).split('/').join(' / ')} / ` : ''}
+            <span className="text-zinc-600">{nameLabel(baseName(path))}</span>
+          </p>
+          {size ? <span className="shrink-0 text-[11px] text-zinc-400">{size}</span> : null}
+          <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">{t('notes.file.readOnly')}</span>
+          <button type="button" onClick={() => void show()} title={t('notes.open.folder')} aria-label={t('notes.open.folder')} className="ml-auto shrink-0 rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation">
+            <FolderOpen size={14} />
+          </button>
+        </div>
+        <div className="min-h-0 flex-1">
+          <TextFile path={path} text={read.text} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-8" data-notes-file={path}>
       {image && url ? <img src={url} alt={baseName(path)} className="max-h-[70%] max-w-full rounded-lg shadow-sm" /> : null}
       <p className="text-[14px] font-semibold text-darkDelegation">{baseName(path)}</p>
-      {file ? <p className="text-[12px] text-zinc-400">{t('notes.file.size', { size: Math.max(1, Math.round(file.size / 1024)) })}</p> : null}
+      {size ? <p className="text-[12px] text-zinc-400">{size}</p> : null}
+      {!image ? <p className="max-w-sm text-center text-[12px] text-zinc-500">{t(read?.tooLarge ? 'notes.file.tooLarge' : 'notes.file.notText')}</p> : null}
       <Button onClick={() => void show()}>
         <FolderOpen size={14} />
         {t('notes.open.folder')}

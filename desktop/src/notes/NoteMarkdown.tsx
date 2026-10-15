@@ -23,7 +23,7 @@ import { useT } from '../i18n/useT';
 import type { Key } from '../i18n';
 import { useApp } from '../store/app';
 import { messageOf } from '@shared/ipcError';
-import { useNotes } from './notesStore';
+import { labelOf, useNotes } from './notesStore';
 import { remarkObsidian } from './remarkObsidian';
 import { imageOf, noteTextOf } from './vaultCache';
 import { peekLeave, peekSoon } from './peek';
@@ -66,7 +66,9 @@ function WikiLink({ target, subpath, alias }: { target: string; subpath: string;
   const t = useT();
   const toast = useApp((s) => s.toast);
   const to = useTarget(target);
-  const shown = alias || (target ? target.replace(/\.md$/i, '') : '') + (subpath ? `${target ? ' › ' : ''}${subpath.replace(/^\^/, '')}` : '');
+  // A link to a receipt reads as its event_id, not as the hash its file is named by.
+  const label = useNotes((state) => (to ? state.labels.get(to) : undefined));
+  const shown = alias || (label ?? (target ? target.replace(/\.md$/i, '') : '')) + (subpath ? `${target ? ' › ' : ''}${subpath.replace(/^\^/, '')}` : '');
   const open = (event: React.MouseEvent) => {
     event.preventDefault();
     if (to) {
@@ -89,6 +91,7 @@ function WikiLink({ target, subpath, alias }: { target: string; subpath: string;
       className="kg-wikilink"
       data-missing={to ? undefined : ''}
       data-note-link={target}
+      data-note-path={to ?? undefined}
       title={to ? undefined : t('notes.link.missing', { name: target })}
       onClick={open}
       onAuxClick={open}
@@ -194,7 +197,7 @@ function NoteEmbed({ target, subpath }: { target: string; subpath: string }) {
         className="mb-1 block text-[11px] font-bold uppercase tracking-widest text-zinc-400 hover:text-darkDelegation"
         onClick={(event) => useNotes.getState().open(to, { ...openOptions(event), subpath: subpath || null })}
       >
-        {noteTitle(to)}
+        {labelOf(to)}
         {subpath ? ` › ${subpath.replace(/^\^/, '')}` : ''}
       </button>
       {text === undefined ? (
@@ -340,6 +343,7 @@ function MarkdownLink({ href, title, children }: { href: string; title: string; 
       href="#"
       className="kg-wikilink"
       data-missing={to ? undefined : ''}
+      data-note-path={to ?? undefined}
       onClick={(event) => {
         event.preventDefault();
         if (to) useNotes.getState().open(to, { ...openOptions(event), subpath: subpath || null });

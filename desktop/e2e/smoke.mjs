@@ -1,5 +1,7 @@
 import { _electron as electron } from 'playwright';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -51,6 +53,39 @@ write('Personal/Health.md', '# Health\n\nWalk every day.\n');
 write('Notes/Plan.md', '---\ntags: [plan]\n---\n# Plan\n\nSee [[Health]] and [[Missing note]].\n\n- [ ] first task\n\n> [!warning] Careful\n> The body.\n');
 write('Notes/Ideas.md', '# Ideas\n\nThe plan is here: [[Plan#Plan|the plan]]. #idea\n');
 fs.writeFileSync(vaultNote('Latin1.md'), Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]));
+// What Cortex's engine keeps, as it writes it: a receipt under the hash of its event_id, and the day's page generated from it.
+const receipt = `receipts/${createHash('sha256').update('cortex-ad-karari-20261013').digest('hex')}.md`;
+write(receipt, '---\n{\n  "kind": "receipt",\n  "event_id": "cortex-ad-karari-20261013"\n}\n---\nAd kararı verildi.\n');
+write('daily/v3/2026-10-13.md', `---\n{"generated": true, "kind": "receipt-index"}\n---\n# Recorded outcomes\n\nSource: [[${receipt}]]\n`);
+write('Notes/settings.json', '{\n  "theme": "ananas",\n  "count": 3\n}\n');
+const receiptBefore = fs.readFileSync(vaultNote(receipt), 'utf8');
+
+/*
+  A stand-in for LM Studio's server: its model list and a streamed answer,
+  as LM Studio's OpenAI-compatible endpoint gives them. The chat talks to it
+  directly, as it talks to the person's own LM Studio.
+*/
+const lmBodies = [];
+const lmStudio = http.createServer((request, response) => {
+  let body = '';
+  request.on('data', (chunk) => (body += chunk));
+  request.on('end', () => {
+    if (request.url === '/api/v0/models') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ data: [{ id: 'qwen-e2e', type: 'llm', state: 'loaded', loaded_context_length: 16384 }] }));
+    } else if (request.url === '/v1/chat/completions') {
+      lmBodies.push(JSON.parse(body));
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      for (const content of ['Yerel model ', 'burada.']) response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content } }] })}\n\n`);
+      response.end('data: [DONE]\n\n');
+    } else {
+      response.writeHead(404);
+      response.end();
+    }
+  });
+});
+await new Promise((done) => lmStudio.listen(0, '127.0.0.1', done));
+const lmStudioBase = `http://127.0.0.1:${lmStudio.address().port}`;
 const hiddenBefore = fs.readFileSync(vaultNote('.hidden/Secret.md'), 'utf8');
 const obsidianBefore = fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'utf8');
 
@@ -59,7 +94,13 @@ const obsidianBefore = fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'u
   not handed to `capturePage` (UnknownVizError) unless Chromium draws in
   software. Windows, where CI runs, draws offscreen as it is.
 */
-const launchArgs = ['.', `--user-data-dir=${userData}`, ...(process.platform === 'linux' ? ['--no-sandbox', '--disable-gpu'] : [])];
+/*
+  CORTEX_SOFTWARE=1 draws in software on Windows too: there a hidden window's
+  frames are not handed to `capturePage` either (UnknownVizError), and the
+  pictures are wanted without a window put in front of the person.
+*/
+const software = process.platform === 'linux' || process.env.CORTEX_SOFTWARE === '1';
+const launchArgs = ['.', `--user-data-dir=${userData}`, ...(process.platform === 'linux' ? ['--no-sandbox'] : []), ...(software ? ['--disable-gpu'] : [])];
 const launch = () =>
   electron.launch({
     args: launchArgs,
@@ -68,8 +109,32 @@ const launch = () =>
       // Electron refuses to be Electron with this set, and Playwright waits out its timeout on a launch that technically succeeded.
       ELECTRON_RUN_AS_NODE: undefined,
       NODE_ENV: 'production',
+      // Pyn's chat talks to a stand-in for an AI CLI (tests/fixtures/fake-acp-agent.mjs), never to one of the machine's.
+      CORTEX_TEST_AGENT: path.resolve('tests/fixtures/fake-acp-agent.mjs'),
+      CORTEX_TEST_CLAUDE: path.resolve('tests/fixtures/fake-claude.mjs'),
+      CORTEX_TEST_CODEX: path.resolve('tests/fixtures/fake-codex.mjs'),
+      // The model servers: LM Studio's stand-in, and Ollama where nothing answers; never the machine's own.
+      CORTEX_TEST_LMSTUDIO: lmStudioBase,
+      CORTEX_TEST_OLLAMA: 'http://127.0.0.1:9',
     },
   });
+
+/*
+  A run never opens the system's browser. The app hands an address the page
+  asks for (a new window, a navigation away) to the system's browser, which is
+  right for the person and wrong for a test: every run left example.com tabs
+  open on the machine (14 October). The main process's way to the browser is
+  stood in for, and what it was asked to open is read back and checked.
+*/
+async function holdBrowser() {
+  await app.evaluate(({ shell }) => {
+    globalThis.cortexOpened = [];
+    shell.openExternal = async (url) => {
+      globalThis.cortexOpened.push(url);
+    };
+  });
+}
+const openedOutside = () => app.evaluate(() => globalThis.cortexOpened ?? []);
 
 let app = await launch();
 
@@ -96,6 +161,8 @@ function listen(page) {
 let page = await app.firstWindow();
 listen(page);
 await page.waitForLoadState('domcontentloaded');
+// Once the window is there: asked of the main process before it, an evaluation can be lost while the app starts.
+await holdBrowser();
 const shownSoon = (locator, timeout = 10_000) => locator.first().waitFor({ timeout }).then(() => true, () => false);
 
 console.log('\nFirst opening');
@@ -105,7 +172,7 @@ check(
   (await page.locator('[data-welcome-choose]').textContent())?.trim() === 'Kasayı seç' && (await page.evaluate(() => document.documentElement.lang)) === 'tr',
 );
 await shoot('01-welcome-tr.png');
-await page.locator('[data-language]').selectOption('en');
+await page.locator('[data-language="en"]').click();
 check(
   'English is one choice away, and the choice is kept by the main process',
   (await shownSoon(page.getByRole('button', { name: 'Choose the vault' }))) &&
@@ -124,7 +191,7 @@ const windowAlone = await page.evaluate(async () => {
   });
   return { node: typeof require + typeof process, bridge: Object.keys(window.cortex).sort(), fetched, image, opened: window.open('https://example.com/') === null };
 });
-check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,notes,on,settings,vault');
+check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,notes,on,settings,vault');
 check('it reaches nothing on the network: no request, no image', windowAlone.fetched === 'blocked' && windowAlone.image === 'blocked');
 check('and opens no window of its own', windowAlone.opened && app.windows().length === 1);
 
@@ -134,7 +201,9 @@ await app.evaluate(({ dialog }, dir) => {
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
 }, vaultDir);
 await page.locator('[data-welcome-choose]').click();
-check('a vault chosen, the notes open', await shownSoon(page.locator('[data-notes-view]'), 15_000));
+check('a vault chosen, Pyn opens first, where the person talks to their AI', await shownSoon(page.locator('[data-chat-view]'), 15_000));
+await page.locator('[data-app-view="notes"]').click();
+check('and the notes are one press away', await shownSoon(page.locator('[data-notes-view]'), 15_000));
 check('the window is told the vault by its name', (await page.locator('[data-vault-name]').textContent())?.trim() === path.basename(vaultDir));
 const indexNow = await page.evaluate(() => window.cortex.notes.index());
 // The folder the vault is in, as written and as JSON writes it (a Windows path's backslashes doubled).
@@ -165,6 +234,10 @@ check(
     !indexNow.notes.some((note) => note.path.split('/').some((part) => part.startsWith('.'))) &&
     !indexNow.folders.some((folder) => folder.split('/').some((part) => part.startsWith('.'))),
 );
+// The left column keeps its own buttons: the fold button once crossed into the tabs beside it (14 October).
+const navBox = await notesView.locator('[data-notes-nav]').boundingBox();
+const foldBox = await notesView.locator('[data-notes-nav-fold]').boundingBox();
+check('the left column’s header holds its buttons inside it', Boolean(navBox && foldBox && foldBox.x + foldBox.width <= navBox.x + navBox.width + 0.5));
 check(
   'and the window cannot read past the vault or into what is hidden',
   (await page.evaluate(() => window.cortex.notes.read('../outside.md').then(() => 'read', () => 'refused'))) === 'refused' &&
@@ -240,6 +313,57 @@ check(
 );
 await notesView.locator('[data-tree-path="Latin1.md"]').click();
 check('bytes that are not UTF-8 are shown and not saved', await shownSoon(notesView.locator('[data-note-banner="read-only"]')));
+await notesView.locator('[data-tree-path="receipts"]').click();
+const receiptRow = notesView.locator(`[data-tree-path="${receipt}"]`);
+check('a receipt is shown by its event_id, not by the hash its file is named by', (await shownSoon(receiptRow)) && (await receiptRow.textContent())?.trim() === 'cortex-ad-karari-20261013');
+await receiptRow.click();
+check(
+  'and is read, not written: the screen says Cortex keeps it',
+  (await shownSoon(notesView.locator(`[data-note-pane="${receipt}"] [data-note-banner="read-only"]`))) &&
+    (await notesView.locator('[data-note-crumbs]').textContent())?.includes('cortex-ad-karari-20261013') &&
+    fs.readFileSync(vaultNote(receipt), 'utf8') === receiptBefore,
+);
+await shoot('07-receipt.png');
+/*
+  The settings (src/ui/SettingsDialog.tsx): what is not a note or what a note
+  shows is out of the tree until every kind is asked for, and a name's leading
+  emoji is left out of what is shown unless asked for; the disk is not touched.
+*/
+const commandCenter = notesView.locator('[data-tree-path="🎯 100-Command-Center"]');
+check(
+  'scripts, JSON and text files are out of the tree, and names are shown without the emoji they start with',
+  (await notesView.locator('[data-tree-path="Notes/settings.json"]').count()) === 0 && (await commandCenter.textContent())?.trim() === '100-Command-Center',
+);
+await page.locator('[data-settings-open]').click();
+check('the gear in the top bar opens the settings', await shownSoon(page.locator('[data-settings]')));
+await page.waitForTimeout(400);
+await shoot('07b-settings.png');
+await page.locator('[data-settings-all-files]').click();
+await page.locator('[data-settings-name-icons]').click();
+check(
+  'a setting changed is kept by the main process at once',
+  await page.waitForFunction(async () => {
+    const { settings } = await window.cortex.bootstrap();
+    return settings.allFiles && settings.nameIcons;
+  }, null, { timeout: 5_000 }).then(() => true, () => false),
+);
+await page.keyboard.press('Escape');
+check(
+  'and the tree follows it: every kind of file, the names as they are on disk',
+  (await shownSoon(notesView.locator('[data-tree-path="Notes/settings.json"]'))) && (await commandCenter.textContent())?.trim() === '🎯 100-Command-Center' && fs.existsSync(vaultNote('🎯 100-Command-Center')),
+);
+await page.keyboard.press('Control+,');
+check('Ctrl+, opens them too', await shownSoon(page.locator('[data-settings]')));
+await page.locator('[data-settings-name-icons]').click();
+await page.keyboard.press('Escape');
+check('and the emoji go again', await page.waitForFunction(() => document.querySelector('[data-tree-path="🎯 100-Command-Center"]')?.textContent?.trim() === '100-Command-Center', null, { timeout: 5_000 }).then(() => true, () => false));
+await notesView.locator('[data-tree-path="Notes/settings.json"]').click();
+check(
+  'a JSON file is shown as the text it is, read only',
+  (await shownSoon(notesView.locator('[data-notes-file-text] [data-text-file="Notes/settings.json"]'))) &&
+    (await notesView.locator('[data-text-file="Notes/settings.json"]').textContent())?.includes('"theme": "ananas"'),
+);
+await shoot('08-text-file.png');
 await page.keyboard.press('Control+o');
 await notesView.locator('[data-notes-switcher-input]').fill('heal');
 await page.keyboard.press('Enter');
@@ -267,11 +391,189 @@ check(
   'Ctrl+Shift+N captures a note into Cortex’s inbox',
   await onDiskSoon(() => fs.readdirSync(vaultNote('📥 000-Inbox/Dump')).filter((name) => name.endsWith('.md')).length === inboxBefore.length + 1),
 );
+// Deleted from the tree: into the vault's own bin, with an Undo; and from the bin's list, back where it was.
+const healthText = fs.readFileSync(vaultNote('Personal/Health.md'), 'utf8');
+await notesView.locator('[data-tree-path="Personal/Health.md"]').click({ button: 'right' });
+await page.getByRole('menuitem', { name: 'Move to trash' }).click();
+check(
+  'a note deleted goes to the vault’s own bin, not away',
+  (await onDiskSoon(() => !fs.existsSync(vaultNote('Personal/Health.md')) && fs.existsSync(vaultNote('.trash/Health.md')))) &&
+    (await shownSoon(page.locator('[data-toast-action]'))),
+);
+await page.locator('[data-toast-action]').click();
+check(
+  'and Undo brings it back where it was, as it was',
+  (await onDiskSoon(() => fs.existsSync(vaultNote('Personal/Health.md')) && !fs.existsSync(vaultNote('.trash/Health.md')))) &&
+    fs.readFileSync(vaultNote('Personal/Health.md'), 'utf8') === healthText,
+);
+await notesView.locator('[data-tree-path="Personal/Health.md"]').click({ button: 'right' });
+await page.getByRole('menuitem', { name: 'Move to trash' }).click();
+await onDiskSoon(() => fs.existsSync(vaultNote('.trash/Health.md')));
+await notesView.locator('[data-notes-nav-tab="trash"]').click();
+check(
+  'the bin lists it, with a count on its tab',
+  (await shownSoon(notesView.locator('[data-bin-item="Health.md"]'))) && (await notesView.locator('[data-bin-count]').textContent())?.trim() === '1',
+);
+await shoot('09-bin.png');
+await notesView.locator('[data-bin-item="Health.md"]').hover();
+await notesView.locator('[data-bin-item="Health.md"] [data-bin-restore]').click();
+check(
+  'and restores it from there',
+  (await onDiskSoon(() => fs.existsSync(vaultNote('Personal/Health.md')))) && fs.readFileSync(vaultNote('Personal/Health.md'), 'utf8') === healthText,
+);
+await notesView.locator('[data-notes-nav-tab="files"]').click();
+
+/*
+  Pyn (src/chat/, electron/services/chat.ts): the person writes, a CLI
+  started in the vault answers over ACP. Here the CLI is the stand-in.
+*/
+console.log('\nPyn');
+await page.locator('[data-app-view="pyn"]').click();
+check('Pyn opens on a new chat: the greeting and the field', await shownSoon(page.locator('[data-chat-empty] [data-chat-input]')));
+// The tools' sign-ins, from the tool chip: each tool listed with what it says of itself. Nothing is pressed in it: a sign-in opens a window.
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-chip-footer]').click();
+check(
+  'the tools’ sign-ins open from the tool chip, every tool listed, the model servers with them',
+  (await shownSoon(page.locator('[data-auth-list]'), 30_000)) && (await page.locator('[data-auth-tool]').count()) === 7 && (await page.locator('[data-auth-tool="lmstudio"]').count()) === 1,
+);
+await shoot('15-auth.png');
+await page.keyboard.press('Escape');
+await page.locator('[data-auth-list]').waitFor({ state: 'detached' });
+await page.locator('[data-settings-open]').click();
+await page.locator('[data-settings-auth]').click();
+check('and from the settings', (await shownSoon(page.locator('[data-auth-list]'), 30_000)) && (await page.locator('[data-settings]').count()) === 0);
+await page.keyboard.press('Escape');
+await page.locator('[data-auth-list]').waitFor({ state: 'detached' });
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-choice="test"]').click();
+await page.locator('[data-chat-input]').fill('merhaba Pyn');
+await page.keyboard.press('Enter');
+check('a message gets its answer streamed in, its words first', await shownSoon(page.locator('[data-chat-text]', { hasText: 'Merhaba dünya' })));
+check('the chat is listed, named by its first words', await shownSoon(page.locator('[data-chat-item]', { hasText: 'merhaba Pyn' })));
+check(
+  'its steps folded into one line of activity, its context as a ring',
+  (await page.locator('[data-chat-fold="activity"]').count()) === 1 && (await page.locator('[data-chat-context]').count()) === 1,
+);
+check('and nothing on the page names where the vault is', !namesWhere(await page.evaluate(() => document.body.innerHTML)));
+await shoot('10-pyn.png');
+await page.locator('[data-chat-input]').fill('izin iste');
+await page.keyboard.press('Enter');
+check('a step the CLI asks leave for is a card over the field', await shownSoon(page.locator('[data-chat-permission]')));
+await shoot('11-permission.png');
+await page.locator('[data-chat-answer-option="allow_once"]').click();
+check('and the answer reaches the CLI', await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: once' })));
+await page.locator('[data-chat-send]').waitFor();
+await page.locator('[data-chat-input]').fill('yavaş olsun');
+await page.keyboard.press('Enter');
+await page.locator('[data-chat-stop]').click();
+check('Stop ends an answer, and says so', await shownSoon(page.locator('[data-chat-stopped="cancelled"]')));
+await page.locator('[data-chat-send]').waitFor();
+await page.locator('[data-chat-input]').fill('giriş yapmadım');
+await page.keyboard.press('Enter');
+await page.locator('[data-chat-sign-in]').click();
+check('a tool not signed in says so, and its card opens the sign-ins', await shownSoon(page.locator('[data-auth-list]'), 30_000));
+await page.keyboard.press('Escape');
+await page.locator('[data-auth-list]').waitFor({ state: 'detached' });
+// Claude Code, in its own stream of JSON: a new chat with its stand-in.
+await page.locator('[data-chat-new]').click();
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-choice="test-claude"]').click();
+await page.locator('[data-chat-input]').fill('izin iste');
+await page.keyboard.press('Enter');
+check('Claude Code asks leave on the same card', await shownSoon(page.locator('[data-chat-permission]')));
+await page.locator('[data-chat-answer-option="allow_once"]').click();
+check(
+  'and answers, with the models it named on its chip',
+  (await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: allow' }))) && (await page.locator('[data-chat-chip="model"]').textContent())?.trim() === 'Default (recommended)',
+);
+await shoot('12-claude.png');
+// Codex, through its app server: a command it asks to run, and its final answer, which comes whole.
+await page.locator('[data-chat-new]').click();
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-choice="test-codex"]').click();
+await page.locator('[data-chat-input]').fill('izin iste');
+await page.keyboard.press('Enter');
+check('Codex asks to run a command on the same card', await shownSoon(page.locator('[data-chat-permission]')));
+await page.locator('[data-chat-answer-option="allow_once"]').click();
+check(
+  'and its final answer comes, on the model the server marks',
+  (await shownSoon(page.locator('[data-chat-text]', { hasText: 'komut: accept.' }))) && (await page.locator('[data-chat-chip="model"]').textContent())?.trim() === 'GPT-6-Luna',
+);
+await shoot('13-codex.png');
+// A note an answer links to opens beside the chat; the panel lists what the chat touched; one opens in the notes from there.
+await page.locator('[data-chat-text] .kg-wikilink', { hasText: 'Ideas' }).first().click();
+check(
+  'a note an answer links to opens beside the chat, and the chat stays',
+  (await shownSoon(page.locator('[data-chat-side-note="Personal/Ideas.md"]'))) && (await page.locator('[data-app-view="pyn"]').getAttribute('aria-pressed')) === 'true',
+);
+await page.locator('[data-chat-side-back]').click();
+check('the panel lists the notes the chat touched', await shownSoon(page.locator('[data-chat-side-item="Personal/Ideas.md"]')));
+await shoot('14-side.png');
+await page.locator('[data-chat-side-item="Personal/Ideas.md"]').click();
+await page.locator('[data-chat-side-open]').click();
+check(
+  'and one opens in the notes from there, to be written',
+  (await shownSoon(notesView.locator('[data-note-pane="Personal/Ideas.md"]'))) && (await page.locator('[data-app-view="notes"]').getAttribute('aria-pressed')) === 'true',
+);
+// LM Studio, talked to directly: the model loaded in its app answers, no other program between.
+await page.locator('[data-app-view="pyn"]').click();
+await page.locator('[data-chat-new]').click();
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-choice="lmstudio"]').click();
+await page.locator('[data-chat-input]').fill('merhaba yerel');
+await page.keyboard.press('Enter');
+check(
+  'LM Studio answers in the chat, on the model loaded in its app, unasked',
+  (await shownSoon(page.locator('[data-chat-text]', { hasText: 'Yerel model burada.' }))) &&
+    lmBodies.length === 1 &&
+    lmBodies[0].model === 'qwen-e2e' &&
+    lmBodies[0].messages.at(-1)?.content === 'merhaba yerel' &&
+    ((await page.locator('[data-chat-chip="model"]').textContent()) ?? '').includes('qwen-e2e'),
+);
+await shoot('13b-lmstudio.png');
 await page.locator('[data-app-view="graph"]').click();
 await page.waitForTimeout(1_500);
 const graphSize = await page.locator('[data-notes-graph="vault"]').evaluate((element) => ({ nodes: Number(element.dataset.graphNodes), edges: Number(element.dataset.graphEdges) }));
 check('the graph draws the vault’s notes and the links between them', graphSize.nodes >= 4 && graphSize.edges >= 2);
+await page.locator('[data-notes-graph="vault"] [data-graph-toggle="receipts"]').click();
+await page.waitForTimeout(500);
+const withReceipts = await page.locator('[data-notes-graph="vault"]').evaluate((element) => Number(element.dataset.graphNodes));
+check('receipts are left out of the vault’s graph until asked for', withReceipts === graphSize.nodes + 1);
+await page.locator('[data-notes-graph="vault"] [data-graph-toggle="receipts"]').click();
 await shoot('06-graph.png');
+
+/*
+  The office (src/office/): Claude Design's drawings and engine in their own
+  tab. A room clicked shows what goes on in it with the vault's own counts; a
+  character's chip opens its card; the gear, the office's settings.
+*/
+console.log('\nOffice');
+await page.locator('[data-app-view="office"]').click();
+check('the office opens in its own tab, its map drawn and its log begun', (await shownSoon(page.locator('[data-office-view] [data-ofis-canvas]'))) && (await page.locator('[data-ofis-line]').count()) >= 1);
+await page.waitForTimeout(1_500);
+await shoot('16-office.png');
+// The map is fitted to the canvas and centred: the mailroom's middle (tile 7, 8) is found from the canvas's size.
+const officeBox = await page.locator('[data-ofis-canvas]').boundingBox();
+if (officeBox) {
+  const zoom = Math.min(4, Math.min(officeBox.width / 976, officeBox.height / 672));
+  await page.mouse.click(officeBox.x + officeBox.width / 2 + (7 * 16 + 8 - 488) * zoom, officeBox.y + officeBox.height / 2 + (8 * 16 + 8 - 336) * zoom);
+}
+check(
+  'a room clicked says what goes on in it, counted from the vault',
+  (await shownSoon(page.locator('[data-ofis-room="posta"]'))) && /\d+ notes changed today/.test((await page.locator('[data-ofis-room-status]').textContent()) ?? ''),
+);
+await page.locator('[data-ofis-chip="defne"]').click();
+check(
+  'a character’s chip opens its card, with the tool it works with',
+  (await shownSoon(page.locator('[data-ofis-card="defne"]'))) && ((await page.locator('[data-ofis-card="defne"]').textContent()) ?? '').includes('Works with Claude'),
+);
+await page.waitForTimeout(800);
+await shoot('17-office-card.png');
+await page.locator('[data-ofis-gear]').click();
+check('the gear opens the office’s settings, live conversations off', (await shownSoon(page.locator('[data-ofis-settings]'))) && (await page.locator('[data-ofis-live]').getAttribute('aria-checked')) === 'false');
+await page.keyboard.press('Escape');
+check('and Escape closes them', await page.locator('[data-ofis-settings]').waitFor({ state: 'detached', timeout: 3_000 }).then(() => true, () => false));
 check(
   'nothing was written into what is hidden',
   fs.readFileSync(vaultNote('.hidden/Secret.md'), 'utf8') === hiddenBefore && fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'utf8') === obsidianBefore,
@@ -289,6 +591,7 @@ await page.evaluate(() => {
 await page.waitForTimeout(800);
 const stillAt = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((one) => one.webContents.getURL()));
 check('and the page does not navigate away', stillAt.length === 1 && stillAt[0].startsWith('file:') && stillAt[0].endsWith('/dist/index.html'));
+check('what it asked for went to the system’s browser instead (stood in for: nothing was opened)', (await openedOutside()).filter((url) => url === 'https://example.com/').length === 2);
 
 /*
   Closed and opened again: the vault and the language are the app's own
@@ -298,6 +601,8 @@ console.log('\nOpened again');
 await app.close();
 app = await launch();
 page = await app.firstWindow();
+await page.waitForLoadState('domcontentloaded');
+await holdBrowser();
 listen(page);
 check('the vault chosen is opened again, with nothing to choose', await shownSoon(page.locator('[data-notes-view]'), 30_000));
 check('in the language chosen', (await page.evaluate(() => document.documentElement.lang)) === 'en');

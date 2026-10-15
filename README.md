@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.7" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.7-E8B23A">
+  <img alt="Sürüm 1.0.9" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.9-E8B23A">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
   <img alt="Telemetri yok" src="https://img.shields.io/badge/telemetri-yok-1B1712">
@@ -27,6 +27,7 @@
 - [Kurulum](#kurulum)
 - [Kurulumdan sonra: beş adımda hazır](#kurulumdan-sonra-beş-adımda-hazır)
 - [`pyn`: Pyn'i her yerden aç](#pyn-pyni-her-yerden-aç)
+- [Masaüstü uygulaması](#masaüstü-uygulaması)
 - [Günlük kullanım](#günlük-kullanım)
 - [Gizlilik: notların nereye gider?](#gizlilik-notların-nereye-gider)
 - [İsteğe bağlı eklentiler](#isteğe-bağlı-eklentiler)
@@ -211,6 +212,24 @@ Ollama ya da LM Studio açıksa ve indirilmiş bir sohbet modeli varsa, menüde 
 
 Sağlayıcı girişlerini OpenCode'da bir kez sen yaparsın: `opencode auth login`. Cortex anahtarlarını hiç görmez. OpenCode içinde modeli `/models` ile değiştirirsin. OpenCode'da her turun notları o turun kendi mesajına eklenir ve sistem metni oturum boyunca değişmez. Böylece sağlayıcının önbelleği korunur ve abonelik kotası çok daha geç dolar.
 
+## Masaüstü uygulaması
+
+`desktop/` klasöründe Cortex'in Windows uygulaması var. Önizleme aşamasında; kurulum dosyası henüz imzasız. Açınca kasanı seçersin, sonra dört ekran:
+
+- **Pyn (ilk ekran):** kasanın içinde, kendi aracınla sohbet. Araç kasada başladığı için hafızayı hook'lar tam olarak verir. Araçlar: Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code ve yerel modeller için LM Studio ile Ollama: modeli kendi uygulamasında yüklersin, Cortex onunla doğrudan konuşur ve Pyn'in hafızasını kasanın hook'undan verir. Aracın izin istediği adımlar kartla sorulur. Model, mod ve efor çiplerle seçilir. Sohbetin okuduğu ve değiştirdiği notlar yan panelde açılır.
+- **Notlar:** Obsidian'a gerek kalmadan okuma ve yazma: wiki linkleri, canlı önizleme, geri bağlantılar, arama, şablonlar, çöp kutusu. Makbuzlar ve motorun ürettiği sayfalar salt okunurdur.
+- **Grafik:** notlar ve aralarındaki linkler.
+- **Ofis:** piksel sanatıyla çizilmiş, yaşayan bir ofis. Patron Pyn, 12 ajan ve ofis kedisi Tekir dokuz odada çalışır; karakterlere ve odalara tıklanır. Sunucu odasının ışıkları araçlarının gerçek giriş durumunu, odalar kasanın sayılarını gösterir.
+
+Dil, kasa, dosya ağacının görünüşü ve araçların girişleri **Ayarlar**'da: üst çubuktaki dişli ya da Ctrl+, açar.
+
+**Girişler ve anahtarlar:**
+- Her araç bu bilgisayarda kayıtlı kendi girişini kullanır; terminaldekiyle aynı giriş. Uygulama bu giriş dosyalarını okumaz, yalnız araca durumunu sorar.
+- Uygulamaya girdiğin API anahtarları Windows'un şifreli deposunda durur.
+- Hiçbiri kasaya ya da bu depoya girmez; her bilgisayarda ayrı giriş yapılır.
+
+**Kurulum:** GitHub Actions her değişiklikte bir Windows kurulum dosyası üretir (desktop iş akışı, `cortex-setup-windows`). Kendin derlemek ve ayrıntılar için: [desktop/README.md](desktop/README.md).
+
 ## Günlük kullanım
 
 Notunu yaz, asistanına ne istediğini söyle. Kaynaklar oturum açılışında ve konuşmanın uygun noktalarında yeniden indekslenir; istemciler kapalıyken arka planda çalışan bir servis yoktur. Önemli iş sonuçları kısa, kaynak bağlantılı kayıtlarla tutulur. Sohbetin tamamı kendiliğinden doğru bilgiye dönüşmez; kalıcı olmasını istediğin karar ve bilgiyi nota yazdır.
@@ -263,6 +282,11 @@ Video, tweet, makale, mail ya da dosyayı gördüğün yerde yakala; asistan met
 3. Asistanına "yakalananları işle" de.
 
 YouTube'da önce altyazı kullanılır, yoksa ses yalnız yerelde yazıya dökülür. Tuşu değiştirmek için `beyin.py yakala kisayol 'cmd+"'`. [Ayrıntılar](docs/v3/YAKALA.md)
+
+**Sesle yazma (Windows, isteğe bağlı):** `py -3 beyin.py ses kur` ile pencereye konuşarak yazarsın.
+- Mikrofona tıkla ya da Ctrl+Alt+B'ye yeniden bas; sonda "kaydet" dersen kart kaydedilir.
+- `beyin.py ses ayar --uyandirma ac` ile "Pyn, not al" demek pencereyi açar.
+- Ses bilgisayardan çıkmaz; çeviriyi yerelde Whisper yapar, NVIDIA, AMD Radeon ve Intel Arc kartlarda ekran kartında. [Ayrıntılar](docs/v3/YAKALA.md#sesle-yazma-windows-isteğe-bağlı)
 
 ### Ananas teması
 
@@ -346,6 +370,8 @@ Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama ya da her s
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.9](docs/v3/releases/1.0.9.md) | Sesle yazma AMD Radeon ve Intel Arc kartlarda da ekran kartında (whisper.cpp, Vulkan); NVIDIA'da CUDA, olmazsa işlemci. Pyn'in yeni yüzü: Claude Design'ın vektör çizimi, sohbette ve Obsidian'da. |
+| [1.0.8](docs/v3/releases/1.0.8.md) | Masaüstü uygulaması (önizleme): Pyn sohbeti (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code; yerel modeller için LM Studio ve Ollama), Obsidian'sız notlar, grafik, araç girişleri ve API anahtarları, ayarlar. Yakala'da isteğe bağlı sesle yazma ve "Pyn, not al" (yerel Whisper). |
 | [1.0.7](docs/v3/releases/1.0.7.md) | Yakala güvenliği (yalnız herkese açık adresler, Windows komut satırı koruması), Türkçe karakterli kısayollar, `Win+Shift+S` ekran görüntüsü; daha hızlı senkron; `pyn` yeni sürümü haber verir, `pyn guncelle`; marka kuralları. |
 | [1.0.6](docs/v3/releases/1.0.6.md) | `pyn kur` Claude Code'a Pyn durum satırı, Windows Terminal'e Pyn profili ekler; menüde yeşil/kırmızı durum noktaları; `pyn kontrol` eski istemcileri bulur; OpenCode 2.x'te de önbellek korunur. |
 | [1.0.5](docs/v3/releases/1.0.5.md) | `pyn` karşılama kutusu ve mühürle açılır, cmd'de de çalışır; OpenCode'da önbellek korunur, yerel modeller OpenCode'da açılır. |

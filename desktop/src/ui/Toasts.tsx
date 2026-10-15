@@ -21,6 +21,19 @@ export function Toasts() {
             <div className="text-[10px] font-black uppercase tracking-widest text-darkDelegation">{toast.title}</div>
             {toast.detail ? <div className="mt-1 whitespace-pre-line break-words text-[11px] leading-relaxed text-zinc-500">{toast.detail}</div> : null}
           </div>
+          {toast.action ? (
+            <button
+              type="button"
+              onClick={() => {
+                dismissToast(toast.id);
+                toast.action?.run();
+              }}
+              className="h-fit shrink-0 rounded-md border border-darkDelegation/25 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-darkDelegation hover:border-darkDelegation"
+              data-toast-action
+            >
+              {toast.action.label}
+            </button>
+          ) : null}
           <button type="button" onClick={() => dismissToast(toast.id)} className="h-fit rounded p-0.5 text-zinc-300 hover:text-darkDelegation">
             <X size={13} />
           </button>

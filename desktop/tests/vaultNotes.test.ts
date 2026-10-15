@@ -6,6 +6,7 @@ import {
   freeName,
   insertTemplate,
   isTemplatesFolder,
+  keptBy,
   retitle,
   fuzzyMatch,
   makeResolver,
@@ -272,6 +273,31 @@ test('the graph is drawn from the links that are there, with orphans, missing no
   assert.deepEqual(local.nodes.map((one) => one.id).sort(), ['B.md', 'C.md']);
   const deeper = vaultGraph(INDEX, [], { around: 'C.md', depth: 2, orphans: false, missing: false, tags: false, files: false });
   assert.deepEqual(deeper.nodes.map((one) => one.id).sort(), ['A.md', 'B.md', 'C.md']);
+});
+
+test("what Cortex's engine keeps is known by where it is and what it says: a receipt by its event_id, a generated page by its flag; receipts leave the graph when asked", () => {
+  const receipt = `receipts/${'a'.repeat(64)}.md`;
+  const props = (text: string) => parseNote(text).properties;
+  const written = '---\n{\n  "kind": "receipt",\n  "event_id": "cortex-ad-karari-20261013",\n  "harness": "claude"\n}\n---\nAd kararı.\n';
+  assert.deepEqual(keptBy(receipt, props(written)), { keeper: 'receipt', label: 'cortex-ad-karari-20261013' });
+  assert.equal(keptBy('notes/Makbuz.md', props(written)), null, 'only where the engine writes one, under the hash');
+  assert.equal(keptBy(receipt, props('---\nkind: receipt\n---\n')), null, 'and only with its event_id');
+  assert.deepEqual(keptBy('daily/v3/2026-10-12.md', props('---\n{"generated": true, "kind": "receipt-index"}\n---\n# Recorded outcomes\n')), { keeper: 'generated', label: null });
+  assert.equal(keptBy('Plan.md', props('---\ngenerated: "true"\n---\n')), null, "a flag written as text is the person's, not the engine's");
+  assert.equal(keptBy('Plan.md', props('# Plan\n')), null);
+
+  const day = 'daily/v3/2026-10-12.md';
+  const notes: IndexedNote[] = [
+    { path: day, modified: 0, size: 1, aliases: [], tags: [], links: [receipt, 'Plan.md'], unresolved: [], keeper: 'generated' },
+    { path: receipt, modified: 0, size: 1, aliases: [], tags: [], links: ['Plan.md'], unresolved: [], keeper: 'receipt', label: 'cortex-ad-karari-20261013' },
+    { path: 'Plan.md', modified: 0, size: 1, aliases: [], tags: [], links: [], unresolved: [] },
+  ];
+  const drawn = vaultGraph(notes, [], { around: null, depth: 1, orphans: true, missing: false, tags: false, files: false });
+  assert.equal(drawn.nodes.find((one) => one.id === receipt)?.label, 'cortex-ad-karari-20261013', 'drawn by its event_id');
+  assert.equal(drawn.edges.length, 3);
+  const without = vaultGraph(notes, [], { around: null, depth: 1, orphans: true, missing: false, tags: false, files: false, receipts: false });
+  assert.deepEqual(without.nodes.map((one) => one.id).sort(), ['Plan.md', day]);
+  assert.deepEqual(without.edges, [{ source: day, target: 'Plan.md' }], 'and every link to or from one with it');
 });
 
 test("a template is filled in Cortex's and Obsidian's placeholders, and Cortex's empty title and heading are given the note's name", () => {

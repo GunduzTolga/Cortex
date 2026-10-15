@@ -67,7 +67,8 @@ def asset_vars():
     for icon in sorted((TEMA / 'ikonlar').glob('*.svg')):
         lines.append(f'  --ananas-ikon-{icon.stem}: ' + _data_uri(icon, 'image/svg+xml') + ';')
     lines.append('  --ananas-logo: ' + _data_uri(MARKA / 'pyn-muhur.svg', 'image/svg+xml') + ';')
-    lines.append('  --ananas-pyn-yuz: ' + _data_uri(MARKA / 'pyn-yuz-256.png', 'image/png') + ';')
+    lines.append('  --ananas-pyn-yuz: ' + _data_uri(MARKA / 'pyn-yuz' / 'pyn-yuz.svg', 'image/svg+xml') + ';')
+    lines.append('  --ananas-pyn-yuz-koyu: ' + _data_uri(MARKA / 'pyn-yuz' / 'pyn-yuz-koyu.svg', 'image/svg+xml') + ';')
     lines.append('}')
     return '\n'.join(lines)
 

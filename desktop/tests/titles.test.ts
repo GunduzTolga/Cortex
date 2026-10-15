@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { sameTitle, titleKey } from '../core/titles';
+import { nameIcon, sameTitle, titleKey, withoutIcon } from '../core/titles';
+import { listedByDefault } from '../core/vaultNotes';
 
 /**
  * Krewgent's tests of the title rule (core/titles.ts), less its journal's.
@@ -39,4 +40,21 @@ test('different titles stay different', () => {
 
 test('the key is only for comparing - it is never what is shown', () => {
   assert.equal(titleKey('Status · İşlem'), 'status · işlem');
+});
+
+test('a name is shown without the emoji it starts with, and only that: the name on disk keeps it', () => {
+  assert.equal(withoutIcon('📥 000-Inbox'), '000-Inbox');
+  assert.equal(nameIcon('📥 000-Inbox'), '📥 ');
+  assert.equal(withoutIcon('🔮 850-Companion'), '850-Companion');
+  assert.equal(withoutIcon('❤️ Sağlık'), 'Sağlık', 'with its variation selector');
+  assert.equal(withoutIcon('👩‍💻 Kod'), 'Kod', 'a joined emoji is one');
+  assert.equal(withoutIcon('000-Inbox'), '000-Inbox', 'a number is not an emoji');
+  assert.equal(withoutIcon('_drafts'), '_drafts', 'nor is a mark');
+  assert.equal(withoutIcon('📥'), '📥', 'a name that is only the emoji keeps it');
+  assert.equal(withoutIcon('📥Inbox'), '📥Inbox', 'one not set apart by a space is part of the word');
+});
+
+test('the tree lists notes and what notes show; scripts, JSON and text files only when asked', () => {
+  for (const path of ['Notes/Plan.md', 'a/b.MD', 'img/x.png', 'docs/paper.pdf', 'Board.canvas', 'clip.mp4']) assert.equal(listedByDefault(path), true, path);
+  for (const path of ['beyin.py', 'scratch_repos.json', 'scratch_repo_analysis.txt', 'Beyni Guncelle.cmd', 'data.csv']) assert.equal(listedByDefault(path), false, path);
 });

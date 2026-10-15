@@ -1,0 +1,98 @@
+name: whisper-vulkan
+
+# whisper.cpp built for Vulkan on Windows, for yakala's voice typing on AMD and Intel graphics
+# cards (template/.claude/scripts/beyin_v3_ses.py). whisper.cpp publishes CPU and CUDA builds
+# for Windows, none for Vulkan, so Cortex builds this one itself from a pinned release.
+#
+# A push that changes this file builds and keeps the archive as the run's artifact. Run by hand
+# with "publish", the archive goes to a pre-release of its own (whisper-vulkan-<version>): a
+# pre-release is never "latest", so Cortex's updater, which reads the latest release, does not
+# take it for a Cortex version.
+
+on:
+  push:
+    paths:
+      - '.github/workflows/whisper-vulkan.yml'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Attach the archive to the whisper-vulkan pre-release
+        type: boolean
+        default: false
+
+env:
+  WHISPER_VERSION: '1.9.5'
+  VULKAN_SDK_VERSION: '1.4.363.0'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ggml-org/whisper.cpp
+          ref: v${{ env.WHISPER_VERSION }}
+          path: w
+
+      - name: Vulkan SDK
+        shell: pwsh
+        run: |
+          $v = $env:VULKAN_SDK_VERSION
+          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$v/windows/vulkansdk-windows-X64-$v.exe" -OutFile vulkan-sdk.exe
+          Start-Process .\vulkan-sdk.exe -ArgumentList '--root', "C:\VulkanSDK\$v", '--accept-licenses', '--default-answer', '--confirm-command', 'install' -Wait
+          "VULKAN_SDK=C:\VulkanSDK\$v" >> $env:GITHUB_ENV
+          "C:\VulkanSDK\$v\Bin" >> $env:GITHUB_PATH
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Derle
+        shell: pwsh
+        working-directory: w
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON -DBUILD_SHARED_LIBS=OFF `
+            -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_SDL2=OFF -DGGML_NATIVE=OFF
+          cmake --build build --config Release -j 4 --target whisper-server whisper-cli
+
+      - name: Paketle
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory paket | Out-Null
+          Copy-Item w\build\bin\whisper-server.exe, w\build\bin\whisper-cli.exe paket\
+          Copy-Item w\LICENSE paket\LICENSE-whisper.cpp.txt
+          "whisper.cpp v$env:WHISPER_VERSION, Vulkan SDK $env:VULKAN_SDK_VERSION, built by Cortex's whisper-vulkan workflow." | Set-Content paket\SURUM.txt
+          Compress-Archive -Path paket\* -DestinationPath whisper-vulkan-win-x64.zip
+          (Get-FileHash whisper-vulkan-win-x64.zip -Algorithm SHA256).Hash.ToLower() + '  whisper-vulkan-win-x64.zip' | Set-Content whisper-vulkan-win-x64.zip.sha256
+          Get-Content whisper-vulkan-win-x64.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: whisper-vulkan-win-x64
+          path: |
+            whisper-vulkan-win-x64.zip
+            whisper-vulkan-win-x64.zip.sha256
+          retention-days: 30
+
+  publish:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: whisper-vulkan-win-x64
+      - name: Pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="whisper-vulkan-${WHISPER_VERSION}"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+              --title "whisper.cpp ${WHISPER_VERSION} (Vulkan, Windows)" \
+              --notes "Yakala'da sesle yazma için, AMD ve Intel ekran kartlarında: whisper.cpp v${WHISPER_VERSION}, Vulkan ile derlendi. beyin.py ses kur bunu kendisi indirir; elle bir şey yapman gerekmez. Lisans: MIT (LICENSE-whisper.cpp.txt)."
+          gh release upload "$tag" whisper-vulkan-win-x64.zip whisper-vulkan-win-x64.zip.sha256 --repo "$GITHUB_REPOSITORY" --clobber

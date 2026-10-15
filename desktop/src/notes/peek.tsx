@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
-import { folderOf, noteTitle } from '../../core/vaultNotes';
+import { folderOf } from '../../core/vaultNotes';
 import { useT } from '../i18n/useT';
 import { NoteMarkdown, sectionOf } from './NoteMarkdown';
-import { useNotes } from './notesStore';
+import { folderLabel, labelOf, useNotes } from './notesStore';
 import { noteTextOf } from './vaultCache';
 
 /**
@@ -79,8 +79,8 @@ export function NotePeek() {
         className="flex w-full items-center gap-2 border-b border-zinc-100 px-4 py-2 text-left hover:bg-zinc-50"
       >
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-bold text-darkDelegation">{noteTitle(peek.path)}</span>
-          {folderOf(peek.path) ? <span className="block truncate text-[10.5px] text-zinc-400">{folderOf(peek.path)}</span> : null}
+          <span className="block truncate text-[13px] font-bold text-darkDelegation">{labelOf(peek.path)}</span>
+          {folderOf(peek.path) ? <span className="block truncate text-[10.5px] text-zinc-400">{folderLabel(folderOf(peek.path))}</span> : null}
         </span>
         <ExternalLink size={13} className="shrink-0 text-zinc-400" />
       </button>

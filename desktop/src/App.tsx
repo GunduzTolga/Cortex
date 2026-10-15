@@ -1,34 +1,28 @@
-import { useEffect, useState } from 'react';
-import { BookOpen, FolderOpen, Network } from 'lucide-react';
+import { useEffect } from 'react';
+import { BookOpen, Building2, FolderOpen, MessageCircle, Network, Settings } from 'lucide-react';
 import seal from '../../tema/ananas/marka/pyn-muhur.svg';
-import { LANGUAGES, type Key, type Language } from './i18n';
-import { useLanguage, useT } from './i18n/useT';
+import type { Key } from './i18n';
+import { useT } from './i18n/useT';
+import { AuthDialog } from './chat/AuthDialog';
+import { ChatView } from './chat/ChatView';
 import { NotesView } from './notes/NotesView';
 import { GraphView } from './notes/GraphView';
+import { OfficeView } from './office/OfficeView';
+import { NotesDialogs } from './notes/NotesMenus';
+import { useNotes } from './notes/notesStore';
 import { useApp } from './store/app';
+import { useView, type View } from './store/view';
+import { LanguageSwitch } from './ui/LanguageSwitch';
+import { SettingsDialog } from './ui/SettingsDialog';
 import { Toasts } from './ui/Toasts';
 import { Button, Spinner } from './ui/ui';
 
 /**
- * The window: the vault chosen first, then its notes.
- *
- * Krewgent's Cortex side (src/cortex/CortexSide.tsx) without its terminal and
- * install pass, which are the second and third stages here: two views of one
- * vault, the notes (src/notes/) and the vault as a graph, each drawn from the
- * first time it is shown and kept after, so the graph is not laid out again at
- * every switch. Which one is in front is this window's storage, a convenience.
+ * The window: the vault chosen first, then its views - Pyn, where the person
+ * talks to their own AI (src/chat/), first; the notes (src/notes/); the vault
+ * as a graph - each drawn from the first time it is shown and kept after
+ * (src/store/view.ts), so the graph is not laid out again at every switch.
  */
-
-type View = 'notes' | 'graph';
-const VIEW_KEY = 'cortex.view';
-
-function savedView(): View {
-  try {
-    return localStorage.getItem(VIEW_KEY) === 'graph' ? 'graph' : 'notes';
-  } catch {
-    return 'notes';
-  }
-}
 
 export function App() {
   const t = useT();
@@ -36,10 +30,14 @@ export function App() {
   const bootError = useApp((s) => s.bootError);
   const vault = useApp((s) => s.vault);
   const unreadable = useApp((s) => s.settingsUnreadable);
+  const nameIcons = useApp((s) => s.settings.nameIcons);
 
   useEffect(() => {
     void useApp.getState().boot();
   }, []);
+
+  // The notes are named as the settings say, wherever they are shown (src/notes/notesStore.ts).
+  useEffect(() => useNotes.getState().setNameIcons(nameIcons), [nameIcons]);
 
   // A settings file that would not be read is said once, and stays until it is closed.
   useEffect(() => {
@@ -61,31 +59,10 @@ export function App() {
       ) : (
         <VaultScreen name={vault.vault.name} missing={vault.missing} />
       )}
+      {/* The confirmations, prompts and menus every view asks with. */}
+      <NotesDialogs />
       <Toasts />
     </>
-  );
-}
-
-function LanguagePicker() {
-  const t = useT();
-  const language = useLanguage();
-  return (
-    <label className="flex items-center gap-2 text-[11px] text-zinc-500">
-      <span className="sr-only">{t('app.language')}</span>
-      <select
-        value={language}
-        onChange={(event) => void useApp.getState().setLanguage(event.target.value as Language)}
-        aria-label={t('app.language')}
-        data-language
-        className="rounded-md border border-zinc-200 bg-white px-1.5 py-1 text-[11px] text-darkDelegation outline-none focus:border-zinc-400"
-      >
-        {LANGUAGES.map((one) => (
-          <option key={one.id} value={one.id}>
-            {one.label}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }
 
@@ -93,20 +70,20 @@ function LanguagePicker() {
 function Welcome() {
   const t = useT();
   return (
-    <div className="flex h-full items-center justify-center p-8" data-welcome>
+    <div className="relative flex h-full items-center justify-center p-8" data-welcome>
+      <div className="absolute right-4 top-3">
+        <LanguageSwitch />
+      </div>
       <div className="flex max-w-xl items-center gap-8">
         <img src={seal} alt="" className="h-32 w-32 shrink-0" />
-        <div className="space-y-4">
+        <div>
           <h1 className="font-display text-4xl text-darkDelegation">Cortex</h1>
-          <p className="text-[13px] leading-relaxed text-zinc-600">{t('welcome.intro')}</p>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button tone="primary" onClick={() => void useApp.getState().chooseVault(t('app.vault.failed'))} data-welcome-choose>
-              <FolderOpen size={14} />
-              {t('welcome.choose')}
-            </Button>
-            <LanguagePicker />
-          </div>
-          <p className="text-[11.5px] text-zinc-400">{t('welcome.private')}</p>
+          <p className="mt-2 text-[15px] text-zinc-700">{t('welcome.tagline')}</p>
+          <p className="mt-3 text-[13px] leading-relaxed text-zinc-600">{t('welcome.intro')}</p>
+          <Button tone="primary" className="mt-5" onClick={() => void useApp.getState().chooseVault(t('app.vault.failed'))} data-welcome-choose>
+            <FolderOpen size={14} />
+            {t('welcome.choose')}
+          </Button>
         </div>
       </div>
     </div>
@@ -115,17 +92,9 @@ function Welcome() {
 
 function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
   const t = useT();
-  const [view, setViewState] = useState<View>(savedView);
-  const [shown, setShown] = useState<Set<View>>(() => new Set([savedView()]));
-  const setView = (next: View) => {
-    setViewState(next);
-    setShown((before) => (before.has(next) ? before : new Set([...before, next])));
-    try {
-      localStorage.setItem(VIEW_KEY, next);
-    } catch {
-      /* for this run */
-    }
-  };
+  const view = useView((state) => state.view);
+  const shown = useView((state) => state.shown);
+  const setView = useView((state) => state.setView);
   const choose = () => void useApp.getState().chooseVault(t('app.vault.failed'));
 
   // A vault gone from disk is said when the window comes back to it too, not only at the start.
@@ -135,9 +104,23 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
     return () => window.removeEventListener('focus', back);
   }, []);
 
+  // Ctrl+, opens the settings, as in most desktop apps.
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key === ',') {
+        event.preventDefault();
+        useApp.getState().openSettings(true);
+      }
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, []);
+
   const views: Array<[View, React.ReactNode, Key]> = [
+    ['pyn', <MessageCircle key="pyn" size={13} />, 'app.view.pyn'],
     ['notes', <BookOpen key="notes" size={13} />, 'app.view.notes'],
     ['graph', <Network key="graph" size={13} />, 'app.view.graph'],
+    ['office', <Building2 key="office" size={13} />, 'app.view.office'],
   ];
 
   return (
@@ -166,7 +149,17 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
           <button type="button" onClick={choose} title={t('app.vault.change')} aria-label={t('app.vault.change')} className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation" data-vault-change>
             <FolderOpen size={14} />
           </button>
-          <LanguagePicker />
+          <button
+            type="button"
+            onClick={() => useApp.getState().openSettings(true)}
+            title={t('app.settings.open')}
+            aria-label={t('settings.title')}
+            className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation"
+            data-settings-open
+          >
+            <Settings size={14} />
+          </button>
+          <LanguageSwitch />
         </div>
       </div>
       <div className="relative min-h-0 flex-1">
@@ -184,6 +177,11 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
               A view not in front is hidden; the one in front says nothing of
               its visibility, so nothing in the hidden one shows through.
             */}
+            {shown.has('pyn') ? (
+              <div className="kg-layer absolute inset-0" style={view === 'pyn' ? undefined : { visibility: 'hidden' }} aria-hidden={view !== 'pyn'}>
+                <ChatView visible={view === 'pyn'} />
+              </div>
+            ) : null}
             {shown.has('notes') ? (
               <div className="kg-layer absolute inset-0" style={view === 'notes' ? undefined : { visibility: 'hidden' }} aria-hidden={view !== 'notes'}>
                 <NotesView visible={view === 'notes'} onGraph={() => setView('graph')} />
@@ -194,9 +192,16 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
                 <GraphView visible={view === 'graph'} />
               </div>
             ) : null}
+            {shown.has('office') ? (
+              <div className="kg-layer absolute inset-0" style={view === 'office' ? undefined : { visibility: 'hidden' }} aria-hidden={view !== 'office'}>
+                <OfficeView visible={view === 'office'} />
+              </div>
+            ) : null}
           </>
         )}
       </div>
+      <SettingsDialog />
+      <AuthDialog />
     </div>
   );
 }

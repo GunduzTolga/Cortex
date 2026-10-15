@@ -337,3 +337,20 @@
 .kg-editor .cm-searchMatch-selected {
   background: color-mix(in oklab, var(--color-warn) 55%, transparent);
 }
+
+/* An answer in Pyn's chat (src/chat/Transcript.tsx): the note's typography, a size smaller, its headings quieter. */
+.kg-chat .kg-note {
+  max-width: none;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.kg-chat .kg-note h1 {
+  font-size: 1.35em;
+}
+.kg-chat .kg-note h2 {
+  font-size: 1.2em;
+}
+.kg-chat .kg-note h3,
+.kg-chat .kg-note h4 {
+  font-size: 1.05em;
+}

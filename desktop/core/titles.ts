@@ -50,3 +50,24 @@ export function sameTitle(a: string, b: string): boolean {
 export function foldForMatch(value: string): string {
   return value.replace(/[İIı]/g, 'i').toLowerCase();
 }
+
+/*
+  The emoji a name starts with, and the space after it: Cortex's numbered
+  folders are named so on disk (`📥 000-Inbox`, `🔮 850-Companion`), and the
+  engine and the AI tools find them by those names. The app shows a name
+  without it unless the person asks for it (settings); the name on disk keeps
+  it. A name that is nothing but the emoji keeps it, and so does one that
+  starts with a mark that is not an emoji (`_drafts`, `(old)`).
+*/
+const NAME_ICON = /^\p{Extended_Pictographic}[\p{Extended_Pictographic}\p{Emoji_Modifier}️‍]*\s+/u;
+
+/** The emoji and space a name starts with; empty when it starts otherwise. */
+export function nameIcon(name: string): string {
+  const icon = name.match(NAME_ICON)?.[0] ?? '';
+  return icon.length < name.length ? icon : '';
+}
+
+/** A name as shown without its leading emoji. */
+export function withoutIcon(name: string): string {
+  return name.slice(nameIcon(name).length);
+}

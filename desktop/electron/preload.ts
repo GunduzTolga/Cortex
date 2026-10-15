@@ -24,6 +24,13 @@ const subscribe = (channel: string, handler: () => void): (() => void) => {
   return () => ipcRenderer.removeListener(channel, listener);
 };
 
+/** A channel that carries data: the payload is handed on, the event that brought it is not. */
+const listen = <T>(channel: string, handler: (payload: T) => void): (() => void) => {
+  const listener = (_event: unknown, payload: T) => handler(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+};
+
 const api: CortexApi = {
   bootstrap: () => invoke('app:bootstrap'),
   settings: {
@@ -36,19 +43,41 @@ const api: CortexApi = {
   notes: {
     index: () => invoke('notes:index'),
     read: (path) => invoke('notes:read', path),
+    text: (path) => invoke('notes:text', path),
     save: (path, text, base) => invoke('notes:save', path, text, base),
     create: (folder, name, options) => invoke('notes:create', folder, name, options),
     createFolder: (parent, name) => invoke('notes:createFolder', parent, name),
     rename: (path, name) => invoke('notes:rename', path, name),
     move: (path, folder) => invoke('notes:move', path, folder),
     trash: (path) => invoke('notes:trash', path),
+    binList: () => invoke('notes:binList'),
+    binRestore: (id) => invoke('notes:binRestore', id),
+    binDelete: (id) => invoke('notes:binDelete', id),
+    binEmpty: () => invoke('notes:binEmpty'),
     backlinks: (path) => invoke('notes:backlinks', path),
     search: (query) => invoke('notes:search', query),
     asset: (path) => invoke('notes:asset', path),
     open: (path, how) => invoke('notes:open', path, how),
   },
+  chat: {
+    clis: () => invoke('chat:clis'),
+    list: () => invoke('chat:list'),
+    open: (id) => invoke('chat:open', id),
+    send: (id, cli, text) => invoke('chat:send', id, cli, text),
+    cancel: (id) => invoke('chat:cancel', id),
+    answer: (id, permission, option) => invoke('chat:answer', id, permission, option),
+    setOption: (id, option, value) => invoke('chat:setOption', id, option, value),
+    rename: (id, title) => invoke('chat:rename', id, title),
+    remove: (id) => invoke('chat:remove', id),
+    auth: () => invoke('chat:auth'),
+    login: (cli) => invoke('chat:login', cli),
+    setKey: (cli, key, baseUrl) => invoke('chat:setKey', cli, key, baseUrl),
+    forgetKey: (cli) => invoke('chat:forgetKey', cli),
+  },
   on: {
     notesChanged: (handler) => subscribe('notes:changed', handler),
+    chat: (handler) => listen('chat:event', handler),
+    authChanged: (handler) => subscribe('chat:authChanged', handler),
   },
 };
 
