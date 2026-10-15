@@ -42,6 +42,18 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(ses.command_of('   '), (None, ''))
         self.assertEqual(ses.command_of('Haftalık plan kaydı kaydet'), ('kaydet', 'Haftalık plan kaydı'))
 
+    def test_pyn_kaydet_saves_and_the_name_is_not_written(self):
+        self.assertEqual(ses.command_of('Toplantı yarın onda, Pyn kaydet.'), ('kaydet', 'Toplantı yarın onda'))
+        self.assertEqual(ses.command_of('Pyn kaydet'), ('kaydet', ''))
+        self.assertEqual(ses.command_of('pın, kaydet'), ('kaydet', ''))
+        self.assertEqual(ses.command_of('Pyn sil'), ('sil', ''))
+        self.assertEqual(ses.command_of('Pinpon oynadık, kaydet'), ('kaydet', 'Pinpon oynadık'), 'only the name itself is taken off')
+
+    def test_what_whisper_makes_up_for_silence_is_never_a_note(self):
+        for made_up in ('Altyazı M.K.', 'İzlediğiniz için teşekkürler.', 'Abone olmayı unutmayın!', '[BLANK_AUDIO]'):
+            self.assertEqual(ses.clean_spoken(made_up), '', made_up)
+        self.assertEqual(ses.clean_spoken(' Altyazı dosyasını düzelt '), 'Altyazı dosyasını düzelt')
+
     def test_what_is_said_goes_after_what_was_typed(self):
         self.assertEqual(yakala.with_spoken('', 'merhaba dünya'), 'merhaba dünya')
         self.assertEqual(yakala.with_spoken('Toplantı:', 'yarın onda'), 'Toplantı: yarın onda')
@@ -420,12 +432,12 @@ class PopupVoiceTest(unittest.TestCase):
         texts = self.texts(win)
         self.assertIn('Not al', texts)
         self.assertNotIn('Beyne at', texts)
-        self.assertIn('Konuş', texts, 'the microphone says what a press does')
+        self.assertTrue(any(text.startswith('Konuşmak için mikrofona tıkla') for text in texts), 'what a press does')
         self.assertTrue(any('Sesli komutlar' in text and '“kaydet”' in text for text in texts), 'the spoken commands are written down')
         win.voice_toggle()
-        win.voice_event({'olay': 'dinliyor'})
+        win.voice_event({'olay': 'dinliyor', 'mikrofon': 'Microphone (HyperX Cloud III Wireless)'})
         texts = self.texts(win)
-        self.assertIn('Dinliyorum', texts)
+        self.assertIn('● Dinliyorum · Microphone (HyperX Cloud III Wireless)', texts, 'which microphone is listened to')
         self.assertTrue(any('Susunca yazarım' in text and 'Enter' in text and 'Esc' in text for text in texts),
                         'how to stop is said while it listens')
 
@@ -440,17 +452,48 @@ class PopupVoiceTest(unittest.TestCase):
         # What the helper still says about that recording changes nothing.
         for event in ({'olay': 'dinliyor'}, {'olay': 'metin', 'metin': '', 'komut': None}):
             win.voice_event(event)
-        self.assertIn('Konuş', self.texts(win))
+        self.assertIn('Yazmaya başladın; dinlemeyi bıraktım', self.texts(win), 'still let go')
         win.voice_toggle()
         self.assertEqual(self.link.worker.sent, ['dinle', 'iptal', 'dinle'], 'and a press listens again')
 
     def test_opened_before_the_model_is_loaded_it_listens_once_it_is(self):
         win = self.window(auto_listen=True)
         self.assertEqual(self.link.worker.sent, [])
-        self.assertIn('Hazırlanıyor', self.texts(win))
+        self.assertTrue(any(text.startswith('Ses hazırlanıyor') for text in self.texts(win)))
         self.link.ready = True
         win.voice_event({'olay': 'hazir', 'aciklama': 'large-v3-turbo (ekran kartı, Vulkan)'})
         self.assertEqual(self.link.worker.sent, ['dinle'])
+
+    def test_opened_listening_it_takes_dictation_until_pyn_kaydet(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        self.assertEqual(self.link.worker.sent, ['dinle'])
+        win.voice_event({'olay': 'dinliyor'})
+        self.assertTrue(any('Pyn, kaydet' in text for text in self.texts(win)), 'how to finish is said')
+        # A pause: the sentence is written and it listens again by itself.
+        win.voice_event({'olay': 'metin', 'metin': 'Cuma günü', 'komut': None})
+        win.update()
+        self.root.after(200)
+        win.update()
+        self.assertEqual(self.link.worker.sent, ['dinle', 'dinle'], 'listening again after a pause')
+        self.assertEqual(self.cards(), [])
+        win.voice_event({'olay': 'dinliyor'})
+        win.voice_event({'olay': 'metin', 'metin': 'sunum provası', 'komut': 'kaydet'})
+        cards = self.cards()
+        self.assertEqual(len(cards), 1, 'saved without a key pressed')
+        self.assertIn('Cuma günü sunum provası', cards[0].read_text(encoding='utf-8'))
+
+    def test_a_long_silence_ends_the_dictation(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        for _ in range(2):
+            win.voice_event({'olay': 'dinliyor'})
+            win.voice_event({'olay': 'metin', 'metin': '', 'komut': None})
+            win.update()
+            self.root.after(200)
+            win.update()
+        self.assertEqual(self.link.worker.sent, ['dinle', 'dinle'], 'twice nothing heard: it stops listening')
+        self.assertIn('Bir süredir ses gelmedi; dinlemeyi bıraktım', self.texts(win))
 
     def test_enter_while_it_listens_ends_it_and_saves_what_was_said(self):
         self.link.ready = True

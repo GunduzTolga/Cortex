@@ -196,12 +196,18 @@ def _without_last_words(text, count):
     return text[:spans[-count]].rstrip(' ,.;:!?…') if count else text.strip()
 
 
+def _named(word):
+    """Whether a word is Pyn's name however the model wrote it (Pyn, pin, pın, pen...)."""
+    return word in NAME_SPELLINGS or word == 'pyn'
+
+
 def command_of(text, commands=None):
     """(command, text to write) for what was said.
 
     "kaydet" counts only at the very end ("Toplantı notu, kaydet" writes and saves); "sil" and
     "iptal" only when said alone. Anywhere else a command word is just a word: "notu kaydettim"
-    and "bu satırı sil" are written as they are.
+    and "bu satırı sil" are written as they are. Pyn's name may come before the command, as
+    the wake phrase is said: "…, Pyn kaydet" saves and the name is not written.
     """
     commands = commands or DEFAULTS['komutlar']
     said = words(text)
@@ -209,13 +215,28 @@ def command_of(text, commands=None):
         return None, ''
     whole = ' '.join(said)
     for name in ('sil', 'iptal', 'kaydet'):
-        if whole in {' '.join(words(p)) for p in commands.get(name, ())}:
+        spoken = {' '.join(words(p)) for p in commands.get(name, ())}
+        if whole in spoken or (len(said) > 1 and _named(said[0]) and ' '.join(said[1:]) in spoken):
             return name, ''
     for phrase in sorted(commands.get('kaydet', ()), key=len, reverse=True):
         wanted = words(phrase)
         if wanted and said[-len(wanted):] == wanted:
-            return 'kaydet', _without_last_words(text, len(wanted))
+            cut = len(wanted) + (1 if len(said) > len(wanted) and _named(said[-len(wanted) - 1]) else 0)
+            return 'kaydet', _without_last_words(text, cut)
     return None, text.strip()
+
+
+# What Whisper writes for silence or noise, learnt from its subtitle training: never a note.
+HALLUCINATIONS = {
+    'altyazi m k', 'altyazilar m k', 'altyazi mk', 'izlediginiz icin tesekkurler', 'izlediginiz icin tesekkur ederim',
+    'abone olmayi unutmayin', 'begenmeyi ve abone olmayi unutmayin', 'blank audio', 'blank_audio', 'muzik', 'alkis',
+    'thank you for watching', 'thanks for watching', 'subtitles by the amara org community',
+}
+
+
+def clean_spoken(text):
+    """What was written from speech, without what Whisper makes up for silence."""
+    return '' if ' '.join(words(text)) in HALLUCINATIONS else (text or '').strip()
 
 
 # ------------------------------------------------------------- install --
@@ -590,7 +611,7 @@ class Worker:
 def human(result, command):
     if command == 'kur':
         return ('Sesle yazma kuruldu (' + (result.get('model') or 'Whisper') + ').\n'
-                'Ctrl+Alt+B ile yakala\'yı aç, mikrofona tıkla ya da Ctrl+Alt+B\'ye yeniden basıp konuş.\n'
+                'Ctrl+Alt+C ile Not al\'ı aç: dinler halde açılır; konuş, bitince "Pyn, kaydet" de.\n'
                 '"Pyn, not al" ile açmak için: beyin.py ses ayar --uyandirma ac')
     if command == 'durum':
         if not result['kurulu']:
@@ -919,6 +940,16 @@ def _device(config):
     return None
 
 
+def _device_name(config):
+    """The microphone listened to, by the name the system gives it; empty when it cannot say."""
+    try:
+        import sounddevice as sd
+        index = _device(config)
+        return str(sd.query_devices(index if index is not None else sd.default.device[0])['name'])
+    except Exception:
+        return ''
+
+
 class Recorder:
     """The microphone into memory, with its level and whether someone has spoken."""
 
@@ -943,7 +974,8 @@ class Recorder:
             self.level = float(abs(data).max())
             rms = float((data ** 2).mean() ** 0.5)
             self.floor = min(rms, self.floor * 1.02 + 1e-6)
-            if rms > max(0.006, self.floor * 4):  # clearly above the room's noise: speech
+            # Clearly above the room's noise: speech. Low enough for a headset mic with little gain.
+            if rms > max(0.0025, self.floor * 5):
                 self.loud += 1
                 if self.loud >= 3:
                     self.spoke = True
@@ -1044,7 +1076,7 @@ def serve(state, config):
             out(olay='hata', neden='mikrofon', mesaj=str(exc)[:300])
             return False
         mode = 'kayit'
-        out(olay='dinliyor')
+        out(olay='dinliyor', mikrofon=_device_name(config))
         return True
 
     def finish(keep=True):
@@ -1061,7 +1093,7 @@ def serve(state, config):
         def work():
             nonlocal mode
             try:
-                text = transcribe(loaded['model'], audio, config, lock)
+                text = ses.clean_spoken(transcribe(loaded['model'], audio, config, lock))
                 command, text = ses.command_of(text, config['komutlar'])
                 out(olay='metin', metin=text, komut=command)
             except Exception as exc:

@@ -338,7 +338,7 @@ class YakalaInstalledTest(unittest.TestCase):
     def test_windows_shortcuts(self):
         appdata = Path(self.env['APPDATA'])
         installed = self.entry('kur')
-        self.assertEqual(installed['kisayol'], 'Ctrl+Alt+B')
+        self.assertEqual(installed['kisayol'], 'Ctrl+Alt+C')
         start = appdata / 'Microsoft/Windows/Start Menu/Programs/Beyne At.lnk'
         sendto = appdata / 'Microsoft/Windows/SendTo/Beyne At.lnk'
         self.assertTrue(start.is_file() and sendto.is_file())
@@ -374,6 +374,23 @@ class ListenerRestartTest(unittest.TestCase):
             self.assertEqual(yakala._own_modules(script, list(stamps)), stamps)
             os.utime(voice, (stamps[voice] + 5, stamps[voice] + 5))
             self.assertNotEqual(yakala._own_modules(script, list(stamps)), stamps, 'the voice module changed: restart')
+
+
+class HotkeyMoveTest(unittest.TestCase):
+    def test_the_old_default_moves_to_ctrl_alt_c_once_and_a_chosen_key_stays(self):
+        with tempfile.TemporaryDirectory(prefix='v3-tus-') as tmp:
+            state = Path(tmp)
+            path = state / yakala.STATE_FILE
+            path.write_text(json.dumps({'schema': 1, 'kisayol': 'Ctrl+Alt+B', 'tus': 'ctrl+alt+b'}), encoding='utf-8')
+            self.assertEqual(yakala.saved_hotkey(state), 'ctrl+alt+c')
+            saved = json.loads(path.read_text(encoding='utf-8'))
+            self.assertEqual(saved['tus'], 'ctrl+alt+c', 'kept, so the listener and the hints agree')
+            if os.name == 'nt':
+                self.assertEqual(saved['kisayol'], 'Ctrl+Alt+C')
+            path.write_text(json.dumps({'schema': 1, 'kisayol': 'Ctrl+Alt+B', 'tus': 'ctrl+alt+b', 'tus_secildi': True}), encoding='utf-8')
+            self.assertEqual(yakala.saved_hotkey(state), 'ctrl+alt+b', 'chosen by the person: never moved')
+            path.write_text(json.dumps({'schema': 1, 'tus': 'ctrl+shift+space'}), encoding='utf-8')
+            self.assertEqual(yakala.saved_hotkey(state), 'ctrl+shift+space')
 
 
 if __name__ == '__main__':

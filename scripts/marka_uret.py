@@ -9,6 +9,10 @@ Pillow ister; yalnız tasarım değiştiğinde elle çalıştırılır, testler 
 - pyn-yuz/*.svg            : Pyn'in yüzü, vektör (sohbet, Obsidian'da boş sekme); `yuz` adımı
 - pyn-yuz-256.png          : aynı yüzün PNG'si, SVG okumayan yerler için; `yuz` adımı
 
+`yakala` adımı Not al penceresinin mikrofon düğmesini çizer (`tema/ananas/marka/yakala/`):
+yuvarlak, sert gölgeli, kenarları yumuşatılmış; boşta, dinlerken, yazarken ve hazırlanırken,
+üç ekran ölçeğinde. Tk tuvali Windows'ta şekilleri yumuşatmadan çizdiği için düğme resimdir.
+
 `kurulum` adımı masaüstü uygulamasının Windows kurulum sihirbazının görsellerini yazar
 (`desktop/build/`, electron-builder'ın kaynak klasörü): kenar görseli (164x314) ve üst başlık
 (150x57), Pyn'in yüzü ve mühürüyle, Ananas renklerinde.
@@ -20,6 +24,7 @@ Ardından: py -3 scripts/ananas_tema.py uret
     py -3 scripts/marka_uret.py "C:\\...\\Pyn Tasarım\\docs\\design\\logo"
     py -3 scripts/marka_uret.py yuz "C:\\...\\Pyn'in Yüz Tasarımı\\pyn-yuz"
     py -3 scripts/marka_uret.py kurulum
+    py -3 scripts/marka_uret.py yakala
 
 `yuz`, Claude Design'ın teslim ettiği SVG'leri (docs/marka/pyn-yuz-brifi.md) alır; PNG'yi
 Edge'in görünmez (headless) kipiyle çizer, pencere açmaz.
@@ -137,7 +142,7 @@ def installer_images():
     side.paste(face, ((w - face.width) // 2, 52 * k), face)
     d = ImageDraw.Draw(side)
     d.text((w // 2, 198 * k), 'Cortex', fill=INK, font=font('Fraunces-Bold.ttf', 27), anchor='mm')
-    for i, line in enumerate(('Notların ve yapay zekâ', 'araçların için ortak hafıza')):
+    for i, line in enumerate(('Notların ve yapay zeka', 'araçların için ortak hafıza')):
         d.text((w // 2, (228 + i * 15) * k), line, fill=MUTED, font=font('SchibstedGrotesk-Regular.ttf', 11), anchor='mm')
     d.rectangle([0, 288 * k, w, h], fill=GOLD)
     d.rectangle([0, 288 * k, w, 288 * k + 2 * k], fill=INK)
@@ -156,8 +161,53 @@ def installer_images():
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
 
 
+MIC_STATES = ('bos', 'dinliyor', 'yaziyor', 'kapali')
+MIC_SIZES = (44, 66, 88)  # 1x, 1.5x and 2x of a 44 px button
+
+
+def mic_buttons():
+    """Not al's microphone button, every state at every scale, as PNGs (yakala/mikrofon-<state>-<size>.png)."""
+    from PIL import ImageDraw
+    folder = OUT / 'yakala'
+    folder.mkdir(parents=True, exist_ok=True)
+    colours = {
+        'bos': ('#fffaf0', INK, INK, True),
+        'dinliyor': (GOLD, INK, INK, True),
+        'yaziyor': ('#fffaf0', INK, INK, True),
+        'kapali': ('#f3efe4', '#c9c3b6', '#a5a198', False),
+    }
+    for state in MIC_STATES:
+        fill, ring, glyph, shadow = colours[state]
+        for size in MIC_SIZES:
+            k = 8  # drawn eight times larger, brought down: smooth edges
+            u = size / 44 * k  # one point of the 44 px design, in drawing pixels
+            side = round((size + 3 * size / 44) * k)
+            img = Image.new('RGBA', (side, side), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            r = 20 * u  # the button's radius: 40 of the 44, the rest for the ring and the shadow
+            cx = cy = 22 * u
+            if shadow:
+                d.ellipse([cx - r + 3 * u, cy - r + 3 * u, cx + r + 3 * u, cy + r + 3 * u], fill=INK)
+            d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill, outline=ring, width=round(2 * u))
+            if state == 'yaziyor':
+                for dx in (-7, 0, 7):
+                    d.ellipse([cx + (dx - 2.2) * u, cy - 2.2 * u, cx + (dx + 2.2) * u, cy + 2.2 * u], fill=glyph)
+            else:
+                w = 2.4 * u  # the glyph's stroke
+                d.rounded_rectangle([cx - 4.6 * u, cy - 11 * u, cx + 4.6 * u, cy + 3 * u], radius=4.6 * u, fill=glyph)
+                d.arc([cx - 8.6 * u, cy - 8.5 * u, cx + 8.6 * u, cy + 7 * u], 0, 180, fill=glyph, width=round(w))
+                d.line([cx, cy + 7 * u, cx, cy + 10.5 * u], fill=glyph, width=round(w))
+                d.rounded_rectangle([cx - 5.5 * u, cy + 10 * u, cx + 5.5 * u, cy + 10 * u + w], radius=w / 2, fill=glyph)
+            out = img.resize((round(side / k), round(side / k)), Image.LANCZOS)
+            out.save(folder / f'mikrofon-{state}-{size}.png', optimize=True)
+    for path in sorted(folder.iterdir()):
+        print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
+
+
 if __name__ == '__main__':
-    if sys.argv[1:2] == ['kurulum']:
+    if sys.argv[1:2] == ['yakala']:
+        mic_buttons()
+    elif sys.argv[1:2] == ['kurulum']:
         installer_images()
     elif sys.argv[1:2] == ['yuz']:
         face(sys.argv[2] if len(sys.argv) > 2 else '.')

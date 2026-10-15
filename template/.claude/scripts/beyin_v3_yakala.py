@@ -30,8 +30,8 @@ FILES = 'dosyalar'
 STATE_FILE = 'yakala.json'
 DEFUDDLE = 'defuddle@0.19.4'  # pinned: npx runs exactly this release
 LAUNCH_LABEL = 'com.gunduztolga.cortex.yakala'
-MAC_HOTKEY = 'Control+Option+B'  # Option+Command+B is the bookmarks key in Chrome and Safari
-WIN_HOTKEY = 'CTRL+ALT+B'
+MAC_HOTKEY = 'Control+Option+C'  # Option+Command+B is the bookmarks key in Chrome and Safari
+WIN_HOTKEY = 'CTRL+ALT+C'
 STATUSES = ('bekliyor', 'cikarildi', 'islendi', 'hata')
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 DETACHED = getattr(subprocess, 'DETACHED_PROCESS', 0)
@@ -1208,14 +1208,13 @@ def _ago(seconds):
 
 
 def image_lines(image, on):
-    """Headline and detail line of the clipboard image card for the current switch state."""
+    """What the clipboard picture's row says: whether it goes with the note, and its facts."""
     facts = ['%d×%d' % (image['width'], image['height'])]
     if image['age'] is not None:
         facts.append(_ago(image['age']))
     elif image['stale']:
         facts.append('eski, geçici dosyası silinmiş')
-    facts.append('Tab ile çıkar' if on else 'Tab ile ekle')
-    return 'Panodaki görüntü' if on else 'Panodaki görüntü eklenmeyecek', ' · '.join(facts)
+    return 'Panodaki görüntü eklenecek' if on else 'Panoda bir görüntü var', ' · '.join(facts)
 
 
 def _image_thumb(root, image, box=(112, 54)):
@@ -1231,48 +1230,71 @@ def _image_thumb(root, image, box=(112, 54)):
         return None
 
 
-def _image_card(canvas, root, image, y, width, pad, changed):
-    """The clipboard picture as an Ananas card (hard ink shadow, outlined card, GÖRSEL chip, thumbnail);
-    Tab or a click switches it. Calls changed(on) and returns the next y."""
+def _attachment(canvas, root, y, width, pad, kind, headline, detail='', thumb=None):
+    """What goes with the note, as one compact row: a small chip (or the picture), the name, the
+    facts after it in grey. Returns the row's items and where its right edge's free room ends."""
     import tkinter.font as tkfont
-    P, height, state = PALETTE, 78, {'on': bool(image['on'])}
-    shadow = _round_rect(canvas, pad + 5, y + 5, width - pad - 1, y + height + 5, 8, fill=P['shadow'], outline='')
-    card = _round_rect(canvas, pad, y, width - pad - 6, y + height, 8, fill=P['card'], outline=P['card_line'], width=1.5)
-    items = [shadow, card]
-    right = width - pad - 22
-    thumb = _image_thumb(root, image)
+    P, height = PALETTE, 46
+    items = [_round_rect(canvas, pad + 3, y + 3, width - pad + 3, y + height + 3, 6, fill=P['shadow'], outline=''),
+             _round_rect(canvas, pad, y, width - pad, y + height, 6, fill=P['card'], outline=P['card_line'], width=1.5)]
+    x = pad + 12
+    if thumb is not None:
+        items.append(canvas.create_image(x, y + height / 2, image=thumb, anchor='w'))
+        x += thumb.width() + 12
+    else:
+        chip_font = _font(8, 'bold', 'label')
+        chip_w = tkfont.Font(root=root, font=chip_font).measure(kind) + 14
+        items.append(_round_rect(canvas, x, y + height / 2 - 10, x + chip_w, y + height / 2 + 10, 4, fill=P['accent'],
+                                 outline=P['card_line'], width=1.2))
+        items.append(canvas.create_text(x + chip_w / 2, y + height / 2, text=kind, fill=P['accent_text'], font=chip_font))
+        x += chip_w + 12
+    return items, x, height
+
+
+def _image_card(canvas, root, image, y, width, pad, changed):
+    """The clipboard picture as one compact row: the picture small, whether it goes with the note,
+    its facts, and a box to tick; Tab or a click switches it. Calls changed(on), returns the next y."""
+    import tkinter.font as tkfont
+    P, state = PALETTE, {'on': bool(image['on'])}
+    thumb = _image_thumb(root, image, box=(64, 32))
     if thumb is not None:
         image['thumb'] = thumb  # Tk drops a picture nothing refers to
-        items.append(canvas.create_image(right, y + height / 2, image=thumb, anchor='e'))
-        right -= thumb.width() + 14
-    chip_font = _font(9, 'bold', 'label')
-    chip_w = tkfont.Font(root=root, font=chip_font).measure('GÖRSEL') + 18
-    chip_y, text_x = y + 28, pad + 16 + chip_w + 12
-    chip = _round_rect(canvas, pad + 16, chip_y - 11, pad + 16 + chip_w, chip_y + 11, 4, fill=P['accent'],
-                       outline=P['card_line'], width=1.5)
-    label = canvas.create_text(pad + 16 + chip_w / 2, chip_y, text='GÖRSEL', fill=P['accent_text'], font=chip_font)
-    headline = canvas.create_text(text_x, chip_y, anchor='w', fill=P['text'], font=_font(14, 'bold'))
-    detail = canvas.create_text(pad + 16, y + height - 20, anchor='w', fill=P['muted'], font=_font(11, role='label'))
+    items, text_x, height = _attachment(canvas, root, y, width, pad, 'GÖRSEL', '', thumb=thumb)
+    mid = y + height / 2
+    # The switch at the right: a box and what it does, the key beside it.
+    switch_font = _font(11, 'bold')
+    label_w = tkfont.Font(root=root, font=switch_font).measure('Ekle')
+    key_font = _font(9, 'bold', 'label')
+    key_w = tkfont.Font(root=root, font=key_font).measure('Tab') + 12
+    right = width - pad - 12
+    key_x2 = right
+    key = [_round_rect(canvas, key_x2 - key_w, mid - 10, key_x2, mid + 10, 4, fill=P['key'], outline=P['key_line'], width=1.2),
+           canvas.create_text(key_x2 - key_w / 2, mid, text='Tab', fill=P['text'], font=key_font)]
+    label = canvas.create_text(key_x2 - key_w - 8, mid, text='Ekle', anchor='e', fill=P['text'], font=switch_font)
+    box_x2 = key_x2 - key_w - 8 - label_w - 8
+    box = _round_rect(canvas, box_x2 - 16, mid - 8, box_x2, mid + 8, 3, fill=P['card'], outline=P['card_line'], width=1.5)
+    tick = canvas.create_text(box_x2 - 8, mid, text='✓', fill=P['accent_text'], font=_font(9, 'bold'), state='hidden')
+    room = box_x2 - 16 - 14 - text_x
+    headline = canvas.create_text(text_x, mid, anchor='w', font=_font(12, 'bold'))
 
     def draw():
         on = state['on']
         first, second = image_lines(image, on)
-        canvas.itemconfigure(chip, fill=P['accent'] if on else P['card'])
-        canvas.itemconfigure(label, fill=P['accent_text'] if on else P['muted'])
-        canvas.itemconfigure(headline, text=_fit(canvas, first, _font(14, 'bold'), right - text_x),
-                             fill=P['text'] if on else P['muted'])
-        canvas.itemconfigure(detail, text=_fit(canvas, second, _font(11, role='label'), right - pad - 16))
+        line = first + '  ·  ' + second
+        canvas.itemconfigure(headline, text=_fit(canvas, line, _font(12, 'bold'), room), fill=P['text'] if on else P['soft'])
+        canvas.itemconfigure(box, fill=P['accent'] if on else P['card'])
+        canvas.itemconfigure(tick, state='normal' if on else 'hidden')
         changed(on)
 
     def toggle(_event=None):
         state['on'] = not state['on']
         draw()
         return 'break'
-    for item in items + [chip, label, headline, detail]:
+    for item in items + key + [label, box, tick, headline]:
         canvas.tag_bind(item, '<Button-1>', toggle)
     root.bind('<Tab>', toggle)
     draw()
-    return y + height + 17
+    return y + height + 16
 
 
 def _image_done(image):
@@ -1315,6 +1337,23 @@ def _hotkey_label(vault):
 def _hotkey_hint(vault):
     label = _hotkey_label(vault)
     return (label + ' ile her yerden açılır') if label else 'İkinci beynine kaydedilir'
+
+
+def _mic_images(root):
+    """The microphone button in its four states at the size nearest the screen scale, or None.
+
+    Pictures, not canvas shapes: Tk draws ovals and arcs without smoothing on Windows, and a
+    round button drawn that way looked rough. scripts/marka_uret.py draws them smooth.
+    """
+    try:
+        import tkinter as tk
+        import beyin_v3_marka as marka
+        scale = root.winfo_fpixels('1i') / 96
+        size = 88 if scale >= 1.75 else 66 if scale >= 1.25 else 44
+        return {state: tk.PhotoImage(master=root, data=''.join(getattr(marka, 'MIKROFON_%s_%d' % (state.upper(), size))))
+                for state in ('bos', 'dinliyor', 'yaziyor', 'kapali')}
+    except Exception:
+        return None
 
 
 def _mic_glyph(canvas, cx, cy, colour):
@@ -1431,7 +1470,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
     clip_text = clip if clip and not clip_is_url else ''
     include = {'on': bool(clip_text) and not url and not files}
 
-    P, W, pad = PALETTE, 640, 26
+    P, W, pad = PALETTE, 760, 30
     root.title('Not al')
     root.configure(bg=P['bg'])
     root.resizable(False, False)
@@ -1439,9 +1478,10 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         root.overrideredirect(True)
     canvas = tk.Canvas(root, width=W, highlightthickness=0, bd=0, bg=P['bg'])
     canvas.pack(fill='both', expand=True)
+    key_label = _hotkey_label(vault) or 'Ctrl+Alt+C'
 
-    # Header: Pyn's seal, name, where it came from.
-    y = 30
+    # Header: Pyn's seal, the name, where it came from.
+    y = 34
     logo = _logo(root)
     if logo is not None:
         canvas.logo = logo  # Tk drops an image nobody references
@@ -1453,15 +1493,16 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
     canvas.create_text(title_x, y, text='Not al', anchor='w', fill=P['text'], font=_font(16, 'bold', 'display'))
     source = context.get('uygulama') or ''
     if source:
-        canvas.create_text(W - pad, y, text=_fit(canvas, source.upper(), _font(10, 'bold', 'label'), 260), anchor='e',
+        canvas.create_text(W - pad, y, text=_fit(canvas, source.upper(), _font(10, 'bold', 'label'), 300), anchor='e',
                            fill=P['muted'], font=_font(10, 'bold', 'label'))
 
-    # Main field: large, borderless, with a placeholder.
-    y = 64
-    entry = tk.Entry(root, font=_font(21), fg=P['text'], bg=P['bg'], insertbackground=P['text'], insertwidth=2,
+    # Main field: large, borderless, with a placeholder; the microphone at its right end.
+    y = 68
+    entry = tk.Entry(root, font=_font(20), fg=P['text'], bg=P['bg'], insertbackground=P['text'], insertwidth=2,
                      relief='flat', bd=0, highlightthickness=0)
-    mic_room = 172 if voice is not None else 0  # the microphone's button sits at the field's right end
-    canvas.create_window(pad, y, window=entry, anchor='nw', width=W - 2 * pad - mic_room, height=40)
+    mics = _mic_images(root) if voice is not None else None
+    mic_room = ((mics['bos'].width() if mics else 44) + 18) if voice is not None else 0
+    canvas.create_window(pad, y, window=entry, anchor='nw', width=W - 2 * pad - mic_room, height=44)
     placeholder_text = 'Neden kaydediyorsun?' if (url or files or clip_text) else 'Aklındakini yaz…'
     hint = {'on': False}
     # Typing in the field while it listens lets the microphone go (set with the microphone below).
@@ -1490,6 +1531,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
     def after_key(_event=None):
         if not hint['on'] and not entry.get():
             show_hint()
+
     def on_paste(_event=None):
         if typing['stop']:
             typing['stop']()
@@ -1502,47 +1544,32 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
     entry.bind('<KeyRelease>', after_key)
     entry.bind('<Button-1>', lambda _e: (entry.focus_set(), entry.icursor(0), 'break')[-1] if hint['on'] else None)
     show_hint()
-    y += 56
+    y += 58
     canvas.create_line(pad, y, W - pad, y, fill=P['line'], width=1.5)
-    y += 16
+    y += 18
 
-    # The voice line: what the microphone is doing and what to do now, the whole width, never cut.
+    # The voice panel: what the microphone does now and what to do, the whole width, never cut.
     if voice is not None:
         voice_y = y + 8
-        voice_line = canvas.create_text(pad, voice_y, anchor='w', fill=P['muted'], font=_font(12, 'bold'), text='')
-        canvas.create_text(pad, voice_y + 21, anchor='w', fill=P['faint'], font=_font(11),
-                           text='Sesli komutlar: sonda “kaydet” kaydeder · tek başına “sil” temizler, “iptal” kapatır')
-        y += 46
+        voice_line = canvas.create_text(pad, voice_y, anchor='w', fill=P['muted'], font=_font(12), text='')
+        voice_help = canvas.create_text(pad, voice_y + 22, anchor='w', fill=P['faint'], font=_font(11), text='')
+        y += 50
 
-    # Preview card.
-    if files or url or clip_text:
-        if files:
-            kind = 'DOSYA'
-            headline = Path(files[0]).name + ('  +' + str(len(files) - 1) if len(files) > 1 else '')
-            detail = str(Path(files[0]).parent)
-        elif url:
-            kind = KIND_LABEL.get(kind_of(url), 'SAYFA')
-            headline, detail = context.get('baslik') or url, url
-        else:
-            kind, headline, detail = 'METİN', _first_line(clip_text, 200), ''
-        card_h = 78 if detail and detail != headline else 56
-        # The card is a drawn object: a hard ink shadow offset down and right, then the outlined card over it.
-        _round_rect(canvas, pad + 5, y + 5, W - pad - 1, y + card_h + 5, 8, fill=P['shadow'], outline='')
-        _round_rect(canvas, pad, y, W - pad - 6, y + card_h, 8, fill=P['card'], outline=P['card_line'], width=1.5)
-        chip_font = _font(9, 'bold', 'label')
-        import tkinter.font as tkfont
-        chip_w = tkfont.Font(root=root, font=chip_font).measure(kind) + 18
-        chip_y = y + (20 if card_h > 56 else card_h / 2) + (8 if card_h > 56 else 0)
-        _round_rect(canvas, pad + 16, chip_y - 11, pad + 16 + chip_w, chip_y + 11, 4, fill=P['accent'],
-                    outline=P['card_line'], width=1.5)
-        canvas.create_text(pad + 16 + chip_w / 2, chip_y, text=kind, fill=P['accent_text'], font=chip_font)
-        text_x = pad + 16 + chip_w + 12
-        canvas.create_text(text_x, chip_y, text=_fit(canvas, headline, _font(14, 'bold'), W - pad - 22 - text_x),
-                           anchor='w', fill=P['text'], font=_font(14, 'bold'))
-        if card_h > 56:
-            canvas.create_text(pad + 16, y + card_h - 20, text=_fit(canvas, detail, _font(11, role='label'), W - 2 * pad - 38),
-                               anchor='w', fill=P['muted'], font=_font(11, role='label'))
-        y += card_h + 17
+    def compact(kind, headline, detail):
+        nonlocal y
+        _items, text_x, height = _attachment(canvas, root, y, W, pad, kind, headline)
+        line = headline + ('  ·  ' + detail if detail and detail != headline else '')
+        canvas.create_text(text_x, y + height / 2, anchor='w', fill=P['text'], font=_font(12, 'bold'),
+                           text=_fit(canvas, line, _font(12, 'bold'), W - pad - 14 - text_x))
+        y += height + 16
+
+    # What goes with the note, one row each.
+    if files:
+        compact('DOSYA', Path(files[0]).name + ('  +' + str(len(files) - 1) if len(files) > 1 else ''), str(Path(files[0]).parent))
+    elif url:
+        compact(KIND_LABEL.get(kind_of(url), 'SAYFA'), context.get('baslik') or url, url)
+    elif clip_text:
+        compact('METİN', _first_line(clip_text, 200), '')
 
     # Optional clipboard toggle when something better is already being saved.
     if clip_text and (url or files):
@@ -1572,10 +1599,10 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         y = _image_card(canvas, root, image, y, W, pad, image_changed)
 
     # Footer: status on the left, key hints on the right.
-    y += 8
+    y += 6
     footer_y = y + 14
     status = canvas.create_text(pad, footer_y, anchor='w', fill=P['muted'], font=_font(12),
-                                text='Tab: panoyu ekle' if clip_text and (url or files) else _hotkey_hint(vault))
+                                text='Tab: panoyu ekle' if clip_text and (url or files) else key_label + ' ile her yerden açılır')
     right = W - pad
 
     def keycap(x_right, key, label):
@@ -1590,7 +1617,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         return x2 - key_w - 18
     right = keycap(right, '↵', 'Kaydet')
     keycap(right, 'esc', 'Kapat')
-    height = footer_y + 28
+    height = footer_y + 30
     canvas.configure(height=height)
     # A paper window on a light desktop needs its own edge: the ink frame of the Ananas sheet.
     canvas.create_rectangle(1, 1, W - 1, height - 1, outline=P['card_line'], width=2)
@@ -1613,7 +1640,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         text = clip_text if include['on'] else None
         why = '' if hint['on'] else entry.get().strip()
         if not (url or files or text or why):
-            canvas.itemconfigure(status, text='Önce bir şey yaz', fill=P['bad'])
+            canvas.itemconfigure(status, text='Önce bir şey yaz ya da söyle', fill=P['bad'])
             return 'break'
         if not (url or files or text):
             text, why = why, ''  # only a typed line: the line itself is the note
@@ -1621,60 +1648,65 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             result.update(capture(vault, url=url, text=text, files=files, why=why, app=context.get('uygulama'),
                                   title=context.get('baslik') if url else None))
         except Exception as exc:
-            canvas.itemconfigure(status, text=_fit(canvas, 'Kaydedilemedi: ' + str(exc), _font(12), 300), fill=P['bad'])
+            canvas.itemconfigure(status, text=_fit(canvas, 'Kaydedilemedi: ' + str(exc), _font(12), 360), fill=P['bad'])
             return 'break'
+        if voice is not None and voice_mode['now'] in ('bekliyor', 'dinliyor'):
+            voice.worker.send('iptal')  # saved: the microphone goes with the window
+        voice_mode['continuous'] = False
         entry.configure(state='disabled', disabledbackground=P['bg'], disabledforeground=P['muted'])
         canvas.itemconfigure(status, text='✓  Kaydedildi', fill=P['ok'], font=_font(12, 'bold'))
         root.after(520, close)
         return 'break'
 
-    voice_mode = {'now': None}
+    # `continuous`: opened listening (the hotkey with listening on, or "Pyn, not al"), it keeps
+    # listening after each sentence until "kaydet" (or "Pyn, kaydet"), Enter or Esc.
+    voice_mode = {'now': None, 'continuous': bool(listening or auto_listen), 'quiet': 0}
     # `save`: Enter pressed while it listened, saved once the words are written. `auto`: listen
     # once the model is loaded. `drop`: the recording was let go; what it still says is not news.
     pending = {'save': False, 'auto': False, 'drop': False}
     if voice is not None:
-        # The microphone: a pill button at the field's end, named for what a press does. Its
-        # states: not ready (the model still loading), ready, listening (gold, with the voice's
-        # level in bars beside the line under the field), writing.
-        bx2, by1, by2 = W - pad, 66, 102
-        bx1 = bx2 - 156
-        button_shadow = _round_rect(canvas, bx1 + 3, by1 + 3, bx2 + 3, by2 + 3, 18, fill=P['shadow'], outline='')
-        button = _round_rect(canvas, bx1, by1, bx2, by2, 18, fill=P['card'], outline=P['card_line'], width=1.5)
-        glyph = _mic_glyph(canvas, bx1 + 24, (by1 + by2) / 2, P['text'])
-        button_label = canvas.create_text(bx1 + 42, (by1 + by2) / 2, anchor='w', text='Konuş', fill=P['text'],
-                                          font=_font(12, 'bold'))
-        bars = [canvas.create_rectangle(W - pad - 30 + i * 7, voice_y - 2, W - pad - 26 + i * 7, voice_y + 2,
+        # The microphone: a round button at the field's end (a picture, smooth); a canvas-drawn
+        # one only when the pictures cannot be read. Its states: getting ready, ready,
+        # listening, writing. Its level shows as bars at the panel's right.
+        bx, by = W - pad, 90
+        if mics:
+            canvas.mics = mics
+            button = canvas.create_image(bx, by, image=mics['kapali'], anchor='e')
+            glyph = []
+        else:
+            button = canvas.create_oval(bx - 44, by - 22, bx, by + 22, fill=P['card'], outline=P['card_line'], width=2)
+            glyph = _mic_glyph(canvas, bx - 22, by, P['text'])
+        bars = [canvas.create_rectangle(W - pad - 34 + i * 7, voice_y - 2, W - pad - 30 + i * 7, voice_y + 2,
                                         fill=P['accent'], outline=P['card_line'], width=1, state='hidden')
                 for i in range(5)]
-        key = _hotkey_label(vault) or 'Ctrl+Alt+B'
+        heard = {'peak': 0.0, 'since': None, 'device': ''}
 
-        def paint(colour):
-            for part in glyph:
-                canvas.itemconfigure(part, **({'outline': colour} if canvas.type(part) == 'arc' else {'fill': colour}))
-
-        def voice_set(mode, message=None, tone=None):
+        def voice_set(mode, message=None, tone=None, help_text=None):
             voice_mode['now'] = mode
             listening_now = mode in ('bekliyor', 'dinliyor')
-            canvas.itemconfigure(button, fill=P['accent'] if listening_now else P['card'],
-                                 outline=P['faint'] if mode == 'yok' else P['card_line'])
-            canvas.itemconfigure(button_shadow, state='hidden' if mode == 'yok' else 'normal')
-            paint(P['faint'] if mode == 'yok' else P['text'])
-            canvas.itemconfigure(button_label, fill=P['faint'] if mode == 'yok' else P['text'],
-                                 text={'yok': 'Hazırlanıyor', 'bekliyor': 'Dinliyorum', 'dinliyor': 'Dinliyorum',
-                                       'ceviriyor': 'Yazıyorum…'}.get(mode, 'Konuş'))
+            if mics:
+                canvas.itemconfigure(button, image=mics[{'yok': 'kapali', 'bekliyor': 'dinliyor', 'dinliyor': 'dinliyor',
+                                                          'ceviriyor': 'yaziyor'}.get(mode, 'bos')])
+            else:
+                canvas.itemconfigure(button, fill=P['accent'] if listening_now else P['card'])
             for bar in bars:
                 canvas.itemconfigure(bar, state='normal' if listening_now else 'hidden')
+            device = (' · ' + heard['device']) if heard['device'] else ''
             text = message or {
-                'yok': 'Ses hazırlanıyor… birazdan konuşabilirsin.',
-                'bekliyor': '● Dinliyorum… Susunca yazarım · Enter: yaz ve kaydet · Esc: vazgeç',
-                'dinliyor': '● Dinliyorum… Susunca yazarım · Enter: yaz ve kaydet · Esc: vazgeç',
+                'yok': 'Ses hazırlanıyor… birazdan konuşabilirsin',
+                'bekliyor': '● Dinliyorum' + device,
+                'dinliyor': '● Dinliyorum' + device,
                 'ceviriyor': 'Söylediğini yazıya çeviriyorum…',
-            }.get(mode, 'Konuşarak da yazabilirsin: Konuş\'a tıkla ya da ' + key + '\'ye bir daha bas.')
+            }.get(mode, 'Konuşmak için mikrofona tıkla ya da ' + key_label + '\'ye bir daha bas')
+            helper = help_text or (
+                'Konuş, ara verebilirsin · bitince “Pyn, kaydet” de ya da Enter · Esc: vazgeç' if listening_now and voice_mode['continuous']
+                else 'Susunca yazarım · “kaydet” ya da Enter: kaydet · Esc: vazgeç' if listening_now
+                else 'Sesli komutlar: sonda “kaydet” kaydeder · tek başına “sil” temizler, “iptal” kapatır')
             colour = P[tone] if tone else (P['text'] if listening_now else P['muted'])
-            # Bold while it listens or something went wrong: the line to read now; a quiet hint otherwise.
             line_font = _font(12, 'bold') if listening_now or tone else _font(12)
-            canvas.itemconfigure(voice_line, text=_fit(canvas, text, line_font, W - 2 * pad - (44 if listening_now else 0)),
+            canvas.itemconfigure(voice_line, text=_fit(canvas, text, line_font, W - 2 * pad - (50 if listening_now else 0)),
                                  fill=colour, font=line_font)
+            canvas.itemconfigure(voice_help, text=_fit(canvas, helper, _font(11), W - 2 * pad))
             if hint['on']:
                 # The empty field says where the words will go while it listens.
                 entry.delete(0, 'end')
@@ -1683,17 +1715,30 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
 
         def level(value):
             # Five bars, the middle ones the tallest, each as high as the voice is loud.
+            value = min(1.0, float(value or 0))
+            heard['peak'] = max(heard['peak'], value)
             for i, bar in enumerate(bars):
-                height = 2 + round(min(1.0, float(value or 0)) * (11 - 3 * abs(2 - i)))
+                height = 2 + round(value * (11 - 3 * abs(2 - i)))
                 x1, _y1, x2, _y2 = canvas.coords(bar)
                 canvas.coords(bar, x1, voice_y - height, x2, voice_y + height)
+            # Three seconds of listening and nothing came in: the microphone is muted, or another one is listened to.
+            if heard['since'] is not None and time_now() - heard['since'] > 3 and heard['peak'] < 0.02:
+                heard['since'] = None
+                voice_set('dinliyor', 'Mikrofondan ses gelmiyor' + ((' · ' + heard['device']) if heard['device'] else ''), 'bad',
+                          'Mikrofon kapalı ya da sessizde olabilir; Windows ses ayarlarından doğru mikrofonu seç')
+
+        def listen():
+            if voice.worker.send('dinle'):
+                pending['drop'] = False
+                voice_set('bekliyor')
+                return True
+            return False
 
         def voice_toggle(_event=None):
             if voice_mode['now'] == 'hazir':
-                if voice.worker.send('dinle'):
-                    pending['drop'] = False
-                    voice_set('bekliyor')
+                listen()
             elif voice_mode['now'] in ('bekliyor', 'dinliyor'):
+                voice_mode['continuous'] = False  # a press ends the dictation: what was said is written
                 voice.worker.send('bitir')
             elif voice_mode['now'] == 'yok':
                 pending['auto'] = True  # pressed before the model was loaded: listen once it is
@@ -1701,10 +1746,11 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
 
         def stop_for_typing():
             pending['auto'] = False
+            voice_mode['continuous'] = False
             if voice_mode['now'] in ('bekliyor', 'dinliyor'):
                 voice.worker.send('iptal')
                 pending['drop'] = True
-                voice_set('hazir', 'Yazmaya başladın; dinlemeyi bıraktım. Konuşmak için Konuş\'a tıkla.')
+                voice_set('hazir', 'Yazmaya başladın; dinlemeyi bıraktım', None, 'Konuşmak için mikrofona tıkla')
         typing['stop'] = stop_for_typing
 
         def voice_event(event):
@@ -1720,14 +1766,17 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                 voice_set('hazir')
                 if pending['auto'] and hint['on']:
                     pending['auto'] = False
-                    voice_toggle()
+                    listen()
             elif kind in ('dinliyor', 'uyandi'):
+                heard.update(peak=0.0, since=time_now(), device=event.get('mikrofon') or heard['device'])
                 voice_set('dinliyor')
             elif kind == 'seviye' and voice_mode['now'] == 'dinliyor':
                 level(event.get('deger'))
             elif kind == 'ceviriyor':
+                heard['since'] = None
                 voice_set('ceviriyor')
             elif kind == 'metin':
+                heard['since'] = None
                 voice_set('hazir')
                 spoken, command = event.get('metin') or '', event.get('komut')
                 if spoken:
@@ -1744,30 +1793,46 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                     save()
                 elif command == 'sil':
                     show_hint()
+                    if voice_mode['continuous']:
+                        root.after(150, listen)
                 elif command == 'iptal':
+                    voice_mode['continuous'] = False
                     close()
                 elif wanted:
-                    voice_set('hazir', 'Bir şey duyamadım; yeniden dene ya da yaz.', 'bad')
+                    voice_set('hazir', 'Bir şey duyamadım; yeniden dene ya da yaz', 'bad')
+                elif voice_mode['continuous']:
+                    # Dictation goes on after each sentence; a long silence ends it, so no microphone stays open by itself.
+                    voice_mode['quiet'] = 0 if spoken else voice_mode['quiet'] + 1
+                    if voice_mode['quiet'] >= 2:
+                        voice_mode['continuous'] = False
+                        voice_set('hazir', 'Bir süredir ses gelmedi; dinlemeyi bıraktım', None, 'Konuşmak için mikrofona tıkla')
+                    else:
+                        root.after(150, listen)
             elif kind == 'hata':
                 pending['save'] = False
+                voice_mode['continuous'] = False
                 voice_set('hazir' if voice.ready else 'yok', 'Ses: ' + (event.get('mesaj') or event.get('neden') or 'bir sorun oldu'), 'bad')
             elif kind == 'bitti':
-                voice_set('yok', 'Ses yardımcısı kapandı.', 'bad')
+                voice_mode['continuous'] = False
+                voice_set('yok', 'Ses yardımcısı kapandı', 'bad')
 
-        for part in [button, button_label, *glyph]:
+        for part in [button, *glyph]:
             canvas.tag_bind(part, '<Button-1>', voice_toggle)
         root.voice_event = voice_event
         root.voice_toggle = voice_toggle
+        if listening:
+            heard['since'] = time_now()
         voice_set('dinliyor' if listening else 'hazir' if voice.ready else 'yok')
         if auto_listen and not listening:
             if voice.ready:
-                voice_toggle()
+                listen()
             else:
                 pending['auto'] = True
 
     def save_or_finish(_event=None):
         # Enter while it listens: the words written first, then saved.
         if voice is not None and voice_mode['now'] in ('bekliyor', 'dinliyor'):
+            voice_mode['continuous'] = False
             voice.worker.send('bitir')
             pending['save'] = True
             return 'break'
@@ -1836,7 +1901,9 @@ def _popup_fallback(vault, context):
 
 # ---------------------------------------------------------------- hotkey spec
 
-DEFAULT_HOTKEY = 'ctrl+alt+b'
+DEFAULT_HOTKEY = 'ctrl+alt+c'
+# The default until 1.0.11: moved to the new one once, unless the person chose it (`tus_secildi`).
+OLD_DEFAULT_HOTKEYS = ('ctrl+alt+b',)
 MODIFIERS = {'cmd': 'cmd', 'command': 'cmd', '⌘': 'cmd', 'super': 'cmd', 'win': 'cmd',
              'ctrl': 'ctrl', 'control': 'ctrl', 'ctl': 'ctrl', '⌃': 'ctrl',
              'alt': 'alt', 'opt': 'alt', 'option': 'alt', '⌥': 'alt',
@@ -1852,10 +1919,10 @@ MAC_ANSI.pop(' ', None)
 
 
 def parse_hotkey(spec):
-    """'cmd+"' / 'ctrl+alt+b' / '⌘⇧K' -> (sorted modifiers, key). The key is the last part."""
+    """'cmd+"' / 'ctrl+alt+c' / '⌘⇧K' -> (sorted modifiers, key). The key is the last part."""
     text = str(spec or '').strip()
     if not text:
-        raise ValueError('Kisayol bos olamaz; ornek: ctrl+alt+b ya da cmd+"')
+        raise ValueError('Kisayol bos olamaz; ornek: ctrl+alt+c ya da cmd+"')
     for symbol in '⌘⌃⌥⇧':
         text = text.replace(symbol, MAC_SYMBOL_REVERSE[symbol] + '+')
     parts = text.split('+')
@@ -1954,10 +2021,24 @@ def windows_hotkey(spec):
 
 
 def saved_hotkey(state):
+    """The key yakala opens with. The old default (Ctrl+Alt+B) becomes the new one (Ctrl+Alt+C)
+    the first time it is read, and is kept so; a key the person chose is never changed."""
+    path = _state_path(state)
     try:
-        return json.loads(_state_path(state).read_text(encoding='utf-8')).get('tus') or DEFAULT_HOTKEY
+        data = json.loads(path.read_text(encoding='utf-8'))
+        spec = data.get('tus') or DEFAULT_HOTKEY
     except (OSError, ValueError, AttributeError):
         return DEFAULT_HOTKEY
+    if spec in OLD_DEFAULT_HOTKEYS and not data.get('tus_secildi'):
+        spec = DEFAULT_HOTKEY
+        data['tus'] = spec
+        if data.get('kisayol'):
+            data['kisayol'] = windows_hotkey(spec)[1] if os.name == 'nt' else data['kisayol'].replace('B', 'C')
+        try:
+            path.write_text(json.dumps(data, ensure_ascii=False) + '\n', encoding='utf-8')
+        except OSError:
+            pass
+    return spec
 
 
 # ---------------------------------------------------------------- hotkey listener (macOS)
@@ -2245,7 +2326,7 @@ description: Kullanıcının yakaladığı kaynakları (YouTube videosu, tweet, 
 
 # Beyne at: yakalanan kaynakları işle
 
-Kullanıcı kaynakları tek tuşla yakalar: kısayol (Mac'te Control+Option+B, Windows'ta Ctrl+Alt+B),
+Kullanıcı kaynakları tek tuşla yakalar: kısayol (Mac'te Control+Option+C, Windows'ta Ctrl+Alt+C),
 tarayıcıda Obsidian Web Clipper'ın "Beyne at" şablonu ya da Windows'ta sağ tık > Gönder > Beyne At.
 Her yakalama `📥 000-Inbox/Yakala/` içinde tek bir karttır. Kartın `## Neden` bölümü kullanıcının
 niyetidir; dersleri o niyete göre seç.
@@ -2425,6 +2506,10 @@ def _argline(values):
 
 def install(vault, state, hotkey=True, spec=None):
     vault, state = Path(vault).resolve(), Path(state).resolve()
+    try:
+        chosen = bool(spec) or bool(json.loads(_state_path(state).read_text(encoding='utf-8')).get('tus_secildi'))
+    except (OSError, ValueError, AttributeError):
+        chosen = bool(spec)
     spec = spec or saved_hotkey(state)
     # Validate before anything is written, so a bad key changes nothing.
     if hotkey and sys.platform == 'darwin':
@@ -2494,7 +2579,7 @@ def install(vault, state, hotkey=True, spec=None):
         if os.environ.get('BEYIN_V3_NO_SPAWN') != '1':
             stop_windows_listener()
         # The Start-menu entry opens the popup directly. It carries the key only when no
-        # listener can hold it: Explorer and the listener cannot both own Ctrl+Alt+B.
+        # listener can hold it: Explorer and the listener cannot both own the same key.
         start_menu = (programs / 'Beyne At.lnk', target, _argline([script, 'pencere', '--vault', vault]))
         _windows_shortcut(*start_menu, None, icon)
         _windows_shortcut(sendto / 'Beyne At.lnk', target, _argline([script, 'ekle', '--vault', vault, '--arac', 'gonder-menusu']),
@@ -2502,7 +2587,8 @@ def install(vault, state, hotkey=True, spec=None):
         done.update(kisayol=label, gonder_menusu=True)
     state.mkdir(parents=True, exist_ok=True)
     _state_path(state).write_text(json.dumps({'schema': 1, 'session_notice': True, 'kisayol': done['kisayol'],
-                                              'tus': spec if done['kisayol'] else saved_hotkey(state)}, ensure_ascii=False) + '\n',
+                                              'tus': spec if done['kisayol'] else saved_hotkey(state),
+                                              'tus_secildi': chosen}, ensure_ascii=False) + '\n',
                                   encoding='utf-8')
     if hotkey and os.name == 'nt':
         # Started only now, after the key is saved: the listener reads it from the state above.
@@ -2710,7 +2796,7 @@ def main(argv=None, vault=None, state=None):
     show.add_argument('--durum', choices=STATUSES)
     setup = command_parser('kur', help='Kisayolu, Web Clipper sablonunu, skill\'i ve oturum bildirimini kur')
     setup.add_argument('--kisayol-yok', action='store_true', help='Yalniz sablon, skill ve bildirim; kisayol kurulmaz')
-    setup.add_argument('--tus', help='Kisayol, ornek: ctrl+alt+b (varsayilan) ya da cmd+"')
+    setup.add_argument('--tus', help='Kisayol, ornek: ctrl+alt+c (varsayilan) ya da cmd+"')
     keys = command_parser('kisayol', help='Kisayolu goster ya da degistir, ornek: kisayol \'cmd+"\'')
     keys.add_argument('tus', nargs='?')
     command_parser('kaldir', help='Kisayolu ve bildirimi kaldir; notlara dokunmaz')

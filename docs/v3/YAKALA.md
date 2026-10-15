@@ -17,7 +17,7 @@ Kurulum şunları yapar:
 
 | | Mac | Windows |
 |---|---|---|
-| Her uygulamada kısayol | `Control+Option+B` | `Ctrl+Alt+B` |
+| Her uygulamada kısayol | `Control+Option+C` | `Ctrl+Alt+C` |
 | Dosya gönderme | Finder'da dosyayı seç, kısayola bas | Sağ tık > Gönder > Beyne At |
 | Tarayıcı | Obsidian Web Clipper şablonu | Obsidian Web Clipper şablonu |
 | Ajan | `beyin-yakala` skill'i | `beyin-yakala` skill'i |
@@ -86,24 +86,26 @@ Pencereye konuşarak yazarsın; ses bilgisayardan çıkmaz, çeviriyi yerelde Wh
 - Kurulum bitince yakala dinleyicisi yeniden başlar.
 
 **Kullanım:**
-1. Ctrl+Alt+B ile **Not al** penceresini aç. Pencere dinler halde açılır ("Dinliyorum"); konuş.
-2. Bitirmek için:
-   - Sus (1,4 saniye): söylediğin kutuya yazılır.
-   - **Enter**'a bas: yazılır ve kaydedilir.
-   - **Ctrl+Alt+B**'ye yeniden bas: dinleme biter, söylediğin yazılır.
-3. Sonda **"kaydet"** dersen yazılır ve kart kaydedilir.
+1. Ctrl+Alt+C ile **Not al** penceresini aç. Pencere dinler halde açılır ("● Dinliyorum" ve dinlenen mikrofonun adı); konuş.
+2. Ara verebilirsin: her cümle kutuya eklenir, pencere dinlemeyi sürdürür.
+3. Bitirmek için:
+   - **"Pyn, kaydet"** de (ya da yalnız "kaydet"): yazılır ve kaydedilir, hiç tuşa basmadan.
+   - **Enter**'a bas: dinleme biter, söylediğin yazılır ve kaydedilir.
+   - **Ctrl+Alt+C**'ye yeniden bas: dinleme biter, söylediğin yazılır; Enter ile kaydedersin.
 4. Tek başına **"sil"** kutuyu temizler. Tek başına **"iptal"** ya da **"vazgeç"** pencereyi kapatır. **Esc**, duyduğunu bırakır ve pencereyi kapatır.
-5. Klavyeyle yazmaya başlarsan mikrofon kapanır. Yeniden konuşmak için **Konuş** düğmesine tıkla.
+5. Klavyeyle yazmaya başlarsan mikrofon kapanır; yeniden konuşmak için mikrofona tıkla. Bir süre hiç ses gelmezse dinleme kendiliğinden biter, mikrofon açık kalmaz.
 
-Pencere alanın hemen altında o an ne yapacağını yazar. Kendiliğinden dinlemeyi kapatmak için: masaüstü uygulamasında Ayarlar → Sesle yazma → "Pencere açılınca dinle" ya da `beyin.py ses ayar --otomatik kapat`.
+Pencere alanın hemen altında o an ne yapacağını yazar. Birkaç saniye mikrofondan ses gelmezse bunu söyler: mikrofon kapalı ya da sessizde olabilir, ya da Windows başka bir mikrofonu dinletiyordur. Kendiliğinden dinlemeyi kapatmak için: masaüstü uygulamasında Ayarlar → Sesle yazma → "Pencere açılınca dinle" ya da `beyin.py ses ayar --otomatik kapat`.
 
-Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya da "bu satırı sil" olduğu gibi yazılır.
+Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya da "bu satırı sil" olduğu gibi yazılır. Whisper'ın sessizliğe uydurduğu "Altyazı M.K." gibi satırlar not olmaz.
 
-**"Pyn, not al" ile açma:** `py -3 beyin.py ses ayar --uyandirma ac`
-- Bu sözü duyunca pencere açılır ve dinlemeye başlar.
+**Sürekli dinle ("Pyn, not al"):** masaüstü uygulamasında Ayarlar → Sesle yazma → "Sürekli dinle", ya da `py -3 beyin.py ses ayar --uyandirma ac`.
+- "Pyn, not al" deyince pencere Ctrl+Alt+C'ye basmışsın gibi açılır ve dinlemeye başlar. Bitince "Pyn, kaydet" de: tuşsuz not.
 - Başta kapalıdır, çünkü açıkken mikrofon sürekli dinler.
 - Sözü küçük bir Türkçe Vosk modeli yakalar; Whisper yalnız asıl yazmada çalışır, böylece işlemci boşuna yorulmaz.
 - Bluetooth kulaklıkta mikrofon açıkken müzik ve video sesi kötüleşir; bu özelliği USB ya da dahili mikrofonla kullan.
+
+**Kısayol:** 1.0.12'den beri Ctrl+Alt+C. Eskiden varsayılan olan Ctrl+Alt+B kendiliğinden Ctrl+Alt+C olur; kendin seçtiğin bir tuş değişmez. Değiştirmek için: `beyin.py yakala kisayol ctrl+alt+x`.
 
 **Hız:** `ses kur` bilgisayardaki ekran kartına bakıp yazan motoru seçer.
 

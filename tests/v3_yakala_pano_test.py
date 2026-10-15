@@ -247,8 +247,8 @@ class ImageOfferTest(ScreenshotFiles, unittest.TestCase):
         path = Path(image['path'])
         self.assertRegex(path.name, r'^pano-goruntusu-\d{8}-\d{6}\.png$')
         self.assertEqual(decode_png(path.read_bytes())[3], self.pixels)
-        self.assertEqual(yakala.image_lines(image, True), ('Panodaki görüntü', '6×4 · Tab ile çıkar'))
-        self.assertEqual(yakala.image_lines(image, False), ('Panodaki görüntü eklenmeyecek', '6×4 · Tab ile ekle'))
+        self.assertEqual(yakala.image_lines(image, True), ('Panodaki görüntü eklenecek', '6×4'))
+        self.assertEqual(yakala.image_lines(image, False), ('Panoda bir görüntü var', '6×4'))
 
     def test_png_payload_is_stored_byte_for_byte_and_wins_over_the_bitmap(self):
         png = make_png(self.pixels)
@@ -263,7 +263,7 @@ class ImageOfferTest(ScreenshotFiles, unittest.TestCase):
         clip = self.shot_file(age=95)
         image, _ = self.offer(clip, {'image': True, 'png': None, 'dib': make_dib(self.pixels)})
         self.assertEqual((image['age'], image['stale'], image['on']), (95.0, False, True))
-        self.assertEqual(yakala.image_lines(image, True)[1], '6×4 · 1 dk önce · Tab ile çıkar')
+        self.assertEqual(yakala.image_lines(image, True)[1], '6×4 · 1 dk önce')
         quoted, _ = self.offer('"' + clip + '"', {'image': True, 'png': None, 'dib': make_dib(self.pixels)})
         self.assertTrue(quoted['on'])
 
@@ -271,7 +271,7 @@ class ImageOfferTest(ScreenshotFiles, unittest.TestCase):
         for age, label in ((yakala.IMAGE_FRESH + 1, '10 dk önce'), (3 * 3600 + 20, '3 saat önce'), (3 * 86400, '3 gün önce')):
             image, _ = self.offer(self.shot_file(age=age), {'image': True, 'png': make_png(self.pixels), 'dib': None})
             self.assertEqual((image['stale'], image['on']), (True, False), age)
-            self.assertEqual(yakala.image_lines(image, False)[1], '6×4 · ' + label + ' · Tab ile ekle')
+            self.assertEqual(yakala.image_lines(image, False)[1], '6×4 · ' + label)
         edge, _ = self.offer(self.shot_file(age=yakala.IMAGE_FRESH), {'image': True, 'png': make_png(self.pixels), 'dib': None})
         self.assertTrue(edge['on'])
         ahead, _ = self.offer(self.shot_file(age=-30), {'image': True, 'png': make_png(self.pixels), 'dib': None})
@@ -280,7 +280,7 @@ class ImageOfferTest(ScreenshotFiles, unittest.TestCase):
     def test_deleted_temp_file_means_an_old_screenshot(self):
         image, _ = self.offer(self.shot_file(age=None), {'image': True, 'png': make_png(self.pixels), 'dib': None})
         self.assertEqual((image['age'], image['stale'], image['on']), (None, True, False))
-        self.assertEqual(yakala.image_lines(image, False)[1], '6×4 · eski, geçici dosyası silinmiş · Tab ile ekle')
+        self.assertEqual(yakala.image_lines(image, False)[1], '6×4 · eski, geçici dosyası silinmiş')
 
     def test_unreadable_bitmap_falls_back_to_the_screenshot_file(self):
         clip = self.shot_file(age=20)
@@ -623,9 +623,9 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
         # The picture was on screen before anything was saved, and the temp copy is gone afterwards.
         placeholder, texts = root.seen[0]
         self.assertEqual(placeholder, 'Neden kaydediyorsun?')
-        self.assertIn('GÖRSEL', texts)
-        self.assertIn('Panodaki görüntü', texts)
-        self.assertIn('8×5 · az önce · Tab ile çıkar', texts)
+        # One compact row: the picture, whether it goes with the note, its facts; a box to tick, Tab beside it.
+        self.assertIn('Panodaki görüntü eklenecek  ·  8×5 · az önce', texts)
+        self.assertIn('Tab', texts)
         self.assertEqual(len(Photo.opened), 1)
         self.assertFalse(Path(Photo.opened[0]).parent.exists())
         self.assertIn('✓  Kaydedildi', root.canvas.texts())
@@ -640,8 +640,7 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
         self.assertEqual(self.saved_files(), [])
         placeholder, texts = root.seen[0]
         self.assertEqual(placeholder, 'Aklındakini yaz…')
-        self.assertIn('Panodaki görüntü eklenmeyecek', texts)
-        self.assertIn('8×5 · az önce · Tab ile ekle', texts)
+        self.assertIn('Panoda bir görüntü var  ·  8×5 · az önce', texts)
         self.assertFalse(Path(Photo.opened[0]).parent.exists())
 
     def test_old_screenshot_waits_for_tab(self):
@@ -656,11 +655,11 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
             self.assertEqual(self.saved_files(), [])
             placeholder, texts = root.seen[0]
             self.assertEqual(placeholder, 'Aklındakini yaz…')
-            self.assertIn('Panodaki görüntü eklenmeyecek', texts)
+            self.assertTrue(any(text.startswith('Panoda bir görüntü var') for text in texts))
         result, root, _ = self.popup(REPORTED, self.bitmap, [('key', '<Tab>'), ('look', None), ('type', 'eski hata'), ('key', '<Return>')])
         self.assertEqual(result['kaynak_turu'], 'dosya')
         self.assertEqual(len(self.saved_files()), 1)
-        self.assertIn('8×5 · eski, geçici dosyası silinmiş · Tab ile çıkar', root.seen[0][1])
+        self.assertIn('Panodaki görüntü eklenecek  ·  8×5 · eski, geçici dosyası silinmiş', root.seen[0][1])
 
     def test_picture_of_unknown_age_waits_for_tab(self):
         # No temp file next to it (a copied web image, an old PrtScn): shown, told how to add it, not attached.
@@ -670,9 +669,7 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
         self.assertEqual(self.saved_files(), [])
         placeholder, texts = root.seen[0]
         self.assertEqual(placeholder, 'Aklındakini yaz…')
-        self.assertIn('GÖRSEL', texts)
-        self.assertIn('Panodaki görüntü eklenmeyecek', texts)
-        self.assertIn('8×5 · Tab ile ekle', texts)
+        self.assertIn('Panoda bir görüntü var  ·  8×5', texts)
         self.assertFalse(Path(Photo.opened[0]).parent.exists())
         result, root, _ = self.popup('', self.bitmap, [('key', '<Tab>'), ('look', None), ('key', '<Return>')])
         self.assertEqual(result['kaynak_turu'], 'dosya')
@@ -680,8 +677,7 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
         self.assertIn('_(not yok)_', self.card(result)['body'])
         placeholder, texts = root.seen[0]
         self.assertEqual(placeholder, 'Neden kaydediyorsun?')
-        self.assertIn('Panodaki görüntü', texts)
-        self.assertIn('8×5 · Tab ile çıkar', texts)
+        self.assertIn('Panodaki görüntü eklenecek  ·  8×5', texts)
 
     def test_tab_twice_puts_it_back_and_enter_alone_saves_the_picture(self):
         script = [('key', '<Tab>'), ('key', '<Tab>'), ('look', None), ('key', '<Return>')]
@@ -697,7 +693,7 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
             Photo.opened = []
             result, root, _ = self.popup(clip, self.bitmap, keys + [('key', '<Return>'), ('look', None), ('key', '<Escape>')])
             self.assertEqual(result, {'status': 'vazgecildi'}, clip)
-            self.assertIn('Önce bir şey yaz', root.seen[0][1])
+            self.assertIn('Önce bir şey yaz ya da söyle', root.seen[0][1])
             self.assertFalse((self.vault / INBOX).exists())
             self.assertFalse(Path(Photo.opened[0]).parent.exists())
 
@@ -716,7 +712,7 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
         self.assertIn('## Neden\n\nbütçe', body)
         self.assertEqual(self.saved_files(), [])
         probe.assert_not_called()
-        self.assertNotIn('GÖRSEL', root.seen[0][1])
+        self.assertFalse(any('Panoda' in text for text in root.seen[0][1]))
         self.assertEqual(Photo.opened, [])
 
     def test_without_a_picture_the_popup_is_unchanged(self):
@@ -725,7 +721,7 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
             self.assertEqual(result['kaynak_turu'], 'metin')
             self.assertIn('> aklıma gelen', self.card(result)['body'])
             self.assertEqual(root.seen[0][0], 'Aklındakini yaz…')
-            self.assertNotIn('GÖRSEL', root.seen[0][1])
+            self.assertFalse(any('Panoda' in text for text in root.seen[0][1]))
         # The reader found no picture: the path text is saved exactly as it was before the fix.
         result, _, _ = self.popup(REPORTED, {'image': False, 'png': None, 'dib': None}, [('key', '<Return>')])
         self.assertEqual(result['kaynak_turu'], 'metin')
