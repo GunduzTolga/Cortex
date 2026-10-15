@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.8" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.8-E8B23A">
+  <img alt="Sürüm 1.0.9" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.9-E8B23A">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
   <img alt="Telemetri yok" src="https://img.shields.io/badge/telemetri-yok-1B1712">
@@ -286,7 +286,7 @@ YouTube'da önce altyazı kullanılır, yoksa ses yalnız yerelde yazıya dökü
 **Sesle yazma (Windows, isteğe bağlı):** `py -3 beyin.py ses kur` ile pencereye konuşarak yazarsın.
 - Mikrofona tıkla ya da Ctrl+Alt+B'ye yeniden bas; sonda "kaydet" dersen kart kaydedilir.
 - `beyin.py ses ayar --uyandirma ac` ile "Pyn, not al" demek pencereyi açar.
-- Ses bilgisayardan çıkmaz; çeviriyi yerelde Whisper yapar. [Ayrıntılar](docs/v3/YAKALA.md#sesle-yazma-windows-isteğe-bağlı)
+- Ses bilgisayardan çıkmaz; çeviriyi yerelde Whisper yapar, NVIDIA, AMD Radeon ve Intel Arc kartlarda ekran kartında. [Ayrıntılar](docs/v3/YAKALA.md#sesle-yazma-windows-isteğe-bağlı)
 
 ### Ananas teması
 
@@ -370,6 +370,7 @@ Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama ya da her s
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.9](docs/v3/releases/1.0.9.md) | Sesle yazma AMD Radeon ve Intel Arc kartlarda da ekran kartında (whisper.cpp, Vulkan); NVIDIA'da CUDA, olmazsa işlemci. Pyn'in yeni yüzü: Claude Design'ın vektör çizimi, sohbette ve Obsidian'da. |
 | [1.0.8](docs/v3/releases/1.0.8.md) | Masaüstü uygulaması (önizleme): Pyn sohbeti (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code; yerel modeller için LM Studio ve Ollama), Obsidian'sız notlar, grafik, araç girişleri ve API anahtarları, ayarlar. Yakala'da isteğe bağlı sesle yazma ve "Pyn, not al" (yerel Whisper). |
 | [1.0.7](docs/v3/releases/1.0.7.md) | Yakala güvenliği (yalnız herkese açık adresler, Windows komut satırı koruması), Türkçe karakterli kısayollar, `Win+Shift+S` ekran görüntüsü; daha hızlı senkron; `pyn` yeni sürümü haber verir, `pyn guncelle`; marka kuralları. |
 | [1.0.6](docs/v3/releases/1.0.6.md) | `pyn kur` Claude Code'a Pyn durum satırı, Windows Terminal'e Pyn profili ekler; menüde yeşil/kırmızı durum noktaları; `pyn kontrol` eski istemcileri bulur; OpenCode 2.x'te de önbellek korunur. |
