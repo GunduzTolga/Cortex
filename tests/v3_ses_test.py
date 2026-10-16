@@ -94,6 +94,14 @@ class WordsTest(unittest.TestCase):
             self.assertEqual(ses.command_of(note), (None, note), note)
         self.assertEqual(ses.command_of('Pyn gönder', after_name=[]), (None, 'Pyn gönder'), 'the list is a setting')
 
+    def test_the_small_models_sound_alikes_are_turkish_words_in_a_note_not_the_name(self):
+        # "bin", "pay", "bayan" stand for Pyn only to the wake listener; Whisper writes the name.
+        for note in ("Ali'ye beş bin gönder", 'Fiyat on bin tamam', 'Kira bitti, pay bitti'):
+            self.assertEqual(ses.command_of(note), (None, note), note)
+        self.assertEqual(ses.command_of('Maaş on bin, kaydet'), ('kaydet', 'Maaş on bin'))
+        self.assertEqual(ses.command_of('Bin kaydet'), ('kaydet', 'Bin'))
+        self.assertTrue(ses.wake_heard('pay not al'), 'still the name to the wake listener')
+
     def test_what_whisper_makes_up_for_silence_is_never_a_note(self):
         for made_up in ('Altyazı M.K.', 'İzlediğiniz için teşekkürler.', 'Abone olmayı unutmayın!', '[BLANK_AUDIO]', '[Müzik]'):
             self.assertEqual(ses.clean_spoken(made_up), '', made_up)

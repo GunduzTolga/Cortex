@@ -260,8 +260,10 @@ def _without_last_words(text, count):
 
 
 def _named(word):
-    """Whether a word is Pyn's name however the model wrote it (Pyn, pin, pın, pen...)."""
-    return word in NAME_SPELLINGS or word == 'pyn'
+    """Whether a word is Pyn's name however Whisper wrote it (Pyn, pin, Payn, pen...). Not the
+    small model's sound-alikes (WAKE_NAMES): those are Turkish words, and in a note "on bin
+    kaydet" or "Ali'ye beş bin gönder" is about a thousand."""
+    return (word in NAME_SPELLINGS or word == 'pyn') and word not in WAKE_NAMES
 
 
 def command_of(text, commands=None, after_name=None):
