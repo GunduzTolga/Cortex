@@ -92,10 +92,16 @@ Pencereye konuşarak yazarsın; ses bilgisayardan çıkmaz, çeviriyi yerelde Wh
    - **"Pyn, kaydet"** de (ya da yalnız "kaydet"): yazılır ve kaydedilir, hiç tuşa basmadan. **"Pyn, gönder"**, **"Pyn, tamam"** ve **"Pyn, bitti"** de kaydeder; bunlar yalnız Pyn'in adından sonra sayılır, "Raporu Ali'ye gönder" nottur.
    - **Enter**'a bas: dinleme biter, söylediğin yazılır ve kaydedilir.
    - **Ctrl+Alt+C**'ye yeniden bas: dinleme biter, söylediğin yazılır; Enter ile kaydedersin.
-4. Tek başına **"sil"** kutuyu temizler. Tek başına **"iptal"** ya da **"vazgeç"** pencereyi kapatır. **Esc**, duyduğunu bırakır ve pencereyi kapatır.
+4. Düzeltmek için:
+   - **"Son kelimeyi sil"**: son kelimeyi geri alır. **"Son cümleyi sil"**: son cümleyi geri alır. İkisi de tek başına ya da cümlenin sonunda söylenebilir ("Saat beş, son kelimeyi sil").
+   - **"Hepsini sil"** (ya da tek başına "sil", "temizle"): kutuyu boşaltır.
+   - Tek başına **"iptal"** ya da **"vazgeç"** pencereyi kaydetmeden kapatır. **Esc**, duyduğunu bırakır ve pencereyi kapatır.
+   - Her komutun önüne Pyn'in adı gelebilir: "Pyn, son cümleyi sil".
 5. Klavyeyle yazmaya başlarsan mikrofon kapanır; yeniden konuşmak için mikrofona tıkla. Bir süre hiç ses gelmezse dinleme kendiliğinden biter, mikrofon açık kalmaz.
 
-Pencere alanın hemen altında o an ne yapacağını yazar. Birkaç saniye mikrofondan ses gelmezse bunu söyler: mikrofon kapalı ya da sessizde olabilir, ya da Windows başka bir mikrofonu dinletiyordur. Kendiliğinden dinlemeyi kapatmak için: masaüstü uygulamasında Ayarlar → Sesle yazma → "Pencere açılınca dinle" ya da `beyin.py ses ayar --otomatik kapat`.
+Uzun bir not alt satıra geçer; alan dört satıra kadar büyür, sonrası kayar. Pencere alanın hemen altında o an ne yapacağını, en altta da söyleyebileceğin komutları yazar. Birkaç saniye mikrofondan ses gelmezse bunu söyler: mikrofon kapalı ya da sessizde olabilir, ya da Windows başka bir mikrofonu dinletiyordur. Kendiliğinden dinlemeyi kapatmak için: masaüstü uygulamasında Ayarlar → Sesle yazma → "Pencere açılınca dinle" ya da `beyin.py ses ayar --otomatik kapat`.
+
+**Komutların sözlerini değiştirmek:** masaüstü uygulamasında Ayarlar → Sesle yazma → Sesli komutlar. Her komut için birden çok söz virgülle yazılır; "İlk hallerine döndür" varsayılanlara döner. Değişiklik bir sonraki cümleden geçerlidir, dinleyici yeniden başlamaz. Terminalden: `beyin.py ses ayar --komutlar '{"kaydet": ["kaydet", "tamamdır"]}'`; bir söz iki komutta birden olamaz.
 
 Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya da "bu satırı sil" olduğu gibi yazılır. Whisper'ın sessizliğe uydurduğu "Altyazı M.K." gibi satırlar not olmaz; bir cümlenin sonuna uydurulduklarında kesilir, sondaki "kaydet" yine sayılır. Her cümle konuşmanın biraz öncesinden biraz sonrasına kesilip yazıya çevrilir, uzun sessizlik Whisper'a verilmez.
 
@@ -103,7 +109,8 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
 - "Pyn, not al" deyince pencere Ctrl+Alt+C'ye basmışsın gibi açılır ve dinlemeye başlar. Bitince "Pyn, kaydet" de: tuşsuz not.
 - Başta kapalıdır, çünkü açıkken mikrofon sürekli dinler.
 - Sözü küçük bir Türkçe Vosk modeli yakalar, böylece kimse konuşmazken Whisper çalışmaz ve işlemci boşuna yorulmaz.
-- Küçük model "Pyn"i bilmez: gerçek bir sesle çoğu zaman yalnız "not al"ı duyar, önündeki kelimeyi tanımaz ("[unk] not al"). O zaman son birkaç saniyeyi Whisper dinler; Pyn'in adını ("Pyn", "Payn", "Pain"…) duyarsa pencere açılır. "Bunu not al" ya da tek başına "not al" açmaz. Whisper bakarken kayıt başlamıştır: sözden sonra söylediğin kaybolmaz.
+- Küçük model "Pyn"i bilmez: gerçek bir sesle çoğu zaman yalnız "not al"ı duyar, önündeki kelimeyi tanımaz ("[unk] not al"); başka bir konuşmayı da sözün kendisi sanabilir. Bu yüzden ne duyarsa duysun son birkaç saniyeyi Whisper dinler; Pyn'in adını ("Pyn", "Payn", "Pain"…) duyarsa pencere açılır. "Bunu not al", tek başına "not al" ya da oyunda konuşurken söylenenler açmaz. Whisper bakarken kayıt başlamıştır: sözden sonra söylediğin kaybolmaz.
+- Oyun oynarken ya da uzun konuşmalarda mikrofonun dinlemesini istemezsen masaüstü uygulamasının sağ alttaki simgesinden "Sürekli dinle"yi kapat.
 - **Tutmuyorsa:** `py -3 beyin.py ses dene --uyandirma` 20 saniye dinler; her denemede küçük modelin ne duyduğunu, Whisper'ın ne yazdığını ve pencerenin açılıp açılmayacağını söyler. `state/ses/isci.log` her uyandırma kararını yazar (söylediklerini değil).
 - Bluetooth kulaklıkta mikrofon açıkken müzik ve video sesi kötüleşir; bu özelliği USB ya da dahili mikrofonla kullan.
 
@@ -133,6 +140,8 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
 | `ses dene --sn 5` | Beş saniye kaydedip yazıya çevirir |
 | `ses dene --uyandirma` | 20 saniye "Pyn, not al"ı dinler; ne duyduğunu ve pencerenin açılıp açılmayacağını söyler |
 | `ses ayar --ses kapat` | Sesi kapatır |
+| `ses ayar --komutlar '{"kelime_sil": ["geri al"]}'` | Bir komutun sözlerini değiştirir (`kaydet`, `adla_kaydet`, `kelime_sil`, `cumle_sil`, `sil`, `iptal`) |
+| `ses ayar --varsayilan-komutlar` | Komutları ilk hallerine döndürür |
 | `ses kaldir` | Ortamı ve modelleri siler |
 
 Ayarlar `state/ses/ayar.json` içinde; sorun olursa `state/ses/isci.log` dosyasına bak.

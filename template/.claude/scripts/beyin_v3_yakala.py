@@ -1410,6 +1410,64 @@ def _bring_to_front(window):
         return False
 
 
+# The note field wraps and grows to this many lines as it fills; past them it scrolls.
+FIELD_LINES, FIELD_PAD = 4, 6
+
+
+def wrapped_lines(text, measure, width):
+    """How many lines `text` takes wrapped at word ends in `width` pixels, `measure` giving a
+    piece's width in the field's font: the field grows to show them (up to FIELD_LINES)."""
+    lines = 0
+    for paragraph in (text or '').split('\n'):
+        lines, used = lines + 1, 0
+        for word in paragraph.split(' '):
+            if used and used + measure(word) > width:
+                lines, used = lines + 1, 0
+            used += measure(word + ' ')
+            while used > width:  # a word longer than the line breaks inside it
+                lines, used = lines + 1, used - width
+    return max(1, lines)
+
+
+def without_last_word(text):
+    """The field with its last word taken back ("son kelimeyi sil")."""
+    return re.sub(r'\S+\s*$', '', (text or '').rstrip()).rstrip()
+
+
+def without_last_sentence(text):
+    """The field with its last sentence taken back ("son cümleyi sil"): back to the end of the
+    one before it, or empty. A full stop inside a number ("12.500") ends no sentence."""
+    text = (text or '').rstrip()
+    body = text.rstrip('.!?…').rstrip()
+    ends = [match.end() for match in re.finditer(r'[.!?…]+(?=\s)', body)]
+    return text[:ends[-1]].rstrip() if ends else ''
+
+
+def spoken_commands_line(commands):
+    """The voice panel's line of what can be said, each command by its first words (for
+    "sil", the longest: "hepsini sil" says what it does)."""
+    parts = []
+    for name in ('kaydet', 'kelime_sil', 'cumle_sil', 'sil', 'iptal'):
+        said = [' '.join(one.split()) for one in (commands or {}).get(name) or [] if isinstance(one, str) and one.strip()]
+        if name == 'sil':
+            said.sort(key=lambda one: -len(one.split()))
+        if said:
+            parts.append('“' + ('Pyn, ' if name == 'kaydet' else '') + said[0] + '”')
+    return 'Sesli komutlar: ' + ' · '.join(parts) if parts else ''
+
+
+def _spoken_commands(state):
+    """The voice commands as set in state/ses (beyin_v3_ses), their defaults where it cannot say."""
+    try:
+        import beyin_v3_ses as ses
+    except Exception:
+        return {}
+    try:
+        return ses.load_config(state)['komutlar'] if state is not None else ses.DEFAULTS['komutlar']
+    except Exception:
+        return ses.DEFAULTS['komutlar']
+
+
 def with_spoken(current, spoken):
     """The field after something was said into it: what was typed, then the spoken words."""
     spoken = (spoken or '').strip()
@@ -1496,23 +1554,52 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         canvas.create_text(W - pad, y, text=_fit(canvas, source.upper(), _font(10, 'bold', 'label'), 300), anchor='e',
                            fill=P['muted'], font=_font(10, 'bold', 'label'))
 
-    # Main field: large, borderless, with a placeholder; the microphone at its right end.
+    # Main field: large, borderless, with a placeholder; the microphone at its right end. It
+    # wraps and grows as it fills, up to FIELD_LINES lines; past them it scrolls.
+    import tkinter.font as tkfont
     y = 68
-    entry = tk.Entry(root, font=_font(20), fg=P['text'], bg=P['bg'], insertbackground=P['text'], insertwidth=2,
-                     relief='flat', bd=0, highlightthickness=0)
+    field_font = _font(20)
+    entry = tk.Text(root, font=field_font, fg=P['text'], bg=P['bg'], insertbackground=P['text'], insertwidth=2,
+                    relief='flat', bd=0, highlightthickness=0, wrap='word', height=1, padx=0, pady=FIELD_PAD, undo=False)
+    # The window's keys before the field's own: Enter saves and Tab toggles, never a line break
+    # or a tab in the note.
+    entry.bindtags((str(entry), str(root), 'Text', 'all'))
+    root.bind('<Tab>', lambda _event: 'break')  # taken over below where Tab has something to do
     mics = _mic_images(root) if voice is not None else None
     mic_room = ((mics['bos'].width() if mics else 44) + 18) if voice is not None else 0
-    canvas.create_window(pad, y, window=entry, anchor='nw', width=W - 2 * pad - mic_room, height=44)
+    field_width = W - 2 * pad - mic_room
+    field_metrics = tkfont.Font(root=root, font=field_font)
+    line_height = int(field_metrics.metrics('linespace') or 32)
+    field = {'lines': 1, 'bottom': y + line_height + 2 * FIELD_PAD}
+    field_item = canvas.create_window(pad, y, window=entry, anchor='nw', width=field_width, height=line_height + 2 * FIELD_PAD)
     placeholder_text = 'Neden kaydediyorsun?' if (url or files or clip_text) else 'Aklındakini yaz…'
     hint = {'on': False}
     # Typing in the field while it listens lets the microphone go (set with the microphone below).
     typing = {'stop': None}
+    # What the window does when the field takes another line: set once the layout below is drawn.
+    layout = {'grow': lambda _by: None}
+
+    def field_text():
+        return entry.get('1.0', 'end-1c')
+
+    def fit_field():
+        lines = min(FIELD_LINES, wrapped_lines(field_text(), field_metrics.measure, field_width - 4))
+        if lines != field['lines']:
+            grow = (lines - field['lines']) * line_height
+            field['lines'] = lines
+            entry.configure(height=lines)
+            canvas.itemconfigure(field_item, height=lines * line_height + 2 * FIELD_PAD)
+            layout['grow'](grow)
+
+    def set_field(text):
+        entry.delete('1.0', 'end')
+        entry.insert('1.0', text)
+        fit_field()
 
     def show_hint():
-        entry.delete(0, 'end')
-        entry.insert(0, placeholder_text)
+        set_field(placeholder_text)
         entry.configure(fg=P['faint'])
-        entry.icursor(0)
+        entry.mark_set('insert', '1.0')
         hint['on'] = True
 
     def on_key(event):
@@ -1520,31 +1607,34 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             typing['stop']()
         # Embedded windows sit above canvas items, so the hint lives inside the field itself.
         if hint['on'] and (event.char and event.char.isprintable() or event.keysym in ('BackSpace', 'Delete')):
-            entry.delete(0, 'end')
+            entry.delete('1.0', 'end')
             entry.configure(fg=P['text'])
             hint['on'] = False
             if event.keysym in ('BackSpace', 'Delete'):
                 return 'break'
-        if hint['on'] and event.keysym in ('Left', 'Right', 'Home', 'End'):
+        if hint['on'] and event.keysym in ('Left', 'Right', 'Up', 'Down', 'Home', 'End'):
             return 'break'
 
     def after_key(_event=None):
-        if not hint['on'] and not entry.get():
+        if not hint['on'] and not field_text():
             show_hint()
+        else:
+            fit_field()
 
     def on_paste(_event=None):
         if typing['stop']:
             typing['stop']()
         if hint['on']:
-            entry.delete(0, 'end')
+            entry.delete('1.0', 'end')
             entry.configure(fg=P['text'])
             hint['on'] = False
+        root.after_idle(fit_field)  # once the pasted text is in
     entry.bind('<KeyPress>', on_key)
     entry.bind('<<Paste>>', on_paste, add='+')
     entry.bind('<KeyRelease>', after_key)
-    entry.bind('<Button-1>', lambda _e: (entry.focus_set(), entry.icursor(0), 'break')[-1] if hint['on'] else None)
+    entry.bind('<Button-1>', lambda _e: (entry.focus_set(), entry.mark_set('insert', '1.0'), 'break')[-1] if hint['on'] else None)
     show_hint()
-    y += 58
+    y = field['bottom'] + 14
     canvas.create_line(pad, y, W - pad, y, fill=P['line'], width=1.5)
     y += 18
 
@@ -1553,7 +1643,10 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         voice_y = y + 8
         voice_line = canvas.create_text(pad, voice_y, anchor='w', fill=P['muted'], font=_font(12), text='')
         voice_help = canvas.create_text(pad, voice_y + 22, anchor='w', fill=P['faint'], font=_font(11), text='')
-        y += 50
+        said = spoken_commands_line(_spoken_commands(state))
+        canvas.create_text(pad, voice_y + 42, anchor='w', fill=P['muted'], font=_font(11),
+                           text=_fit(canvas, said, _font(11), W - 2 * pad))
+        y += 70 if said else 50
 
     def compact(kind, headline, detail):
         nonlocal y
@@ -1620,8 +1713,22 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
     height = footer_y + 30
     canvas.configure(height=height)
     # A paper window on a light desktop needs its own edge: the ink frame of the Ananas sheet.
-    canvas.create_rectangle(1, 1, W - 1, height - 1, outline=P['card_line'], width=2)
+    frame = canvas.create_rectangle(1, 1, W - 1, height - 1, outline=P['card_line'], width=2)
     result = {}
+
+    def grow(by):
+        """The field took another line, or gave one back: what is below it moves, the window with it."""
+        nonlocal height
+        for item in canvas.find_all():
+            box = canvas.bbox(item)
+            if item != frame and box and box[1] >= field['bottom'] - 1:
+                canvas.move(item, 0, by)
+        field['bottom'] += by
+        height += by
+        canvas.configure(height=height)
+        canvas.coords(frame, 1, 1, W - 1, height - 1)
+        root.geometry('%dx%d' % (W, height))
+    layout['grow'] = grow
 
     def close():
         def fade(alpha):
@@ -1638,7 +1745,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
 
     def save(_event=None):
         text = clip_text if include['on'] else None
-        why = '' if hint['on'] else entry.get().strip()
+        why = '' if hint['on'] else field_text().strip()
         if not (url or files or text or why):
             canvas.itemconfigure(status, text='Önce bir şey yaz ya da söyle', fill=P['bad'])
             return 'break'
@@ -1653,7 +1760,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         if voice is not None and voice_mode['now'] in ('bekliyor', 'dinliyor'):
             voice.worker.send('iptal')  # saved: the microphone goes with the window
         voice_mode['continuous'] = False
-        entry.configure(state='disabled', disabledbackground=P['bg'], disabledforeground=P['muted'])
+        entry.configure(state='disabled', fg=P['muted'])
         canvas.itemconfigure(status, text='✓  Kaydedildi', fill=P['ok'], font=_font(12, 'bold'))
         root.after(520, close)
         return 'break'
@@ -1670,7 +1777,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         # The microphone: a round button at the field's end (a picture, smooth); a canvas-drawn
         # one only when the pictures cannot be read. Its states: getting ready, ready,
         # listening, writing. Its level shows as bars at the panel's right.
-        bx, by = W - pad, 90
+        bx, by = W - pad, 68 + (line_height + 2 * FIELD_PAD) // 2
         if mics:
             canvas.mics = mics
             button = canvas.create_image(bx, by, image=mics['kapali'], anchor='e')
@@ -1703,7 +1810,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             helper = help_text or (
                 'Konuş, ara verebilirsin · bitince “Pyn, kaydet” de ya da Enter · Esc: vazgeç' if listening_now and voice_mode['continuous']
                 else 'Susunca yazarım · “kaydet” ya da Enter: kaydet · Esc: vazgeç' if listening_now
-                else 'Sesli komutlar: sonda “kaydet” kaydeder · tek başına “sil” temizler, “iptal” kapatır')
+                else 'Ya da yaz · Enter kaydeder, Esc kapatır')
             colour = P[tone] if tone else (P['text'] if listening_now else P['muted'])
             line_font = _font(12, 'bold') if listening_now or tone else _font(12)
             canvas.itemconfigure(voice_line, text=_fit(canvas, text, line_font, W - 2 * pad - (50 if listening_now else 0)),
@@ -1711,18 +1818,18 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             canvas.itemconfigure(voice_help, text=_fit(canvas, helper, _font(11), W - 2 * pad))
             if hint['on']:
                 # The empty field says where the words will go while it listens.
-                entry.delete(0, 'end')
-                entry.insert(0, 'Konuş, ben yazayım…' if listening_now else placeholder_text)
-                entry.icursor(0)
+                set_field('Konuş, ben yazayım…' if listening_now else placeholder_text)
+                entry.mark_set('insert', '1.0')
 
         def level(value):
             # Five bars, the middle ones the tallest, each as high as the voice is loud.
             value = min(1.0, float(value or 0))
             heard['peak'] = max(heard['peak'], value)
+            middle = canvas.coords(voice_line)[1]  # the panel moves down as the field grows
             for i, bar in enumerate(bars):
                 height = 2 + round(value * (11 - 3 * abs(2 - i)))
                 x1, _y1, x2, _y2 = canvas.coords(bar)
-                canvas.coords(bar, x1, voice_y - height, x2, voice_y + height)
+                canvas.coords(bar, x1, middle - height, x2, middle + height)
             # Three seconds of listening and nothing came in: the microphone is muted, or another one is listened to.
             if heard['since'] is not None and time_now() - heard['since'] > 3 and heard['peak'] < 0.02:
                 heard['since'] = None
@@ -1759,13 +1866,25 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             if not spoken:
                 return
             if hint['on']:
-                entry.delete(0, 'end')
+                entry.delete('1.0', 'end')
                 entry.configure(fg=P['text'])
                 hint['on'] = False
-            merged = with_spoken(entry.get(), spoken)
-            entry.delete(0, 'end')
-            entry.insert(0, merged)
-            entry.icursor('end')
+            set_field(with_spoken(field_text(), spoken))
+            entry.mark_set('insert', 'end')
+            entry.see('end')
+
+        def take_back(command):
+            """"son kelimeyi sil" or "son cümleyi sil" said: the field without its last word or sentence."""
+            if hint['on']:
+                return
+            rest = without_last_word(field_text()) if command == 'kelime_sil' else without_last_sentence(field_text())
+            if rest:
+                set_field(rest)
+                entry.mark_set('insert', 'end')
+                entry.see('end')
+            else:
+                show_hint()
+                voice_set(voice_mode['now'])
 
         def voice_event(event):
             kind = event.get('olay')
@@ -1802,11 +1921,15 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                 if event.get('komut') == 'sil':
                     show_hint()
                     voice_set(voice_mode['now'])
+                elif event.get('komut') in ('kelime_sil', 'cumle_sil'):
+                    take_back(event.get('komut'))
             elif kind == 'metin':
                 heard['since'] = None
                 voice_set('hazir')
                 spoken, command = event.get('metin') or '', event.get('komut')
                 write_in(spoken)
+                if command in ('kelime_sil', 'cumle_sil'):
+                    take_back(command)
                 wanted, pending['save'] = pending['save'], False
                 if command == 'kaydet' or (wanted and (spoken or not hint['on'])):
                     save()
@@ -1820,7 +1943,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                 elif voice_mode['continuous']:
                     # The helper ended a dictation nobody spoke into for a while: no microphone stays open by itself.
                     voice_mode['continuous'] = False
-                    if not spoken:
+                    if not spoken and command is None:
                         voice_set('hazir', 'Bir süredir ses gelmedi; dinlemeyi bıraktım', None, 'Konuşmak için mikrofona tıkla')
             elif kind == 'hata':
                 pending['save'] = False
@@ -2256,13 +2379,14 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
             _write_listener_state(state, son_pencere=time_now())
 
         if link is not None:
-            if ticks[0] % 80 == 0:  # the wake word switched on or off with `ses ayar`
+            if ticks[0] % 80 == 0:  # the wake word or the commands changed with `ses ayar`
                 try:
                     path = ses.ses_dir(state) / ses.CONFIG
                     mtime = path.stat().st_mtime if path.exists() else None
                     if mtime != voice_config['mtime']:
                         voice_config['mtime'] = mtime
                         link.worker.send('uyandirma', acik=bool(ses.load_config(state).get('uyandirma')))
+                        link.worker.send('ayar')
                 except OSError:
                     pass
             for event in link.worker.take():
@@ -2273,6 +2397,8 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
                     link.ready = False
                 if kind == 'uyandi' and not windows:
                     open_window(windows_context(), listening=True)  # "Pyn, not al": the window opens listening
+                    if windows and hasattr(windows[-1], 'voice_event'):
+                        windows[-1].voice_event(event)  # and says which microphone it listens to
                     continue
                 if windows and hasattr(windows[-1], 'voice_event'):
                     windows[-1].voice_event(event)

@@ -85,9 +85,13 @@ DEFAULTS = {
     'en_uzun_sn': 120,
     'mikrofon': None,
     'ipucu': 'Cortex, Pyn, yakala, kasa, not, makbuz, Claude, Codex.',
+    # Said alone, with or without Pyn's name before: "sil" empties the field, "iptal" closes it.
+    # "kaydet" and taking the last word or sentence back count at a sentence's end too.
     'komutlar': {
         'kaydet': ['kaydet'],
-        'sil': ['sil', 'temizle'],
+        'sil': ['sil', 'temizle', 'hepsini sil'],
+        'kelime_sil': ['son kelimeyi sil'],
+        'cumle_sil': ['son cümleyi sil'],
         'iptal': ['iptal', 'vazgeç'],
     },
     # These save only right after Pyn's name ("…, Pyn gönder"); anywhere else they are the note's words.
@@ -132,6 +136,17 @@ def worker_command(state, *extra):
             '--state', str(state), *extra]
 
 
+COMMANDS = tuple(DEFAULTS['komutlar'])
+# Commands that count at the end of a sentence too ("…, kaydet"); the others only said alone.
+AT_END = ('kaydet', 'kelime_sil', 'cumle_sil')
+# A command's words as earlier versions wrote them into every settings file: the new default.
+OLD_COMMANDS = {'sil': (['sil', 'temizle'],)}
+# What a person may set a command's words to.
+MOST_PHRASES, LONGEST_PHRASE = 8, 40
+# What a running helper takes up when the settings file changes (`ayar`); the rest needs a restart.
+LIVE_SETTINGS = ('komutlar', 'adla_kaydet', 'sessizlik_sn', 'en_uzun_sn', 'surekli_bekle_sn', 'ipucu')
+
+
 def load_config(state):
     config = json.loads(json.dumps(DEFAULTS))
     try:
@@ -141,10 +156,56 @@ def load_config(state):
     if isinstance(saved, dict):
         for key, value in saved.items():
             if key == 'komutlar' and isinstance(value, dict):
-                config['komutlar'].update({k: list(v) for k, v in value.items() if isinstance(v, list)})
+                config['komutlar'].update({k: list(v) for k, v in value.items()
+                                           if isinstance(v, list) and list(v) not in OLD_COMMANDS.get(k, ())})
             elif key in DEFAULTS:
                 config[key] = value
     return config
+
+
+def commands_from(text, config):
+    """(komutlar, adla_kaydet) from `ses ayar --komutlar` JSON: {command: [words], ...} and
+    'adla_kaydet', each given replacing that list, the rest kept. Each phrase tidied; a phrase
+    said for two things, one too long, or one without a word is refused, so the setting is
+    always one the helper can tell apart."""
+    try:
+        asked = json.loads(text)
+    except ValueError:
+        asked = None
+    if not isinstance(asked, dict):
+        raise SystemExit('Komutlar JSON olarak verilmeli: {"kaydet": ["kaydet", "tamam"]}')
+    commands = {name: list(config['komutlar'].get(name, DEFAULTS['komutlar'][name])) for name in COMMANDS}
+    after_name = list(config.get('adla_kaydet') or [])
+    for name, phrases in asked.items():
+        if name not in COMMANDS + ('adla_kaydet',):
+            raise SystemExit('Bilinmeyen komut: %s (%s)' % (name, ', '.join(COMMANDS + ('adla_kaydet',))))
+        if not isinstance(phrases, list) or not all(isinstance(one, str) for one in phrases):
+            raise SystemExit('%s: sözler bir liste olmalı' % name)
+        kept = []
+        for phrase in phrases:
+            phrase = ' '.join(phrase.split())
+            if not phrase:
+                continue
+            if len(phrase) > LONGEST_PHRASE:
+                raise SystemExit('“%s…” çok uzun; bir komut en fazla %d harf' % (phrase[:20], LONGEST_PHRASE))
+            if not words(phrase):
+                raise SystemExit('“%s” bir kelime değil' % phrase)
+            if ' '.join(words(phrase)) not in {' '.join(words(one)) for one in kept}:
+                kept.append(phrase)
+        if len(kept) > MOST_PHRASES:
+            raise SystemExit('%s: en fazla %d söz' % (name, MOST_PHRASES))
+        if name == 'adla_kaydet':
+            after_name = kept
+        else:
+            commands[name] = kept
+    owner = {}
+    for name, phrases in list(commands.items()) + [('adla_kaydet', after_name)]:
+        for phrase in phrases:
+            said = ' '.join(words(phrase))
+            if owner.get(said, name) != name and {owner[said], name} != {'kaydet', 'adla_kaydet'}:
+                raise SystemExit('“%s” iki komutta birden var; hangisi olduğunu ayırt edemem' % phrase)
+            owner.setdefault(said, name)
+    return commands, after_name
 
 
 def save_config(state, config):
@@ -195,10 +256,25 @@ def _name_like(word, head):
     return any(difflib.SequenceMatcher(None, word, form).ratio() >= 0.6 for form in forms)
 
 
+def _apart(got, said, ends=None):
+    """Heard words with the phrase's own words written as one taken apart: Whisper writes
+    "not al" as "notal" too. With `ends` (where each word ends in the text), theirs alongside."""
+    joined = {''.join(said[i:j]): said[i:j] for i in range(len(said)) for j in range(i + 2, len(said) + 1)}
+    words_out, ends_out = [], []
+    for at, word in enumerate(got):
+        parts = joined.get(word, [word])
+        words_out.extend(parts)
+        if ends is not None:
+            ends_out.extend([ends[at]] * len(parts))
+    return (words_out, ends_out) if ends is not None else words_out
+
+
 def wake_heard(text, phrase=DEFAULTS['uyandirma_sozu']):
     """Whether the wake phrase is in what was heard. The rest of the phrase must be there as
-    said ("not al"); the name before it is matched loosely, since nobody spells "Pyn" alike."""
-    want, got = words(phrase), words(text)
+    said ("not al", or "notal" as one word); the name before it is matched loosely, since nobody
+    spells "Pyn" alike."""
+    want = words(phrase)
+    got = _apart(words(text), want)
     if not want:
         return False
     head, tail = want[0], want[1:]
@@ -216,7 +292,8 @@ def wake_verdict(text, phrase=DEFAULTS['uyandirma_sozu']):
     Whisper decides from the sound (wake_heard on what it writes). None otherwise."""
     if wake_heard(text, phrase):
         return 'soz'
-    tail, got = words(phrase)[1:], words(text)
+    tail = words(phrase)[1:]
+    got = _apart(words(text), words(phrase))
     if tail and any(got[at:at + len(tail)] == tail for at in range(len(got) - len(tail) + 1)):
         return 'aday'
     return None
@@ -240,8 +317,8 @@ def wake_grammar(phrase=DEFAULTS['uyandirma_sozu']):
 def without_wake(text, phrase=DEFAULTS['uyandirma_sozu']):
     """Dictation begun by the wake phrase, without what of the phrase its recording caught at the
     start ("al.", "not al,", "Pyn, not al"): the note begins after it."""
-    said, got = words(phrase), words(text)
-    ends = [m.end() for m in re.finditer(r'\w+', tr_lower(text))]
+    said = words(phrase)
+    got, ends = _apart(words(text), said, [m.end() for m in re.finditer(r'\w+', tr_lower(text))])
     for size in range(len(said), 0, -1):
         if len(got) < size or got[1:size] != said[len(said) - size + 1:]:
             continue
@@ -249,6 +326,18 @@ def without_wake(text, phrase=DEFAULTS['uyandirma_sozu']):
         if got[0] == first or (size == len(said) and _name_like(got[0], first)):
             return text[ends[size - 1]:].lstrip(' ,.;:!?…-').strip()
     return text.strip()
+
+
+def mic_label(name, names=()):
+    """A microphone's name for a person: whole where Windows' oldest sound API cut it at 31
+    letters (another API lists it whole), and its own name without "Microphone (…)" around it."""
+    name = (name or '').strip()
+    if len(name) >= 31:
+        longer = [one for one in names if isinstance(one, str) and one.startswith(name) and len(one) > len(name)]
+        if longer:
+            name = min(longer, key=len)
+    inner = re.match(r'^(?:microphone|mikrofon|mic)\s*\((.+?)\)?$', name, re.IGNORECASE)
+    return inner.group(1).strip() if inner else name
 
 
 def _without_last_words(text, count):
@@ -269,8 +358,9 @@ def _named(word):
 def command_of(text, commands=None, after_name=None):
     """(command, text to write) for what was said.
 
-    "kaydet" counts only at the very end ("Toplantı notu, kaydet" writes and saves); "sil" and
-    "iptal" only when said alone. Anywhere else a command word is just a word: "notu kaydettim"
+    "kaydet" counts only at the very end ("Toplantı notu, kaydet" writes and saves), as do
+    "son kelimeyi sil" and "son cümleyi sil" (the window writes, then takes the word or the
+    sentence back); "sil" ("hepsini sil") and "iptal" only when said alone. Anywhere else a command word is just a word: "notu kaydettim"
     and "bu satırı sil" are written as they are. Pyn's name may come before the command, as
     the wake phrase is said: "…, Pyn kaydet" saves and the name is not written. `after_name`
     ("gönder", "tamam"…) save too, but only right after the name: "Ali'ye gönder" is a note.
@@ -282,16 +372,16 @@ def command_of(text, commands=None, after_name=None):
         return None, ''
     whole = ' '.join(said)
     named_saves = {' '.join(words(p)) for p in after_name}
-    for name in ('sil', 'iptal', 'kaydet'):
+    for name in COMMANDS:
         spoken = {' '.join(words(p)) for p in commands.get(name, ())}
         named = spoken | named_saves if name == 'kaydet' else spoken
         if whole in spoken or (len(said) > 1 and _named(said[0]) and ' '.join(said[1:]) in named):
             return name, ''
-    for phrase in sorted(commands.get('kaydet', ()), key=len, reverse=True):
-        wanted = words(phrase)
-        if wanted and said[-len(wanted):] == wanted:
+    at_end = [(name, words(p)) for name in AT_END for p in commands.get(name, ())]
+    for name, wanted in sorted(at_end, key=lambda one: len(one[1]), reverse=True):
+        if wanted and len(said) >= len(wanted) and said[-len(wanted):] == wanted:
             cut = len(wanted) + (1 if len(said) > len(wanted) and _named(said[-len(wanted) - 1]) else 0)
-            return 'kaydet', _without_last_words(text, cut)
+            return name, _without_last_words(text, cut)
     for wanted in sorted((words(p) for p in after_name), key=len, reverse=True):
         if wanted and len(said) > len(wanted) and said[-len(wanted):] == wanted and _named(said[-len(wanted) - 1]):
             return 'kaydet', _without_last_words(text, len(wanted) + 1)
@@ -597,7 +687,8 @@ def status(state):
     return {'kurulu': installed(state), 'acik': bool(config['acik']), 'uyandirma': bool(config['uyandirma']),
             'uyandirma_sozu': config['uyandirma_sozu'], 'otomatik_dinle': bool(config['otomatik_dinle']),
             'model': marker.get('model'), 'ekran_karti': marker.get('ekran_karti'),
-            'motor': engine_in_use(state, config), 'klasor': str(ses_dir(state))}
+            'motor': engine_in_use(state, config), 'klasor': str(ses_dir(state)),
+            'komutlar': config['komutlar'], 'adla_kaydet': list(config.get('adla_kaydet') or [])}
 
 
 def uninstall(state):
@@ -772,6 +863,8 @@ def main(argv=None, vault=None, state=None):
     setting.add_argument('--ses', choices=('ac', 'kapat'), help='Sesle yazmayı aç ya da kapat')
     setting.add_argument('--model', help='Whisper modeli, örnek: large-v3-turbo, small')
     setting.add_argument('--motor', choices=('otomatik',) + ENGINES, help='Yazan motor: otomatik, cuda, vulkan ya da islemci')
+    setting.add_argument('--komutlar', help='Sesli komutların sözleri, JSON: {"kaydet": ["kaydet", "tamam"], "adla_kaydet": ["gönder"]}')
+    setting.add_argument('--varsayilan-komutlar', action='store_true', help='Sesli komutları ilk hallerine döndür')
     trial = sub.add_parser('dene', help='Birkaç saniye kaydedip yazıya çevir')
     trial.add_argument('--sn', type=float, help='Kaç saniye (5; --uyandirma ile 20)')
     trial.add_argument('--uyandirma', action='store_true', help='"Pyn, not al"ı dinle: ne duyduğunu ve pencerenin açılıp açılmayacağını söyler')
@@ -813,6 +906,11 @@ def main(argv=None, vault=None, state=None):
             config['model'] = config['cpu_model'] = args.model
         if args.motor:
             config['motor'] = args.motor
+        if args.varsayilan_komutlar:
+            config['komutlar'] = json.loads(json.dumps(DEFAULTS['komutlar']))
+            config['adla_kaydet'] = list(DEFAULTS['adla_kaydet'])
+        if args.komutlar is not None:
+            config['komutlar'], config['adla_kaydet'] = commands_from(args.komutlar, config)
         save_config(state, config)
         result = {'status': 'kaydedildi', **status(state),
                   'dinleyici': restart_listener(state) if args.ses or args.model or args.motor else False}
@@ -1105,7 +1203,9 @@ def _device_name(config):
     try:
         import sounddevice as sd
         index = _device(config)
-        return str(sd.query_devices(index if index is not None else sd.default.device[0])['name'])
+        devices = sd.query_devices()
+        name = devices[index if index is not None else sd.default.device[0]]['name']
+        return ses.mic_label(str(name), [str(device['name']) for device in devices])
     except Exception:
         return ''
 
@@ -1351,7 +1451,7 @@ def serve(state, config, lines=None):
     def confirmed():
         turns[turn]['checking'] = None
         out(olay='dinliyor', mikrofon=_device_name(config))
-        out(olay='uyandi')
+        out(olay='uyandi', mikrofon=_device_name(config))
 
     def piece(audio, last):
         jobs.put({'is': 'parca', 'turn': turn, 'audio': audio, 'son': last})
@@ -1456,6 +1556,13 @@ def serve(state, config, lines=None):
                     end(keep=name == 'bitir')
             elif name == 'uyandirma':
                 wake_on = bool(command.get('acik'))
+            elif name == 'ayar':
+                # The settings file changed: the commands and pauses count from the next sentence.
+                try:
+                    fresh = ses.load_config(state)
+                except Exception:
+                    fresh = {}
+                config.update({key: fresh[key] for key in ses.LIVE_SETTINGS if key in fresh})
         moment = now()
         if mode == 'kayit' and checking is not None:
             if not checking['sent'] and moment - recorder.started >= ses.WAKE_AFTER_SN:
@@ -1483,13 +1590,10 @@ def serve(state, config, lines=None):
                 if not wake.running:
                     wake.start()
                 else:
-                    verdict = wake.heard()
-                    if verdict == 'soz':
-                        log('uyandırma: küçük model sözü duydu ("%s")' % wake.text)
-                        wake.stop()
-                        if begin(continuous=True, woke=True):
-                            out(olay='uyandi')
-                    elif verdict == 'aday':
+                    # Whatever the small model heard, the phrase whole or only "not al", Whisper
+                    # checks it before a window opens: held to a grammar, the small model takes
+                    # talk for the phrase (seen during a game), and a window must not open over it.
+                    if wake.heard():
                         clip = wake.clip()
                         wake.stop()
                         begin(continuous=True, woke=True, checking={'clip': clip, 'sent': False})

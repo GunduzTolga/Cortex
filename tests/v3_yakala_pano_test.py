@@ -537,6 +537,13 @@ class Entry(Widget):
         self.handlers['<KeyRelease>'](None)
 
 
+class Text(Entry):
+    """The note field is a Tk Text: its indices are line.column."""
+
+    def get(self, *_indices):
+        return self.text
+
+
 class Canvas(Widget):
     def __init__(self, root, **_options):
         self.items = {}
@@ -588,9 +595,9 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
         roots = []
         fake = types.ModuleType('tkinter')
         fake.Tk = lambda: roots.append(Root(script)) or roots[-1]
-        fake.Canvas, fake.Entry, fake.PhotoImage, fake.TclError = Canvas, Entry, Photo, RuntimeError
+        fake.Canvas, fake.Entry, fake.Text, fake.PhotoImage, fake.TclError = Canvas, Entry, Text, Photo, RuntimeError
         fake.font = types.ModuleType('tkinter.font')
-        fake.font.Font = lambda **_options: types.SimpleNamespace(measure=lambda text: len(text) * 6)
+        fake.font.Font = lambda **_options: types.SimpleNamespace(measure=lambda text: len(text) * 6, metrics=lambda _what: 32)
         environment = {key: value for key, value in os.environ.items() if key != 'BEYIN_YAKALA_SNAPSHOT'}
         with patch.dict(sys.modules, {'tkinter': fake, 'tkinter.font': fake.font}), \
                 patch.dict(os.environ, environment, clear=True), \

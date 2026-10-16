@@ -68,6 +68,15 @@ class WordsTest(unittest.TestCase):
         for kept in ('Alışveriş listesi', 'Yarın onda', 'Notlar hazır'):
             self.assertEqual(ses.without_wake(kept), kept)
 
+    def test_whisper_writing_the_phrase_joined_is_still_the_phrase(self):
+        # Seen in the window: "Py notal. Şu an ne yapıyoruz?", the phrase left at the note's start.
+        self.assertEqual(ses.without_wake('Py notal. Şu an ne yapıyoruz?'), 'Şu an ne yapıyoruz?')
+        self.assertEqual(ses.without_wake('Notal, yarın onda'), 'yarın onda')
+        self.assertTrue(ses.wake_heard('Py notal.'))
+        self.assertTrue(ses.wake_heard('Payn notal'))
+        self.assertFalse(ses.wake_heard('Bunu notal.'))
+        self.assertEqual(ses.without_wake('Notalar hazır'), 'Notalar hazır', 'a word that only starts like it is a word')
+
     def test_kaydet_counts_at_the_end_sil_and_iptal_only_alone(self):
         self.assertEqual(ses.command_of('Toplantı notu, kaydet.'), ('kaydet', 'Toplantı notu'))
         self.assertEqual(ses.command_of('Kaydet'), ('kaydet', ''))
@@ -85,6 +94,38 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(ses.command_of('Pyn sil'), ('sil', ''))
         self.assertEqual(ses.command_of('Pinpon oynadık, kaydet'), ('kaydet', 'Pinpon oynadık'), 'only the name itself is taken off')
         self.assertEqual(ses.command_of('Market listesi, Payn kaydet.'), ('kaydet', 'Market listesi'), 'the name as Whisper writes it')
+
+    def test_the_window_takes_back_the_last_word_or_sentence(self):
+        self.assertEqual(yakala.without_last_word("Toplantı yarın Ali'ye."), 'Toplantı yarın')
+        self.assertEqual(yakala.without_last_word('tek'), '')
+        self.assertEqual(yakala.without_last_sentence('Py notal. Şu an ne yapıyoruz? Bunların hepsini kay'), 'Py notal. Şu an ne yapıyoruz?')
+        self.assertEqual(yakala.without_last_sentence('Bir. İki.'), 'Bir.')
+        self.assertEqual(yakala.without_last_sentence('Kira 12.500 lira'), '', 'a full stop inside a number ends no sentence')
+        self.assertEqual(yakala.without_last_sentence(''), '')
+
+    def test_the_field_counts_the_lines_a_note_takes_wrapped(self):
+        measure = lambda text: len(text) * 10
+        self.assertEqual(yakala.wrapped_lines('', measure, 100), 1)
+        self.assertEqual(yakala.wrapped_lines('kısa not', measure, 100), 1)
+        self.assertEqual(yakala.wrapped_lines('bir iki üç dört beş altı', measure, 100), 3)
+        self.assertEqual(yakala.wrapped_lines('a\nb', measure, 100), 2)
+        self.assertEqual(yakala.wrapped_lines('x' * 35, measure, 100), 4, 'a word longer than the line breaks inside it')
+
+    def test_the_panel_says_the_commands_by_the_words_set_for_them(self):
+        line = yakala.spoken_commands_line(ses.DEFAULTS['komutlar'])
+        self.assertEqual(line, 'Sesli komutlar: “Pyn, kaydet” · “son kelimeyi sil” · “son cümleyi sil” · “hepsini sil” · “iptal”')
+        self.assertEqual(yakala.spoken_commands_line({'kaydet': ['tamam'], 'sil': []}), 'Sesli komutlar: “Pyn, tamam”')
+        self.assertEqual(yakala.spoken_commands_line({}), '')
+
+    def test_the_last_word_or_sentence_is_taken_back_alone_or_at_the_end_everything_only_alone(self):
+        self.assertEqual(ses.command_of('Son kelimeyi sil.'), ('kelime_sil', ''))
+        self.assertEqual(ses.command_of('Toplantı yarın saat beş, son kelimeyi sil'), ('kelime_sil', 'Toplantı yarın saat beş'))
+        self.assertEqual(ses.command_of('Pyn, son cümleyi sil'), ('cumle_sil', ''))
+        self.assertEqual(ses.command_of('Hayır öyle değil, son cümleyi sil.'), ('cumle_sil', 'Hayır öyle değil'))
+        self.assertEqual(ses.command_of('Hepsini sil.'), ('sil', ''))
+        self.assertEqual(ses.command_of('Pyn, hepsini sil'), ('sil', ''))
+        for note in ('Dosyaların hepsini sil', 'Son kelimeyi silmeyi unutma', 'son kelime güzeldi'):
+            self.assertEqual(ses.command_of(note), (None, note), note)
 
     def test_gonder_tamam_bitti_save_only_right_after_the_name(self):
         self.assertEqual(ses.command_of('Pyn, gönder.'), ('kaydet', ''))
@@ -139,9 +180,51 @@ class SetupTest(unittest.TestCase):
         self.assertTrue(config['uyandirma'])
         self.assertNotIn('yabanci', config)
         self.assertEqual(config['komutlar']['kaydet'], ['tamam', 'kaydet'])
-        self.assertEqual(config['komutlar']['sil'], ['sil', 'temizle'], 'the other commands keep their words')
+        self.assertEqual(config['komutlar']['sil'], ses.DEFAULTS['komutlar']['sil'], 'the other commands keep their words')
         self.assertFalse(ses.installed(self.state))
         self.assertFalse(ses.usable(self.state))
+
+    def test_commands_saved_as_the_old_defaults_get_the_new_words_ones_chosen_stay(self):
+        ses.ses_dir(self.state).mkdir(parents=True)
+        path = ses.ses_dir(self.state) / ses.CONFIG
+        path.write_text(json.dumps({'komutlar': {'kaydet': ['kaydet'], 'sil': ['sil', 'temizle'], 'iptal': ['iptal', 'vazgeç']}}), encoding='utf-8')
+        config = ses.load_config(self.state)
+        self.assertIn('hepsini sil', config['komutlar']['sil'], 'every older settings file holds the old default')
+        self.assertEqual(config['komutlar']['kelime_sil'], ['son kelimeyi sil'])
+        path.write_text(json.dumps({'komutlar': {'sil': ['temizle']}}), encoding='utf-8')
+        self.assertEqual(ses.load_config(self.state)['komutlar']['sil'], ['temizle'], 'a list someone chose is theirs')
+
+    def ayar(self, *args):
+        out = io.StringIO()
+        from contextlib import redirect_stdout
+        with redirect_stdout(out), mock.patch.object(ses, 'restart_listener', return_value=False):
+            ses.main(['ayar', *args, '--json'], state=self.state)
+        return json.loads(out.getvalue())
+
+    def test_the_commands_words_are_a_setting_checked_before_they_are_kept(self):
+        result = self.ayar('--komutlar', json.dumps({'kaydet': ['kaydet', ' Tamamdır  '], 'kelime_sil': ['geri al'],
+                                                     'adla_kaydet': ['yolla']}, ensure_ascii=False))
+        self.assertEqual(result['komutlar']['kaydet'], ['kaydet', 'Tamamdır'])
+        self.assertEqual(result['komutlar']['kelime_sil'], ['geri al'])
+        self.assertEqual(result['komutlar']['sil'], ses.DEFAULTS['komutlar']['sil'], 'what was not given stays')
+        self.assertEqual(result['adla_kaydet'], ['yolla'])
+        config = ses.load_config(self.state)
+        self.assertEqual(ses.command_of('Bugün bitti, tamamdır', config['komutlar'], config['adla_kaydet']), ('kaydet', 'Bugün bitti'))
+        for wrong, why in (({'kaydet': ['sil']}, 'iki komutta'), ({'uydur': ['x']}, 'Bilinmeyen'), ({'sil': ['a' * 41]}, 'uzun'),
+                           ({'sil': 'sil'}, 'liste'), ({'sil': ['...']}, 'kelime')):
+            with self.assertRaises(SystemExit) as raised:
+                self.ayar('--komutlar', json.dumps(wrong))
+            self.assertIn(why, str(raised.exception), wrong)
+        self.assertEqual(ses.load_config(self.state)['komutlar']['kaydet'], ['kaydet', 'Tamamdır'], 'a refused change keeps nothing')
+        reset = self.ayar('--varsayilan-komutlar')
+        self.assertEqual((reset['komutlar'], reset['adla_kaydet']), (ses.DEFAULTS['komutlar'], ses.DEFAULTS['adla_kaydet']))
+
+    def test_a_microphones_name_is_whole_and_without_the_word_microphone_around_it(self):
+        names = ['Microsoft Sound Mapper - Input', 'Microphone (HyperX Cloud III Wi', 'Microphone (HyperX Cloud III Wireless)']
+        self.assertEqual(ses.mic_label('Microphone (HyperX Cloud III Wi', names), 'HyperX Cloud III Wireless', 'MME cuts at 31 letters')
+        self.assertEqual(ses.mic_label('Mikrofon (USB Audio)'), 'USB Audio')
+        self.assertEqual(ses.mic_label('Headset Microphone'), 'Headset Microphone')
+        self.assertEqual(ses.mic_label(''), '')
 
     def test_the_plan_picks_a_python_with_wheels_and_adds_cuda_only_with_an_nvidia_card(self):
         calls = []
@@ -527,7 +610,9 @@ class PopupVoiceTest(unittest.TestCase):
         self.assertIn('Not al', texts)
         self.assertNotIn('Beyne at', texts)
         self.assertTrue(any(text.startswith('Konuşmak için mikrofona tıkla') for text in texts), 'what a press does')
-        self.assertTrue(any('Sesli komutlar' in text and '“kaydet”' in text for text in texts), 'the spoken commands are written down')
+        commands = next(text for text in texts if text.startswith('Sesli komutlar'))
+        for said in ('“Pyn, kaydet”', '“son kelimeyi sil”', '“son cümleyi sil”', '“hepsini sil”', '“iptal”'):
+            self.assertIn(said, commands, 'the spoken commands are written down')
         win.voice_toggle()
         win.voice_event({'olay': 'dinliyor', 'mikrofon': 'Microphone (HyperX Cloud III Wireless)'})
         texts = self.texts(win)
@@ -611,6 +696,39 @@ class PopupVoiceTest(unittest.TestCase):
         self.assertEqual(len(cards), 1)
         self.assertNotIn('yanlış', cards[0].read_text(encoding='utf-8'))
         self.assertIn('Doğrusu bu', cards[0].read_text(encoding='utf-8'))
+
+    def field(self, win):
+        return next(child for child in win.winfo_children() if child.winfo_class() == 'Text')
+
+    def test_son_kelimeyi_sil_and_son_cumleyi_sil_take_back_what_was_said_and_it_goes_on(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        win.voice_event({'olay': 'dinliyor'})
+        win.voice_event({'olay': 'metin', 'metin': 'Toplantı yarın.', 'komut': None, 'son': False})
+        win.voice_event({'olay': 'metin', 'metin': 'Saat beş altı', 'komut': 'kelime_sil', 'son': False})
+        self.assertEqual(self.field(win).get('1.0', 'end-1c'), 'Toplantı yarın. Saat beş')
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'cumle_sil', 'son': False})
+        self.assertEqual(self.field(win).get('1.0', 'end-1c'), 'Toplantı yarın.')
+        self.assertEqual(self.link.worker.sent, ['dinle'], 'it still listens')
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'cumle_sil', 'son': False})
+        self.assertTrue(any('Konuş, ben yazayım' in text for text in [self.field(win).get('1.0', 'end-1c')]), 'nothing left: the hint again')
+        win.voice_event({'olay': 'metin', 'metin': 'Saat altıda', 'komut': 'kaydet', 'son': True})
+        self.assertIn('Saat altıda', self.cards()[0].read_text(encoding='utf-8'))
+
+    def test_a_long_note_wraps_and_the_window_grows_to_show_it(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        canvas = next(child for child in win.winfo_children() if child.winfo_class() == 'Canvas')
+        before = int(canvas.cget('height'))
+        win.voice_event({'olay': 'dinliyor'})
+        said = 'Şu an ne yapıyoruz? Bunların hepsini kaydedip yarın sabah toplantıda konuşalım, sonra da raporu bitirelim.'
+        win.voice_event({'olay': 'metin', 'metin': said, 'komut': None, 'son': False})
+        field = self.field(win)
+        self.assertEqual(field.get('1.0', 'end-1c'), said, 'all of it in the field')
+        self.assertGreater(int(field.cget('height')), 1, 'more than one line shown')
+        self.assertGreater(int(canvas.cget('height')), before, 'the window grew with it')
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'sil', 'son': False})
+        self.assertEqual((int(field.cget('height')), int(canvas.cget('height'))), (1, before), 'and back once emptied')
 
     def test_typing_in_a_dictation_keeps_what_was_said_before_but_no_command(self):
         self.link.ready = True
@@ -940,6 +1058,19 @@ class ServeTest(unittest.TestCase):
         self.assertEqual(self.asked, ['cuma', 'prova'])
         self.assertIsNone(self.recorder.stream, 'saved: the microphone goes')
 
+    def test_commands_changed_in_the_settings_count_from_the_next_sentence(self):
+        self.serve()
+        state = Path(self.tmp.name) / 'state'
+        ses.save_config(state, dict(ses.load_config(state), komutlar=dict(ses.DEFAULTS['komutlar'], kaydet=['yolla'])))
+        self.send('ayar')  # the listener saw the settings file change
+        self.written.update({'not': 'Market listesi, yolla.'})
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.recorder.speak('not')
+        self.pause()
+        last = self.until('metin')
+        self.assertEqual((last['metin'], last['komut'], last['son']), ('Market listesi', 'kaydet', True))
+
     def test_bitir_writes_the_last_sentence_after_the_ones_before_it(self):
         self.serve()
         self.written.update({'bir': 'Birinci', 'iki': 'ikinci'})
@@ -977,7 +1108,7 @@ class ServeTest(unittest.TestCase):
         self.assertFalse([e for e in nothing if e['olay'] in ('dinliyor', 'uyandi')], 'nobody is told before Whisper says so')
         self.assertEqual(self.recorder.stream, 'open', 'but the recording has begun: no word after the phrase is lost')
         self.pause(ses.WAKE_AFTER_SN)
-        self.until('uyandi')
+        self.assertEqual(self.until('uyandi')['mikrofon'], 'Mikrofon', 'the window it opens says which microphone')
         self.assertEqual(self.asked[0], 'once+al', 'Whisper heard the seconds before it and the phrase\'s end')
         self.recorder.speak('yarin')
         self.pause()
@@ -996,11 +1127,21 @@ class ServeTest(unittest.TestCase):
         self.assertIsNone(self.recorder.stream, 'the recording let go')
         self.assertTrue(self.wake.running and self.wake.starts >= 2, 'listening for the phrase again')
 
-    def test_the_whole_phrase_the_small_model_heard_opens_at_once(self):
+    def test_the_whole_phrase_the_small_model_heard_is_checked_by_whisper_too(self):
+        # Seen during a game: talk the small model took for "pay not al" opened the window over it.
         self.serve(uyandirma=True)
+        self.written.update({'once': 'CS, CS. Ne oldu?'})
         self.wake.verdicts = ['soz']
-        self.until('uyandi')
-        self.assertEqual(self.asked, [], 'no check needed')
+        self.until_recording()
+        self.pause(ses.WAKE_AFTER_SN)
+        self.until_asked('once')
+        said = self.quiet(0.6)
+        self.assertFalse([e for e in said if e['olay'] in ('dinliyor', 'uyandi')], 'Whisper did not hear it: no window')
+        self.written.update({'once': 'Pyn, not al.'})
+        self.wake.verdicts = ['soz']
+        self.until_recording()
+        self.pause(ses.WAKE_AFTER_SN)
+        self.assertEqual(self.until('uyandi')['mikrofon'], 'Mikrofon', 'heard by Whisper: the window opens')
 
     def test_asked_to_listen_while_a_not_al_is_being_checked_it_listens(self):
         self.serve(uyandirma=True)
