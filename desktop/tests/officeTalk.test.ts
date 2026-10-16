@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { linesOf, officeTalk, pieceOf, scenePrompt, talkModels } from '../electron/services/officeTalk';
 import { updateSettings } from '../electron/services/settings';
+import { talkPrefsOf } from '../shared/office';
 
 /**
  * The office's live conversations (electron/services/officeTalk.ts): the model chosen in the
@@ -19,6 +20,12 @@ const cast = [
   { id: 'baran', name: 'Baran', role: 'Mühendis', bio: 'Çalışıyorsa dokunmaz.' },
   { id: 'pyn', name: 'Pyn', role: 'Patron', bio: 'Hmm.' },
 ];
+
+test('the live conversations’ choice is read back as one of its choices, or its default', () => {
+  assert.deepEqual(talkPrefsOf({ live: true, tool: 'ollama', model: 'qwen3.6:27b', every: 30 }), { live: true, tool: 'ollama', model: 'qwen3.6:27b', every: 30 });
+  assert.deepEqual(talkPrefsOf({ live: 'yes', tool: 'gpt', model: '', every: 7, followClock: false }), { live: false, tool: null, model: null, every: 20 });
+  assert.deepEqual(talkPrefsOf(null), { live: false, tool: null, model: null, every: 20 });
+});
 
 test('a scene is read from the JSON a model wrote, its thinking and anyone outside the cast left out', () => {
   const answer = '<think>önce düşüneyim</think>\n```json\n{"lines":[{"who":"defne","text":"«Proje planı» dipnot istiyor."},{"who":"Baran","text":"Çalışıyorsa dokunma."},{"who":"zeynep","text":"Ben kimim?"}]}\n```';
@@ -92,6 +99,42 @@ test('LM Studio writes the scene with the model chosen, about the vault’s last
     assert.equal(asked[1].model, 'qwen3-8b', 'a model the server no longer has: the loaded one');
     await assert.rejects(officeTalk({ tool: 'codex', model: null, cast, language: 'tr' }));
     await assert.rejects(officeTalk({ tool: 'lmstudio', model: null, cast: cast.slice(0, 1), language: 'tr' }));
+    assert.equal((asked[0] as { reasoning_effort?: string }).reasoning_effort, 'none', 'a short scene needs no thinking');
+  } finally {
+    delete process.env.CORTEX_TEST_LMSTUDIO;
+    server.close();
+  }
+});
+
+test('a thinking model that spent its budget on thought is asked once more, with room to answer', async () => {
+  const vault = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-dusunen-')));
+  fs.writeFileSync(path.join(vault, 'Plan.md'), '# Plan\n\nHedefler.\n');
+  updateSettings((settings) => {
+    settings.vault = vault;
+  });
+  const asked: Array<{ max_tokens?: number; reasoning_effort?: string }> = [];
+  const server = http.createServer((request, response) => {
+    let body = '';
+    request.on('data', (chunk) => (body += chunk));
+    request.on('end', () => {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      if (request.url === '/api/v0/models') {
+        response.end(JSON.stringify({ data: [{ id: 'qwen3.5-9b', type: 'vlm', state: 'loaded' }] }));
+        return;
+      }
+      const one = JSON.parse(body) as { max_tokens?: number; reasoning_effort?: string };
+      asked.push(one);
+      // A server that ignores "no thinking": the first budget all thought, the larger one enough to answer.
+      const content = (one.max_tokens ?? 0) > 700 ? '{"lines":[{"who":"defne","text":"Plan hazır."},{"who":"pyn","text":"Hmm."}]}' : '';
+      response.end(JSON.stringify({ choices: [{ message: { content, reasoning_content: 'Thinking Process: ...' }, finish_reason: content ? 'stop' : 'length' }] }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  process.env.CORTEX_TEST_LMSTUDIO = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const lines = await officeTalk({ tool: 'lmstudio', model: null, cast, language: 'tr' });
+    assert.deepEqual(lines.map((one) => one.who), ['defne', 'pyn']);
+    assert.deepEqual(asked.map((one) => [one.reasoning_effort ?? null, one.max_tokens]), [['none', 700], [null, 3000]]);
   } finally {
     delete process.env.CORTEX_TEST_LMSTUDIO;
     server.close();

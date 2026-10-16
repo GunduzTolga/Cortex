@@ -15,6 +15,10 @@ export function clockText(date?: Date): string;
 export function loopFrame(t: number, fps: number, frames: number, offset?: number): number;
 export const TOOL_STATUS: Record<Art.ToolId, Led>;
 export const TOOL_LABEL: Record<Led, string>;
+/** A name with the possessive ending: "Tolga Bey'in", "Ayşe'nin"; English "Tolga's". Empty for no name. */
+export function possessive(name: string | null | undefined, lang?: 'tr' | 'en'): string;
+/** The manager named after the vault's owner (the character and its room), the manager without a name. */
+export function nameTheManager(art: typeof Art, userName: string | null, lang?: 'tr' | 'en'): void;
 
 export interface AgentSnapshot {
   id: string;

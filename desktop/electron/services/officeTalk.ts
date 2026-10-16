@@ -155,10 +155,28 @@ export function linesOf(answer: string, cast: TalkPerson[]): TalkLine[] {
   return lines.slice(0, 8);
 }
 
-/** A model server asked once, not streamed: its OpenAI-compatible chat endpoint. */
-function askLocal(tool: 'lmstudio' | 'ollama', model: string, system: string, user: string): Promise<string> {
+/** What a model server answered: the text, and what it thought before it, apart (LM Studio's `reasoning_content`). */
+interface LocalAnswer {
+  content: string;
+  thought: string;
+}
+
+/**
+ * A model server asked once, not streamed: its OpenAI-compatible chat endpoint. `think: false` asks
+ * a thinking model (Qwen 3.5, GLM) to answer at once: a short scene needs no thinking, and a
+ * thinking model otherwise spends its whole budget on it and writes nothing (seen with
+ * qwen3.5-9b: 700 tokens of thought, an empty answer). A server that does not know the option
+ * ignores it, and gets room to think and still answer.
+ */
+function askLocal(tool: 'lmstudio' | 'ollama', model: string, system: string, user: string, think: boolean): Promise<LocalAnswer> {
   const url = new URL('/v1/chat/completions', baseOf(tool));
-  const body = JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature: 0.8, max_tokens: 700, stream: false });
+  const body = JSON.stringify({
+    model,
+    messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+    temperature: 0.8,
+    stream: false,
+    ...(think ? { max_tokens: 3000 } : { max_tokens: 700, reasoning_effort: 'none' }),
+  });
   return new Promise((resolve, reject) => {
     const request = http.request(
       url,
@@ -169,9 +187,14 @@ function askLocal(tool: 'lmstudio' | 'ollama', model: string, system: string, us
         response.on('data', (chunk: string) => (data += chunk));
         response.on('end', () => {
           try {
-            const value = JSON.parse(data) as { choices?: Array<{ message?: { content?: unknown } }>; error?: { message?: unknown } | string };
-            const content = value.choices?.[0]?.message?.content;
-            if (typeof content === 'string') return resolve(content);
+            const value = JSON.parse(data) as {
+              choices?: Array<{ message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown } }>;
+              error?: { message?: unknown } | string;
+            };
+            const message = value.choices?.[0]?.message;
+            const content = message?.content;
+            const thought = typeof message?.reasoning_content === 'string' ? message.reasoning_content : typeof message?.reasoning === 'string' ? message.reasoning : '';
+            if (typeof content === 'string') return resolve({ content, thought });
             const said = typeof value.error === 'string' ? value.error : value.error?.message;
             reject(new Error(typeof said === 'string' ? said : say('Model boş cevap verdi.', 'The model answered nothing.')));
           } catch {
@@ -248,7 +271,13 @@ export async function officeTalk(request: unknown): Promise<TalkLine[]> {
       const { models, loaded } = await talkModels(tool);
       const model = typeof asked.model === 'string' && models.includes(asked.model) ? asked.model : (loaded[0] ?? models[0]);
       if (!model) throw new Error(say('Sunucuda model yok: uygulamasında bir model indir ya da yükle.', 'The server has no model: download or load one in its app.'));
-      answer = await askLocal(tool, model, system, user);
+      let said = await askLocal(tool, model, system, user, false);
+      // It thought all the same (a server that ignores "no thinking"): once more, with room to think and answer.
+      if (!said.content.trim() && said.thought) said = await askLocal(tool, model, system, user, true);
+      if (!said.content.trim() && said.thought) {
+        throw new Error(say('Model yalnız düşündü, bir şey yazmadı; düşünmeyen bir model seç ya da yeniden dene.', 'The model only thought and wrote nothing; pick a model that does not think, or try again.'));
+      }
+      answer = said.content;
     }
     const lines = linesOf(answer, cast);
     if (!lines.length) throw new Error(say('Model bir konuşma yazmadı; başka bir model dene.', 'The model wrote no conversation; try another model.'));

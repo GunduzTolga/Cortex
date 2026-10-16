@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import test from 'node:test';
 import * as art from '../src/office/office-art.js';
-import { loopFrame } from '../src/office/ofis-engine.js';
+import { loopFrame, nameTheManager, possessive } from '../src/office/ofis-engine.js';
 
 /**
  * The office's drawings as Claude Design delivered them (src/office/office-art.js),
@@ -35,7 +35,7 @@ function recorder() {
 test('the map is the brief’s: 61 by 42, nine rooms named in both languages, every seat and spot reached from the newsroom', () => {
   assert.equal(art.MAP.w, 61);
   assert.equal(art.MAP.h, 42);
-  assert.deepEqual(art.MAP.rooms.map((one) => one.id).sort(), ['arsiv', 'dinlenme', 'harita', 'mutfak', 'posta', 'pyn', 'salon', 'sunucu', 'toplanti']);
+  assert.deepEqual(art.MAP.rooms.map((one) => one.id).sort(), ['arsiv', 'dinlenme', 'harita', 'mudur', 'mutfak', 'pyn', 'salon', 'sunucu', 'toplanti']);
   assert.ok(art.MAP.rooms.every((one) => one.tr && one.en));
   assert.deepEqual(art.checkReachability(), [], 'nothing walled in');
 });
@@ -46,9 +46,12 @@ test('every thing placed and every floor and wall tile has its drawing', () => {
   assert.deepEqual([...new Set(missing)], []);
 });
 
-test('the cast: Pyn, twelve agents and Tekir, each at home, the tool agents on their tools', () => {
+test('the cast: Pyn, the manager, Tolga, twelve agents and Tekir, each at home, the tool agents on their tools', () => {
   const cast = Object.entries(art.CHARACTERS);
-  assert.equal(cast.length, 14);
+  assert.equal(cast.length, 16);
+  assert.equal(art.CHARACTERS.mudur.role, 'Müdür', 'named after the vault\'s owner at run time');
+  assert.equal(art.CHARACTERS.tolga.name, 'Tolga');
+  assert.equal(art.CHARACTERS.tolga.role, 'Yazılımcı', 'the developer who wrote Cortex, at his own desk');
   assert.deepEqual(
     cast.filter(([, one]) => one.tool).map(([id, one]) => `${id}:${one.tool}`).sort(),
     ['asya:qwen', 'baran:codex', 'defne:claude', 'ilgin:opencode', 'toprak:gemini'],
@@ -117,4 +120,67 @@ test('the loop keeps its clock: no comment swallows the statements written after
     assert.ok(lines.length > 0, statement);
     for (const line of lines) assert.ok(!line.slice(0, line.indexOf(statement)).includes('//'), `${statement} is code, not a comment: ${line.trim()}`);
   }
+});
+
+test('the brain frame: margins on the 16 grid, the map inside, drawn in whole-pixel rectangles and never over the map', () => {
+  const { margin, w, h, map } = art.BRAIN;
+  for (const side of ['top', 'right', 'bottom', 'left'] as const) assert.equal(margin[side] % 16, 0, side);
+  assert.equal(w, art.MAP.w * 16 + margin.left + margin.right);
+  assert.equal(h, art.MAP.h * 16 + margin.top + margin.bottom);
+  assert.deepEqual(map, { x: margin.left, y: margin.top, w: art.MAP.w * 16, h: art.MAP.h * 16 });
+  for (const mode of ['sabah', 'ogle', 'aksam', 'gece'] as const) {
+    const { ctx, rects, other } = recorder();
+    art.paintBrain(ctx, mode);
+    assert.deepEqual(other, [], `${mode}: only fillStyle and fillRect`);
+    assert.ok(rects.length > 1000, `${mode} is drawn`);
+    for (const [x, y, rw, rh] of rects) {
+      assert.ok([x, y, rw, rh].every(Number.isInteger), `${mode}: whole pixels`);
+      assert.ok(x >= 0 && y >= 0 && x + rw <= w && y + rh <= h, `${mode}: inside the world`);
+      assert.ok(x + rw <= map.x || x >= map.x + map.w || y + rh <= map.y || y >= map.y + map.h, `${mode}: nothing over the map at ${x},${y}`);
+    }
+  }
+});
+
+test('the sparks: every frame in its cell in both colours, by day and by night; their paths stay on the frame, one from every room', () => {
+  for (const name of ['kivilcim', 'kivilcim_iz']) {
+    const sprite = art.SPRITES[name];
+    for (let frame = 0; frame < (sprite.frames ?? 1); frame += 1) {
+      for (const pal of [{ renk: 'altin' }, { renk: 'turkuaz' }, { renk: 'altin', gece: true }, { renk: 'turkuaz', gece: true }]) {
+        const { ctx, rects, other } = recorder();
+        sprite.paint(ctx, frame, pal);
+        assert.deepEqual(other, [], `${name} ${frame}: only fillStyle and fillRect`);
+        assert.ok(rects.length > 0, `${name} ${frame} is drawn`);
+        for (const [x, y, rw, rh] of rects) assert.ok([x, y, rw, rh].every(Number.isInteger) && x >= 0 && y >= 0 && x + rw <= sprite.w && y + rh <= sprite.h, `${name} ${frame}: inside its cell`);
+      }
+    }
+  }
+  const { map, w, h, anchors } = art.BRAIN;
+  assert.ok(art.NEURON_PATHS.length >= 9);
+  for (const path of art.NEURON_PATHS) {
+    assert.ok(path.length >= 4 && path.length <= 12, `${path.length} points`);
+    for (const [x, y] of path) {
+      assert.ok(Number.isInteger(x) && Number.isInteger(y) && x >= 3 && y >= 3 && x < w - 3 && y < h - 3);
+      assert.ok(x < map.x - 3 || x >= map.x + map.w + 3 || y < map.y - 3 || y >= map.y + map.h + 3, `off the map: ${x},${y}`);
+    }
+  }
+  assert.deepEqual(Object.keys(anchors).sort(), art.MAP.rooms.map((one) => one.id).sort());
+  for (const [room, [x, y]] of Object.entries(anchors)) assert.ok(art.NEURON_PATHS.some((path) => path[0][0] === x && path[0][1] === y), `${room}'s sparks have a path`);
+});
+
+test('the manager and their room are named after the vault’s owner; Tolga stays Tolga', () => {
+  assert.deepEqual(
+    ['Tolga Bey', 'Ayşe', 'Umut', 'Gül', 'Pyn', 'Ali'].map((name) => possessive(name)),
+    ["Tolga Bey'in", "Ayşe'nin", "Umut'un", "Gül'ün", "Pyn'in", "Ali'nin"],
+  );
+  assert.equal(possessive('Tolga', 'en'), "Tolga's");
+  assert.equal(possessive(''), '');
+  const room = () => art.MAP.rooms.find((one) => one.id === 'mudur');
+  nameTheManager(art, 'Tolga Bey', 'tr');
+  assert.equal(art.CHARACTERS.mudur.name, 'Tolga Bey');
+  assert.equal(room()?.tr, "TOLGA BEY'İN ODASI");
+  assert.equal(room()?.en, "TOLGA BEY'S OFFICE");
+  nameTheManager(art, null, 'en');
+  assert.equal(art.CHARACTERS.mudur.name, 'Manager');
+  assert.equal(room()?.tr, 'MÜDÜR ODASI');
+  assert.equal(art.CHARACTERS.tolga.name, 'Tolga', 'the developer who wrote Cortex, whoever owns the vault');
 });
