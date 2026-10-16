@@ -34,6 +34,7 @@ export function SettingsDialog() {
           <Row label={t('settings.name')}>
             <NameField />
           </Row>
+          <Switch checked={settings.background} onChange={(on) => void set({ background: on })} label={t('settings.background')} hint={t('settings.background.hint')} data-settings-background />
           {vault ? (
             <Row label={t('settings.vault')}>
               <span className="min-w-0 truncate text-[12px] text-zinc-500" data-settings-vault>

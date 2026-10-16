@@ -20,6 +20,39 @@ export interface VoiceStatus {
   engine: VoiceEngine;
   /** The model and where it runs, as the engine says it: `large-v3-turbo (ekran kartı, Vulkan)`. */
   model: string | null;
+  /** The spoken commands' words; null from an engine that cannot set them yet. */
+  commands: VoiceCommands | null;
+}
+
+/** What can be said into yakala's window, each by the words set for it (`ses ayar --komutlar`). */
+export interface VoiceCommands {
+  /** Writes and saves; at a sentence's end too ("…, kaydet"). */
+  kaydet: string[];
+  /** Save too, but only right after Pyn's name ("Pyn, gönder"): anywhere else they are the note's words. */
+  adla_kaydet: string[];
+  /** Takes the last word back; at a sentence's end too. */
+  kelime_sil: string[];
+  /** Takes the last sentence back; at a sentence's end too. */
+  cumle_sil: string[];
+  /** Empties the field, said alone. */
+  sil: string[];
+  /** Closes the window without saving, said alone. */
+  iptal: string[];
+}
+
+export const VOICE_COMMANDS = ['kaydet', 'adla_kaydet', 'kelime_sil', 'cumle_sil', 'sil', 'iptal'] as const;
+
+/** A command's words as a person may set them; the engine checks them again. */
+export const COMMAND_WORDS = { most: 8, longest: 40 } as const;
+
+export interface VoicePatch {
+  on?: boolean;
+  wake?: boolean;
+  auto?: boolean;
+  /** Each command given takes these words; the others keep theirs. */
+  commands?: Partial<VoiceCommands>;
+  /** Every command back to its first words. */
+  defaultCommands?: boolean;
 }
 
 export type SetupJob = 'python' | 'engine' | 'voice';
@@ -56,5 +89,5 @@ export interface SetupApi {
   installEngine(): Promise<SetupStatus>;
   /** Voice typing set up: its own environment, its models, the engine fit for the graphics card. */
   installVoice(): Promise<SetupStatus>;
-  voice(patch: { on?: boolean; wake?: boolean; auto?: boolean }): Promise<SetupStatus>;
+  voice(patch: VoicePatch): Promise<SetupStatus>;
 }

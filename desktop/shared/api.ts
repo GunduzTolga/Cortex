@@ -21,6 +21,8 @@ export interface WindowSettings {
   userName: string | null;
   /** The first-run screen has been gone through. */
   onboarded: boolean;
+  /** The window closed, Cortex stays in the notification area (the microphone switched from there), and starts there with Windows. */
+  background: boolean;
 }
 
 /** The vault by its folder's name, and whether that folder is still there; never its path. */

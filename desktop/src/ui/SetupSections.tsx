@@ -1,11 +1,12 @@
-import { useEffect } from 'react';
-import { Download, Mic, RefreshCw } from 'lucide-react';
-import type { SetupJob, SetupStatus } from '@shared/setup';
+import { useEffect, useState } from 'react';
+import { Download, Mic, RefreshCw, RotateCcw } from 'lucide-react';
+import { COMMAND_WORDS, VOICE_COMMANDS } from '@shared/setup';
+import type { SetupJob, SetupStatus, VoiceCommands } from '@shared/setup';
 import type { Key } from '../i18n';
 import { useT } from '../i18n/useT';
 import { useSetup } from '../store/setup';
 import { Section } from './settingsParts';
-import { Button, Spinner, Switch } from './ui';
+import { Button, Spinner, Switch, inputClass } from './ui';
 
 /**
  * Cortex set up from the settings window (shared/setup.ts): the memory
@@ -92,6 +93,63 @@ function EngineSection({ status }: { status: SetupStatus }) {
   );
 }
 
+/** A command's words, comma separated; kept when the field is left or Enter is pressed. */
+function CommandWords({ name, words, busy }: { name: keyof VoiceCommands; words: string[]; busy: boolean }) {
+  const set = useSetup((s) => s.voice);
+  const shown = words.join(', ');
+  const [text, setText] = useState(shown);
+  useEffect(() => setText(shown), [shown]);
+  const keep = () => {
+    const asked = text
+      .split(',')
+      .map((one) => one.trim().replace(/\s+/g, ' '))
+      .filter(Boolean);
+    if (asked.join(', ') !== shown) void set({ commands: { [name]: asked } });
+    else setText(shown);
+  };
+  return (
+    <input
+      className={`${inputClass.replace('w-full', '')} h-8 w-56 shrink-0`}
+      value={text}
+      disabled={busy}
+      maxLength={COMMAND_WORDS.most * (COMMAND_WORDS.longest + 2)}
+      onChange={(event) => setText(event.target.value)}
+      onBlur={keep}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') keep();
+      }}
+      data-setup-voice-command={name}
+    />
+  );
+}
+
+/** What can be said into yakala's window, each command's words editable. */
+function VoiceCommandsBlock({ commands, busy }: { commands: VoiceCommands; busy: boolean }) {
+  const t = useT();
+  const set = useSetup((s) => s.voice);
+  return (
+    <div className="mt-3" data-setup-voice-commands>
+      <h4 className="px-3 text-[12px] font-bold text-darkDelegation">{t('setup.voice.commands')}</h4>
+      <Note>{t('setup.voice.commands.intro')}</Note>
+      {VOICE_COMMANDS.map((name) => (
+        <div key={name} className="flex items-start gap-3 px-3 py-1.5">
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px] font-semibold text-darkDelegation">{t(`setup.voice.cmd.${name}` as Key)}</span>
+            <span className="block text-[11.5px] leading-snug text-zinc-500">{t(`setup.voice.cmd.${name}.hint` as Key)}</span>
+          </span>
+          <CommandWords name={name} words={commands[name]} busy={busy} />
+        </div>
+      ))}
+      <div className="mt-1 px-3">
+        <Button tone="ghost" disabled={busy} onClick={() => void set({ defaultCommands: true })} data-setup-voice-commands-reset>
+          <RotateCcw size={13} />
+          {t('setup.voice.commands.reset')}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function VoiceSection({ status }: { status: SetupStatus }) {
   const t = useT();
   const steps = useSetup((s) => s.steps);
@@ -112,6 +170,7 @@ function VoiceSection({ status }: { status: SetupStatus }) {
           <Switch checked={voice.auto} onChange={(auto) => void set({ auto })} label={t('setup.voice.auto')} hint={t('setup.voice.auto.hint')} data-setup-voice-auto />
           <Switch checked={voice.wake} onChange={(wake) => void set({ wake })} label={t('setup.voice.wake')} hint={t('setup.voice.wake.hint')} data-setup-voice-wake />
           <Note data="engine">{t('setup.voice.engine', { engine: t(ENGINE_NAME[voice.engine]), model: voice.model ?? '' })}</Note>
+          {voice.commands ? <VoiceCommandsBlock commands={voice.commands} busy={busy} /> : null}
         </>
       ) : (
         <Note data="not-installed">{t('setup.voice.intro')}</Note>

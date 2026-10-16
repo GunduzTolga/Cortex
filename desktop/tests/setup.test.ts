@@ -17,8 +17,10 @@ import {
   installVoice,
   installedVersion,
   onSetupPush,
+  onVoiceStatus,
   readLine,
   setVoice,
+  commandsPatch,
   setupStatus,
   trailingObject,
   voiceOf,
@@ -65,9 +67,26 @@ test('the voice status is the engine’s, the model by its name only', () => {
     auto: false,
     engine: 'vulkan',
     model: 'large-v3-turbo',
+    commands: null,
   });
   assert.equal(voiceOf({ kurulu: false, motor: 'bilinmeyen' })?.engine, 'islemci');
   assert.equal(voiceOf({ status: 'tamam' }), null, 'not a voice status');
+});
+
+test('the spoken commands are the engine’s, and what a window asks is tidied before the engine checks it', () => {
+  const said = { kaydet: ['kaydet'], sil: ['sil', 'hepsini sil'], kelime_sil: ['son kelimeyi sil'], cumle_sil: [], iptal: ['iptal', 3] };
+  assert.deepEqual(voiceOf({ kurulu: true, komutlar: said, adla_kaydet: ['gönder'] })?.commands, {
+    kaydet: ['kaydet'],
+    adla_kaydet: ['gönder'],
+    kelime_sil: ['son kelimeyi sil'],
+    cumle_sil: [],
+    sil: ['sil', 'hepsini sil'],
+    iptal: ['iptal'],
+  });
+  assert.deepEqual(commandsPatch({ kaydet: ['  kaydet ', '', 'tamam   dır'], uydurma: ['x'], sil: 'sil' }), { kaydet: ['kaydet', 'tamam dır'] });
+  assert.deepEqual(commandsPatch({ iptal: Array.from({ length: 12 }, (_, i) => 'söz ' + i) })?.iptal?.length, 8);
+  assert.equal(commandsPatch({}), null);
+  assert.equal(commandsPatch(['kaydet']), null);
 });
 
 /** The vault's engine stood in for: it keeps what it was asked in a log, and answers as beyin.py does. */
@@ -144,10 +163,19 @@ test('voice typing is set up from the app: yakala first if it is not, then the e
     asked(vault).filter((one) => one !== 'ses durum'),
     ['yakala durum', 'yakala kur', 'ses kur'],
   );
-  // The wake phrase on, from the switch: the engine's own setting command.
+  // The wake phrase on, from the switch: the engine's own setting command; the icon at the bottom right hears of it.
+  const heard: Array<boolean | undefined> = [];
+  const stop = onVoiceStatus((voice) => heard.push(voice?.wake));
   const woken = await setVoice({ wake: true });
+  stop();
   assert.equal(woken.voice?.wake, true);
+  assert.deepEqual(heard, [true], 'told once, of the change');
   assert.ok(asked(vault).includes('ses ayar --uyandirma ac'));
+  // A command's words, and every command back to its first words.
+  await setVoice({ commands: { kaydet: ['kaydet', 'tamam'] } });
+  assert.ok(asked(vault).includes('ses ayar --komutlar {"kaydet":["kaydet","tamam"]}'));
+  await setVoice({ defaultCommands: true });
+  assert.ok(asked(vault).includes('ses ayar --varsayilan-komutlar'));
 });
 
 test('a job that fails says why, and the next one may start', { skip: !hasPython || process.platform !== 'win32' }, async () => {

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { messageOf } from '@shared/ipcError';
-import type { SetupJob, SetupPush, SetupStatus } from '@shared/setup';
+import type { SetupJob, SetupPush, SetupStatus, VoicePatch } from '@shared/setup';
 import { translate } from '../i18n';
 import { useApp } from './app';
 
@@ -17,7 +17,7 @@ interface SetupState {
   error: { job: SetupJob; text: string } | null;
   refresh(): Promise<void>;
   run(job: SetupJob): Promise<void>;
-  voice(patch: { on?: boolean; wake?: boolean; auto?: boolean }): Promise<void>;
+  voice(patch: VoicePatch): Promise<void>;
 }
 
 /** A download's progress line, as the engine says it ("%40 (650 / 1624 MB)") or in English ("40% (…)"). */

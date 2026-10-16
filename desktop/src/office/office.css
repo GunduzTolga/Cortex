@@ -49,7 +49,9 @@
 .ofis *::after {
   box-sizing: border-box;
 }
-.ofis button {
+/* Lowest weight (:where): a button's own class sets its size; `.ofis button` outweighed
+   them, and the chips' 9px never applied. */
+:where(.ofis) button {
   font: inherit;
   color: inherit;
 }

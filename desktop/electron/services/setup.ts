@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { app } from 'electron';
-import type { SetupJob, SetupPush, SetupStatus, VoiceEngine, VoiceStatus } from '../../shared/setup';
+import { COMMAND_WORDS, VOICE_COMMANDS } from '../../shared/setup';
+import type { SetupJob, SetupPush, SetupStatus, VoiceCommands, VoiceEngine, VoiceStatus } from '../../shared/setup';
 import pythonPin from '../../python.json';
 import { childEnv } from './acp';
 import { pythonOf } from './localChat';
@@ -35,6 +36,22 @@ const STATUS_TIMEOUT = 60_000;
 const JOB_TIMEOUT = 3 * 60 * 60_000;
 
 let current: SetupJob | null = null;
+
+/** The voice status last read, and who is told of a new one (the notification-area icon, electron/services/tray.ts). */
+let lastVoice: string | undefined;
+const voiceListeners = new Set<(voice: VoiceStatus | null) => void>();
+
+export function onVoiceStatus(listener: (voice: VoiceStatus | null) => void): () => void {
+  voiceListeners.add(listener);
+  return () => voiceListeners.delete(listener);
+}
+
+function heardVoice(voice: VoiceStatus | null): void {
+  const said = JSON.stringify(voice);
+  if (said === lastVoice) return;
+  lastVoice = said;
+  for (const listener of voiceListeners) listener(voice);
+}
 
 /** A sentence in the window's language: the setup speaks as the window does, never both at once. */
 function say(tr: string, en: string): string {
@@ -208,7 +225,40 @@ export function voiceOf(result: Record<string, unknown>): VoiceStatus | null {
     engine,
     // The model's name only: where it runs is said by `engine`, not twice (`large-v3-turbo (ekran kartı, Vulkan)`).
     model: typeof result.model === 'string' ? result.model.replace(/\s*\([^)]*\)\s*$/, '') : null,
+    commands: commandsOf(result),
   };
+}
+
+const wordsOf = (value: unknown): string[] => (Array.isArray(value) ? value.filter((one): one is string => typeof one === 'string') : []);
+
+/** The spoken commands as the engine reports them (`komutlar`, and `adla_kaydet` beside them); null from an older engine. */
+function commandsOf(result: Record<string, unknown>): VoiceCommands | null {
+  const given = result.komutlar;
+  if (!given || typeof given !== 'object' || Array.isArray(given)) return null;
+  const said = given as Record<string, unknown>;
+  return {
+    kaydet: wordsOf(said.kaydet),
+    adla_kaydet: wordsOf(result.adla_kaydet),
+    kelime_sil: wordsOf(said.kelime_sil),
+    cumle_sil: wordsOf(said.cumle_sil),
+    sil: wordsOf(said.sil),
+    iptal: wordsOf(said.iptal),
+  };
+}
+
+/** The commands a window asked for, as `ses ayar --komutlar` takes them: known ones only, each word tidied; null when none. */
+export function commandsPatch(asked: unknown): Partial<VoiceCommands> | null {
+  if (!asked || typeof asked !== 'object' || Array.isArray(asked)) return null;
+  const patch: Partial<VoiceCommands> = {};
+  for (const name of VOICE_COMMANDS) {
+    const given = (asked as Record<string, unknown>)[name];
+    if (!Array.isArray(given)) continue;
+    patch[name] = wordsOf(given)
+      .map((one) => one.trim().replace(/\s+/g, ' ').slice(0, COMMAND_WORDS.longest))
+      .filter(Boolean)
+      .slice(0, COMMAND_WORDS.most);
+  }
+  return Object.keys(patch).length ? patch : null;
 }
 
 /** A result written over several lines (`json.dumps(..., indent=2)`): the last block that starts a line with `{`. */
@@ -308,6 +358,7 @@ export async function setupStatus(): Promise<SetupStatus> {
       voice = null; // an engine from before voice typing: it does not know the command
     }
   }
+  if (current !== 'voice') heardVoice(voice);
   return {
     python: python !== null,
     pythonBundled: process.platform === 'win32' && pythonInstaller() ? pythonPin.version : null,
@@ -419,13 +470,16 @@ export function installVoice(): Promise<SetupStatus> {
   });
 }
 
-/** Voice typing on or off, the wake phrase on or off. */
+/** Voice typing on or off, the wake phrase on or off, the spoken commands' words. */
 export async function setVoice(patch: unknown): Promise<SetupStatus> {
   const asked = patch && typeof patch === 'object' ? (patch as Record<string, unknown>) : {};
   const args: string[] = [];
   if (typeof asked.on === 'boolean') args.push('--ses', asked.on ? 'ac' : 'kapat');
   if (typeof asked.wake === 'boolean') args.push('--uyandirma', asked.wake ? 'ac' : 'kapat');
   if (typeof asked.auto === 'boolean') args.push('--otomatik', asked.auto ? 'ac' : 'kapat');
+  if (asked.defaultCommands === true) args.push('--varsayilan-komutlar');
+  const commands = commandsPatch(asked.commands);
+  if (commands) args.push('--komutlar', JSON.stringify(commands));
   const vault = vaultOrNull();
   if (!args.length || !vault) return setupStatus();
   if (current) throw new Error(say('Başka bir kurulum sürüyor.', 'Another setup is going on.'));

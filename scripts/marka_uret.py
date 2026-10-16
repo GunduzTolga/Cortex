@@ -204,8 +204,35 @@ def mic_buttons():
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
 
 
+TRAY_SIZES = (16, 24, 32)  # 1x, 1.5x and 2x of the notification area's icon
+LISTENING = '#d9412b'  # the red of Windows' own "the microphone is in use" mark
+
+
+def tray_icons():
+    """The desktop app's notification-area icon: Pyn's seal, and with a red dot when the
+    microphone listens all the time ("Sürekli dinle"), at each scale (tepsi/pyn-<state>-<size>.png)."""
+    from PIL import ImageDraw
+    folder = OUT / 'tepsi'
+    folder.mkdir(parents=True, exist_ok=True)
+    seal = Image.open(OUT / 'pyn-muhur-200.png').convert('RGBA')
+    for size in TRAY_SIZES:
+        k = 8
+        big = seal.resize((size * k, size * k), Image.LANCZOS)
+        big.resize((size, size), Image.LANCZOS).save(folder / f'pyn-kapali-{size}.png', optimize=True)
+        d = ImageDraw.Draw(big)
+        r, ring = size * k * 0.22, size * k * 0.06  # the dot, and a paper ring that keeps it off the seal
+        cx = cy = size * k - r - ring
+        d.ellipse([cx - r - ring, cy - r - ring, cx + r + ring, cy + r + ring], fill=PAPER)
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=LISTENING)
+        big.resize((size, size), Image.LANCZOS).save(folder / f'pyn-dinliyor-{size}.png', optimize=True)
+    for path in sorted(folder.iterdir()):
+        print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
+
+
 if __name__ == '__main__':
-    if sys.argv[1:2] == ['yakala']:
+    if sys.argv[1:2] == ['tepsi']:
+        tray_icons()
+    elif sys.argv[1:2] == ['yakala']:
         mic_buttons()
     elif sys.argv[1:2] == ['kurulum']:
         installer_images()

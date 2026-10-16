@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { BootstrapPayload, WindowSettings } from '../shared/api';
 import { readSettings, settingsUnreadable, tidyName, updateSettings } from './services/settings';
+import { startWithWindows } from './services/tray';
 import { setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
@@ -44,8 +45,8 @@ function broadcast(channel: string, payload: unknown): void {
 }
 
 function windowSettings(): WindowSettings {
-  const { language, allFiles, nameIcons, userName, onboarded } = readSettings();
-  return { language, allFiles, nameIcons, userName, onboarded };
+  const { language, allFiles, nameIcons, userName, onboarded, background } = readSettings();
+  return { language, allFiles, nameIcons, userName, onboarded, background };
 }
 
 export function registerIpc(): void {
@@ -65,7 +66,9 @@ export function registerIpc(): void {
     if (typeof asked.nameIcons === 'boolean') change.nameIcons = asked.nameIcons;
     if (typeof asked.userName === 'string' || asked.userName === null) change.userName = tidyName(asked.userName);
     if (typeof asked.onboarded === 'boolean') change.onboarded = asked.onboarded;
+    if (typeof asked.background === 'boolean') change.background = asked.background;
     if (Object.keys(change).length) updateSettings((settings) => Object.assign(settings, change));
+    if (change.background !== undefined) startWithWindows(change.background);
     return windowSettings();
   });
 

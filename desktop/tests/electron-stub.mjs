@@ -26,6 +26,11 @@ export const app = {
   whenReady: async () => undefined,
   requestSingleInstanceLock: () => true,
   quit: noop,
+  isPackaged: false,
+  loginItems: [],
+  setLoginItemSettings(settings) {
+    this.loginItems.push(settings);
+  },
   // Whether a program is registered for a link's scheme; a test sets it.
   protocolApps: {},
   getApplicationNameForProtocol(url) {
@@ -68,7 +73,15 @@ export class BrowserWindow {
   }
 }
 export const Menu = { setApplicationMenu: noop, buildFromTemplate: () => ({}) };
+export const nativeImage = { createEmpty: () => ({ addRepresentation: noop }) };
+export class Tray {
+  on() {}
+  setImage() {}
+  setToolTip() {}
+  popUpContextMenu() {}
+  displayBalloon() {}
+}
 export const session = {};
 export const contextBridge = { exposeInMainWorld: noop };
 export const ipcRenderer = { invoke: async () => undefined, on: noop, removeListener: noop };
-export default { app, ipcMain, dialog, shell, safeStorage, BrowserWindow, Menu, session, contextBridge, ipcRenderer };
+export default { app, ipcMain, dialog, shell, safeStorage, BrowserWindow, Menu, nativeImage, Tray, session, contextBridge, ipcRenderer };

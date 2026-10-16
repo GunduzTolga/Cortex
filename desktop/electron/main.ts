@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerIpc, stopWatching, trustPagesWhere } from './ipc';
 import { readSettings } from './services/settings';
+import { startTray, startWithWindows, trayNotice } from './services/tray';
 
 const DEV_SERVER = process.env.VITE_DEV_SERVER_URL;
 const isDev = Boolean(DEV_SERVER);
@@ -33,6 +34,15 @@ const pageFile = path.join(rootDir, 'dist', 'index.html');
 const pageUrl = pathToFileURL(pageFile).href;
 
 let window: BrowserWindow | null = null;
+
+/*
+  Started with Windows (the `background` setting): only the icon at the bottom
+  right, the window when asked for. And with `background` on, closing the
+  window only hides it: Cortex quits from the icon's menu.
+*/
+const START_HIDDEN = process.argv.includes('--gizli');
+let quitting = false;
+let toldOfTray = false;
 
 function sameOrigin(a: string, b: string): boolean {
   try {
@@ -115,7 +125,7 @@ function holdSession(): void {
   });
 }
 
-function createWindow(): void {
+function createWindow(showNow = true): void {
   window = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -142,7 +152,27 @@ function createWindow(): void {
   if (HIDDEN) window.webContents.setFrameRate(30);
 
   window.once('ready-to-show', () => {
-    if (!HIDDEN) window?.show();
+    if (!HIDDEN && showNow) window?.show();
+  });
+
+  // Windows shutting down or signing out: the window closes for good, nothing holds the session up.
+  window.on('query-session-end', () => {
+    quitting = true;
+  });
+  window.on('close', (event) => {
+    if (quitting || HIDDEN || !readSettings().background) return;
+    event.preventDefault();
+    window?.hide();
+    if (!toldOfTray) {
+      toldOfTray = true;
+      const english = readSettings().language === 'en';
+      trayNotice(
+        'Cortex',
+        english
+          ? 'Cortex keeps running at the bottom right. Open it, or switch the microphone, from the icon.'
+          : 'Cortex sağ altta çalışmaya devam ediyor. Simgeden açabilir, mikrofonu açıp kapatabilirsin.',
+      );
+    }
   });
 
   if (DEV_SERVER) {
@@ -155,6 +185,17 @@ function createWindow(): void {
   window.on('closed', () => {
     window = null;
   });
+}
+
+/** The window brought back: from the icon, or a second launch; made again if it was closed for good. */
+function showWindow(): void {
+  if (!window) {
+    createWindow();
+    return;
+  }
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
 }
 
 function buildMenu(): void {
@@ -186,12 +227,7 @@ app.on('web-contents-created', (_event, contents) => holdContents(contents));
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    if (window) {
-      if (window.isMinimized()) window.restore();
-      window.focus();
-    }
-  });
+  app.on('second-instance', () => showWindow());
 
   void app.whenReady().then(() => {
     holdSession();
@@ -200,7 +236,17 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu();
     // Read once at start, so a settings file that will not be read is found before the window asks.
     readSettings();
-    createWindow();
+    createWindow(!START_HIDDEN);
+    if (!HIDDEN) {
+      startTray({
+        open: showWindow,
+        quit: () => {
+          quitting = true;
+          app.quit();
+        },
+      });
+      startWithWindows(readSettings().background);
+    }
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -212,4 +258,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', () => stopWatching());
+app.on('before-quit', () => {
+  quitting = true;
+  stopWatching();
+});

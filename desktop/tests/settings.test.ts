@@ -20,12 +20,12 @@ const fresh = () => {
 
 test('a missing file is a first run, and what is changed is written at once, through a temporary', () => {
   fresh();
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false });
+  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true });
   assert.equal(settingsUnreadable(), null);
   updateSettings((settings) => {
     settings.language = 'en';
   });
-  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')), { vault: null, language: 'en', allFiles: false, nameIcons: false, userName: null, onboarded: false });
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')), { vault: null, language: 'en', allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true });
   assert.deepEqual(fs.readdirSync(dir()).filter((name) => name.endsWith('.tmp')), [], 'no temporary left');
   forgetSettings();
   assert.equal(readSettings().language, 'en', 'read back from disk');
@@ -34,7 +34,7 @@ test('a missing file is a first run, and what is changed is written at once, thr
 test('a file that will not parse is copied aside before an empty one is saved', () => {
   fresh();
   fs.writeFileSync(settingsPath(), '{"vault": "C:\\\\Notlar", "lang');
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false });
+  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true });
   assert.equal(settingsUnreadable(), 'copied');
   const copies = fs.readdirSync(dir()).filter((name) => name.startsWith('settings.json.corrupt-'));
   assert.equal(copies.length, 1);
@@ -49,7 +49,7 @@ test('a file the disk will not hand over is left as it is, and nothing is writte
   fresh();
   // A folder where the file should be: read fails without the text ever arriving, as a locked file's does.
   fs.mkdirSync(settingsPath());
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false });
+  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true });
   assert.equal(settingsUnreadable(), 'left');
   updateSettings((settings) => {
     settings.language = 'en';
@@ -61,10 +61,10 @@ test('a file the disk will not hand over is left as it is, and nothing is writte
 test('what is not a known value is read as none', () => {
   fresh();
   fs.writeFileSync(settingsPath(), JSON.stringify({ vault: 42, language: 'de', other: true, allFiles: 'yes', nameIcons: 1, userName: 7, onboarded: 'yes' }));
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false });
+  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true });
   fs.writeFileSync(settingsPath(), JSON.stringify(['not', 'an', 'object']));
   forgetSettings();
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false });
+  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true });
   assert.equal(settingsUnreadable(), 'copied');
 });
 

@@ -38,6 +38,8 @@ export interface Settings {
   userName: string | null;
   /** The first-run screen has been gone through; until then it is what the app opens on. */
   onboarded: boolean;
+  /** The window closed, Cortex stays in the notification area, and starts there with Windows; on by default. */
+  background: boolean;
 }
 
 /** The longest name kept: a way of addressing somebody, not a paragraph. */
@@ -50,7 +52,7 @@ export function tidyName(value: unknown): string | null {
   return name || null;
 }
 
-const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false };
+const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true };
 
 let cache: Settings | null = null;
 let keepOff = false;
@@ -68,6 +70,7 @@ function hydrate(raw: Record<string, unknown>): Settings {
     nameIcons: raw.nameIcons === true,
     userName: tidyName(raw.userName),
     onboarded: raw.onboarded === true,
+    background: raw.background !== false,
   };
 }
 

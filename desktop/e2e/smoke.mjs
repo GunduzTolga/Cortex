@@ -173,6 +173,36 @@ await page.waitForLoadState('domcontentloaded');
 // Once the window is there: asked of the main process before it, an evaluation can be lost while the app starts.
 await holdBrowser();
 const shownSoon = (locator, timeout = 10_000) => locator.first().waitFor({ timeout }).then(() => true, () => false);
+/** Whether `test` comes true within a while: for what the run sees outside the window (a file). */
+async function soon(test, timeout = 8_000) {
+  for (const end = Date.now() + timeout; Date.now() < end; await new Promise((done) => setTimeout(done, 100))) {
+    if (test()) return true;
+  }
+  return false;
+}
+/** The vault's engine stood in for, for voice typing: installed, its commands kept in `folder`, what it is asked logged there. */
+const voiceStandIn = (folder) => String.raw`
+import json, os, sys
+folder = ${JSON.stringify(folder)}
+args = sys.argv[1:]
+with open(os.path.join(folder, 'istenen.log'), 'a', encoding='utf-8') as log:
+    log.write(' '.join(args) + '\n')
+kept = os.path.join(folder, 'komutlar.json')
+commands = json.load(open(kept, encoding='utf-8')) if os.path.exists(kept) else {
+    'kaydet': ['kaydet'], 'sil': ['sil', 'temizle', 'hepsini sil'], 'kelime_sil': ['son kelimeyi sil'],
+    'cumle_sil': ['son cümleyi sil'], 'iptal': ['iptal', 'vazgeç']}
+if args[:2] == ['ses', 'ayar'] and '--komutlar' in args:
+    commands.update(json.loads(args[args.index('--komutlar') + 1]))
+    json.dump(commands, open(kept, 'w', encoding='utf-8'))
+if args[:2] == ['yakala', 'durum']:
+    print(json.dumps({'status': 'tamam', 'kurulu': True}))
+elif args[:1] == ['ses']:
+    print(json.dumps({'kurulu': True, 'acik': True, 'uyandirma': False, 'otomatik_dinle': True, 'motor': 'vulkan',
+                      'model': 'large-v3-turbo (ekran kartı, Vulkan)', 'komutlar': commands, 'adla_kaydet': ['gönder', 'tamam']}, ensure_ascii=False))
+else:
+    print('bilinmeyen komut', file=sys.stderr)
+    sys.exit(2)
+`;
 
 console.log('\nFirst opening');
 check('a first run opens on the first-run screen, Pyn asking how to address the person', await shownSoon(page.locator('[data-onboarding-step="name"]'), 30_000));
@@ -391,6 +421,10 @@ check(
 );
 await page.locator('[data-settings-open]').click();
 check('the gear in the top bar opens the settings', await shownSoon(page.locator('[data-settings]')));
+check(
+  'Cortex stays at the bottom right when the window is closed, unless told otherwise',
+  (await page.locator('[data-settings-background]').getAttribute('aria-checked')) === 'true',
+);
 /*
   Cortex set up from the app (src/ui/SetupSections.tsx): this vault, a copy of
   the template, has no engine; the settings offer the one the app came with,
@@ -426,6 +460,37 @@ check('Ctrl+, opens them too', await shownSoon(page.locator('[data-settings]')))
 await page.locator('[data-settings-name-icons]').click();
 await page.keyboard.press('Escape');
 check('and the emoji go again', await page.waitForFunction(() => document.querySelector('[data-tree-path="🎯 100-Command-Center"]')?.textContent?.trim() === '100-Command-Center', null, { timeout: 5_000 }).then(() => true, () => false));
+/*
+  The spoken commands, set from the settings (src/ui/SetupSections.tsx): a
+  stand-in for the vault's engine says voice typing is installed and keeps what
+  it is asked. Words changed in a command's field go to the engine's own
+  setting, `ses ayar --komutlar`. Windows only, as voice typing is.
+*/
+if (process.platform === 'win32' && (await page.evaluate(() => window.cortex.setup.status())).python) {
+  const askedLog = path.join(enginePackages, 'istenen.log');
+  fs.writeFileSync(vaultNote('beyin.py'), voiceStandIn(enginePackages));
+  fs.writeFileSync(vaultNote('.beyin-version'), '9.9.9\n');
+  await page.keyboard.press('Control+,');
+  const saveWords = page.locator('[data-setup-voice-command="kaydet"]');
+  check(
+    'installed voice typing shows the spoken commands, each one’s words there to change',
+    (await shownSoon(saveWords, 15_000)) && (await saveWords.inputValue()) === 'kaydet' &&
+      (await page.locator('[data-setup-voice-command="kelime_sil"]').inputValue()) === 'son kelimeyi sil',
+  );
+  await page.locator('[data-setup-voice-commands]').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  await shoot('07c-voice-commands.png');
+  await saveWords.fill('kaydet,  tamamdır ');
+  await saveWords.press('Enter');
+  check(
+    'and words changed there are set with the engine’s own setting',
+    await soon(() => fs.existsSync(askedLog) && fs.readFileSync(askedLog, 'utf8').includes('ses ayar --komutlar {"kaydet":["kaydet","tamamdır"]}')),
+  );
+  check('and shown as the engine kept them', await page.waitForFunction(() => document.querySelector('[data-setup-voice-command="kaydet"]')?.value === 'kaydet, tamamdır', null, { timeout: 5_000 }).then(() => true, () => false));
+  await page.keyboard.press('Escape');
+  fs.rmSync(vaultNote('beyin.py'));
+  fs.rmSync(vaultNote('.beyin-version'));
+}
 await notesView.locator('[data-tree-path="Notes/settings.json"]').click();
 check(
   'a JSON file is shown as the text it is, read only',
@@ -653,6 +718,7 @@ check(
   (await shownSoon(page.locator('[data-ofis-line]', { hasText: '«Plan» notuna dipnot lazım.' }), 15_000)) &&
     lmBodies.some((one) => one.stream === false && one.model === 'qwen-e2e' && JSON.stringify(one.messages).includes('Defne')),
 );
+await shoot('18-office-settings.png');
 await page.locator('[data-ofis-live]').click();
 await page.keyboard.press('Escape');
 check('and Escape closes them', await page.locator('[data-ofis-settings]').waitFor({ state: 'detached', timeout: 3_000 }).then(() => true, () => false));
