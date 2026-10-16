@@ -4,14 +4,17 @@ Offline and silent: nothing is installed, downloaded or recorded. The helper pro
 in for by a small script that speaks the same protocol, and the installer's commands are
 recorded instead of run.
 """
+import gc
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
+import queue
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -36,11 +39,34 @@ class WordsTest(unittest.TestCase):
         grammar = json.loads(ses.wake_grammar())
         self.assertEqual(grammar[0], 'pyn not al')
         self.assertIn('pay not al', grammar, '"payn not al" as the small model hears it')
+        self.assertIn('not al', grammar, 'the rest of the phrase alone: a real voice saying "payn" is mostly [unk] to it')
         self.assertEqual(grammar[-1], '[unk]', 'anything else is nothing')
-        self.assertNotIn('not al', grammar, 'never the command without the name')
         for heard in ('pay not al', 'bin not al', 'bayan not al'):
             self.assertTrue(ses.wake_heard(heard), heard)
         self.assertEqual(json.loads(ses.wake_grammar('hey pyn not al'))[1], 'pay pyn not al')
+
+    def test_what_the_small_model_hears_is_the_phrase_a_candidate_for_whisper_or_nothing(self):
+        for heard in ('pay not al', 'bin not al', 'pyn not al'):
+            self.assertEqual(ses.wake_verdict(heard), 'soz', heard)
+        for heard in ('[unk] not al', 'not al', '[unk] [unk] not al', 'pay [unk] not al'):
+            self.assertEqual(ses.wake_verdict(heard), 'aday', heard)
+        for heard in ('[unk]', '[unk] not', 'not [unk] al', 'pay', ''):
+            self.assertIsNone(ses.wake_verdict(heard), heard)
+
+    def test_whisper_hears_pyns_name_however_it_writes_it_and_no_other_word(self):
+        for written in ('Pyn, not al.', 'Payn not al', 'Pain, not al.', 'Bayın not al.', 'Payın not al', 'Pin not al.',
+                        'Pyn not al. Yarın toplantı var'):
+            self.assertTrue(ses.wake_heard(written), written)
+        for written in ('Bunu not al.', 'Bana not al.', 'Şunu not al', 'Onu not al', 'Not al.', 'Notları al.', ''):
+            self.assertFalse(ses.wake_heard(written), written)
+
+    def test_a_dictation_the_wake_phrase_began_starts_after_the_phrase(self):
+        self.assertEqual(ses.without_wake('Al. Yarın toplantı var'), 'Yarın toplantı var', 'the end of "al" the recording caught')
+        self.assertEqual(ses.without_wake('not al, yarın onda'), 'yarın onda')
+        self.assertEqual(ses.without_wake('Payn, not al. Süt al'), 'Süt al', 'the name however written; the last "al" is a word')
+        self.assertEqual(ses.without_wake('Pyn, not al'), '')
+        for kept in ('Alışveriş listesi', 'Yarın onda', 'Notlar hazır'):
+            self.assertEqual(ses.without_wake(kept), kept)
 
     def test_kaydet_counts_at_the_end_sil_and_iptal_only_alone(self):
         self.assertEqual(ses.command_of('Toplantı notu, kaydet.'), ('kaydet', 'Toplantı notu'))
@@ -58,11 +84,30 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(ses.command_of('pın, kaydet'), ('kaydet', ''))
         self.assertEqual(ses.command_of('Pyn sil'), ('sil', ''))
         self.assertEqual(ses.command_of('Pinpon oynadık, kaydet'), ('kaydet', 'Pinpon oynadık'), 'only the name itself is taken off')
+        self.assertEqual(ses.command_of('Market listesi, Payn kaydet.'), ('kaydet', 'Market listesi'), 'the name as Whisper writes it')
+
+    def test_gonder_tamam_bitti_save_only_right_after_the_name(self):
+        self.assertEqual(ses.command_of('Pyn, gönder.'), ('kaydet', ''))
+        self.assertEqual(ses.command_of('Toplantı yarın onda, Pyn tamam'), ('kaydet', 'Toplantı yarın onda'))
+        self.assertEqual(ses.command_of('Pin bitti.'), ('kaydet', ''))
+        for note in ("Raporu Ali'ye gönder", 'Tamam', 'Proje bitti', 'tamam mı'):
+            self.assertEqual(ses.command_of(note), (None, note), note)
+        self.assertEqual(ses.command_of('Pyn gönder', after_name=[]), (None, 'Pyn gönder'), 'the list is a setting')
 
     def test_what_whisper_makes_up_for_silence_is_never_a_note(self):
-        for made_up in ('Altyazı M.K.', 'İzlediğiniz için teşekkürler.', 'Abone olmayı unutmayın!', '[BLANK_AUDIO]'):
+        for made_up in ('Altyazı M.K.', 'İzlediğiniz için teşekkürler.', 'Abone olmayı unutmayın!', '[BLANK_AUDIO]', '[Müzik]'):
             self.assertEqual(ses.clean_spoken(made_up), '', made_up)
         self.assertEqual(ses.clean_spoken(' Altyazı dosyasını düzelt '), 'Altyazı dosyasını düzelt')
+
+    def test_what_whisper_makes_up_after_the_words_is_cut_so_kaydet_is_still_the_end(self):
+        cleaned = ses.clean_spoken('Toplantı notu, Pyn kaydet. Altyazı M.K.')
+        self.assertEqual(cleaned, 'Toplantı notu, Pyn kaydet')
+        self.assertEqual(ses.command_of(cleaned), ('kaydet', 'Toplantı notu'))
+        self.assertEqual(ses.clean_spoken('Merhaba [Müzik] dünya'), 'Merhaba dünya')
+        prompt = ses.DEFAULTS['ipucu']
+        self.assertEqual(ses.clean_spoken('Süt al. ' + prompt, prompt), 'Süt al', 'its prompt said back')
+        self.assertEqual(ses.clean_spoken(prompt, prompt), '')
+        self.assertEqual(ses.clean_spoken('Yarın konser var, müzik'), 'Yarın konser var, müzik', 'one word is a word')
 
     def test_what_is_said_goes_after_what_was_typed(self):
         self.assertEqual(yakala.with_spoken('', 'merhaba dünya'), 'merhaba dünya')
@@ -357,6 +402,33 @@ for line in sys.stdin:
 '''
 
 
+class TrialWakeTest(unittest.TestCase):
+    def test_the_wake_trial_says_what_was_heard_and_whether_the_window_would_open(self):
+        events = [{'olay': 'dinliyor', 'sn': 20, 'mikrofon': 'Mikrofon (USB)', 'model': 'large-v3-turbo', 'soz': 'pyn not al'},
+                  {'olay': 'duyulan', 'metin': '[unk] not al'},
+                  {'olay': 'karar', 'karar': 'aday', 'duyulan': '[unk] not al', 'whisper': 'Payn, not al.', 'uyanir': True},
+                  {'olay': 'karar', 'karar': 'aday', 'duyulan': '[unk] not al', 'whisper': 'Bunu not al.', 'uyanir': False},
+                  {'olay': 'karar', 'karar': 'soz', 'duyulan': 'pay not al', 'uyanir': True}]
+        asked = []
+
+        def popen(command, **_options):
+            asked.append(command)
+            lines = [json.dumps(event, ensure_ascii=False) + '\n' for event in events]
+            return types.SimpleNamespace(stdout=iter(lines), wait=lambda: 0)
+
+        said = []
+        with tempfile.TemporaryDirectory(prefix='v3-ses-dene-') as tmp:
+            self.assertEqual(ses.trial_wake(Path(tmp), 20, False, popen=popen, say=said.append), 0)
+        self.assertEqual(asked[0][-2:], ['--dene-uyandirma', '20'])
+        text = '\n'.join(said)
+        self.assertIn('20 saniye dinliyorum · Mikrofon (USB)', text)
+        self.assertIn('"Pyn, not al" de', text)
+        self.assertIn('küçük model: [unk] not al', text)
+        self.assertIn('Whisper: “Payn, not al.” · pencere açılırdı ✓', text)
+        self.assertIn('Whisper: “Bunu not al.” · Pyn\'in adını duymadı, pencere açılmazdı ✗', text)
+        self.assertIn('sözü tam duydu: pencere açılırdı ✓', text)
+
+
 class WorkerTest(unittest.TestCase):
     def test_commands_go_in_and_events_come_out_one_line_each(self):
         with tempfile.TemporaryDirectory(prefix='v3-ses-isci-') as tmp:
@@ -389,10 +461,11 @@ class WorkerTest(unittest.TestCase):
 
 class FakeWorker:
     def __init__(self):
-        self.sent = []
+        self.sent, self.values = [], []
 
     def send(self, command, **values):
         self.sent.append(command)
+        self.values.append(values)
         return True
 
 
@@ -406,6 +479,9 @@ class PopupVoiceTest(unittest.TestCase):
         except Exception as exc:  # no Tk, or no display
             self.skipTest('Tk yok: %s' % exc)
         self.root.withdraw()
+        # Tk's images are freed here, after the root: freed later on another test's thread, each
+        # one waits there for a main loop that is not running.
+        self.addCleanup(gc.collect)
         self.addCleanup(self.root.destroy)
         from unittest.mock import patch
         # Nothing appears on the screen and nothing is read from the person's clipboard.
@@ -477,18 +553,17 @@ class PopupVoiceTest(unittest.TestCase):
     def test_opened_listening_it_takes_dictation_until_pyn_kaydet(self):
         self.link.ready = True
         win = self.window(auto_listen=True)
-        self.assertEqual(self.link.worker.sent, ['dinle'])
+        self.assertEqual((self.link.worker.sent, self.link.worker.values), (['dinle'], [{'surekli': True}]),
+                         'one dictation: the helper keeps the microphone open between sentences')
         win.voice_event({'olay': 'dinliyor'})
         self.assertTrue(any('Pyn, kaydet' in text for text in self.texts(win)), 'how to finish is said')
-        # A pause: the sentence is written and it listens again by itself.
-        win.voice_event({'olay': 'metin', 'metin': 'Cuma günü', 'komut': None})
+        # A pause: the sentence is written in and the microphone was never let go.
+        win.voice_event({'olay': 'metin', 'metin': 'Cuma günü', 'komut': None, 'son': False})
         win.update()
-        self.root.after(200)
-        win.update()
-        self.assertEqual(self.link.worker.sent, ['dinle', 'dinle'], 'listening again after a pause')
+        self.assertEqual(self.link.worker.sent, ['dinle'], 'nothing to ask: it still listens')
+        self.assertTrue(any(text.startswith('● Dinliyorum') for text in self.texts(win)))
         self.assertEqual(self.cards(), [])
-        win.voice_event({'olay': 'dinliyor'})
-        win.voice_event({'olay': 'metin', 'metin': 'sunum provası', 'komut': 'kaydet'})
+        win.voice_event({'olay': 'metin', 'metin': 'sunum provası', 'komut': 'kaydet', 'son': True})
         cards = self.cards()
         self.assertEqual(len(cards), 1, 'saved without a key pressed')
         self.assertIn('Cuma günü sunum provası', cards[0].read_text(encoding='utf-8'))
@@ -496,13 +571,10 @@ class PopupVoiceTest(unittest.TestCase):
     def test_a_long_silence_ends_the_dictation(self):
         self.link.ready = True
         win = self.window(auto_listen=True)
-        for _ in range(2):
-            win.voice_event({'olay': 'dinliyor'})
-            win.voice_event({'olay': 'metin', 'metin': '', 'komut': None})
-            win.update()
-            self.root.after(200)
-            win.update()
-        self.assertEqual(self.link.worker.sent, ['dinle', 'dinle'], 'twice nothing heard: it stops listening')
+        win.voice_event({'olay': 'dinliyor'})
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': None, 'son': True})  # the helper's own end
+        win.update()
+        self.assertEqual(self.link.worker.sent, ['dinle'], 'it does not listen again by itself')
         self.assertIn('Bir süredir ses gelmedi; dinlemeyi bıraktım', self.texts(win))
 
     def test_enter_while_it_listens_ends_it_and_saves_what_was_said(self):
@@ -513,10 +585,43 @@ class PopupVoiceTest(unittest.TestCase):
         self.assertEqual(self.link.worker.sent, ['dinle', 'bitir'])
         self.assertEqual(self.cards(), [], 'not saved before the words are written')
         win.voice_event({'olay': 'ceviriyor'})
-        win.voice_event({'olay': 'metin', 'metin': 'Cuma sunum provası', 'komut': None})
+        win.voice_event({'olay': 'metin', 'metin': 'Cuma', 'komut': None, 'son': False})
+        self.assertEqual(self.cards(), [], 'a sentence said before it: the last one is still to come')
+        win.voice_event({'olay': 'metin', 'metin': 'sunum provası', 'komut': None, 'son': True})
         cards = self.cards()
         self.assertEqual(len(cards), 1)
         self.assertIn('Cuma sunum provası', cards[0].read_text(encoding='utf-8'))
+
+    def test_sil_in_a_dictation_clears_the_field_and_it_goes_on_listening(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        win.voice_event({'olay': 'dinliyor'})
+        win.voice_event({'olay': 'metin', 'metin': 'yanlış bir şey', 'komut': None, 'son': False})
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'sil', 'son': False})
+        win.voice_event({'olay': 'metin', 'metin': 'Doğrusu bu', 'komut': 'kaydet', 'son': True})
+        cards = self.cards()
+        self.assertEqual(len(cards), 1)
+        self.assertNotIn('yanlış', cards[0].read_text(encoding='utf-8'))
+        self.assertIn('Doğrusu bu', cards[0].read_text(encoding='utf-8'))
+
+    def test_typing_in_a_dictation_keeps_what_was_said_before_but_no_command(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        win.voice_event({'olay': 'dinliyor'})
+        win.typed()
+        self.assertEqual(self.link.worker.sent, ['dinle', 'iptal'])
+        win.voice_event({'olay': 'metin', 'metin': 'Söylenen', 'komut': 'kaydet', 'son': False})
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': None, 'son': True})
+        self.assertEqual(self.cards(), [], 'nothing saved by itself once typing began')
+        win.enter()
+        self.assertIn('Söylenen', self.cards()[0].read_text(encoding='utf-8'))
+
+    def test_the_wake_phrase_said_to_an_open_window_begins_a_dictation(self):
+        self.link.ready = True
+        win = self.window()
+        win.voice_event({'olay': 'dinliyor'})
+        win.voice_event({'olay': 'uyandi'})
+        self.assertTrue(any('Pyn, kaydet' in text for text in self.texts(win)), 'it takes dictation')
 
     def test_what_is_said_is_written_into_the_field_and_kaydet_at_the_end_saves_it(self):
         self.link.ready = True
@@ -653,6 +758,365 @@ class VulkanServerTest(unittest.TestCase):
         first, second = [entry['argv'] for entry in self.seen() if 'argv' in entry]
         self.assertIn('-dev', first)
         self.assertIn('-ng', second)
+
+
+class Sound:
+    """A piece of recorded sound, by name: what the stand-in Whisper is asked to write."""
+
+    def __init__(self, name, seconds=1.0):
+        self.name, self.seconds = name, seconds
+
+    def __len__(self):
+        return int(self.seconds * 16000)
+
+
+class FakeRecorder:
+    """The microphone, played by the test: it says when someone speaks and what each sentence is."""
+
+    def __init__(self, clock):
+        self.clock, self.stream, self.level, self.said = clock, None, 0.0, []
+        self.starts = self.stops = 0
+        self._sentence()
+
+    def _sentence(self):
+        self.spoke, self.started, self.last_voice = False, self.clock.t, self.clock.t
+
+    def start(self, on_chunk=None):
+        self.stream, self.said = 'open', []
+        self.starts += 1
+        self._sentence()
+
+    def speak(self, name):
+        self.said.append(name)
+        self.spoke, self.last_voice = True, self.clock.t
+
+    def cut(self):
+        sound = Sound('+'.join(self.said))
+        self.said = []
+        self._sentence()
+        return sound
+
+    def peek(self):
+        return Sound('+'.join(self.said))
+
+    def stop(self):
+        self.stream = None
+        self.stops += 1
+        sound, self.said = Sound('+'.join(self.said), 1.0 if self.said else 0.0), []
+        return sound
+
+
+class FakeWake:
+    def __init__(self):
+        self.running, self.verdicts, self.text, self.starts = False, [], '', 0
+
+    def start(self):
+        self.running = True
+        self.starts += 1
+
+    def stop(self):
+        self.running = False
+
+    def heard(self, seen=None):
+        if self.verdicts:
+            self.text = '[unk] not al'
+            return self.verdicts.pop(0)
+        return None
+
+    def clip(self):
+        return Sound('once')
+
+
+class ServeTest(unittest.TestCase):
+    """The helper's loop with the microphone, Vosk and Whisper stood in for and the clock held."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-dongu-')
+        self.addCleanup(self.tmp.cleanup)
+        spec = importlib.util.spec_from_file_location('isci_dongu_testi', ses.write_worker(Path(self.tmp.name) / 'state'))
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        helper.ses = ses
+        self.clock = types.SimpleNamespace(t=1000.0)
+        self.recorder, self.wake = FakeRecorder(self.clock), FakeWake()
+        self.events, self.asked, self.written = queue.Queue(), [], {}
+        self.hold = threading.Event()
+        self.hold.set()
+
+        def transcribe(_model, audio, _config, _lock):
+            self.asked.append(audio.name)
+            self.hold.wait(5)
+            return self.written.get(audio.name, '')
+
+        for name, value in (('Recorder', lambda _config: self.recorder), ('Wake', lambda _state, _config: self.wake),
+                            ('load_model', lambda _state, _config: ('model', 'sahte')), ('release', lambda _model: None),
+                            ('transcribe', transcribe), ('_device_name', lambda _config: 'Mikrofon'),
+                            ('join_audio', lambda *parts: Sound('+'.join(part.name for part in parts if part.name))),
+                            ('out', lambda **event: self.events.put(event)), ('log', lambda _text: None),
+                            ('now', lambda: self.clock.t)):
+            setattr(helper, name, value)
+        self.helper, self.lines = helper, queue.Queue()
+
+    def serve(self, **config):
+        def lines():
+            while True:
+                line = self.lines.get()
+                if line is None:
+                    return
+                yield line
+        settings = dict(ses.DEFAULTS, **config)
+        thread = threading.Thread(target=self.helper.serve, args=(Path(self.tmp.name) / 'state', settings, lines()), daemon=True)
+        thread.start()
+        self.addCleanup(lambda: (self.send('kapat'), self.hold.set(), thread.join(5)))
+        self.until('hazir')
+
+    def send(self, command, **values):
+        self.lines.put(json.dumps(dict(values, komut=command)) + '\n')
+
+    def until(self, kind, wait=5.0, **fields):
+        seen, deadline = [], time.monotonic() + wait
+        while time.monotonic() < deadline:
+            try:
+                event = self.events.get(timeout=0.02)
+            except queue.Empty:
+                continue
+            seen.append(event)
+            if event.get('olay') == kind and all(event.get(k) == v for k, v in fields.items()):
+                return event
+        self.fail('no %s %s; saw %s' % (kind, fields, seen))
+
+    def quiet(self, wait=0.4):
+        """What it said in a little while, `seviye` aside."""
+        deadline, seen = time.monotonic() + wait, []
+        while time.monotonic() < deadline:
+            try:
+                event = self.events.get(timeout=0.02)
+            except queue.Empty:
+                continue
+            if event.get('olay') != 'seviye':
+                seen.append(event)
+        return seen
+
+    def pause(self, seconds=1.5):
+        self.clock.t += seconds
+
+    def until_asked(self, *names, wait=5.0):
+        deadline = time.monotonic() + wait
+        while self.asked != list(names) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(self.asked, list(names), 'what Whisper was asked to write')
+
+    def until_recording(self, wait=5.0):
+        deadline = time.monotonic() + wait
+        while self.recorder.stream is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(self.recorder.stream, 'open')
+
+    def test_a_dictation_keeps_the_microphone_open_while_a_sentence_is_written(self):
+        self.serve()
+        self.written.update({'cuma': 'Cuma günü', 'prova': 'sunum provası, Pyn kaydet.'})
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.hold.clear()  # Whisper is slow: the first sentence is still being written...
+        self.recorder.speak('cuma')
+        self.pause()
+        self.until_asked('cuma')
+        self.recorder.speak('prova')  # ...while the next one is said into the open microphone
+        self.assertEqual((self.recorder.stream, self.recorder.stops), ('open', 0), 'never let go between sentences')
+        self.hold.set()
+        first = self.until('metin')
+        self.assertEqual((first['metin'], first['komut'], first['son']), ('Cuma günü', None, False))
+        self.pause()
+        last = self.until('metin')
+        self.assertEqual((last['metin'], last['komut'], last['son']), ('sunum provası', 'kaydet', True))
+        self.assertEqual(self.asked, ['cuma', 'prova'])
+        self.assertIsNone(self.recorder.stream, 'saved: the microphone goes')
+
+    def test_bitir_writes_the_last_sentence_after_the_ones_before_it(self):
+        self.serve()
+        self.written.update({'bir': 'Birinci', 'iki': 'ikinci'})
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.hold.clear()
+        self.recorder.speak('bir')
+        self.pause()
+        self.until_asked('bir')
+        self.recorder.speak('iki')
+        self.send('bitir')  # Enter
+        self.until('ceviriyor')
+        self.hold.set()
+        events = [e for e in self.quiet(1.0) if e['olay'] == 'metin']
+        self.assertEqual([(e['metin'], e['son']) for e in events], [('Birinci', False), ('ikinci', True)])
+
+    def test_a_dictation_nobody_speaks_into_ends_by_itself(self):
+        self.serve()
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.pause(10)
+        self.assertEqual([e for e in self.quiet() if e['olay'] == 'metin'], [], 'ten seconds of quiet is a pause')
+        self.pause(15)
+        last = self.until('metin')
+        self.assertEqual((last['metin'], last['son']), ('', True))
+        self.assertIsNone(self.recorder.stream)
+
+    def test_a_heard_not_al_whisper_confirms_opens_listening_and_the_phrase_is_not_written(self):
+        self.serve(uyandirma=True)
+        self.written.update({'once': 'Payn, not al.', 'once+al': 'Payn, not al.', 'al+yarin': 'Al. Yarın toplantı var.'})
+        self.wake.verdicts = ['aday']
+        self.until_recording()
+        self.recorder.speak('al')  # the end of "al" the recording caught
+        nothing = self.quiet()
+        self.assertFalse([e for e in nothing if e['olay'] in ('dinliyor', 'uyandi')], 'nobody is told before Whisper says so')
+        self.assertEqual(self.recorder.stream, 'open', 'but the recording has begun: no word after the phrase is lost')
+        self.pause(ses.WAKE_AFTER_SN)
+        self.until('uyandi')
+        self.assertEqual(self.asked[0], 'once+al', 'Whisper heard the seconds before it and the phrase\'s end')
+        self.recorder.speak('yarin')
+        self.pause()
+        first = self.until('metin')
+        self.assertEqual((first['metin'], first['son']), ('Yarın toplantı var.', False))
+
+    def test_a_heard_not_al_whisper_does_not_confirm_says_nothing_and_listens_for_the_phrase_again(self):
+        self.serve(uyandirma=True)
+        self.written.update({'once': 'Bunu not al.'})
+        self.wake.verdicts = ['aday']
+        self.until_recording()
+        self.pause(ses.WAKE_AFTER_SN)
+        self.until_asked('once')
+        said = self.quiet(0.6)
+        self.assertFalse([e for e in said if e['olay'] in ('dinliyor', 'uyandi', 'metin')], said)
+        self.assertIsNone(self.recorder.stream, 'the recording let go')
+        self.assertTrue(self.wake.running and self.wake.starts >= 2, 'listening for the phrase again')
+
+    def test_the_whole_phrase_the_small_model_heard_opens_at_once(self):
+        self.serve(uyandirma=True)
+        self.wake.verdicts = ['soz']
+        self.until('uyandi')
+        self.assertEqual(self.asked, [], 'no check needed')
+
+    def test_asked_to_listen_while_a_not_al_is_being_checked_it_listens(self):
+        self.serve(uyandirma=True)
+        self.wake.verdicts = ['aday']
+        self.until_recording()
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.assertEqual(self.recorder.starts, 1, 'the same recording')
+        self.pause(ses.WAKE_AFTER_SN)
+        self.assertFalse([e for e in self.quiet() if e['olay'] == 'uyandi'])
+
+
+class RecorderTest(unittest.TestCase):
+    """The helper's microphone on real sample arrays (numpy, which the engine's own Python may lack)."""
+
+    def setUp(self):
+        try:
+            import numpy
+        except ImportError:
+            self.skipTest('numpy yok')
+        self.np = numpy
+        self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-kayit-')
+        self.addCleanup(self.tmp.cleanup)
+        spec = importlib.util.spec_from_file_location('isci_kayit_testi', ses.write_worker(Path(self.tmp.name) / 'state'))
+        self.helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.helper)
+        self.helper.ses = ses
+        self.clock = types.SimpleNamespace(t=0.0)
+        self.helper.now = lambda: self.clock.t
+        self.streams = []
+        test = self
+
+        class Stream:
+            def __init__(self, callback=None, **_settings):
+                self.callback, self.open = callback, False
+                test.streams.append(self)
+
+            def start(self):
+                self.open = True
+
+            def stop(self):
+                self.open = False
+
+            def close(self):
+                pass
+
+        fake = types.SimpleNamespace(InputStream=Stream, query_devices=lambda *_a: [], default=types.SimpleNamespace(device=[0]))
+        patcher = mock.patch.dict(sys.modules, {'sounddevice': fake})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def feed(self, seconds, loud):
+        """Ten-millisecond blocks into the stream, as the sound card gives them."""
+        stream = self.streams[-1]
+        for _ in range(int(round(seconds * 100))):
+            block = self.np.full((160, 1), 0.1 if loud else 0.0005, dtype='float32')
+            if loud:
+                block[::2] *= -1
+            stream.callback(block, 160, None, None)
+            self.clock.t += 0.01
+
+    def test_a_cut_takes_the_sentence_trimmed_to_its_speech_and_the_stream_goes_on(self):
+        recorder = self.helper.Recorder(dict(ses.DEFAULTS))
+        recorder.start()
+        self.feed(1.0, False)
+        self.feed(1.0, True)
+        self.feed(1.5, False)
+        self.assertTrue(recorder.spoke)
+        self.assertAlmostEqual(self.clock.t - recorder.last_voice, 1.5, places=1)
+        sentence = recorder.cut()
+        self.assertAlmostEqual(len(sentence) / 16000, 0.3 + 1.0 + 0.4, places=1, msg='the speech, a little either side')
+        self.assertTrue(self.streams[-1].open, 'the microphone stays open')
+        self.assertFalse(recorder.spoke, 'the next sentence begins unsaid')
+        self.feed(0.5, True)
+        self.feed(0.2, False)
+        last = recorder.stop()
+        self.assertTrue(recorder.spoke)
+        self.assertFalse(self.streams[-1].open)
+        self.assertAlmostEqual(len(last) / 16000, 0.5 + 0.2, places=1, msg='what was said since the cut, no sound lost between')
+
+    def test_the_wake_listener_keeps_the_last_seconds_and_says_a_candidate_with_what_it_heard(self):
+        heard = {'partial': '[unk]'}
+
+        class Recognizer:
+            def __init__(self, _model, _rate, grammar):
+                self.grammar = json.loads(grammar)
+
+            def Reset(self):
+                pass
+
+            def AcceptWaveform(self, _pcm):
+                return False
+
+            def PartialResult(self):
+                return json.dumps(heard)
+
+        vosk = types.SimpleNamespace(KaldiRecognizer=Recognizer, Model=lambda _path: None, SetLogLevel=lambda _level: None)
+        with mock.patch.dict(sys.modules, {'vosk': vosk}):
+            wake = self.helper.Wake(Path(self.tmp.name) / 'state', dict(ses.DEFAULTS))
+        self.assertIn('not al', wake.recognizer.grammar)
+        wake.start()
+        self.feed(6.0, False)  # six seconds of the room
+        seen = []
+        self.assertIsNone(wake.heard(seen.append))
+        self.assertEqual(seen, ['[unk]'], 'what it heard, each new thing once')
+        heard['partial'] = '[unk] not al'
+        self.feed(0.02, True)
+        self.assertEqual(wake.heard(seen.append), 'aday')
+        self.assertEqual(wake.text, '[unk] not al')
+        self.feed(0.5, True)  # the rest of the phrase, waiting in the queue
+        clip = wake.clip()
+        self.assertLessEqual(len(clip) / 16000, ses.WAKE_CLIP_SN + 0.02, 'only the last few seconds')
+        self.assertGreater(float(abs(clip[-800:]).max()), 0.05, 'what still waited is its end')
+        wake.stop()
+        self.assertFalse(wake.running)
+
+    def test_a_click_is_not_speech_and_nothing_said_is_kept_whole(self):
+        recorder = self.helper.Recorder(dict(ses.DEFAULTS))
+        recorder.start()
+        self.feed(0.5, False)
+        self.feed(0.02, True)  # two loud blocks: a click
+        self.feed(0.5, False)
+        self.assertFalse(recorder.spoke)
+        self.assertAlmostEqual(len(recorder.stop()) / 16000, 1.02, places=1)
 
 
 class HelperModuleTest(unittest.TestCase):

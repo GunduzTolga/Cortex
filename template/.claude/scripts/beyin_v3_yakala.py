@@ -1659,8 +1659,10 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         return 'break'
 
     # `continuous`: opened listening (the hotkey with listening on, or "Pyn, not al"), it keeps
-    # listening after each sentence until "kaydet" (or "Pyn, kaydet"), Enter or Esc.
-    voice_mode = {'now': None, 'continuous': bool(listening or auto_listen), 'quiet': 0}
+    # listening after each sentence until "kaydet" (or "Pyn, kaydet"), Enter or Esc. The helper
+    # keeps the microphone open between sentences and sends each one as it is written (`son`
+    # false); its last word on a dictation (`son` true) ends it.
+    voice_mode = {'now': None, 'continuous': bool(listening or auto_listen)}
     # `save`: Enter pressed while it listened, saved once the words are written. `auto`: listen
     # once the model is loaded. `drop`: the recording was let go; what it still says is not news.
     pending = {'save': False, 'auto': False, 'drop': False}
@@ -1728,7 +1730,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                           'Mikrofon kapalı ya da sessizde olabilir; Windows ses ayarlarından doğru mikrofonu seç')
 
         def listen():
-            if voice.worker.send('dinle'):
+            if voice.worker.send('dinle', surekli=voice_mode['continuous']):
                 pending['drop'] = False
                 voice_set('bekliyor')
                 return True
@@ -1753,12 +1755,29 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                 voice_set('hazir', 'Yazmaya başladın; dinlemeyi bıraktım', None, 'Konuşmak için mikrofona tıkla')
         typing['stop'] = stop_for_typing
 
+        def write_in(spoken):
+            if not spoken:
+                return
+            if hint['on']:
+                entry.delete(0, 'end')
+                entry.configure(fg=P['text'])
+                hint['on'] = False
+            merged = with_spoken(entry.get(), spoken)
+            entry.delete(0, 'end')
+            entry.insert(0, merged)
+            entry.icursor('end')
+
         def voice_event(event):
             kind = event.get('olay')
+            last = event.get('son', True)
             if pending['drop']:
-                # Let go for typing: the helper's last words about that recording change nothing.
+                # Let go for typing: what was said before still goes in, as words only; the
+                # helper's last word about that recording changes nothing.
                 if kind == 'metin':
-                    pending['drop'] = False
+                    if last:
+                        pending['drop'] = False
+                    else:
+                        write_in(event.get('metin') or '')
                     return
                 if kind in ('dinliyor', 'seviye', 'ceviriyor'):
                     return
@@ -1768,6 +1787,8 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                     pending['auto'] = False
                     listen()
             elif kind in ('dinliyor', 'uyandi'):
+                if kind == 'uyandi':
+                    voice_mode['continuous'] = True  # what the wake phrase begins is a dictation
                 heard.update(peak=0.0, since=time_now(), device=event.get('mikrofon') or heard['device'])
                 voice_set('dinliyor')
             elif kind == 'seviye' and voice_mode['now'] == 'dinliyor':
@@ -1775,39 +1796,32 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             elif kind == 'ceviriyor':
                 heard['since'] = None
                 voice_set('ceviriyor')
+            elif kind == 'metin' and not last:
+                # A sentence of a dictation that goes on: written in, the microphone still open.
+                write_in(event.get('metin') or '')
+                if event.get('komut') == 'sil':
+                    show_hint()
+                    voice_set(voice_mode['now'])
             elif kind == 'metin':
                 heard['since'] = None
                 voice_set('hazir')
                 spoken, command = event.get('metin') or '', event.get('komut')
-                if spoken:
-                    if hint['on']:
-                        entry.delete(0, 'end')
-                        entry.configure(fg=P['text'])
-                        hint['on'] = False
-                    merged = with_spoken(entry.get(), spoken)
-                    entry.delete(0, 'end')
-                    entry.insert(0, merged)
-                    entry.icursor('end')
+                write_in(spoken)
                 wanted, pending['save'] = pending['save'], False
                 if command == 'kaydet' or (wanted and (spoken or not hint['on'])):
                     save()
                 elif command == 'sil':
                     show_hint()
-                    if voice_mode['continuous']:
-                        root.after(150, listen)
                 elif command == 'iptal':
                     voice_mode['continuous'] = False
                     close()
                 elif wanted:
                     voice_set('hazir', 'Bir şey duyamadım; yeniden dene ya da yaz', 'bad')
                 elif voice_mode['continuous']:
-                    # Dictation goes on after each sentence; a long silence ends it, so no microphone stays open by itself.
-                    voice_mode['quiet'] = 0 if spoken else voice_mode['quiet'] + 1
-                    if voice_mode['quiet'] >= 2:
-                        voice_mode['continuous'] = False
+                    # The helper ended a dictation nobody spoke into for a while: no microphone stays open by itself.
+                    voice_mode['continuous'] = False
+                    if not spoken:
                         voice_set('hazir', 'Bir süredir ses gelmedi; dinlemeyi bıraktım', None, 'Konuşmak için mikrofona tıkla')
-                    else:
-                        root.after(150, listen)
             elif kind == 'hata':
                 pending['save'] = False
                 voice_mode['continuous'] = False

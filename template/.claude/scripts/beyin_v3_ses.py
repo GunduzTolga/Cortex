@@ -90,7 +90,14 @@ DEFAULTS = {
         'sil': ['sil', 'temizle'],
         'iptal': ['iptal', 'vazgeç'],
     },
+    # These save only right after Pyn's name ("…, Pyn gönder"); anywhere else they are the note's words.
+    'adla_kaydet': ['gönder', 'tamam', 'bitti', 'bitir'],
+    'surekli_bekle_sn': 24,         # a dictation nobody speaks into for this long ends by itself
 }
+# A heard "not al" after a word the small model does not know is checked by Whisper on the last
+# few seconds of sound, the rest of the phrase included: it waits this long after it for that.
+WAKE_CLIP_SN = 4.0
+WAKE_AFTER_SN = 0.6
 
 
 def ses_dir(state):
@@ -158,8 +165,10 @@ def usable(state):
 
 # --------------------------------------------------------------- words --
 _FOLD = str.maketrans('ışğüöç', 'isguoc')
-# How recognizers spell the name they hear as "pin".
-NAME_SPELLINGS = {'pyn', 'pin', 'pinn', 'pen', 'pine', 'bin', 'fin', 'pay', 'bayan'}
+# How recognizers spell the name they hear as "pin" or "payn" (Whisper: "Payn", "Pain", "Payın").
+NAME_SPELLINGS = {'pyn', 'pin', 'pinn', 'pen', 'pine', 'bin', 'fin', 'pay', 'bayan', 'payn', 'pain', 'payin', 'bayin', 'pyne'}
+# How the name is said: a heard word close to it is the name, as one close to how it is written is.
+NAME_SAID = 'payn'
 # Words of the small Turkish model's own vocabulary that sound like "Pyn" said as "payn" or "pin".
 # The model can only write words it knows, and "pyn", "payn", "pin" are not among them: listening
 # freely, it wrote "payn not al" as "aynen" or "pan am". Given the phrase as a grammar it hears
@@ -177,6 +186,15 @@ def words(text):
     return [w.translate(_FOLD) for w in re.findall(r'\w+', tr_lower(text))]
 
 
+def _name_like(word, head):
+    """Whether a heard word is the phrase's name: one of its spellings, or close to how it is
+    written or, for Pyn, said."""
+    if word == head or word in NAME_SPELLINGS:
+        return True
+    forms = (head, NAME_SAID) if head == 'pyn' else (head,)
+    return any(difflib.SequenceMatcher(None, word, form).ratio() >= 0.6 for form in forms)
+
+
 def wake_heard(text, phrase=DEFAULTS['uyandirma_sozu']):
     """Whether the wake phrase is in what was heard. The rest of the phrase must be there as
     said ("not al"); the name before it is matched loosely, since nobody spells "Pyn" alike."""
@@ -186,23 +204,51 @@ def wake_heard(text, phrase=DEFAULTS['uyandirma_sozu']):
     head, tail = want[0], want[1:]
     for at in range(len(got) - len(want) + 1):
         window = got[at:at + len(want)]
-        if window[1:] != tail:
-            continue
-        if window[0] == head or window[0] in NAME_SPELLINGS or difflib.SequenceMatcher(None, window[0], head).ratio() >= 0.6:
+        if window[1:] == tail and _name_like(window[0], head):
             return True
     return False
 
 
+def wake_verdict(text, phrase=DEFAULTS['uyandirma_sozu']):
+    """What the wake listener's words say: 'soz' when the phrase is there, name and all; 'aday'
+    when only the rest of it is ("not al"), after a word the small model does not know or after
+    nothing. Said by a real voice, the name is mostly such a word: whether it was Pyn's name,
+    Whisper decides from the sound (wake_heard on what it writes). None otherwise."""
+    if wake_heard(text, phrase):
+        return 'soz'
+    tail, got = words(phrase)[1:], words(text)
+    if tail and any(got[at:at + len(tail)] == tail for at in range(len(got) - len(tail) + 1)):
+        return 'aday'
+    return None
+
+
 def wake_grammar(phrase=DEFAULTS['uyandirma_sozu']):
     """What the wake listener may hear, as a Vosk grammar (JSON): the wake phrase with Pyn's name
-    and the sound-alikes the model knows, everything else "[unk]". A grammar also keeps other
-    speech from looking like the phrase: "bunu not al" and "not al" alone are not it."""
+    and the sound-alikes the model knows, the rest of the phrase alone, everything else "[unk]".
+    The model knows no "pyn": it leaves the word out, so "not al" was in the grammar already, and
+    a real voice saying "payn" is mostly heard as "[unk] not al". "bunu not al" is heard so too:
+    "not al" is never the phrase by itself, only a candidate Whisper checks (wake_verdict)."""
     said = words(phrase)
     if not said:
         return json.dumps(['[unk]'])
     head, tail = said[0], ' '.join(said[1:])
     names = [head] + [name for name in WAKE_NAMES if name != head]
-    return json.dumps([(name + ' ' + tail).strip() for name in names] + ['[unk]'], ensure_ascii=False)
+    phrases = [(name + ' ' + tail).strip() for name in names] + ([tail] if tail else [])
+    return json.dumps(phrases + ['[unk]'], ensure_ascii=False)
+
+
+def without_wake(text, phrase=DEFAULTS['uyandirma_sozu']):
+    """Dictation begun by the wake phrase, without what of the phrase its recording caught at the
+    start ("al.", "not al,", "Pyn, not al"): the note begins after it."""
+    said, got = words(phrase), words(text)
+    ends = [m.end() for m in re.finditer(r'\w+', tr_lower(text))]
+    for size in range(len(said), 0, -1):
+        if len(got) < size or got[1:size] != said[len(said) - size + 1:]:
+            continue
+        first = said[len(said) - size]
+        if got[0] == first or (size == len(said) and _name_like(got[0], first)):
+            return text[ends[size - 1]:].lstrip(' ,.;:!?…-').strip()
+    return text.strip()
 
 
 def _without_last_words(text, count):
@@ -218,28 +264,35 @@ def _named(word):
     return word in NAME_SPELLINGS or word == 'pyn'
 
 
-def command_of(text, commands=None):
+def command_of(text, commands=None, after_name=None):
     """(command, text to write) for what was said.
 
     "kaydet" counts only at the very end ("Toplantı notu, kaydet" writes and saves); "sil" and
     "iptal" only when said alone. Anywhere else a command word is just a word: "notu kaydettim"
     and "bu satırı sil" are written as they are. Pyn's name may come before the command, as
-    the wake phrase is said: "…, Pyn kaydet" saves and the name is not written.
+    the wake phrase is said: "…, Pyn kaydet" saves and the name is not written. `after_name`
+    ("gönder", "tamam"…) save too, but only right after the name: "Ali'ye gönder" is a note.
     """
     commands = commands or DEFAULTS['komutlar']
+    after_name = DEFAULTS['adla_kaydet'] if after_name is None else after_name
     said = words(text)
     if not said:
         return None, ''
     whole = ' '.join(said)
+    named_saves = {' '.join(words(p)) for p in after_name}
     for name in ('sil', 'iptal', 'kaydet'):
         spoken = {' '.join(words(p)) for p in commands.get(name, ())}
-        if whole in spoken or (len(said) > 1 and _named(said[0]) and ' '.join(said[1:]) in spoken):
+        named = spoken | named_saves if name == 'kaydet' else spoken
+        if whole in spoken or (len(said) > 1 and _named(said[0]) and ' '.join(said[1:]) in named):
             return name, ''
     for phrase in sorted(commands.get('kaydet', ()), key=len, reverse=True):
         wanted = words(phrase)
         if wanted and said[-len(wanted):] == wanted:
             cut = len(wanted) + (1 if len(said) > len(wanted) and _named(said[-len(wanted) - 1]) else 0)
             return 'kaydet', _without_last_words(text, cut)
+    for wanted in sorted((words(p) for p in after_name), key=len, reverse=True):
+        if wanted and len(said) > len(wanted) and said[-len(wanted):] == wanted and _named(said[-len(wanted) - 1]):
+            return 'kaydet', _without_last_words(text, len(wanted) + 1)
     return None, text.strip()
 
 
@@ -251,9 +304,22 @@ HALLUCINATIONS = {
 }
 
 
-def clean_spoken(text):
-    """What was written from speech, without what Whisper makes up for silence."""
-    return '' if ' '.join(words(text)) in HALLUCINATIONS else (text or '').strip()
+def clean_spoken(text, prompt=None):
+    """What was written from speech, without what Whisper makes up for silence: a bracketed
+    sound ("[Müzik]"), a subtitle line or the prompt it was given said back. Whole, or at the
+    end, after the words: "…, Pyn kaydet. Altyazı M.K." still ends with the command."""
+    text = ' '.join(re.sub(r'\[[^\]]*\]', ' ', text or '').split())
+    if ' '.join(words(text)) in HALLUCINATIONS:
+        return ''
+    made_up = [line.split() for line in HALLUCINATIONS if ' ' in line] + ([words(prompt)] if prompt and words(prompt) else [])
+    trimmed = True
+    while trimmed and text:
+        trimmed, said = False, words(text)
+        for line in sorted(made_up, key=len, reverse=True):
+            if len(said) >= len(line) and said[-len(line):] == line:
+                text, trimmed = _without_last_words(text, len(line)), True
+                break
+    return text.strip()
 
 
 # ------------------------------------------------------------- install --
@@ -646,6 +712,51 @@ def human(result, command):
     return json.dumps(result, ensure_ascii=False)
 
 
+def trial_line(event):
+    """A line of `ses dene --uyandirma` for a person, from one of the helper's events; None for
+    one that says nothing to them."""
+    kind = event.get('olay')
+    if kind == 'dinliyor':
+        return ('%g saniye dinliyorum · %s · Whisper: %s\n"%s" de; birkaç kez, farklı tonlarda dene.'
+                % (event.get('sn') or 0, event.get('mikrofon') or 'varsayılan mikrofon', event.get('model') or '?',
+                   'Pyn, ' + ' '.join(words(event.get('soz') or '')[1:]) if event.get('soz') else 'Pyn, not al'))
+    if kind == 'duyulan':
+        return '  küçük model: ' + str(event.get('metin') or '')
+    if kind == 'karar' and event.get('karar') == 'soz':
+        return '  → sözü tam duydu: pencere açılırdı ✓'
+    if kind == 'karar':
+        return '  → Whisper: “%s” · %s' % (event.get('whisper') or '', 'pencere açılırdı ✓' if event.get('uyanir')
+                                          else 'Pyn\'in adını duymadı, pencere açılmazdı ✗')
+    return None
+
+
+def trial_wake(state, seconds, as_json, popen=subprocess.Popen, say=print):
+    """`ses dene --uyandirma`: the helper's wake trial, each thing it hears said as it comes."""
+    process = popen(worker_command(state, '--dene-uyandirma', str(seconds)), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, encoding='utf-8', errors='replace', env=worker_env(state), creationflags=NO_WINDOW)
+    utf8 = (getattr(sys.stdout, 'encoding', '') or '').lower().replace('-', '') in ('utf8', 'utf8sig')
+    decided, other = 0, []
+    for line in process.stdout:
+        line = line.strip()
+        try:
+            event = json.loads(line)
+        except ValueError:
+            event = None
+        if not isinstance(event, dict):
+            if line:
+                other.append(line)
+            continue
+        decided += event.get('olay') == 'karar'
+        text = json.dumps(event, ensure_ascii=not utf8) if as_json else trial_line(event)
+        if text:
+            say(text)
+    if process.wait():
+        raise SystemExit('\n'.join(other)[-600:] or 'Ses yardımcısı bir hatayla kapandı.')
+    if not as_json and not decided:
+        say('"not al" hiç duyulmadı. Doğru mikrofon mu dinleniyor? `beyin.py ses dene` söylediğini yazıya çevirip gösterir.')
+    return 0
+
+
 def main(argv=None, vault=None, state=None):
     parser = argparse.ArgumentParser(prog='beyin.py ses', description='Yakala\'da sesle yazma (yerel Whisper).')
     parser.add_argument('--json', action='store_true')
@@ -660,7 +771,8 @@ def main(argv=None, vault=None, state=None):
     setting.add_argument('--model', help='Whisper modeli, örnek: large-v3-turbo, small')
     setting.add_argument('--motor', choices=('otomatik',) + ENGINES, help='Yazan motor: otomatik, cuda, vulkan ya da islemci')
     trial = sub.add_parser('dene', help='Birkaç saniye kaydedip yazıya çevir')
-    trial.add_argument('--sn', type=float, default=5.0)
+    trial.add_argument('--sn', type=float, help='Kaç saniye (5; --uyandirma ile 20)')
+    trial.add_argument('--uyandirma', action='store_true', help='"Pyn, not al"ı dinle: ne duyduğunu ve pencerenin açılıp açılmayacağını söyler')
     argv = list(sys.argv[1:] if argv is None else argv)
     # As beyin.py and yakala decide: text for a terminal, JSON for anything reading the output;
     # --json and --human say it outright, before or after the command.
@@ -707,7 +819,9 @@ def main(argv=None, vault=None, state=None):
     else:
         if not installed(state):
             raise SystemExit('Sesle yazma kurulu değil. Kurmak için: beyin.py ses kur')
-        done = subprocess.run(worker_command(state, '--dene', str(args.sn)), capture_output=True, text=True, encoding='utf-8',
+        if args.uyandirma:
+            return trial_wake(state, args.sn or 20.0, args.json)
+        done = subprocess.run(worker_command(state, '--dene', str(args.sn or 5.0)), capture_output=True, text=True, encoding='utf-8',
                               env=worker_env(state), timeout=600)
         if done.returncode:
             raise SystemExit((done.stderr or done.stdout).strip()[-600:])
@@ -727,14 +841,21 @@ WORKER_SOURCE = r'''"""Voice helper for yakala: runs in state/ses/venv, never in
 
 Commands arrive on stdin and events leave on stdout, one JSON object a line (see
 beyin_v3_ses.Worker). It loads Whisper on the engine `ses kur` set up (whisper.cpp's server on a
-Vulkan card, faster-whisper on CUDA, else on the processor), records the microphone on `dinle`, ends on silence, on "kaydet" at the end or on `bitir`, writes what was
-said, and, when the wake word is on and nothing is being recorded, listens with a small Vosk
-model for "Pyn, not al" and starts recording by itself. No audio is kept or sent anywhere.
+Vulkan card, faster-whisper on CUDA, else on the processor), records the microphone on `dinle`,
+writes what was said, and, when the wake word is on and nothing is being recorded, listens with a
+small Vosk model for "Pyn, not al" and starts recording by itself. No audio is kept or sent anywhere.
+
+A dictation (`dinle` with `surekli`, and every one the wake phrase begins) is one recording: each
+pause hands the sentence to Whisper and the microphone stays open, so nothing said while a
+sentence is written is lost. Its sentences come back in order as `metin` events with `son`
+false; the last one, `son` true, ends it: "kaydet" said, `bitir`, `iptal`, or a long silence.
 
 Modes for the command line: `--indir` loads the model once (the install fetches it) and exits;
-`--dene N` records N seconds, writes them and exits.
+`--dene N` records N seconds, writes them and exits; `--dene-uyandirma N` listens for the wake
+phrase N seconds and says what it hears and what it would do.
 """
 import argparse
+import collections
 import io
 import json
 import os
@@ -748,10 +869,30 @@ sys.dont_write_bytecode = True
 ses = None  # beyin_v3_ses, imported from the engine's scripts folder named by --scripts
 
 RATE = 16000
+# A sentence is kept from a little before its speech to a little after: Whisper given a long
+# silence makes words up ("Altyazı M.K."), and quiet word endings are below the speech level.
+LEAD_SN, TAIL_SN = 0.3, 0.4
+now = time.time
+_writing = threading.Lock()
 
 
 def out(**event):
-    print(json.dumps(event, ensure_ascii=False), flush=True)
+    # One write a line, under a lock: the loader's thread speaks too, and half a line is no event.
+    line = json.dumps(event, ensure_ascii=False) + '\n'
+    with _writing:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+
+def log(text):
+    """A line for isci.log (the helper's stderr): what the wake listener decided, never what was said."""
+    print(time.strftime('%Y-%m-%d %H:%M:%S ') + text, file=sys.stderr, flush=True)
+
+
+def join_audio(*parts):
+    import numpy as np
+    parts = [part for part in parts if part is not None and len(part)]
+    return np.concatenate(parts) if parts else np.zeros(0, dtype='float32')
 
 
 def _cuda_dirs():
@@ -968,54 +1109,102 @@ def _device_name(config):
 
 
 class Recorder:
-    """The microphone into memory, with its level and whether someone has spoken."""
+    """The microphone into memory, with its level and whether someone has spoken.
+
+    A dictation is one stream: `cut` takes the sentence said so far and the recording goes on,
+    so nothing is lost while a sentence is written. A sentence is kept from a little before its
+    speech to a little after it (LEAD_SN, TAIL_SN).
+    """
 
     def __init__(self, config):
         self.config = config
         self.stream = None
-        self.chunks = []
         self.level = 0.0
+        self.guard = threading.Lock()  # the stream's thread appends while the loop cuts
+        self._sentence(now())
+
+    def _sentence(self, at):
+        # Positions are samples into the sentence: where its speech starts and where it last was.
+        self.chunks, self.count, self.run_from = [], 0, 0
+        self.spoke, self.started, self.last_voice = False, at, at
+        self.voice_from = self.voice_to = None
 
     def start(self, on_chunk=None):
         import sounddevice as sd
-        self.chunks, self.level, self.floor, self.loud = [], 0.0, 1.0, 0
-        self.spoke, self.started = False, time.time()
-        self.last_voice = self.started
+        self.level, self.floor, self.loud = 0.0, 1.0, 0
+        self._sentence(now())
         self.on_chunk = on_chunk
 
         def take(data, _frames, _time, _status):
             if self.on_chunk is not None:
                 self.on_chunk(data.copy())
                 return
-            self.chunks.append(data.copy())
-            self.level = float(abs(data).max())
             rms = float((data ** 2).mean() ** 0.5)
-            self.floor = min(rms, self.floor * 1.02 + 1e-6)
-            # Clearly above the room's noise: speech. Low enough for a headset mic with little gain.
-            if rms > max(0.0025, self.floor * 5):
-                self.loud += 1
-                if self.loud >= 3:
-                    self.spoke = True
-                self.last_voice = time.time()
-            else:
-                self.loud = 0
+            with self.guard:
+                at = self.count
+                self.chunks.append(data.copy())
+                self.count += len(data)
+                self.level = float(abs(data).max())
+                self.floor = min(rms, self.floor * 1.02 + 1e-6)
+                # Clearly above the room's noise: speech. Low enough for a headset mic with little gain.
+                if rms > max(0.0025, self.floor * 5):
+                    self.loud += 1
+                    if self.loud == 1:
+                        self.run_from = at
+                    if self.loud >= 3:
+                        self.spoke = True
+                        if self.voice_from is None:
+                            self.voice_from = self.run_from
+                    self.voice_to = self.count
+                    self.last_voice = now()
+                else:
+                    self.loud = 0
 
         self.stream = sd.InputStream(samplerate=RATE, channels=1, dtype='float32', device=_device(self.config), callback=take)
         self.stream.start()
 
-    def stop(self):
+    def _speech(self, chunks, start, end):
+        """The sentence's sound; only its speech, a little either side, when someone spoke."""
         import numpy as np
+        if not chunks:
+            return np.zeros(0, dtype='float32')
+        audio = np.concatenate(chunks)[:, 0]
+        if start is None or end is None:
+            return audio
+        return audio[max(0, start - int(LEAD_SN * RATE)):end + int(TAIL_SN * RATE)]
+
+    def cut(self):
+        """The sentence said so far; the stream goes on into the next one."""
+        with self.guard:
+            chunks, start, end = self.chunks, self.voice_from, self.voice_to
+            self._sentence(now())
+        return self._speech(chunks, start, end)
+
+    def peek(self):
+        """What it recorded since the last cut, all of it, without taking it."""
+        with self.guard:
+            chunks = list(self.chunks)
+        return self._speech(chunks, None, None)
+
+    def stop(self):
+        """The microphone let go; what was said since the last cut. `spoke` still says whether
+        anyone did."""
         if self.stream is not None:
             self.stream.stop()
             self.stream.close()
             self.stream = None
-        if not self.chunks:
-            return np.zeros(0, dtype='float32')
-        return np.concatenate(self.chunks)[:, 0]
+        with self.guard:
+            chunks, start, end = self.chunks, self.voice_from, self.voice_to
+            self.chunks = []
+        return self._speech(chunks, start, end)
 
 
 class Wake:
-    """"Pyn, not al" heard with a small Vosk model: cheap enough to run while nobody speaks to Pyn."""
+    """"Pyn, not al" heard with a small Vosk model: cheap enough to run while nobody speaks to Pyn.
+
+    It keeps the last few seconds it heard (WAKE_CLIP_SN), so a heard "not al" can be checked by
+    Whisper on the sound itself.
+    """
 
     def __init__(self, state, config):
         from vosk import KaldiRecognizer, Model, SetLogLevel
@@ -1025,44 +1214,81 @@ class Wake:
         # A grammar, not free listening: the model knows no "Pyn" and would never write it.
         self.recognizer = KaldiRecognizer(self.model, RATE, ses.wake_grammar(self.phrase))
         self.audio = queue.Queue()
+        self.recent, self.kept = collections.deque(), 0
+        self.text, self.last_seen = '', ''
         self.recorder = Recorder(config)
 
     def start(self):
         self.recognizer.Reset()
+        self.recent.clear()
+        self.kept = 0
         self.recorder.start(on_chunk=self.audio.put)
 
     def stop(self):
         self.recorder.stop()
-        while not self.audio.empty():
-            self.audio.get_nowait()
+        self._drain()  # what arrived and was not listened to yet is the clip's end
 
     @property
     def running(self):
         return self.recorder.stream is not None
 
-    def heard(self):
-        """Whether the phrase was said in what arrived since the last call."""
+    def _keep(self, chunk):
+        self.recent.append(chunk)
+        self.kept += len(chunk)
+        while self.recent and self.kept - len(self.recent[0]) >= ses.WAKE_CLIP_SN * RATE:
+            self.kept -= len(self.recent.popleft())
+
+    def _drain(self):
+        while True:
+            try:
+                self._keep(self.audio.get_nowait())
+            except queue.Empty:
+                return
+
+    def clip(self):
+        """The last few seconds it heard."""
+        self._drain()
+        return join_audio(*[chunk[:, 0] for chunk in self.recent])
+
+    def forget(self):
+        """A candidate dealt with: the next one is judged on its own sound."""
+        self.recognizer.Reset()
+        self.recent.clear()
+        self.kept = 0
+
+    def heard(self, seen=None):
+        """What the small model made of what arrived since the last call: 'soz', 'aday' or None
+        (ses.wake_verdict); `text` is what it heard then. `seen` is given each new thing it heard."""
         import numpy as np
         while True:
             try:
                 chunk = self.audio.get_nowait()
             except queue.Empty:
-                return False
+                return None
+            self._keep(chunk)
             pcm = (np.clip(chunk[:, 0], -1, 1) * 32767).astype('<i2').tobytes()
             if self.recognizer.AcceptWaveform(pcm):
                 text = json.loads(self.recognizer.Result()).get('text', '')
             else:
                 text = json.loads(self.recognizer.PartialResult()).get('partial', '')
-            if text and ses.wake_heard(text, self.phrase):
+            if seen is not None and text and text != self.last_seen:
+                seen(text)
+            if text:
+                self.last_seen = text
+            verdict = ses.wake_verdict(text, self.phrase) if text else None
+            if verdict:
+                self.text, self.last_seen = text, ''
                 self.recognizer.Reset()
-                return True
+                return verdict
 
 
-def serve(state, config):
+def serve(state, config, lines=None):
+    """The helper's loop: commands from `lines` (stdin), events out. Whisper writes on a thread of
+    its own, one piece at a time and in the order said; everything else happens on this one."""
     commands = queue.Queue()
 
     def read():
-        for line in sys.stdin:
+        for line in (sys.stdin if lines is None else lines):
             try:
                 commands.put(json.loads(line))
             except ValueError:
@@ -1072,6 +1298,7 @@ def serve(state, config):
     threading.Thread(target=read, daemon=True).start()
     out(olay='yukleniyor')
     loaded, lock = {}, threading.Lock()
+    jobs, written = queue.Queue(), queue.Queue()
 
     def load():
         try:
@@ -1080,12 +1307,32 @@ def serve(state, config):
         except Exception as exc:
             out(olay='hata', neden='model', mesaj=str(exc)[:300])
 
+    def write():
+        while True:
+            job = jobs.get()
+            if job is None:
+                return
+            if job['audio'] is None or 'model' not in loaded:  # a dictation's end with nothing more to write: in its turn
+                written.put(dict(job, metin=''))
+                continue
+            try:
+                text = transcribe(loaded['model'], job['audio'], config, lock)
+                written.put(dict(job, metin=ses.clean_spoken(text, config.get('ipucu'))))
+            except Exception as exc:
+                written.put(dict(job, hata=str(exc)[:300]))
+
     threading.Thread(target=load, daemon=True).start()
+    threading.Thread(target=write, daemon=True).start()
     recorder, wake, wake_on = Recorder(config), None, bool(config.get('uyandirma'))
     mode, last_level = 'bos', 0.0
+    # Each recording is a turn. What Whisper writes back names its turn: a turn ended by what
+    # was said in it ("kaydet") is gone from `turns`, and nothing it still writes is news.
+    turn, turns = 0, {}
 
-    def begin():
-        nonlocal mode
+    def begin(continuous=False, woke=False, checking=None):
+        """Recording. `checking`: begun on a heard "not al" Whisper has yet to confirm; nobody is
+        told until it does, and the sound since is already the dictation's start."""
+        nonlocal mode, turn
         if wake is not None and wake.running:
             wake.stop()
         try:
@@ -1093,38 +1340,95 @@ def serve(state, config):
         except Exception as exc:
             out(olay='hata', neden='mikrofon', mesaj=str(exc)[:300])
             return False
-        mode = 'kayit'
-        out(olay='dinliyor', mikrofon=_device_name(config))
+        mode, turn = 'kayit', turn + 1
+        turns[turn] = {'continuous': continuous, 'woke': woke, 'first': True, 'checking': checking}
+        if checking is None:
+            out(olay='dinliyor', mikrofon=_device_name(config))
         return True
 
-    def finish(keep=True):
+    def confirmed():
+        turns[turn]['checking'] = None
+        out(olay='dinliyor', mikrofon=_device_name(config))
+        out(olay='uyandi')
+
+    def piece(audio, last):
+        jobs.put({'is': 'parca', 'turn': turn, 'audio': audio, 'son': last})
+
+    def end(keep=True):
+        """The microphone let go: what was said since the last sentence is written, if anything
+        was, and the dictation ends with it once what came before is written."""
         nonlocal mode
         audio = recorder.stop()
         # Nothing said (no speech above the room's noise): Whisper given silence makes words up.
-        if not keep or not recorder.spoke or len(audio) < RATE * 0.3 or 'model' not in loaded:
-            mode = 'bos'
-            out(olay='metin', metin='', komut=None)
-            return
+        if keep and recorder.spoke and len(audio) >= RATE * 0.3 and 'model' in loaded:
+            out(olay='ceviriyor')
+            piece(audio, True)
+        else:
+            piece(None, True)
         mode = 'ceviri'
-        out(olay='ceviriyor')
 
-        def work():
-            nonlocal mode
-            try:
-                text = ses.clean_spoken(transcribe(loaded['model'], audio, config, lock))
-                command, text = ses.command_of(text, config['komutlar'])
-                out(olay='metin', metin=text, komut=command)
-            except Exception as exc:
-                out(olay='hata', neden='ceviri', mesaj=str(exc)[:300])
-            mode = 'bos'
+    def drop():
+        """A recording nobody was told of, let go: it says nothing."""
+        nonlocal mode
+        recorder.stop()
+        turns.pop(turn, None)
+        mode = 'bos'
 
-        threading.Thread(target=work, daemon=True).start()
+    def back(result):
+        """What Whisper wrote, said, in the order it was said."""
+        nonlocal mode
+        info, own = turns.get(result['turn']), result['turn'] == turn
+        if info is None:
+            return
+        if result['is'] == 'dogrula':
+            if own and mode == 'kayit' and info['checking'] is not None:
+                if 'hata' not in result and ses.wake_heard(result['metin'], config['uyandirma_sozu']):
+                    log('uyandırma: küçük model "%s" duydu, Whisper doğruladı' % wake.text)
+                    confirmed()
+                else:
+                    log('uyandırma: küçük model "%s" duydu, Whisper doğrulamadı' % wake.text)
+                    drop()
+            return
+        if 'hata' in result:
+            turns.pop(result['turn'], None)
+            if own:
+                if mode == 'kayit':
+                    recorder.stop()
+                mode = 'bos'
+            out(olay='hata', neden='ceviri', mesaj=result['hata'])
+            return
+        text = result['metin']
+        if info['woke'] and info['first']:
+            text = ses.without_wake(text, config['uyandirma_sozu'])
+        info['first'] = False
+        command, text = ses.command_of(text, config['komutlar'], config.get('adla_kaydet'))
+        last = result['son'] or command in ('kaydet', 'iptal')
+        if last:
+            turns.pop(result['turn'], None)
+            if own:
+                if mode == 'kayit':
+                    recorder.stop()  # what was said after "kaydet" is not the note
+                mode = 'bos'
+            elif command not in ('kaydet', 'iptal'):
+                # Ended while another recording began: its words go in, its end is not news.
+                if text or command:
+                    out(olay='metin', metin=text, komut=command, son=False)
+                return
+        elif not (text or command):
+            return
+        out(olay='metin', metin=text, komut=command, son=last)
 
     while True:
         try:
             command = commands.get(timeout=0.05)
         except queue.Empty:
             command = None
+        while True:
+            try:
+                back(written.get_nowait())
+            except queue.Empty:
+                break
+        checking = turns[turn]['checking'] if mode == 'kayit' and turn in turns else None
         if command:
             name = command.get('komut')
             if name == 'kapat':
@@ -1132,41 +1436,93 @@ def serve(state, config):
                     recorder.stop()
                 if wake is not None and wake.running:
                     wake.stop()
+                jobs.put(None)
                 release(loaded.get('model'))
                 return 0
-            if name == 'dinle' and mode == 'bos':
-                begin()
-            elif name == 'bitir' and mode == 'kayit':
-                finish()
-            elif name == 'iptal' and mode == 'kayit':
-                finish(keep=False)
+            if name == 'dinle' and mode in ('bos', 'ceviri'):
+                begin(continuous=bool(command.get('surekli')))
+            elif name == 'dinle' and mode == 'kayit':
+                # Asked to listen while it already does (a "not al" still being checked, too).
+                turns[turn]['continuous'] = turns[turn]['continuous'] or bool(command.get('surekli'))
+                if checking is not None:
+                    turns[turn]['checking'] = checking = None
+                out(olay='dinliyor', mikrofon=_device_name(config))
+            elif name in ('bitir', 'iptal') and mode == 'kayit':
+                if checking is not None:
+                    drop()
+                else:
+                    end(keep=name == 'bitir')
             elif name == 'uyandirma':
                 wake_on = bool(command.get('acik'))
-        now = time.time()
-        if mode == 'kayit':
-            if now - last_level >= 0.1:
-                last_level = now
+        moment = now()
+        if mode == 'kayit' and checking is not None:
+            if not checking['sent'] and moment - recorder.started >= ses.WAKE_AFTER_SN:
+                checking['sent'] = True
+                jobs.put({'is': 'dogrula', 'turn': turn, 'audio': join_audio(checking['clip'], recorder.peek()), 'son': False})
+        elif mode == 'kayit':
+            if moment - last_level >= 0.1:
+                last_level = moment
                 out(olay='seviye', deger=round(min(1.0, recorder.level * 4), 2))
-            spoke_then_quiet = recorder.spoke and now - recorder.last_voice > float(config['sessizlik_sn'])
-            if spoke_then_quiet or now - recorder.started > float(config['en_uzun_sn']):
-                finish()
-            elif not recorder.spoke and now - recorder.started > 12:
-                finish(keep=False)  # nothing said: let the microphone go
+            spoke_then_quiet = recorder.spoke and moment - recorder.last_voice > float(config['sessizlik_sn'])
+            too_long = moment - recorder.started > float(config['en_uzun_sn'])
+            if turns[turn]['continuous']:
+                if recorder.spoke and (spoke_then_quiet or too_long):
+                    piece(recorder.cut(), False)  # the sentence is written, the microphone stays open
+                elif not recorder.spoke and moment - recorder.started > float(config['surekli_bekle_sn']):
+                    end()  # nobody spoke for a long while: no microphone stays open by itself
+            elif spoke_then_quiet or too_long:
+                end()
+            elif not recorder.spoke and moment - recorder.started > 12:
+                end(keep=False)  # nothing said: let the microphone go
         elif mode == 'bos' and wake_on and 'model' in loaded:
             try:
                 if wake is None:
                     wake = Wake(state, config)
                 if not wake.running:
                     wake.start()
-                elif wake.heard():
-                    wake.stop()
-                    if begin():
-                        out(olay='uyandi')
+                else:
+                    verdict = wake.heard()
+                    if verdict == 'soz':
+                        log('uyandırma: küçük model sözü duydu ("%s")' % wake.text)
+                        wake.stop()
+                        if begin(continuous=True, woke=True):
+                            out(olay='uyandi')
+                    elif verdict == 'aday':
+                        clip = wake.clip()
+                        wake.stop()
+                        begin(continuous=True, woke=True, checking={'clip': clip, 'sent': False})
             except Exception as exc:
                 out(olay='hata', neden='uyandirma', mesaj=str(exc)[:300])
                 wake_on = False
         elif wake is not None and wake.running and not wake_on:
             wake.stop()
+
+
+def trial_wake(state, config, seconds):
+    """`--dene-uyandirma N`: the wake listener for N seconds, saying what the small model hears
+    and, for a heard "not al", what Whisper writes and whether the window would open."""
+    model, what = load_model(state, config)
+    try:
+        wake = Wake(state, config)
+        out(olay='dinliyor', model=what, soz=config['uyandirma_sozu'], sn=seconds, mikrofon=_device_name(config))
+        wake.start()
+        deadline = now() + seconds
+        while now() < deadline:
+            verdict = wake.heard(lambda text: out(olay='duyulan', metin=text))
+            if verdict == 'soz':
+                out(olay='karar', karar='soz', duyulan=wake.text, uyanir=True)
+                wake.forget()
+            elif verdict == 'aday':
+                time.sleep(ses.WAKE_AFTER_SN)  # the rest of the phrase, as the listener waits for it
+                text = ses.clean_spoken(transcribe(model, wake.clip(), config, threading.Lock()), config.get('ipucu'))
+                out(olay='karar', karar='aday', duyulan=wake.text, whisper=text,
+                    uyanir=ses.wake_heard(text, config['uyandirma_sozu']))
+                wake.forget()
+            time.sleep(0.05)
+        wake.stop()
+    finally:
+        release(model)
+    return 0
 
 
 def main(argv=None):
@@ -1175,6 +1531,7 @@ def main(argv=None):
     parser.add_argument('--scripts', required=True)
     parser.add_argument('--indir', action='store_true')
     parser.add_argument('--dene', type=float)
+    parser.add_argument('--dene-uyandirma', type=float)
     args = parser.parse_args(argv)
     global ses
     sys.path.insert(0, args.scripts)
@@ -1200,6 +1557,8 @@ def main(argv=None):
             release(model)
         print(json.dumps({'metin': text, 'model': what, 'sure_sn': round(time.time() - started, 2)}, ensure_ascii=False), flush=True)
         return 0
+    if args.dene_uyandirma:
+        return trial_wake(state, config, args.dene_uyandirma)
     return serve(state, config)
 
 
