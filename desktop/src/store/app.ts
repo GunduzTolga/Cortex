@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { BootstrapPayload, VaultStatus, WindowSettings } from '@shared/api';
 import { messageOf } from '@shared/ipcError';
 import { turkishOf } from '@shared/refusalsTr';
+import { useSaved } from './saved';
 
 /**
  * What the window holds around the notes screen: whether it has heard from
@@ -75,6 +76,7 @@ export const useApp = create<AppState>((set, get) => ({
   async setSettings(patch) {
     try {
       set({ settings: await window.cortex.settings.set(patch) });
+      useSaved.getState().flash();
     } catch (err) {
       get().toast({ tone: 'error', title: 'Cortex', detail: messageOf(err) });
     }

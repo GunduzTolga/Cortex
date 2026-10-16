@@ -442,6 +442,12 @@ check(
 await page.waitForTimeout(400);
 await shoot('07b-settings.png');
 await page.locator('[data-settings-all-files]').click();
+check('a setting changed says it was kept', await shownSoon(page.locator('[data-settings-saved="shown"]'), 3_000));
+// A name being typed gets a Kaydet button beside it, gone once the field says what is kept.
+await page.locator('[data-settings-name]').fill('Tolga');
+check('a name being typed gets a save button', await shownSoon(page.locator('[data-settings-name-save]'), 3_000));
+await page.locator('[data-settings-name]').fill('Tolga Bey');
+check('and none once it is what is kept', (await page.locator('[data-settings-name-save]').count()) === 0);
 await page.locator('[data-settings-name-icons]').click();
 check(
   'a setting changed is kept by the main process at once',
@@ -481,6 +487,7 @@ if (process.platform === 'win32' && (await page.evaluate(() => window.cortex.set
   await page.waitForTimeout(300);
   await shoot('07c-voice-commands.png');
   await saveWords.fill('kaydet,  tamamdır ');
+  check('words changed in a command’s field get a save button', await shownSoon(page.locator('[data-setup-voice-command-save]'), 3_000));
   await saveWords.press('Enter');
   check(
     'and words changed there are set with the engine’s own setting',
@@ -688,16 +695,27 @@ check('the office opens in its own tab, its map drawn and its log begun', (await
 check('and greets the person as they asked to be addressed', (await page.locator('[data-ofis-line]').allTextContents()).some((line) => line.includes('Tolga Bey')));
 await page.waitForTimeout(1_500);
 await shoot('16-office.png');
-// The map is fitted to the canvas and centred: the mailroom's middle (tile 7, 8) is found from the canvas's size.
+// The brain around the map is fitted to the canvas and centred (the frame is 1168 by 832, the map
+// 976 by 672 inside it at 96, 48): Pyn's room's middle (tile 7, 8) is found from the canvas's size.
 const officeBox = await page.locator('[data-ofis-canvas]').boundingBox();
 if (officeBox) {
-  const zoom = Math.min(4, Math.min(officeBox.width / 976, officeBox.height / 672));
-  await page.mouse.click(officeBox.x + officeBox.width / 2 + (7 * 16 + 8 - 488) * zoom, officeBox.y + officeBox.height / 2 + (8 * 16 + 8 - 336) * zoom);
+  const zoom = Math.min(4, Math.min(officeBox.width / 1168, officeBox.height / 832));
+  await page.mouse.click(officeBox.x + officeBox.width / 2 + (7 * 16 + 8 - 488) * zoom, officeBox.y + officeBox.height / 2 + (8 * 16 + 8 - 368) * zoom);
 }
 check(
   'a room clicked says what goes on in it, counted from the vault',
-  (await shownSoon(page.locator('[data-ofis-room="posta"]'))) && /\d+ notes changed today/.test((await page.locator('[data-ofis-room-status]').textContent()) ?? ''),
+  (await shownSoon(page.locator('[data-ofis-room="pyn"]'))) && /\d+ notes changed today/.test((await page.locator('[data-ofis-room-status]').textContent()) ?? ''),
 );
+// The manager is the vault's owner, and Tolga, who wrote Cortex, has a desk of his own.
+check(
+  'the office and its manager carry the name the person gave, Tolga is at his desk',
+  ((await page.locator('[data-ofis-name]').textContent()) ?? '').includes("Tolga Bey's brain") &&
+    ((await page.locator('[data-ofis-chip="mudur"]').textContent()) ?? '').includes('Tolga Bey') &&
+    ((await page.locator('[data-ofis-chip="tolga"]').textContent()) ?? '').includes('Tolga'),
+);
+await page.locator('[data-ofis-chip="tolga"]').click();
+await page.waitForTimeout(900);
+await shoot('16b-office-tolga.png');
 await page.locator('[data-ofis-chip="defne"]').click();
 check(
   'a character’s chip opens its card, with the tool it works with',
@@ -719,6 +737,24 @@ check(
     lmBodies.some((one) => one.stream === false && one.model === 'qwen-e2e' && JSON.stringify(one.messages).includes('Defne')),
 );
 await shoot('18-office-settings.png');
+// The same choice in the app's settings (Settings → Office): one choice, changed in either place.
+await page.keyboard.press('Escape');
+await page.keyboard.press('Control+,');
+const officeSection = page.locator('[data-settings-section="office"]');
+check(
+  'the app’s settings show the office’s choice: live, LM Studio, the model chosen',
+  (await shownSoon(officeSection.locator('[data-settings-office-model]'))) &&
+    (await officeSection.locator('[data-settings-office-live]').getAttribute('aria-checked')) === 'true' &&
+    (await officeSection.locator('[data-settings-office-tool="lmstudio"]').getAttribute('aria-pressed')) === 'true' &&
+    (await officeSection.locator('[data-settings-office-model]').inputValue()) === 'qwen-e2e',
+);
+await officeSection.locator('[data-settings-office-every="30"]').click();
+await officeSection.scrollIntoViewIfNeeded();
+await page.waitForTimeout(300);
+await shoot('07d-settings-office.png');
+await page.keyboard.press('Escape');
+await page.locator('[data-ofis-gear]').click();
+check('and a change made there is the office’s too', ((await page.locator('.ofis-segments button[aria-pressed="true"]').textContent()) ?? '').includes('30'));
 await page.locator('[data-ofis-live]').click();
 await page.keyboard.press('Escape');
 check('and Escape closes them', await page.locator('[data-ofis-settings]').waitFor({ state: 'detached', timeout: 3_000 }).then(() => true, () => false));

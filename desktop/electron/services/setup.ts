@@ -340,6 +340,27 @@ export function runPython(
   });
 }
 
+/**
+ * Yakala's window opened from outside (the notification-area icon's "Not al"): `beyin.py yakala
+ * pencere` asks the running listener for its window, the one with the voice helper warm, and
+ * opens the window by itself when no listener runs. Not waited for: it lives as long as the window.
+ */
+export function openNoteWindow(): boolean {
+  const vault = vaultOrNull();
+  const python = pythonOf();
+  if (!vault || !python || process.platform !== 'win32') return false;
+  const child = spawn(python.command, [...python.args, path.join(vault, 'beyin.py'), 'yakala', 'pencere'], {
+    cwd: vault,
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    env: childEnv({ PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' }),
+  });
+  child.on('error', () => undefined);
+  child.unref();
+  return true;
+}
+
 function vaultOrNull(): string | null {
   const vault = readSettings().vault;
   return vault && fs.existsSync(vault) ? vault : null;

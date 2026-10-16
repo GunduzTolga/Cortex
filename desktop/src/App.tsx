@@ -40,6 +40,9 @@ export function App() {
     void useApp.getState().boot();
   }, []);
 
+  // The notification-area icon's "Ayarlar": the window comes back on its settings.
+  useEffect(() => window.cortex.on.openSettings(() => useApp.getState().openSettings(true)), []);
+
   // The notes are named as the settings say, wherever they are shown (src/notes/notesStore.ts).
   useEffect(() => useNotes.getState().setNameIcons(nameIcons), [nameIcons]);
 

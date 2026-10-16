@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import { FolderOpen, KeyRound, ListChecks } from 'lucide-react';
+import { Check, FolderOpen, KeyRound, ListChecks } from 'lucide-react';
 import { useChat } from '../chat/chatStore';
 import { useT } from '../i18n/useT';
 import { useApp } from '../store/app';
+import { useSaved } from '../store/saved';
 import { LanguageSwitch } from './LanguageSwitch';
+import { OfficeTalkSection } from './OfficeTalkSection';
 import { SetupSections } from './SetupSections';
-import { Row, Section } from './settingsParts';
+import { Row, SaveButton, Section } from './settingsParts';
 import { Button, Modal, Switch, inputClass } from './ui';
 
 /**
@@ -25,7 +27,7 @@ export function SettingsDialog() {
   const close = () => useApp.getState().openSettings(false);
   const set = useApp.getState().setSettings;
   return (
-    <Modal open={open} title={t('settings.title')} onClose={close} width="max-w-lg">
+    <Modal open={open} title={t('settings.title')} onClose={close} width="max-w-lg" status={<SavedNote />}>
       <div data-settings>
         <Section title={t('settings.general')} data="general">
           <Row label={t('settings.language')}>
@@ -67,6 +69,7 @@ export function SettingsDialog() {
             </Button>
           </div>
         </Section>
+        <OfficeTalkSection />
         <SetupSections open={open} />
         <Section title={t('settings.onboarding')} data="onboarding">
           <div className="px-3">
@@ -92,15 +95,42 @@ export function SettingsDialog() {
 }
 
 /** How Pyn and the office address the person: kept when the field is left or Enter is pressed. */
+/** "Kaydedildi" for a moment after a setting is kept: every change is kept at once, and says so. */
+function SavedNote() {
+  const t = useT();
+  const at = useSaved((s) => s.at);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!at) return;
+    setShown(true);
+    const timer = setTimeout(() => setShown(false), 2200);
+    return () => clearTimeout(timer);
+  }, [at]);
+  return (
+    <span
+      role="status"
+      aria-live="polite"
+      className={`flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 transition-opacity ${shown ? 'opacity-100' : 'opacity-0'}`}
+      data-settings-saved={shown ? 'shown' : 'hidden'}
+    >
+      <Check size={12} />
+      {t('settings.saved')}
+    </span>
+  );
+}
+
 function NameField() {
   const t = useT();
   const saved = useApp((s) => s.settings.userName);
   const [name, setName] = useState(saved ?? '');
   useEffect(() => setName(saved ?? ''), [saved]);
+  const changed = name.trim() !== (saved ?? '');
   const keep = () => {
-    if (name.trim() !== (saved ?? '')) void useApp.getState().setSettings({ userName: name.trim() || null });
+    if (changed) void useApp.getState().setSettings({ userName: name.trim() || null });
   };
   return (
+    <>
+    {changed ? <SaveButton onSave={keep} data="settings-name-save" /> : null}
     <input
       className={`${inputClass.replace('w-full', '')} h-8 w-56 shrink-0`}
       value={name}
@@ -113,5 +143,6 @@ function NameField() {
       }}
       data-settings-name
     />
+    </>
   );
 }

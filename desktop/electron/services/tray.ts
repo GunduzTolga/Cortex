@@ -3,24 +3,29 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { VoiceStatus } from '../../shared/setup';
 import { readSettings } from './settings';
-import { onVoiceStatus, setupStatus, setVoice } from './setup';
+import { onVoiceStatus, openNoteWindow, setupStatus, setVoice } from './setup';
 
 /**
  * Cortex in the notification area, at the bottom right on Windows: Pyn's seal,
  * with a red dot while the microphone listens all the time for "Pyn, not al".
- * Its menu turns that listening on and off without opening the window, so the
- * microphone is not open by itself; it also opens the window and quits. With
- * the `background` setting on, the window closed leaves Cortex here, and
- * Cortex starts here with Windows.
+ * Its menu says whether the microphone listens and turns that on and off
+ * without opening the window, so the microphone is not open by itself; it
+ * opens yakala's window, Cortex, its settings, and quits. With the
+ * `background` setting on, the window closed leaves Cortex here, and Cortex
+ * starts here with Windows.
+ *
+ * Every item has an icon: a Windows menu keeps a column at the left for them
+ * whether there are any or not, and empty it made the words look pushed aside.
  */
 
-export type TrayAction = 'wake' | 'open' | 'quit';
+export type TrayAction = 'wake' | 'note' | 'open' | 'settings' | 'quit';
+export type TrayIcon = 'mikrofon-acik' | 'mikrofon-kapali' | 'not' | 'pyn' | 'ayarlar' | 'cik';
 
 export interface TrayItem {
   label: string;
-  type: 'normal' | 'checkbox' | 'separator';
-  checked?: boolean;
+  type: 'normal' | 'separator';
   enabled?: boolean;
+  icon?: TrayIcon;
   action?: TrayAction;
 }
 
@@ -30,22 +35,39 @@ export function listensAlways(voice: VoiceStatus | null): boolean {
 }
 
 /** The menu, as plain items: what it says and does for this voice status, in the window's language. */
-export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boolean): TrayItem[] {
+export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boolean, canNote: boolean): TrayItem[] {
   const say = (tr: string, en: string) => (english ? en : tr);
   const usable = Boolean(voice?.installed && voice.on);
+  const listening = listensAlways(voice);
+  const separator: TrayItem = { label: '', type: 'separator' };
   return [
     {
-      label: usable
-        ? say('Sürekli dinle ("Pyn, not al")', 'Always listen ("Pyn, not al")')
-        : say('Sürekli dinle · sesle yazma kurulu değil', 'Always listen · voice typing is not set up'),
-      type: 'checkbox',
-      checked: listensAlways(voice),
-      enabled: usable && !busy,
-      action: 'wake',
+      label: !usable
+        ? say('Sesle yazma kurulu değil', 'Voice typing is not set up')
+        : listening
+          ? say('Mikrofon dinliyor: "Pyn, not al"', 'The microphone listens: "Pyn, not al"')
+          : say('Mikrofon kapalı', 'The microphone is off'),
+      type: 'normal',
+      enabled: false,
+      icon: listening ? 'mikrofon-acik' : 'mikrofon-kapali',
     },
-    { label: '', type: 'separator' },
-    { label: say("Cortex'i aç", 'Open Cortex'), type: 'normal', action: 'open' },
-    { label: say('Çık', 'Quit'), type: 'normal', action: 'quit' },
+    ...(usable
+      ? [
+          {
+            label: listening ? say('Sürekli dinlemeyi kapat', 'Stop listening all the time') : say('Sürekli dinle ("Pyn, not al")', 'Listen all the time ("Pyn, not al")'),
+            type: 'normal' as const,
+            enabled: !busy,
+            icon: listening ? ('mikrofon-kapali' as const) : ('mikrofon-acik' as const),
+            action: 'wake' as const,
+          },
+        ]
+      : []),
+    separator,
+    { label: say('Not al', 'Take a note'), type: 'normal', enabled: canNote, icon: 'not', action: 'note' },
+    { label: say("Cortex'i aç", 'Open Cortex'), type: 'normal', icon: 'pyn', action: 'open' },
+    { label: say('Ayarlar', 'Settings'), type: 'normal', icon: 'ayarlar', action: 'settings' },
+    separator,
+    { label: say('Çık', 'Quit'), type: 'normal', icon: 'cik', action: 'quit' },
   ];
 }
 
@@ -58,48 +80,69 @@ export function trayTooltip(voice: VoiceStatus | null, english: boolean): string
 let tray: Tray | null = null;
 let voice: VoiceStatus | null = null;
 let busy = false;
-let handlers: { open(): void; quit(): void } | null = null;
+let handlers: { open(): void; settings(): void; quit(): void } | null = null;
+const icons = new Map<string, Electron.NativeImage>();
 
-/** The icon's pictures (tema/ananas/marka/tepsi, from scripts/marka_uret.py tepsi), beside the bundle when packaged. */
+/** The icons' pictures (tema/ananas/marka/tepsi, from scripts/marka_uret.py tepsi), beside the bundle when packaged. */
 function iconFile(name: string): string | undefined {
   const candidates = [path.join(process.resourcesPath ?? '', 'tepsi', name), path.join(__dirname, '..', '..', 'tema', 'ananas', 'marka', 'tepsi', name)];
   return candidates.find((one) => fs.existsSync(one));
 }
 
-function icon(listening: boolean): Electron.NativeImage {
+/** A picture at each scale it has: `<stem>-16.png` for 1x, and the larger ones for screens set larger. */
+function picture(stem: string, sizes: Array<[number, number]>): Electron.NativeImage {
+  const kept = icons.get(stem);
+  if (kept) return kept;
   const image = nativeImage.createEmpty();
-  for (const [size, scaleFactor] of [
-    [16, 1],
-    [24, 1.5],
-    [32, 2],
-  ] as const) {
-    const file = iconFile(`pyn-${listening ? 'dinliyor' : 'kapali'}-${size}.png`);
+  for (const [size, scaleFactor] of sizes) {
+    const file = iconFile(`${stem}-${size}.png`);
     if (file) image.addRepresentation({ scaleFactor, buffer: fs.readFileSync(file) });
   }
+  icons.set(stem, image);
   return image;
 }
 
+const trayPicture = (listening: boolean) =>
+  picture(`pyn-${listening ? 'dinliyor' : 'kapali'}`, [
+    [16, 1],
+    [24, 1.5],
+    [32, 2],
+  ]);
+const menuPicture = (icon: TrayIcon) =>
+  picture(icon === 'pyn' ? 'pyn-kapali' : `menu-${icon}`, [
+    [16, 1],
+    [32, 2],
+  ]);
+
 const english = () => readSettings().language === 'en';
+const canNote = () => process.platform === 'win32' && Boolean(readSettings().vault);
 
 function menu(): Electron.Menu {
   return Menu.buildFromTemplate(
-    trayItems(voice, english(), busy).map((item): Electron.MenuItemConstructorOptions =>
+    trayItems(voice, english(), busy, canNote()).map((item): Electron.MenuItemConstructorOptions =>
       item.type === 'separator'
         ? { type: 'separator' }
-        : { label: item.label, type: item.type, checked: item.checked, enabled: item.enabled ?? true, click: () => void act(item.action) },
+        : {
+            label: item.label,
+            enabled: item.enabled ?? true,
+            icon: item.icon ? menuPicture(item.icon) : undefined,
+            click: () => void act(item.action),
+          },
     ),
   );
 }
 
 function show(): void {
   if (!tray) return;
-  tray.setImage(icon(listensAlways(voice)));
+  tray.setImage(trayPicture(listensAlways(voice)));
   tray.setToolTip(trayTooltip(voice, english()));
 }
 
 async function act(action: TrayAction | undefined): Promise<void> {
   if (action === 'open') handlers?.open();
+  else if (action === 'settings') handlers?.settings();
   else if (action === 'quit') handlers?.quit();
+  else if (action === 'note') openNoteWindow();
   else if (action === 'wake' && voice) {
     busy = true;
     try {
@@ -114,10 +157,10 @@ async function act(action: TrayAction | undefined): Promise<void> {
 }
 
 /** The icon put in the notification area, told of every voice status the app reads from then on. */
-export function startTray(given: { open(): void; quit(): void }): void {
+export function startTray(given: { open(): void; settings(): void; quit(): void }): void {
   if (tray) return;
   handlers = given;
-  tray = new Tray(icon(false));
+  tray = new Tray(trayPicture(false));
   // Either click shows the menu, built anew so it says how things are now; a double click opens the window.
   const popUp = () => tray?.popUpContextMenu(menu());
   tray.on('click', popUp);
@@ -133,7 +176,7 @@ export function startTray(given: { open(): void; quit(): void }): void {
 
 /** A short word from the icon (Windows: a notification beside it). */
 export function trayNotice(title: string, content: string): void {
-  tray?.displayBalloon({ title, content, icon: icon(false) });
+  tray?.displayBalloon({ title, content, icon: trayPicture(false) });
 }
 
 /**

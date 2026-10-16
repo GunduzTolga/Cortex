@@ -229,9 +229,54 @@ def tray_icons():
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
 
 
+MENU_GLYPHS = ('mikrofon-acik', 'mikrofon-kapali', 'not', 'ayarlar', 'cik')
+
+
+def menu_icons():
+    """The notification-area menu's icons (tepsi/menu-<name>-<16|32>.png): the microphone listening
+    (red) or off (grey, struck through), a note, a gear, the power sign. Gold and mid-tones, so they
+    read on Windows' light menus and dark ones alike; drawn eight times larger and brought down."""
+    from PIL import ImageDraw
+    folder = OUT / 'tepsi'
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in MENU_GLYPHS:
+        for size in (16, 32):
+            k = 8
+            u = size * k / 16  # one point of the 16 px design, in drawing pixels
+            img = Image.new('RGBA', (size * k, size * k), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            w = round(1.6 * u)
+            if name.startswith('mikrofon'):
+                c = LISTENING if name == 'mikrofon-acik' else '#8f8a80'
+                d.rounded_rectangle([5.2 * u, 1.2 * u, 10.8 * u, 9.6 * u], radius=2.8 * u, fill=c)
+                d.arc([3 * u, 4 * u, 13 * u, 12.2 * u], 0, 180, fill=c, width=w)
+                d.line([8 * u, 12.2 * u, 8 * u, 14.2 * u], fill=c, width=w)
+                d.line([5.4 * u, 14.6 * u, 10.6 * u, 14.6 * u], fill=c, width=w)
+                if name == 'mikrofon-kapali':
+                    d.line([2.4 * u, 2.4 * u, 13.6 * u, 13.6 * u], fill=c, width=round(1.8 * u))
+            elif name == 'not':
+                d.rounded_rectangle([3 * u, 1.5 * u, 13 * u, 14.5 * u], radius=1.2 * u, outline=GOLD, width=w)
+                for y in (5.2, 8, 10.8):
+                    d.line([5.4 * u, y * u, 10.6 * u, y * u], fill=GOLD, width=round(1.2 * u))
+            elif name == 'ayarlar':
+                import math
+                cx = cy = 8 * u
+                for i in range(8):
+                    a = i * math.pi / 4
+                    d.line([cx + math.cos(a) * 4 * u, cy + math.sin(a) * 4 * u, cx + math.cos(a) * 6.8 * u, cy + math.sin(a) * 6.8 * u], fill=GOLD, width=round(2.2 * u))
+                d.ellipse([cx - 4.8 * u, cy - 4.8 * u, cx + 4.8 * u, cy + 4.8 * u], outline=GOLD, width=round(2.2 * u))
+            elif name == 'cik':
+                d.arc([2.6 * u, 3 * u, 13.4 * u, 13.8 * u], -60, 240, fill=GOLD, width=w)
+                d.line([8 * u, 1.4 * u, 8 * u, 8 * u], fill=GOLD, width=w)
+            img.resize((size, size), Image.LANCZOS).save(folder / f'menu-{name}-{size}.png', optimize=True)
+    for path in sorted(folder.glob('menu-*')):
+        print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
+
+
 if __name__ == '__main__':
     if sys.argv[1:2] == ['tepsi']:
         tray_icons()
+        menu_icons()
     elif sys.argv[1:2] == ['yakala']:
         mic_buttons()
     elif sys.argv[1:2] == ['kurulum']:

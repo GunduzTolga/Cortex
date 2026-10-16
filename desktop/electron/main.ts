@@ -187,6 +187,16 @@ function createWindow(showNow = true): void {
   });
 }
 
+/** The window brought back on its settings (the icon's "Ayarlar"), once its page is there to be told. */
+function showSettings(): void {
+  showWindow();
+  const contents = window?.webContents;
+  if (!contents) return;
+  const tell = () => contents.send('app:openSettings');
+  if (contents.isLoading()) contents.once('did-finish-load', tell);
+  else tell();
+}
+
 /** The window brought back: from the icon, or a second launch; made again if it was closed for good. */
 function showWindow(): void {
   if (!window) {
@@ -240,6 +250,7 @@ if (!app.requestSingleInstanceLock()) {
     if (!HIDDEN) {
       startTray({
         open: showWindow,
+        settings: showSettings,
         quit: () => {
           quitting = true;
           app.quit();

@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { useT } from '../i18n/useT';
+import { Button } from './ui';
 
 /** A part of the settings window: its title, then its rows. */
 export function Section({ title, children, data }: { title: string; children: ReactNode; data: string }) {
@@ -17,5 +19,22 @@ export function Row({ label, children }: { label: string; children: ReactNode })
       <span className="min-w-0 flex-1 text-[13px] font-semibold text-darkDelegation">{label}</span>
       {children}
     </div>
+  );
+}
+
+/** Beside a field being typed in: kept with a press (or Enter, or leaving the field). */
+export function SaveButton({ onSave, data }: { onSave: () => void; data?: string }) {
+  const t = useT();
+  return (
+    <Button
+      tone="ghost"
+      className="h-8 shrink-0"
+      // Kept on the press itself: the field keeps its focus, and leaving it does not keep the same thing twice.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onSave}
+      {...(data ? { [`data-${data}`]: true } : {})}
+    >
+      {t('settings.save')}
+    </Button>
   );
 }

@@ -5,7 +5,7 @@ import type { SetupJob, SetupStatus, VoiceCommands } from '@shared/setup';
 import type { Key } from '../i18n';
 import { useT } from '../i18n/useT';
 import { useSetup } from '../store/setup';
-import { Section } from './settingsParts';
+import { SaveButton, Section } from './settingsParts';
 import { Button, Spinner, Switch, inputClass } from './ui';
 
 /**
@@ -99,15 +99,18 @@ function CommandWords({ name, words, busy }: { name: keyof VoiceCommands; words:
   const shown = words.join(', ');
   const [text, setText] = useState(shown);
   useEffect(() => setText(shown), [shown]);
+  const asked = text
+    .split(',')
+    .map((one) => one.trim().replace(/\s+/g, ' '))
+    .filter(Boolean);
+  const changed = asked.join(', ') !== shown;
   const keep = () => {
-    const asked = text
-      .split(',')
-      .map((one) => one.trim().replace(/\s+/g, ' '))
-      .filter(Boolean);
-    if (asked.join(', ') !== shown) void set({ commands: { [name]: asked } });
+    if (changed) void set({ commands: { [name]: asked } });
     else setText(shown);
   };
   return (
+    <>
+    {changed ? <SaveButton onSave={keep} data="setup-voice-command-save" /> : null}
     <input
       className={`${inputClass.replace('w-full', '')} h-8 w-56 shrink-0`}
       value={text}
@@ -120,6 +123,7 @@ function CommandWords({ name, words, busy }: { name: keyof VoiceCommands; words:
       }}
       data-setup-voice-command={name}
     />
+    </>
   );
 }
 

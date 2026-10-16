@@ -3,6 +3,7 @@ import { messageOf } from '@shared/ipcError';
 import type { SetupJob, SetupPush, SetupStatus, VoicePatch } from '@shared/setup';
 import { translate } from '../i18n';
 import { useApp } from './app';
+import { useSaved } from './saved';
 
 /**
  * Cortex's engine and voice typing being set up (shared/setup.ts), held
@@ -82,6 +83,7 @@ export const useSetup = create<SetupState>((set, get) => {
     async voice(patch) {
       try {
         set({ status: await window.cortex.setup.voice(patch), error: null });
+        useSaved.getState().flash();
       } catch (err) {
         set({ error: { job: 'voice', text: messageOf(err) } });
       }

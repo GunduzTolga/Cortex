@@ -97,5 +97,7 @@ export interface CortexApi {
     authChanged(handler: () => void): () => void;
     /** A setup job going on: a step, or its end. */
     setup(handler: (push: SetupPush) => void): () => void;
+    /** The notification-area icon's "Ayarlar": open the settings. */
+    openSettings(handler: () => void): () => void;
   };
 }
