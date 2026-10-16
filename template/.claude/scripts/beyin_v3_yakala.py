@@ -1997,11 +1997,15 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
     except tk.TclError:
         pass
     # Shown at full opacity at once: the layout is already complete here, and a fade-in only
-    # added ~80 ms between the hotkey and a window you can type into.
-    root.deiconify()
-    if sys.platform == 'darwin':
+    # added ~80 ms between the hotkey and a window you can type into. BEYIN_YAKALA_GIZLI=1 (the
+    # tests' listener) builds it and never shows it: nothing appears on the screen of whoever
+    # runs them, nothing takes the front from what they are doing.
+    hidden = os.environ.get('BEYIN_YAKALA_GIZLI') == '1'
+    if not hidden:
+        root.deiconify()
+    if sys.platform == 'darwin' and not hidden:
         _style_mac(focus=not snapshot)
-    if not snapshot:
+    if not snapshot and not hidden:
         root.lift()
         _bring_to_front(root)
         root.focus_force()
@@ -2227,6 +2231,9 @@ def listen_mac(vault, script, keycode=11, modifiers=0x1000 | 0x800):
 
 LISTENER_MUTEX = 'Local\\CortexPynYakalaDinleyici'
 LISTENER_STOP = 'Local\\CortexPynYakalaDur'
+# Set by `yakala pencere` (the desktop app's "Not al"): the running listener opens its window, the
+# one with the voice helper already warm.
+LISTENER_OPEN = 'Local\\CortexPynYakalaAc'
 LISTENER_STATE = 'yakala-dinleyici.json'
 WIN_MODS = {'alt': 0x1, 'ctrl': 0x2, 'shift': 0x4}
 
@@ -2263,7 +2270,7 @@ def _own_modules(script, paths=None):
     return {path: path.stat().st_mtime for path in paths}
 
 
-def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name=LISTENER_STOP):
+def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name=LISTENER_STOP, open_name=LISTENER_OPEN):
     """Resident hotkey on Windows: Tk is warm before the key, so the window opens at once.
 
     A small thread owns RegisterHotKey and reads the foreground window the moment the key
@@ -2290,6 +2297,7 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
     if not lock or ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS: another listener serves this user
         return 0
     stop = kernel32.CreateEventW(None, True, False, stop_name)
+    opener = kernel32.CreateEventW(None, False, False, open_name)  # auto-reset: one window a request
     # A listener that is still on its way out may keep the event alive, signalled: that request
     # was for it, not for us.
     kernel32.ResetEvent.argtypes = [wintypes.HANDLE]
@@ -2349,6 +2357,8 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
         user32.PostThreadMessageW(ready['tid'], 0x0012, 0, 0)  # WM_QUIT ends the hotkey thread
         kernel32.CloseHandle(lock)
         kernel32.CloseHandle(stop)
+        if opener:
+            kernel32.CloseHandle(opener)
         if restart:
             subprocess.Popen([sys.executable, str(script), 'dinle', '--vault', str(vault)], close_fds=True,
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -2358,6 +2368,8 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
     def poll():
         if kernel32.WaitForSingleObject(stop, 0) == 0:  # WAIT_OBJECT_0: kur or kaldir asked us to go
             return finish()
+        if opener and kernel32.WaitForSingleObject(opener, 0) == 0:  # `yakala pencere`: as if the key were pressed
+            pressed.put({})
         windows[:] = [window for window in windows if window.winfo_exists()]
         ticks[0] += 1
         if ticks[0] % 80 == 0 and not windows:  # about every two seconds
@@ -2420,6 +2432,24 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
     root.after(25, poll)
     root.mainloop()
     return 0
+
+
+def open_windows_listener(open_name=LISTENER_OPEN):
+    """Ask a running listener to open its window; False when no listener runs (Windows only)."""
+    if os.name != 'nt':
+        return False
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.OpenEventW.restype = wintypes.HANDLE
+    kernel32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.SetEvent.argtypes = kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    event = kernel32.OpenEventW(0x0002, False, open_name)  # EVENT_MODIFY_STATE
+    if not event:
+        return False
+    kernel32.SetEvent(event)
+    kernel32.CloseHandle(event)
+    return True
 
 
 def stop_windows_listener(stop_name=LISTENER_STOP, mutex_name=LISTENER_MUTEX, wait=3.0):
@@ -2950,7 +2980,10 @@ def main(argv=None, vault=None, state=None):
     state = Path(state) if state else resolve_state(vault)
     command = args.command or 'pencere'
     as_json = args.force_json or not sys.stdout or not sys.stdout.isatty()
-    if command == 'pencere':
+    if command == 'pencere' and not getattr(args, 'baglam', None) and open_windows_listener():
+        # The running listener opens it: the same window as the key's, its microphone warm.
+        result = {'status': 'dinleyici'}
+    elif command == 'pencere':
         context = json.loads(args.baglam) if getattr(args, 'baglam', None) else gather_context()
         result = popup(vault, context, state=state)
     elif command == 'dinle':

@@ -139,11 +139,13 @@ class YakalaUnitTest(unittest.TestCase):
         except Exception as exc:
             self.skipTest('no Tk display: ' + type(exc).__name__)
         state = Path(self.tmp.name) / 'state'
-        names = ('Local\\CortexTestKilit-' + str(os.getpid()), 'Local\\CortexTestDur-' + str(os.getpid()))
+        names = tuple('Local\\CortexTest%s-%d' % (kind, os.getpid()) for kind in ('Kilit', 'Dur', 'Ac'))
         code = ('import sys; sys.path.insert(0, %r); import beyin_v3_yakala as y; '
-                'sys.exit(y.listen_windows(%r, %r, spec="ctrl+alt+shift+f11", mutex_name=%r, stop_name=%r))'
+                'sys.exit(y.listen_windows(%r, %r, spec="ctrl+alt+shift+f11", mutex_name=%r, stop_name=%r, open_name=%r))'
                 % (str(SCRIPTS), str(self.vault), str(state), *names))
-        listener = subprocess.Popen([sys.executable, '-c', code])
+        # Its windows are built and never shown: nothing appears on the screen of whoever runs the tests.
+        hidden = dict(os.environ, BEYIN_YAKALA_GIZLI='1')
+        listener = subprocess.Popen([sys.executable, '-c', code], env=hidden)
         self.addCleanup(lambda: listener.poll() is None and listener.kill())
 
         def info():
@@ -156,7 +158,7 @@ class YakalaUnitTest(unittest.TestCase):
             time.sleep(0.05)
         if not info().get('kisayol_calisiyor'):
             self.skipTest('the test hotkey is held elsewhere on this machine')
-        twin = subprocess.run([sys.executable, '-c', code], timeout=60)
+        twin = subprocess.run([sys.executable, '-c', code], timeout=60, env=hidden)
         self.assertEqual(twin.returncode, 0)  # one listener per user: the second steps aside
         user32 = ctypes.windll.user32
         user32.PostThreadMessageW.argtypes = [ctypes.c_ulong, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
@@ -166,7 +168,21 @@ class YakalaUnitTest(unittest.TestCase):
         while info().get('son_pencere', 0) < pressed and time.monotonic() < deadline:
             time.sleep(0.01)
         self.assertGreaterEqual(info().get('son_pencere', 0), pressed)
+        # `yakala pencere` (the desktop app's "Not al") asks the running listener for its window:
+        # it takes the request (the auto-reset event is down again a moment later).
+        self.assertTrue(yakala.open_windows_listener(open_name=names[2]))
+        time.sleep(1.0)
+        kernel32 = ctypes.windll.kernel32
+        kernel32.OpenEventW.restype = ctypes.c_void_p
+        kernel32.OpenEventW.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_wchar_p]
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        event = kernel32.OpenEventW(0x00100000, False, names[2])  # SYNCHRONIZE
+        self.assertTrue(event)
+        self.assertEqual(kernel32.WaitForSingleObject(event, 0), 258, 'the listener took the request')  # WAIT_TIMEOUT
+        kernel32.CloseHandle(event)
         self.assertTrue(yakala.stop_windows_listener(stop_name=names[1], mutex_name=names[0], wait=10))
+        self.assertFalse(yakala.open_windows_listener(open_name=names[2]), 'no listener: the window opens by itself')
         self.assertEqual(listener.wait(timeout=10), 0)
 
     def test_vtt_text(self):
