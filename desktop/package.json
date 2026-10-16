@@ -1,7 +1,7 @@
 {
   "name": "cortex-desktop",
   "productName": "Cortex",
-  "version": "1.0.15",
+  "version": "1.0.17",
   "description": "Cortex'in masaüstü uygulaması: kasayı Obsidian gibi okur ve yazar.",
   "private": true,
   "type": "module",
@@ -86,6 +86,10 @@
       {
         "from": "../tema/ananas/marka/pyn.ico",
         "to": "pyn.ico"
+      },
+      {
+        "from": "../tema/ananas/marka/tepsi",
+        "to": "tepsi"
       },
       {
         "from": "../LICENSE",
