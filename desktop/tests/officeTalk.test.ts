@@ -51,7 +51,9 @@ test('the model is told the cast, the notes by title and how the person is addre
 });
 
 test('LM Studio writes the scene with the model chosen, about the vault’s last notes', async () => {
-  const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-ofis-'));
+  // By the real path the disk gives, as the app keeps a chosen vault: on Windows the temporary folder
+  // can come by its 8.3 short name, which the vault's reader takes for a link and does not read.
+  const vault = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-ofis-')));
   fs.writeFileSync(path.join(vault, 'Proje planı.md'), '# Plan\n\nÜçüncü madde havada kaldı.\n');
   fs.mkdirSync(path.join(vault, 'receipts'));
   fs.writeFileSync(path.join(vault, 'receipts', 'abc.md'), '---\n{"kind": "receipt"}\n---\nMakbuz.\n');
