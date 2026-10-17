@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.23" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.23-E8B23A">
+  <img alt="Sürüm 1.0.25" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.25-E8B23A">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
   <img alt="Telemetri yok" src="https://img.shields.io/badge/telemetri-yok-1B1712">
@@ -379,6 +379,8 @@ Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama ya da her s
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.25](docs/v3/releases/1.0.25.md) | Öncülün 3.10 ve 3.11 motoru: BOM ve hassas klasör gizliliği, uzun Kurallar.md, daha iyi arama, Kiro, `scheduled-check`, `triage`; Yakala'da açık sayfanın bağlantısı, pano tazeliği, videonun konuşulan dili. |
+| [1.0.24](docs/v3/releases/1.0.24.md) | İlk açılışta sesli uyandırma çalışmıyordu (kulaklık hazır değilken mikrofon açılamayınca kapanıyordu): artık yeniden deniyor, sonradan bağlanan kulaklığı da buluyor. |
 | [1.0.23](docs/v3/releases/1.0.23.md) | Uyandırma sözü "İkisi de" olabilir; "panodaki resmi ekle" son kopyalanan görüntüyü nota ekler. |
 | [1.0.22](docs/v3/releases/1.0.22.md) | Uyandırma sözü seçilebilir: "Pyn, not al" ya da "Hey Pyn"; ikisi de Not al penceresini açar, Whisper Pyn'in adını doğrular. |
 | [1.0.21](docs/v3/releases/1.0.21.md) | Canlı konuşmalar düşünen modellerle de yazılıyor (qwen3.5); "Ofis" sekmesi "Beyin" oldu; sağ alttaki menüde mikrofonun durumu, Not al ve Ayarlar, her satırda simge. |
