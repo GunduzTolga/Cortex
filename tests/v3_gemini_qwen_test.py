@@ -98,8 +98,8 @@ class HarnessListTest(unittest.TestCase):
         import re
         cli = (ROOT / 'scripts/beyin_v3.py').read_text(encoding='utf-8')
         lists = re.findall(r'"--harness", choices=\(([^)]*)\)', cli)
-        lists += re.findall(r'seen = \{name: set\(\) for name in \(([^)]*)\)\}', cli)
-        self.assertEqual(len(lists), 3)  # context and receipt choices, doctor's lifecycle table
+        lists += re.findall(r'hook_done_summary\(state, \(([^)]*)\)\)', cli)
+        self.assertEqual(len(lists), 3)  # context and receipt choices, doctor's lifecycle table (hook_done)
         for found in lists:
             self.assertEqual(set(re.findall(r'["\'](\w+)["\']', found)), set(beyin_v3.HARNESSES), found)
         skill = (ROOT / 'template/.agents/skills/beyin/SKILL.md').read_text(encoding='utf-8')

@@ -4,6 +4,16 @@ This module is an opt-in foundation, not a replacement installer or lifecycle mi
 
 `template/.claude/scripts/beyin_v3.py` exposes `MemoryStore(state_dir, vault_root)`. SQLite records and receipts persist in `state_dir/memory.sqlite3`; the runtime directory is private to the local account. Each operation owns and closes its connection. Write operations use `BEGIN IMMEDIATE` transactions; this is local process coordination, not distributed cloud synchronization.
 
+## Hook acknowledgement retention
+
+Every processed hook event is first acknowledged as a private `state/hook-done/<sha256>.json` marker. These recent markers prevent duplicate work without needing to read the database when the same event is immediately replayed.
+
+On successful queue drains, `beyin_v3_hook_done.py` migrates markers older than seven days into the local `memory.sqlite3` table `hook_done_ledger` (at most 256 per run). Its row stores only the event hash, harness and lifecycle event name, not prompt or session text. The SQLite transaction commits **before** the JSON is removed: if a worker crashes between those steps, both copies are harmless and `doctor` counts the event once. A failed migration never deletes its marker. When no old markers are found, the scan is limited to once per day.
+
+Newly delivered events are checked against both the live markers and this ledger. `doctor` combines recent JSON and archived lifecycle metadata so migration does not reset previously observed clients or inflate `acknowledged_events`. This is local-only and requires no extra service or dependency.
+
+The ledger intentionally **retains event hashes indefinitely**, because removing old hashes would allow very late event-ID replays. This change bounds the number of individual JSON files during ordinary use; it does not promise bounded SQLite storage or a measured speed-up. A state reset, backup or restore should keep `memory.sqlite3` and `hook-done/` together.
+
 ## Records and source references
 
 `ingest(record)` requires `id`, `text`, and `source`. The source must be an existing relative file resolving inside the vault. Traversal and escaping symlinks are rejected. Records preserve all supplied structured fields, including `facts`, `kind`, `project`, `status`, `visibility`, `updated_at`, and `supersedes`. Facts default to an empty mapping, revision to 1, visibility to internal, and supersedes to an empty list. When `updated_at` is absent or blank it is filled from the first of `updated`, `modified`, `last_modified`, `date_modified` whose value is a string beginning with an ISO date; other values are ignored and file modification time is never used, because synchronized vaults rewrite it. The alias stays in the record and the source file is not rewritten.
@@ -11,6 +21,8 @@ This module is an opt-in foundation, not a replacement installer or lifecycle mi
 Ingesting the exact same record is idempotent. Reusing an existing ID for different content fails. `update_task(id, expected_revision, changes)` performs a locked revision comparison and increments the revision; it does not permit changing the record ID or directly setting its revision. These updates affect the local record store, not source Markdown files. They do not claim external verification or completion.
 
 `submit_receipt(event_id, summary, refs, harness)` requires existing source references. Replaying the same semantic payload, including from the other harness, returns the original receipt. Changing summary or references under an existing event ID fails. First-writer harness attribution is retained. Receipts are stored locally and do not automatically append to daily notes or project views.
+
+The Claude/Codex Stop learning reminder treats knowledge references as citations, not proof that a note was updated. A declared learning still needs a non-symlink Markdown note under the existing distillation roots, outside the generated-file exclusions, with a modification time at or after the edit window began, or a PostToolUse editor write of such a note (Claude file path, Codex apply_patch header) in the same window, since that write precedes the hook that opens the window; citing an older note alone does not suppress the reminder. The existing folder scan also accepts a recent note that is not in the receipt's refs. This is a filesystem-time heuristic, not content-hash verification, proof of authorship or a semantic check that the declared learning was saved; a sync tool can change modification times without changing content.
 
 ## Retrieval and harness parity
 
@@ -47,10 +59,53 @@ Supply a dedicated application runtime directory. Initialization sets that exact
 Cortex writes exclusively to its explicit managed vault files:
 - Entry point and metadata: `beyin.py`, `.beyin-runtime.json`, `.beyin-version`.
 - Scripts: `.claude/scripts/beyin_v3*.py`.
-- Managed starter skills: `.agents/skills/{beyin,beyin-doktor,beyin-guncelle}/` and `.claude/skills/...`.
+- Managed starter skills: `.agents/skills/{beyin,beyin-doktor,beyin-guncelle}/`, `.claude/skills/...`, and `.kiro/skills/...`.
 - Platform launchers: `Beyni Guncelle.cmd`, `Beyni Güncelle.sh`, `Beyni Guncelle.command`, `Beyni Güncelle.desktop`.
-- Adapter shims: `.claude/hermes-plugin/`, `.opencode/plugins/`, `.omp/hooks/`.
-- Harness hook declarations: `.claude/settings.local.json`, `.codex/hooks.json`, `.codex/config.toml`, `.agents/hooks.json`.
+- Adapter shims: `.claude/hermes-plugin/`, `.claude/scripts/beyin_v3_kiro.py`, `.opencode/plugins/`, `.omp/hooks/`.
+- Harness hook declarations: `.claude/settings.local.json`, `.codex/hooks.json`, `.codex/config.toml`, `.agents/hooks.json`, `.kiro/hooks/beyin-v3.json`.
 - Companion instruction blocks: `AGENTS.md`, `CLAUDE.md`.
 
 All other paths belong to the user. In particular, `.brain/` and `custom/` directories are reserved as an untouched, unmanaged user layer. Installer, updater, and `doctor` checks never treat files under `.brain/` or `custom/` as conflicts or unmanaged system intrusions.
+
+## Proje klasörü kapsamlarını yönetme
+
+`.beyin-projects.json` içindeki bulunamayan klasörler uyarı ve doctor tanısı üretir; diğer
+projelerin sorguları devam eder. Eksik klasör eşlemesi eski `--no-sync` indeks satırlarının
+başka projelere ortak not gibi açılmaması için kapsam sınırı olarak korunur.
+
+`project-scope list` yalnız okur. `project-scope add --folder "Projeler/Deneme" --project deneme`,
+`project-scope remove --folder "Projeler/Deneme"` ve `project-scope prune` açıkça kapsam
+dosyasını düzenler. `prune` yalnız artık bulunamayan klasör girdilerini çıkarır. Bozuk
+veya symlink yapılandırma üzerine yazılmaz; önce dosyayı onar.
+
+## Receipt görünümü çakışması ve kurtarma
+
+`daily/v3/YYYY-MM-DD.md` ve `knowledge/v3/outcomes.md` değişmez receipt kaynaklarından
+üretilir. Görünüm elle değişmişse veya yerel takip geçmişi yoksa mevcut baytlar korunur
+ve `kind: receipt_view` uyarısı görünür kalır (`sync.status: degraded`). Sağlam kaynak
+bağlamı, lifecycle kayıtları ve yeni receipt yazımı devam eder; gerçek kaynak
+çakışmaları bağlamı ve geçmişi engellemeye devam eder. `receipt`, `task-update`,
+`context` ve `recap` JSON çıktıları ilgili tanıyı `source_sync.warnings` altında
+bildirir. `history` JSON liste biçimini korur ve uyarıyı stderr'e yazar.
+
+Takip edilen veya mevcut receipt'lerin üreteceği görünüm, başlığı silinse bile kaynak
+not olarak dizine eklenmez. Aynı dosyanın sabit bağlantıları da dışlanır. Önceden
+yanlışlıkla dizine alınmış görünüm kayıtları ve bu kayıtlara ait geçmiş olayları
+otomatik bağlamdan saklanır; denetim olaylarının baytları değiştirilmez. Görünümün
+yerinde sonradan oluşan gerçek bir not yeniden dizine alınabilir. Yerel state tamamen
+kaybolsa bile kurtarma arşivinin yanında kaydedilmiş köken bilgisi ve arşiv özeti,
+halen mevcut aynı sabit bağlantıyı tanımak için kullanılır. Bu yan kayıt silinirse,
+bozulursa veya bağlantı hem yer hem içerik değiştirirse eski köken yeniden
+kanıtlanamaz; bu dosyaları elle inceleyin.
+
+Açık kurtarma komutu: `python3 beyin.py sync --recover-views` (Windows: `py -3 beyin.py sync --recover-views`).
+Çakışan baytlar görünümün yanındaki `.archive/` içinde her denemeye ayrı bir dosya
+olarak kalıcı yazıldıktan sonra görünüm yeniden üretilir. Kurtarma başarısızsa kaynak
+ve takip kaydı korunur; symlink arşiv hedefleri kabul edilmez. Komut receipt kaynaklarını
+ve runtime veritabanını silmez. Arşivdeki kullanıcı eklemelerini uygun bilgi notlarına taşı.
+Sabit bağlantı varsa arşivin yanında küçük bir `.provenance.json` kaydı da saklanır;
+bu kaydı arşivle birlikte koruyun.
+POSIX'te özgün görünüm değiştirilmeden önce arşiv dosyası, arşiv dizini ve üst dizin
+`fsync` bariyerlerinden geçer; bariyer hatası kurtarmayı durdurur. Bu sıra güç kesintisi
+veya uzak dosya sistemi için mutlak kalıcılık garantisi değildir. Windows'ta dizin
+`fsync` desteği bulunmadığından aynı kalıcılık iddiası yapılmaz.

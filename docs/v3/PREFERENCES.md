@@ -51,6 +51,13 @@ Açılışta hafıza dosyaları kırpılıyorsa sorgusuz seçilen ilgisiz bir no
 bütçe kırpılan dosyalara döner. Dosyalar tam sığıyorsa en fazla 1.500 karakterlik bir
 güncel not eklenebilir.
 
+`Kurallar.md`'nin bu bütçede en fazla kaç karakterinin tam geldiğini `doctor`
+`companion_rules_opening` altında söyler; kurallar kırpılıyorsa `--human` çıktısı bunu tek
+satırla bildirir (#374). Sayı öbür companion dosyalarının boyutuyla ve receipt'le değişir.
+Core 544, Last-Session 1.743, Threads 543 karakter ve bir receipt taşıyan örnek bir kasada
+varsayılan 5.000 karakterlik açılış yaklaşık 1.550-1.750, 8.000 yaklaşık 3.050-3.300
+karakter gösterir; satır başına ~50 karakterlik kurallarla bu 30 ile 60 kural arasıdır.
+
 ## Opt-in sır süzgeci
 
 `python3 beyin.py preferences --secret-filter on` komutu receipt özeti, note-create ve task-create gövdesi, bu komutların ve task-update değişikliklerinin `title`, `next_action`, `completion_criterion` ve `facts` alanlarında yaygın erişim anahtarı biçimlerini yazmadan önce `[REDACTED]` ile değiştirir. Varsayılan kapalıdır; profil değişikliği bu bağımsız tercihi değiştirmez. Kapatmak için `--secret-filter off` kullan.
@@ -76,6 +83,12 @@ Bu değişiklik yerel adaydır; yayımlanmış v3.0.0 paketine otomatik olarak e
 - Blok köprünün `--context-chars` bütçesinden geriye kalanla ve en fazla 1.200 karakterle sınırlıdır. Görev varsa receipt özeti bu alanın yarısını aşmaz. Satırlar bütün olarak eklenir; sığmayan görevler `(+N gorev sigmadi)` ile sayılır.
 - Blok salt okunur SQLite okumasıyla kurulur; model çağrısı ve yazma yoktur. Okuma başarısız olursa yalnız bu blok düşer, köprünün başlangıç talimatı aynen verilir.
 - Ayar, eski sürümler bilinmeyen tercih alanını reddettiği için `.beyin-preferences.json` içinde değil, runtime klasöründeki `project-context.json` dosyasında tutulur; makineye özeldir ve rollback güvenlidir. Kapatmak için `--project-context off`.
+
+## Hassas klasörlerin korunması
+
+Adında `Kasa`, `Şifreler`, `Müşteriler`, `Özel`, `Private` gibi hassasiyet bildiren bir sözcük bulunan klasörler ana hafıza taramasına alınmaz. Aynı kural alt klasörlerde de geçerlidir; Türkçe harfler, büyük/küçük harfler ve baştaki emoji veya numaralar fark etmez. Bu dosyalar silinmez ya da değiştirilmez.
+
+Eski sürümden kalan bir indeks henüz senkronize edilmemiş olsa bile bu klasörlerdeki kaynaklar otomatik hafıza bağlamında gösterilmez. Bu kaynaklara bağlı receipt özetleri de otomatik açılış bağlamından çıkarılır. Görünür bir hafıza kaydı istiyorsan dosyayı hassas klasör dışında tutmalısın. `visibility: private` kişisel notlar için ayrıca kullanılabilir; yalnızca klasör adı, dosyanın işletim sistemi ve Git izinlerini değiştirmez.
 
 ## Opt-in hijyen sinyalleri
 
@@ -109,6 +122,90 @@ python3 beyin.py preferences --inbox-folder ""   # listeyi boşalt, ad tanımaya
 
 Listede olup vault'ta bulunmayan klasör `error: not_found` ile gösterilir. Not sayısı `--inbox-max-items` değerine ya da en eski not `--inbox-max-days` gününe ulaşan klasör `attention` ile işaretlenir; bu yalnız bir sinyaldir, `doctor` durumunu değiştirmez. Hiçbir not taşınmaz, sınıflandırılmaz ve ajan başlatılmaz; işleme kararı senindir. Okunamayan klasör boş sayılmaz, `error` ile listelenir. Companion ve kasa sınıfı klasörler muaftır, nokta klasörler ve sembolik bağlar sayılmaz. Eski sürümler bilinmeyen `hygiene.json` anahtarını reddettiği için ayar runtime klasöründe ayrı bir `inbox-report.json` dosyasında tutulur; rollback diğer hijyen sinyallerini kapatmaz. Kapatmak için `--inbox-report off`.
 
+## Zamanlanmış sağlık denetimi ve bildirim
+
+Otomatik kontroller bir istemci olayıyla çalışır; hiçbir istemci açılmazsa `doctor`'un gördüğü sorun (sync çakışması, bayat hook yolu, skill/talimat çakışması, görev ve geçerlilik sorunları) bir sonraki oturuma kadar görünmez (#267). `beyin.py scheduled-check` bunu senin kurduğun işletim sistemi zamanlayıcısıyla kapatır: önce `sync`, sonra `doctor` çalıştırır ve sonucu runtime klasöründeki `scheduled-check.json` dosyasına yazar. `doctor` son koşuyu `scheduled_check` alanında yaşıyla gösterir (hiç kurulmadıysa `never_run`); bu alan bilgi amaçlıdır, durumu değiştirmez. Komut model çağırmaz, servis kurmaz, hiçbir şeyi onarmaz; Beyin zamanlayıcı kurmaz.
+
+Çıkış kodu: `0` sağlıklı, `4` dikkat gerekiyor, `1` denetimin kendisi tamamlanamadı, `3` başka bir denetim hâlâ çalışıyor. `2` argparse'ın kullanım hatasıdır (yanlış yazılmış komut, eski sürümde olmayan seçenek); "dikkat" anlamına gelmez. Kilit işletim sisteminin dosya kilididir: çöken bir koşunun kilidi onunla birlikte bırakılır, beklenecek bayat kilit yoktur.
+
+Sonuç dikkat gerektirdiğinde satır runtime klasöründeki `scheduled-notice.json` dosyasına yazılır ve bir sonraki ajan oturumunun açılışında tek satır olarak bir kez söylenir. Bu kanal her zaman çalışır; `--notify` olsun olmasın.
+
+`--notify` eklersen (varsayılan kapalı) aynı anlarda işletim sistemi bildirimi de gösterilir. Ek bağımlılık yoktur: Windows'ta Windows PowerShell 5.1 toast (`pwsh` 7'de bu türler yok), macOS'ta `osascript`, Linux'ta `notify-send` (yoksa bildirim sessizce atlanır, oturum açılışındaki satır yine çıkar). Bildirimin gerçekten görüldüğü bilinemez (`osascript` Odak modunda da başarı döner, Windows toast'ı sessizce düşebilir); bu yüzden bildirim ek kanaldır, oturum satırının yerini tutmaz.
+
+- Yalnız durum değişince: sağlıklıdan dikkate geçişte bir kez, düzelince bir kez (`Beyin: sorunlar giderildi, kasa saglikli.`). Sorun sürdükçe her gece tekrar etmez; yedi günde bir hatırlatır. Denetimin kendisi tamamlanamazsa bildirim değişmez, `doctor` `error` gösterir.
+- Metin sabit kalıplardan ve sayılardan oluşur; not adı, yol ya da proje adı yazmaz: `Beyin: sync cakismasi (2), hook uyarisi (1) - ayrinti: beyin.py doctor`. Metin bildirim aracına kabuk üzerinden değil argüman olarak geçer; her alt süreçte zaman aşımı vardır.
+- Oturum satırını ilk açılan oturum bir kez söyler; sorun düzelirse söylenmemiş satır geri alınır.
+- Bütün durum (son koşu, son söyleme zamanı, bekleyen satır) makineye özel runtime klasöründe ayrı dosyalardadır, vault'a ve `.beyin-preferences.json`'a yazılmaz; rollback bu yüzden bozulmaz ve her makine kendi sağlığını kendisi bildirir. `doctor` bu dosyalardan yalnız bildiği alanları okur, hiçbirine yazmaz; oturum açılışı yalnız küçük satır dosyasını okur, vault taraması yapmaz.
+
+Bildirim yalnız kullanıcı oturumunda çalışan bir zamanlayıcıdan ekrana gelir. Aşağıdaki örnekler bu yüzden kullanıcı oturumunda çalışır; yolları kendi vault'unla değiştir.
+
+**Windows** (Görev Zamanlayıcı, "yalnız kullanıcı oturum açıkken çalıştır": `/RU` verilmeyen görev böyle kurulur; "oturum açık olsun olmasın" seçilirse toast ekrana gelmez). PowerShell'de `--%` satırın geri kalanını `schtasks`'a olduğu gibi geçirir; o olmadan Windows PowerShell 5.1 `/TR` içindeki `\"` kaçışlarını bozar ve vault yolu `/TR` değerinden kopar. `cmd.exe`'de `--%` yazılmaz:
+
+```powershell
+schtasks --% /Create /TN "Beyin saglik" /SC DAILY /ST 20:00 /TR "py -3 \"C:\Users\SEN\Beynim\beyin.py\" scheduled-check --notify"
+```
+
+**macOS** (LaunchAgent). `/usr/bin/python3` macOS'ta 3.9'dur; Beyin 3.11 ve üstünü ister. `python3 --version` ile 3.11+ olan yolu bul (Homebrew: `/opt/homebrew/bin/python3`, python.org: `/Library/Frameworks/Python.framework/Versions/3.13/bin/python3`). Vault iCloud Drive, Belgeler ya da Masaüstü altındaysa macOS bu klasörleri arka plan işlemlerine kapatır; Sistem Ayarları › Gizlilik ve Güvenlik › Tam Disk Erişimi'ne bu `python3`'ü ekle. Bildirim `osascript` üzerinden geldiği için Bildirim Merkezi'nde "Betik Düzenleyici" (Script Editor) adıyla görünür; ilk bildirimde izin isteyebilir. `~/Library/LaunchAgents/com.cortex.beyin-saglik.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.cortex.beyin-saglik</string>
+  <key>ProgramArguments</key><array>
+    <string>/opt/homebrew/bin/python3</string>
+    <string>/Users/sen/Beynim/beyin.py</string>
+    <string>scheduled-check</string><string>--notify</string>
+  </array>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>/Users/sen/Library/Logs/beyin-saglik.log</string>
+  <key>StandardErrorPath</key><string>/Users/sen/Library/Logs/beyin-saglik.log</string>
+</dict></plist>
+```
+
+```sh
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cortex.beyin-saglik.plist
+```
+
+**Linux** (systemd user timer; çıktı `journalctl --user -u beyin-saglik` ile okunur). Beyin Python 3.11 ve üstünü ister; dağıtımın `/usr/bin/python3`'ü daha eski olabilir. `/usr/bin/python3 --version` ile bak, eskiyse `ExecStart`'a 3.11+ olan yolu yaz (ör. `command -v python3.11` çıktısı). `~/.config/systemd/user/beyin-saglik.service`:
+
+```ini
+[Unit]
+Description=Beyin saglik denetimi
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/sen/Beynim/beyin.py scheduled-check --notify
+SuccessExitStatus=4
+```
+
+`~/.config/systemd/user/beyin-saglik.timer`:
+
+```ini
+[Timer]
+OnCalendar=*-*-* 20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```sh
+systemctl --user enable --now beyin-saglik.timer
+```
+
+Düz `cron` kullanıcı oturumu dışında çalışır; bildirim ekrana gelmez ama kayıt ve oturum açılışındaki satır yine çalışır. Çıktıyı `/dev/null`'a atma, bir günlük dosyasına yönlendir (`>> ~/beyin-saglik.log 2>&1`); macOS'ta cron için de Tam Disk Erişimi gerekir.
+
+Kaldırmak için zamanlayıcı görevini sil; Beyin tarafında kapatılacak bir ayar yoktur.
+
+Nerede nasıl doğrulandı:
+
+| Platform | Gerçek masaüstünde | Yalnız testle |
+|---|---|---|
+| Windows 11 (PowerShell 5.1) | Görev Zamanlayıcı'dan `scheduled-check --notify`: bildirim Bildirim Merkezi'ne düştü, ama tam ekran video açıkken ekrana açılır pencere olarak gelmedi (Windows bu sırada bildirimleri yalnız merkezde tutar; komut yine 0 döndü). Oturum açılışında satır bir kez söylendi | Kilit çakışması, durum geçişleri, argüman literal'i (gerçek `powershell.exe` ile) |
+| macOS | Denenmedi | `osascript` argv biçimi, sahte bildirim aracıyla |
+| Linux | Denenmedi | `notify-send` argv biçimi ve yokken atlanması |
+
 ## Paralel oturum bildirimi
 
 Aynı vault'ta birden çok oturum açıkken ajanlar ortak git index'ine, ortak geçici dosyalara ya da aynı nota dokunabilir. Kart tarafı companion protokolüyle çözülü; bu bildirim kartın dışında kalan ortak şeyler içindir (#170). Varsayılan kapalıdır:
@@ -122,6 +219,25 @@ python3 beyin.py preferences --parallel-sessions on
 - İşaret runtime klasöründe `session-markers/<sha256(harness + "\0" + session_id)>.json` dosyasıdır ve yalnız `schema, harness, session, first_at, last_at, announced` taşır: istem metni ve çalışma klasörü yazılmaz. Runtime klasörü vault başına ve makineye özel olduğundan başka vault'taki ya da başka makinedeki oturumlar sayılmaz.
 - SessionEnd kendi işaretini siler (`/clear` sonrası hayalet oturum kalmaz). Her yazımda 24 saatten eski işaretler silinir ve en fazla 128 işaret tutulur. Okunamayan işaret yok sayılır; işaret hatası hook'u düşürmez, yalnız satır düşer.
 - Ayar, eski sürümler bilinmeyen tercih alanını reddettiği için `.beyin-preferences.json` içinde değil, runtime klasöründeki `parallel-sessions.json` dosyasında tutulur; rollback güvenlidir. Kapalıyken hook çıktısı değişmez ve işaret yazılmaz. `doctor` açıkken etkin işaret sayısını salt okunur olarak yazar. Kapatmak için `--parallel-sessions off`.
+
+## Oturum içi bağlam tekrarını önleme (`--context-dedupe`)
+
+`context_mode: turn` açıkken kanca her kullanıcı isteminde leksikal arama yapar. Uzun ve odaklı oturumlarda aynı notların her mesajda tekrar tekrar modele iletilmesi bağlam penceresini gereksiz yere doldurur (#363). Oturum içi tekrar önleme (de-duplication) etkinleştirildiğinde:
+
+```bash
+python3 beyin.py preferences --context-dedupe on
+```
+
+- Kanca, bu oturumda daha önce teslim ettiği kayıtları (`id`, `source_sha256` ve metin penceresi) runtime klasöründe `session-delivery/<sha256(harness + "\0" + session_id)>.json` dosyasında tutar. Oturum kimliğinin kendisi yazılmaz.
+- Mesaj bağlamı pasaj tabanlıdır: uzun bir notun başka bir bölümü (aynı `id`, farklı pencere) yeni sayılır ve teslim edilir; aynı pencere kısaltılmış olsa da tekrar sayılır. Geri tutulan kayıtların bütçesi yeni kayıtlara kalır.
+- Arama sonucunda gelen not daha önce iletildiyse ve dosya diskte değişmediyse filtrelenir; mesajda yalnızca yeni ya da güncellenen notlar modele teslim edilir.
+- Notların ardından eklenen son receipt bloğu da aynı defterle izlenir; defterde receipt metninin yalnız sha256 değeri tutulur. Aynı receipt oturumda bir kez verilir; yeni bir receipt yazılınca ya da receipt dosyası değişince ve sıkıştırmadan sonra yeniden verilir. Bütçeye sığmadığı için gösterilmeyen receipt teslim edilmiş sayılmaz.
+- Bir istemde hiç yeni not kalmazsa kanca boş ek bağlam (`{}`) döner; gereksiz token tüketimi ve dikkat dağınıklığı önlenir. Eşleşen notların hepsi geri tutulduğu halde son receipt bu oturum için yeniyse yalnız receipt verilir. Hiç not eşleşmeyen istemde, tekrar önleme kapalıyken olduğu gibi receipt de eklenmez.
+- **Sıkıştırma (Compaction):** Model bağlamı sıkıştırdığında (`PreCompact` veya Claude Code `SessionStart` olayında `source: compact`), eski notlar pencereden düştüğü için teslimat defteri otomatik sıfırlanır.
+- `SessionEnd` oturumun teslimat defterini temizler. Dosya diskte düzenlenirse `source_sha256` değiştiği için not yeni sayılır ve tekrar teslim edilir.
+- Tümü tekrar sayılan bir istem süreklilik çapasını (`topic-refs`) silmez; sıkıştırmadan sonra gelen kısa bir devam mesajı konuyu kaybetmez.
+- Defter oturum başına en çok 512 kayıt ve kayıt başına 8 pencere tutar (en eskisi düşer). Her yazımda 24 saatten eski defterler silinir ve en fazla 128 defter tutulur.
+- Ayar, rollback güvenliği için `.beyin-preferences.json` içinde değil, runtime klasöründeki `context-dedupe.json` dosyasında tutulur (varsayılan kapalı). Kapatmak için `--context-dedupe off`.
 
 ## Stop'ta receipt hatırlatması
 
@@ -155,7 +271,7 @@ Runtime klasöründeki (konumu için bkz. QUICKSTART) isteğe bağlı `retrieval
 ```
 
 - `strict_floor`: 0 ile 2 arası sayı, varsayılan 0,20. Yükseltmek yanlış eklemeyi azaltır, cevabı bulma oranını da düşürür.
-- `strict_exclude`: vault köküne göre en fazla 64 yol öneki. `daily/` ve `receipts/` her zaman dışarıdadır, liste bunlara eklenir. Karşılaştırma büyük/küçük harfe ve Unicode biçimine (NFC/NFD) duyarsızdır, `\` ayırıcısı da kabul edilir. Arşiv ya da oturum dökümü klasörleri için uygundur.
+- `strict_exclude`: vault köküne göre en fazla 64 yol öneki. `daily/` ve `receipts/` her zaman dışarıdadır, liste bunlara eklenir. Karşılaştırma büyük/küçük harfe ve Unicode biçimine (NFC/NFD) duyarsızdır, `\` ayırıcısı da kabul edilir. Arşiv ya da oturum dökümü klasörleri için uygundur. Bu ayar strict arama yollarında, not düzeyi yedek arama dahil, sonuçları eler. `context_mode: session` açılışındaki companion kaynak seçimine uygulanmaz ve açık non-strict geçmiş aramasını engellemez. Arşiv klasörünü indeksten tamamen uzak tutmak için aşağıda anlatılan `--index-exclude-dir` tercih edilmelidir.
 - Dosya bozuksa ya da bir değer geçersizse varsayılanlar kullanılır; hook bozulmaz.
 
 Bu ayar makineye özeldir ve `.beyin-preferences.json` şemasına girmez: eski bir sürüme dönüldüğünde tanımadığı bir tercih alanı yüzünden hook'un durması istenmedi.
@@ -187,6 +303,28 @@ Varsayılan 0,20 bu kurala göre seçildi: gündelik ve ajan komutu gürültüs�
 
 Aynı vault'ta ilk indeks kurulumu yaklaşık 3 saniye (birkaç tura bölünür), önbellek 9,1 MB (arşiv dışlanınca 5,5 MB). Ağır yük altında (10 çekirdekte yük ortalaması 40 civarı) sorgu başına ortanca süre not düzeyinde 1,8 saniye, pasaj yolunda 0,5 saniye; ikisinin de yaklaşık 0,3 saniyesi kaynak tazeliği kontrolü. Tek vault ve Türkçe ağırlıklı bir korpus üzerinde ölçüldü; kendi vault'unuzda ölçüp eşiği ona göre ayarlayın.
 
+## İndeks dışı klasör adları (`index.json`)
+
+Vault'un içine gömülü bir kod deposu varsa, o deponun taşıdığı başka projelerin belgeleri (`3rdparty/SDL2/README.md`, `SECURITY.md` gibi) senin notların gibi indekse girer ve aramada gerçek notların önüne geçebilir. Hangi klasör adlarının indekse hiç girmeyeceğini sen söylersin:
+
+```bash
+python3 beyin.py preferences --index-exclude-dir 3rdparty --index-exclude-dir target
+python3 beyin.py preferences --index-include-dir target   # listeden çıkar
+python3 beyin.py sync
+```
+
+- Liste klasör **adı** tutar, yol değil: `3rdparty` yazınca vault'un her derinliğindeki `3rdparty` klasörleri taranmaz. Eşleşme yol parçasının tamamıyla yapılır (`3rdparty-notlari` ya da `my3rdparty` etkilenmez), büyük/küçük harf ve Unicode biçimi (NFC/NFD) fark etmez, Türkçe `İ/i/I/ı` aynı harf sayılır. En fazla 64 ad.
+- Beyin kendiliğinden yalnız `node_modules`, `receipts`, `__pycache__`, nokta ile başlayan klasörleri ve sembolik bağları atlar; bu adları listeye yazmak serbesttir ama hiçbir şeyi değiştirmez. `vendor`, `external`, `third_party` gibi adlar **otomatik atlanmaz**: bir vault'ta gömülü kod ağacı olan `Vendor`, başka bir vault'ta tedarikçi notlarının klasörüdür ve bir güncellemeyle notların sessizce aramadan düşmesi istenmedi. Bunun yerine `doctor`, bu adlardan birini taşıyan ve içinde `README.md`, `SECURITY.md`, `CONTRIBUTING.md` gibi yukarı akış belgeleri bulunan indeksli klasörleri sayısıyla birlikte gösterir (`Indeks kapsami (bilgi): ...`) ve çalıştırılacak komutu yazar. Karar senindir.
+- `notes`, `knowledge`, `tasks` ve companion klasörü listeye alınamaz: `note-create` ve `task-create` yazdığını indeksten geri okur, oturum başı hafıza bağlamı da companion dosyalarını indeksten alır. Komut bu adları gerekçesiyle reddeder. Aynı nedenle `note-create` ve `task-create`, listedeki bir adın altına düşen yeni bir kaynağı dosyayı yazmadan reddeder.
+- Etkin liste her yerde görünür: `sync` çıktısında `index_exclusions` (`excluded_dirs`, bu taramada atlanan klasör sayısı `pruned` ve ilk 20 yol `pruned_dirs`), `doctor` ve `preferences` çıktısında `Indeks disi klasor adlari` satırı. Listen yoksa bu çıktılar değişmez.
+- Bir ad eklendiğinde bir sonraki `sync` o klasörlerdeki kayıtları indeksten siler (`deleted` sayısı, `delete` olayları) ve arama onları getirmez; dosyalara dokunulmaz. Ad listeden çıkarıldığında bir sonraki `sync` aynı dosyaları yeniden indeksler. Atlanan klasörler hiç listelenmez ve okunmaz, yani büyük bir ağaç `sync` süresine de yük olmaz.
+- Ayar makineye özeldir ve runtime klasöründeki `index.json` dosyasında durur (`{"schema": 1, "excluded_dirs": ["3rdparty"]}`); `.beyin-preferences.json` şemasına girmez. Runtime klasörünün yolu `python3 beyin.py doctor --json` çıktısında `state_location.effective_state` alanındadır (varsayılan konumlar için bkz. QUICKSTART). Dosyayı elle de yazabilirsin; kurallar aynıdır.
+- Dosya bozuksa, sembolik bağsa, 64 KB'ı aşıyorsa ya da tek bir geçersiz giriş içeriyorsa (yol ayırıcı, `.`/`..`, boş ad, korunan ad, bilinmeyen anahtar) listenin **hiçbiri** uygulanmaz: `sync` bozulmaz, her şey indekslenir ve neden `sync` çıktısındaki `index_exclusions.error` alanında ve `doctor`da `index.json gecersiz (...)` satırında görünür. Yarım uygulanmış bir liste yerine görünür bir hata tercih edildi.
+- Bu bir gizlilik sınırı değildir. Bu ayarı tanımayan bir sürüme (3.9.0 ve öncesi) dönüldüğünde dosya yok sayılır ve o klasörler yeniden indekslenir; yeniden güncellendiğinde liste kaldığı yerden uygulanır. Bir kaynağı bağlamdan kesin olarak uzak tutan şey `visibility: private` alanıdır. İndekste olmayan bir dosyanın frontmatter'ı okunmadığı için görünürlüğü de bilinemez. Bu yüzden listedeki bir klasörün altındaki her dosya, bir receipt'e kaynak olarak verildiğinde özel bir kaynak gibi ele alınır: `recap` yolunu göstermez, yalnız sayar; oturum başı bağlamı ve proje köprüsü de o receipt'i göstermez. Klasör listeden çıkarılıp yeniden indekslendiğinde karar yine notun kendi `visibility` alanına döner.
+- Listedeki bir klasörde duran not indekste olmadığı için öbür kurallara da katılmaz: başka bir notu `supersedes` ile emekliye ayırıyorsa o eski not yeniden güncel sayılır, `validity: rejected` taşıyorsa aynı iddianın yeniden önerilmesini artık engellemez. Bir klasörü listeye almadan önce içinde böyle notlar olup olmadığına bak.
+- `retrieval.json` içindeki `strict_exclude` ile farkı: o strict aramada sonuçları eler; dosyalar yine taranır, indekslenir ve açık non-strict aramada bulunabilir. `index.json` ise taramanın kendisini keser.
+- Opt-in kelime tavanı sinyali de listedeki klasörleri atlar. Gelen kutusu raporu, kapalı görev raporu ve bilgi damıtması tarihi diskteki dosyalara bakar, indekse değil; bu liste onları değiştirmez.
+
 ## Bileşen ve skill hariç tutma (susturma)
 
 Kullanıcı gereksinim duymadığı başlangıç skill'lerini, adaptörleri, başlatıcıları veya kancaları susturabilir:
@@ -198,3 +336,22 @@ Hariç tutulabilen bileşenler:
 `agents_block`, `adapters`, `adapters/hermes`, `adapters/omp`, `adapters/opencode`, `harnesses/antigravity`, `launchers`, `skills`, `skills/beyin`, `skills/beyin-doktor`, `skills/beyin-guncelle`.
 
 Hariç tutma tercihleri vault kökünde bağımsız `.beyin-exclusions.json` dosyasında saklanır (`.beyin-preferences.json` dosyasını değiştirmez; böylece eski sürümlere rollback, öncül 3.4.0 dahil, uyumlu kalır). Tercih kaydedildiğinde bir sonraki kurulum veya güncellemede uygulanır (`update` veya `install`). Değiştirilmemiş hariç tutulan dosyalar temizlenir, kullanıcının değiştirdiği dosyalar ise çakışma vermeden korunur. `doctor` çıktısı hem uygulanan hariç tutmaları hem de bekleyen değişiklikleri gösterir.
+
+## Hermes platform tercihi (`hermes-platforms.json`)
+
+Hermes Agent entegrasyonunda varsayılan olarak gözetimsiz (unattended / bot) sayılan kanallar (`a2a`, `cron`, `telegram`, `discord`, `slack`, `whatsapp`, `signal`, `matrix`, `email`, `sms`, `webhook`) için makbuz hatırlatması ve oturum sonu kontrol noktası üretilmez.
+
+Hermes'i Slack gibi bir kanal üzerinden kişisel interaktif asistan olarak kullananlar için bu kanal gözetimli olarak işaretlenebilir:
+
+```bash
+# Slack'i gözetimli/insanlı say:
+python3 beyin.py preferences --hermes-attended-platform slack
+
+# Özel bir bot kanalını gözetimsiz say:
+python3 beyin.py preferences --hermes-unattended-platform custom-bot
+
+# Varsayılanlara dön:
+python3 beyin.py preferences --hermes-reset-platforms
+```
+
+Ayar runtime klasöründeki `hermes-platforms.json` dosyasında tutulur (`{"schema": 1, "attended": ["slack"], "unattended": []}`); `.beyin-preferences.json` şemasına girmez ve rollback güvenlidir.

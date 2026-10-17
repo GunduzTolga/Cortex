@@ -54,6 +54,32 @@ ve dosyayı okumak gerektiğini söyler. Kesme satır sınırındadır, yarım k
 haritası ve ilişkili kaynaklar payını aldıktan sonra artan bütçe kırpılmış companion
 bölümlerine geri verilir; sınır hiçbir durumda aşılmaz.
 
+Bu paylaşımdan önce companion dosyaları kaynak doğrulamalı anlık görüntüden 200.000
+karakterlik bir üst sınırla okunur (upstream #374).
+Payından kısa kalan dosya artanı uzun dosyalara bırakır; böylece kural kırpması ve
+`rules X-Y (n of N)` işaretindeki numaralar dosyanın tam metni üzerinden hesaplanır.
+Önceden pay eşit bölünüyordu ve yaklaşık 40.000 karakteri aşan bir `Kurallar.md` bu
+katmanda başını kaybediyordu: dosyanın başındaki özet açılışa hiç ulaşmıyor, işaret de
+kuralları kesik metinden sayıyordu. Üst sınırı aşan bir `Kurallar.md` artık bu katmanda da
+başı ve sonuyla tutulur; `Journal.md` en yeni kayıtlar altta olduğu için sonuyla tutulmaya
+devam eder.
+
+Kapsamlı kurallar (#333, upstream #375): tek bir
+projeye ya da alana ait düzeltme `projects/<proje>/Kurallar.md` dosyasına yazılır; global
+`Kurallar.md` içinde en çok `[kapsam: <proje>]` etiketli tek satırlık işaretçi kalır. Etiket
+`[kapsam: ...]` ya da `[scope: ...]` biçimindedir (köşeli parantezsiz `kapsam: ad` da tanınır),
+virgülle birden çok ad alır; `genel`, `global`, `all` ve `herkes` etiketsiz kuralla aynıdır. Etiket, satır başında `-`, `*`, `+`,
+`1.` ya da `1)` ile açılan liste maddesinin herhangi bir satırında durabilir; madde boş satıra
+ya da başlığa kadar sürer. Ad karşılaştırması büyük/küçük harf ve Türkçe karakter farkını yok
+sayar. Hook başka projelerin etiketli maddelerini yalnız kanca girdisinde etkin bir `project`
+adı geldiğinde eler; o zaman vault kökündeki `projects/`, `Projeler/` ve `projeler/` altında
+bu adı birebir taşıyan klasörden ilk bulunan `Kurallar.md` (yoksa `rules.md`) dosyasını da
+ekler. Sembolik bağ ve vault dışına çıkan yol okunmaz; dosya indekslenmiş ve `private`
+olmayan bir kaynak olmalıdır. Claude Code kanca girdisinde `project` alanı göndermez: orada
+etiketli kurallar da açılışa girer ve proje dosyası otomatik gelmez. Bu yüzden işaretçi satırı
+ajana dosyayı ne zaman açacağını söyler. Etkin projeyi `cwd` üzerinden bulma ayrı bir iştir
+(upstream #288).
+
 ## Boyut sınırı ve arşivleme (#96)
 
 Upstream #96 sorun kaydı beş haftalık bir kasada
@@ -86,13 +112,19 @@ Düzeltme dört parçadır:
   senkronizasyon arızası değildir, `doctor` durumunu değiştirmez. `Kurallar.md`,
   `Core.md`/`Soul.md` ve `Journal.md` bilerek birikir; boyutları yalnız bilgi olarak
   gösterilir, bunlara sınır uygulanmaz. Hook `Kurallar.md` dosyasını doğrudan okur ve
-  sığmadığında başını ve sonunu atlanan karakter sayısıyla birlikte verir (#45).
+  sığmadığında başını ve sonunu atlanan kural aralığıyla birlikte verir (#45, #196).
+  `doctor` ayrıca `companion_rules_opening` altında Claude Code açılışının kural metninin
+  en fazla kaç karakterini tam gösterdiğini (`share`) hook'un kendi hesabıyla verir; sayı
+  öbür companion dosyalarının o anki boyutuna ve receipt'e göre değişir. Kurallar
+  kırpılıyorsa `--human` çıktısında tek satır görünür. Bilgi amaçlıdır, `doctor` durumunu
+  değiştirmez ve hiçbir dosya yazmaz (#374).
 - **Kayıpsız arşivleme.** `python3 beyin.py companion-compact` açık bir komuttur; hook,
   worker veya zamanlayıcı onu kendiliğinden çalıştırmaz. Yalnız sınırı aşan dosyada önce
   `## Previous`/`## Önceki` (Last-Session) veya `## Closed`/`## Kapanan`/`## Kapalı`
   (Threads) bölümünün gövdesini, sonra dosya sınıra inene kadar en eski tarihli kayıtları
-  taşır. Tarihli kayıt, ilk karakterlerinde ISO tarih bulunan bir başlık, paragraf veya
-  liste maddesidir ve bir sonraki kayda ya da tarihsiz başlığa kadar sürer. Tarihli bir
+  taşır. Tarihli kayıt, ilk karakterlerinde ISO (`2026-10-12`) ya da yazıyla
+  (`12 Ekim 2026`, `12 October 2026`; aralıkta son gün: `4→5 Ekim 2026`) tarih bulunan bir
+  başlık, paragraf veya liste maddesidir ve bir sonraki kayda ya da tarihsiz başlığa kadar sürer. Tarihli bir
   başlık bir kart açar: aynı ya da daha üst seviyedeki bir sonraki başlığa kadar içindeki
   tarihli satırlar ve alt başlıklar o kartındır; kart bölünmeden ya kalır ya da bütün
   halde taşınır (#118). Devir kartının
@@ -110,6 +142,13 @@ Düzeltme dört parçadır:
   yazıldıktan sonra canlı dosya değişmişse arşiv eski baytlarına döner ve `conflict`
   raporlanır. `--dry-run` hiçbir şey yazmadan planı gösterir. Komut model çağırmaz ve
   bitince yeni boyutları indekslemek için `sync` çalıştırır.
+- **Karar defteri.** Taşınan metindeki karar satırları (`**Karar:**`, `**Karar (Ad):**`,
+  `**Karar 2 (Ad):**`, `**Decision:**`; liste maddesi olabilir, kod bloğu içindekiler sayılmaz)
+  ayrıca companion klasöründeki `Kararlar.md` dosyasına, geldikleri kartın başlığı ve arşiv
+  yoluyla kelimesi kelimesine eklenir. Aynı satır ikinci kez eklenmez; dosya yalnız eklenerek
+  büyür. `Kararlar.md` `visibility: internal` bir nottur, arşivin aksine aramaya ve bağlama
+  girer; böylece kartı arşive giden bir karar görünür kalır. Canlı kartta kalan karar
+  kopyalanmaz. Rapor `decisions_added` (`--dry-run`'da `decisions_planned`) sayısını verir.
 
 `tests/v3_companion_hygiene_test.py` sentetik verilerle #96'daki iki biçimi (en üste eklenen
 tarihli paragraflar ve budanmamış `## Previous Sessions`; konu başına onlarca tarihli
@@ -148,3 +187,5 @@ Bunlar kaynak aktarımı, kurulum ve koruma sözleşmelerinin testleridir. Yeni 
 konuşmalarında kişilik kalitesi için kör kullanıcı karşılaştırması yapılmadı. Öğrenme
 protokolünün uygulanması aktif ajanın talimat takibine bağlıdır; mevcut hafıza verisi
 otomatik olarak geriye dönük yeniden yazılmaz.
+
+Karar defteri kaynak kartın gizlilik ve güven sınırını genişletmez: private, untrusted veya reddedilmiş kaynaklardan karar kopyalanmaz. Yeni `Kararlar.md` yerel aramaya açık (`visibility: internal`) ve uzak danışmana kapalıdır (`remote_allowed: false`). Var olan defterin de `remote_allowed: false` veya `visibility: private` taşıması gerekir; bozuk ya da uygun olmayan defterde kartlar taşınmadan dikkat uyarısı döner. Aynı satır farklı kartlarda geçiyorsa her kartın kararı ayrı korunur; aynı kartın tekrar denemesi yeni kopya eklemez.

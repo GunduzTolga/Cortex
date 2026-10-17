@@ -1,5 +1,9 @@
 """Context must refresh source state without lifecycle hooks."""
+from datetime import datetime, timezone
+from contextlib import closing
 import json
+import hashlib
+import sqlite3
 import os
 from pathlib import Path
 import shutil
@@ -44,6 +48,16 @@ class ContextRefreshTest(unittest.TestCase):
             target = checkout / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, target)
+        # The standalone reader still enforces folder privacy on an older persisted row.
+        private = self.vault / 'notes/Özel/decision.md'
+        private.parent.mkdir()
+        private.write_text('synthetic calibration PRIVATE_CANARY', encoding='utf-8')
+        with closing(sqlite3.connect(self.state / 'memory.sqlite3')) as db, db:
+            payload = json.loads(db.execute('SELECT payload FROM records WHERE id=?', ('calibration',)).fetchone()[0])
+            payload.update(id='private-old-row', source='notes/Özel/decision.md',
+                           text=private.read_text(encoding='utf-8'),
+                           source_sha256=hashlib.sha256(private.read_bytes()).hexdigest())
+            db.execute('INSERT INTO records VALUES (?,?)', (payload['id'], json.dumps(payload)))
         before = snapshot(checkout), snapshot(self.vault), snapshot(self.state)
         env = inherited_env()
         env.pop('PYTHONDONTWRITEBYTECODE', None)
@@ -305,5 +319,27 @@ class ContextRefreshTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, '')
         self.assertIn('conflict', result.stderr.lower())
+
+    def test_recap_with_since_and_until_filters_correctly(self):
+        result = self.run_cli('recap', '--since', '2026-09-20', '--until', '2026-09-24T12:00:00Z')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        # from/through stay dates, as in the --days window: the local calendar day of each bound.
+        self.assertEqual(out['from'], '2026-09-20')
+        self.assertEqual(out['through'], datetime(2026, 9, 24, 12, tzinfo=timezone.utc).astimezone().date().isoformat())
+        self.assertEqual(out['timezone'], 'local')
+
+    def test_invalid_date_exits_cleanly(self):
+        result = self.run_cli('recap', '--since', 'invalid-date')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('invalid date format', result.stderr)
+        self.assertEqual(result.stdout, '')
+
+    def test_since_after_until_exits_cleanly(self):
+        result = self.run_cli('recap', '--since', '2026-09-20', '--until', '2026-09-10')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('argument --since: must not be after --until', result.stderr)
+        self.assertEqual(result.stdout, '')
+
 
 if __name__=='__main__':unittest.main()
