@@ -5,14 +5,14 @@
 <h1 align="center">Cortex</h1>
 
 <p align="center">
-  <b>Yapay zekâ asistanların için yerel, kalıcı bir ikinci beyin.</b><br>
+  <b>Yapay zeka asistanların için yerel, kalıcı bir ikinci beyin.</b><br>
   Notların senin Markdown dosyalarında kalır; Claude Code, Codex, OpenCode ve diğerleri aynı hafızayı paylaşır.<br>
   Maskotu ve düşünme ortağın: ananas <b>Pyn</b>.<br>
   <sub>SoleLuna Tech</sub>
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.9" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.9-E8B23A">
+  <img alt="Sürüm 1.0.23" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.23-E8B23A">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
   <img alt="Telemetri yok" src="https://img.shields.io/badge/telemetri-yok-1B1712">
@@ -43,7 +43,7 @@
 
 ## Cortex nedir?
 
-Her yapay zekâ asistanı oturum kapanınca unutur; bir istemcide anlattığını diğeri bilmez. Cortex bu boşluğu kapatır. Bir Obsidian vault'una (ya da sıradan bir klasöre) kurulur ve kullandığın istemcilere ortak bir hafıza bağlar:
+Her yapay zeka asistanı oturum kapanınca unutur; bir istemcide anlattığını diğeri bilmez. Cortex bu boşluğu kapatır. Bir Obsidian vault'una (ya da sıradan bir klasöre) kurulur ve kullandığın istemcilere ortak bir hafıza bağlar:
 
 - **Hatırlar.** Her oturum açılışında ve her mesajda, konuyla ilgili notların asistanın bağlamına eklenir. Önceki oturumun devir kartı, açık konular ve senin düzeltmelerin hep el altındadır.
 - **Kaynak gösterir.** Biten işler kısa, kaynak bağlantılı makbuzlarla kaydedilir. Neyin nereden geldiği her zaman izlenebilir.
@@ -73,7 +73,7 @@ Hafızayı model değil istemci taşır. Bu yüzden ücretsiz, uygun fiyatlı ya
 
 ## Kurulum
 
-**Gereksinimler:** Python **3.11 veya üzeri** ve kullanmak istediğin yapay zekâ istemcisi (kendi kurulumu ve hesabıyla). Windows, macOS ve Linux desteklenir.
+**Gereksinimler:** Python **3.11 veya üzeri** ve kullanmak istediğin yapay zeka istemcisi (kendi kurulumu ve hesabıyla). Windows, macOS ve Linux desteklenir.
 
 İki yol var. İkisi de mevcut notlarına dokunmaz; Cortex'i zaten kurduysan aynı yol, notlarını koruyarak günceller.
 
@@ -214,14 +214,23 @@ Sağlayıcı girişlerini OpenCode'da bir kez sen yaparsın: `opencode auth logi
 
 ## Masaüstü uygulaması
 
-`desktop/` klasöründe Cortex'in Windows uygulaması var. Önizleme aşamasında; kurulum dosyası henüz imzasız. Açınca kasanı seçersin, sonra dört ekran:
+`desktop/` klasöründe Cortex'in Windows uygulaması var. Önizleme aşamasında; kurulum dosyası henüz imzasız.
+
+**İlk açılış:** terminal gerekmez. Pyn önce sana nasıl hitap edeceğini sorar, sonra kurulacakları sırayla gösterir:
+1. Kasa (notlarının klasörü).
+2. Python, bilgisayarda yoksa: kurulum dosyasıyla gelir, yalnız senin kullanıcın için kurulur.
+3. Pyn'in hafızası: Cortex kasaya kurulur.
+4. Yapay zeka aracın: girişler.
+5. Sesle yazma.
+
+Her adımda ne yaptığı yazar; isteğe bağlı olanlar "Atla" ile geçilir, sonra Ayarlar'dan kurulur. Ardından dört ekran:
 
 - **Pyn (ilk ekran):** kasanın içinde, kendi aracınla sohbet. Araç kasada başladığı için hafızayı hook'lar tam olarak verir. Araçlar: Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code ve yerel modeller için LM Studio ile Ollama: modeli kendi uygulamasında yüklersin, Cortex onunla doğrudan konuşur ve Pyn'in hafızasını kasanın hook'undan verir. Aracın izin istediği adımlar kartla sorulur. Model, mod ve efor çiplerle seçilir. Sohbetin okuduğu ve değiştirdiği notlar yan panelde açılır.
 - **Notlar:** Obsidian'a gerek kalmadan okuma ve yazma: wiki linkleri, canlı önizleme, geri bağlantılar, arama, şablonlar, çöp kutusu. Makbuzlar ve motorun ürettiği sayfalar salt okunurdur.
 - **Grafik:** notlar ve aralarındaki linkler.
-- **Ofis:** piksel sanatıyla çizilmiş, yaşayan bir ofis. Patron Pyn, 12 ajan ve ofis kedisi Tekir dokuz odada çalışır; karakterlere ve odalara tıklanır. Sunucu odasının ışıkları araçlarının gerçek giriş durumunu, odalar kasanın sayılarını gösterir.
+- **Ofis:** piksel sanatıyla çizilmiş, yaşayan bir ofis. Patron Pyn, 12 ajan ve ofis kedisi Tekir dokuz odada çalışır; karakterlere ve odalara tıklanır. Sunucu odasının ışıkları araçlarının gerçek giriş durumunu, odalar kasanın sayılarını gösterir. Ofisin ayarlarında canlı konuşmaları açıp bir araç ve model seçersen (LM Studio, Ollama ya da Claude Code), model son notların hakkında ekibe kısa konuşmalar yazar.
 
-Dil, kasa, dosya ağacının görünüşü ve araçların girişleri **Ayarlar**'da: üst çubuktaki dişli ya da Ctrl+, açar.
+Dil, hitap, kasa, dosya ağacının görünüşü, araçların girişleri, kasadaki Cortex'in güncellenmesi ve sesle yazma **Ayarlar**'da: üst çubuktaki dişli ya da Ctrl+, açar. İlk kurulum ekranı da oradan yeniden açılır.
 
 **Girişler ve anahtarlar:**
 - Her araç bu bilgisayarda kayıtlı kendi girişini kullanır; terminaldekiyle aynı giriş. Uygulama bu giriş dosyalarını okumaz, yalnız araca durumunu sorar.
@@ -256,7 +265,7 @@ Varsayılan sınırlar 3.000 ve 8.000 karakterdir. Sınır aşılınca oturum `M
 
 Cortex notlarını kendi başına hiçbir yere göndermez ve telemetri toplamaz. Tek otomatik ağ isteği, günde en çok bir kez GitHub'a sorulan "yeni sürüm var mı?" sorusudur; not, prompt ya da hesap bilgisi taşımaz (`preferences --update-notifications off` kapatır). `pyn kontrol` npm'e yalnız sen çalıştırdığında sorar.
 
-Asıl akış şudur: yazdığın mesajla eşleşen notlar asistanının bağlamına eklenir ve böylece **kullandığın yapay zekâ sağlayıcısına** (Anthropic, OpenAI, Google…) gider. Sistemin amacı budur; ama varsayılan olarak vault'taki her not adaydır. Kendini korumak için:
+Asıl akış şudur: yazdığın mesajla eşleşen notlar asistanının bağlamına eklenir ve böylece **kullandığın yapay zeka sağlayıcısına** (Anthropic, OpenAI, Google…) gider. Sistemin amacı budur; ama varsayılan olarak vault'taki her not adaydır. Kendini korumak için:
 
 - **Tek bir notu dışarıda tut.** Notun en başına şu üç satırı koy; not otomatik bağlama hiç girmez, yalnız açıkça istediğinde okunur:
 
@@ -278,13 +287,13 @@ Arama indeksi vault'un dışında, yalnız senin hesabının okuyabildiği bir k
 Video, tweet, makale, mail ya da dosyayı gördüğün yerde yakala; asistan metni çıkarıp dersleri `knowledge/` notlarına bağlasın.
 
 1. Bir kez kur: `python3 beyin.py yakala kur` (Windows'ta `py -3`).
-2. Her uygulamada Windows'ta `Ctrl+Alt+B`, Mac'te `Control+Option+B`. Tarayıcıda Obsidian Web Clipper'ın "Beyne at" şablonu.
+2. Her uygulamada Windows'ta `Ctrl+Alt+C`, Mac'te `Control+Option+C`. Tarayıcıda Obsidian Web Clipper'ın "Beyne at" şablonu.
 3. Asistanına "yakalananları işle" de.
 
 YouTube'da önce altyazı kullanılır, yoksa ses yalnız yerelde yazıya dökülür. Tuşu değiştirmek için `beyin.py yakala kisayol 'cmd+"'`. [Ayrıntılar](docs/v3/YAKALA.md)
 
 **Sesle yazma (Windows, isteğe bağlı):** `py -3 beyin.py ses kur` ile pencereye konuşarak yazarsın.
-- Mikrofona tıkla ya da Ctrl+Alt+B'ye yeniden bas; sonda "kaydet" dersen kart kaydedilir.
+- Ctrl+Alt+C, **Not al** penceresini dinler halde açar: konuş, ara ver, bitince "Pyn, kaydet" (ya da "Pyn, gönder") de; tuşa basmadan kaydedilir. "Son kelimeyi sil", "son cümleyi sil" ve "hepsini sil" de söylenebilir.
 - `beyin.py ses ayar --uyandirma ac` ile "Pyn, not al" demek pencereyi açar.
 - Ses bilgisayardan çıkmaz; çeviriyi yerelde Whisper yapar, NVIDIA, AMD Radeon ve Intel Arc kartlarda ekran kartında. [Ayrıntılar](docs/v3/YAKALA.md#sesle-yazma-windows-isteğe-bağlı)
 
@@ -370,6 +379,20 @@ Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama ya da her s
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.23](docs/v3/releases/1.0.23.md) | Uyandırma sözü "İkisi de" olabilir; "panodaki resmi ekle" son kopyalanan görüntüyü nota ekler. |
+| [1.0.22](docs/v3/releases/1.0.22.md) | Uyandırma sözü seçilebilir: "Pyn, not al" ya da "Hey Pyn"; ikisi de Not al penceresini açar, Whisper Pyn'in adını doğrular. |
+| [1.0.21](docs/v3/releases/1.0.21.md) | Canlı konuşmalar düşünen modellerle de yazılıyor (qwen3.5); "Ofis" sekmesi "Beyin" oldu; sağ alttaki menüde mikrofonun durumu, Not al ve Ayarlar, her satırda simge. |
+| [1.0.20](docs/v3/releases/1.0.20.md) | Ayarlar her değişikliği kaydettiğini söylüyor ("Kaydedildi"), yazılan alanların yanında Kaydet düğmesi; kurulum konum sormadan standart yere kuruluyor. |
+| [1.0.19](docs/v3/releases/1.0.19.md) | Beynin içindeki ofis: harita bir beynin içinde, kıvrımlarında kıvılcımlar akar; ofis ve müdür ilk açılışta yazılan adı taşır; Cortex'i yazan Tolga kendi masasında. |
+| [1.0.18](docs/v3/releases/1.0.18.md) | Ofisin canlı konuşmaları Ayarlar → Ofis'ten de seçilir: araç (LM Studio, Ollama, Claude Code; hangisinin hazır olduğu yazar), model ve sıklık; ofisin kendi ayarlarıyla aynı seçim. |
+| [1.0.17](docs/v3/releases/1.0.17.md) | Masaüstü sağ altta: simgenin menüsünden "Sürekli dinle" açılıp kapanır (açıkken simgede kırmızı nokta), pencere kapanınca Cortex orada kalır ve Windows'la başlar; ofisin kişi çipleri gerçekten küçüldü. |
+| [1.0.16](docs/v3/releases/1.0.16.md) | Not al: uzun not alt satıra geçer, alan dört satıra kadar büyür; "son kelimeyi sil", "son cümleyi sil", "hepsini sil" komutları; komutların sözleri masaüstünde Ayarlar → Sesle yazma'dan değişir; "Py notal" gibi bitişik yazılan uyandırma sözü nota girmez; mikrofonun adı tam görünür. |
+| [1.0.15](docs/v3/releases/1.0.15.md) | Sesli komutlar düzeldi: "Pyn, not al" gerçek bir sesle de açar (küçük model "not al"ı yakalar, Pyn'in adını Whisper doğrular); cümleler arasında mikrofon kapanmaz; "Pyn, kaydet" Whisper'ın uydurduğu satırların arkasında kalmaz; "Pyn, gönder/tamam/bitti" de kaydeder; `ses dene --uyandirma` ne duyduğunu gösterir. |
+| [1.0.14](docs/v3/releases/1.0.14.md) | Ofisin canlı konuşmaları gerçek: ofis ayarlarında araç (LM Studio, Ollama, Claude Code) ve model seçilir, model son notlar hakkında ekibe konuşma yazar; kişi çipleri küçüldü, hepsi sığıyor. |
+| [1.0.13](docs/v3/releases/1.0.13.md) | "Pyn, not al" "payn" diye söylenince de tutar (dar gramerli dinleme); ofisin hızlanması ve büyük yazıları düzeldi; ilk kurulumda "Sürekli dinle" anahtarı; beynin içindeki ofis için Claude Design brifi. |
+| [1.0.12](docs/v3/releases/1.0.12.md) | Not al baştan tasarlandı (geniş, yumuşak kenarlı mikrofon, mikrofon adı ve ses düzeyi, "mikrofondan ses gelmiyor" uyarısı); "Pyn, kaydet" diyene kadar kesintisiz dikte, sürekli dinleme; kısayol Ctrl+Alt+C; ana ekranda Cortex güncelleme bildirimi; Türkçe arayüzde İngilizce cümle kalmadı. |
+| [1.0.11](docs/v3/releases/1.0.11.md) | Ctrl+Alt+B penceresi yenilendi: "Not al", yazılı mikrofon düğmesi, pencere dinler halde açılır ve ne yapacağını söyler, Enter yazıp kaydeder. İlk kurulum ekranı kayıtlı girişleri "hazır" saymaz; kurulum sihirbazı Pyn'in görselleriyle. |
+| [1.0.10](docs/v3/releases/1.0.10.md) | Masaüstü uygulaması her şeyi kendisi kurar: ilk kurulum ekranı (hitap, kasa, Python, Pyn'in hafızası, yapay zeka aracı, sesle yazma), kurulum dosyasıyla gelen Python, Ayarlar'da Cortex ve sesle yazma. Ofis kullanıcıya adıyla seslenir. |
 | [1.0.9](docs/v3/releases/1.0.9.md) | Sesle yazma AMD Radeon ve Intel Arc kartlarda da ekran kartında (whisper.cpp, Vulkan); NVIDIA'da CUDA, olmazsa işlemci. Pyn'in yeni yüzü: Claude Design'ın vektör çizimi, sohbette ve Obsidian'da. |
 | [1.0.8](docs/v3/releases/1.0.8.md) | Masaüstü uygulaması (önizleme): Pyn sohbeti (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code; yerel modeller için LM Studio ve Ollama), Obsidian'sız notlar, grafik, araç girişleri ve API anahtarları, ayarlar. Yakala'da isteğe bağlı sesle yazma ve "Pyn, not al" (yerel Whisper). |
 | [1.0.7](docs/v3/releases/1.0.7.md) | Yakala güvenliği (yalnız herkese açık adresler, Windows komut satırı koruması), Türkçe karakterli kısayollar, `Win+Shift+S` ekran görüntüsü; daha hızlı senkron; `pyn` yeni sürümü haber verir, `pyn guncelle`; marka kuralları. |

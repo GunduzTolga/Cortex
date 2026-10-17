@@ -7,8 +7,11 @@ import '@fontsource/vt323/400.css';
 import './office.css';
 import * as art from './office-art.js';
 import type { ToolId } from './office-art.js';
-import { OfficeEngine, clockText, lightForHour, type AgentSnapshot, type Led, type LogEntry } from './ofis-engine.js';
+import { OfficeEngine, clockText, lightForHour, nameTheManager, possessive, type AgentSnapshot, type Led, type LogEntry } from './ofis-engine.js';
 import { useChat } from '../chat/chatStore';
+import { TALK_EVERY, TALK_TOOL_NAME, useTalk, useTalkModels, useTalkTools, type TalkToolState } from './talkPrefs';
+import { refusal, useApp } from '../store/app';
+import { type TalkTool } from '@shared/office';
 import { useNotes } from '../notes/notesStore';
 import { useLanguage, useT } from '../i18n/useT';
 import type { Key } from '../i18n';
@@ -28,22 +31,21 @@ import { useEscapeLayer } from '../ui/useEscapeLayer';
 const TOOLS: ToolId[] = ['claude', 'codex', 'opencode', 'gemini', 'qwen'];
 const TOOL_NAME: Record<string, string> = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini', qwen: 'Qwen', lmstudio: 'LM Studio', ollama: 'Ollama' };
 const LED_COLOR: Record<Led, string> = { ok: '#5BD77A', wait: '#F2C14E', off: '#8A93A3' };
-const FREQUENCIES = [10, 20, 30, 60];
+const TALK_STATE_WORD: Record<TalkToolState, Key> = { ready: 'office.talk.ready', off: 'office.talk.off', signedOut: 'office.talk.signedOut' };
 const PREFS_KEY = 'cortex.office.v1';
 
+/** How the office looks; its live conversations are a choice of their own (talkPrefs.ts), the app's settings show it too. */
 interface Prefs {
   followClock: boolean;
   pixel: boolean;
   logHeight: number;
-  live: boolean;
-  tool: string | null;
-  every: number;
 }
-const DEFAULTS: Prefs = { followClock: true, pixel: true, logHeight: 150, live: false, tool: null, every: 20 };
+const DEFAULTS: Prefs = { followClock: true, pixel: true, logHeight: 150 };
 
 function loadPrefs(): Prefs {
   try {
-    return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<Prefs>) };
+    const saved = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<Prefs>;
+    return { followClock: saved.followClock ?? DEFAULTS.followClock, pixel: saved.pixel ?? DEFAULTS.pixel, logHeight: saved.logHeight ?? DEFAULTS.logHeight };
   } catch {
     return DEFAULTS;
   }
@@ -115,7 +117,6 @@ export function OfficeView({ visible }: { visible: boolean }) {
   const [lastTalk, setLastTalk] = useState<string | null>(null);
 
   const auth = useChat((state) => state.auth);
-  const clis = useChat((state) => state.clis);
   const index = useNotes((state) => state.index);
 
   const change = (patch: Partial<Prefs>) =>
@@ -149,6 +150,10 @@ export function OfficeView({ visible }: { visible: boolean }) {
       onInteract: () => setHint(false),
     });
     engineRef.current = engine;
+    // Greeted in the window's language, before its own effect below has set it.
+    engine.lang = useApp.getState().settings.language === 'en' ? 'en' : 'tr';
+    engine.setUserName(useApp.getState().settings.userName);
+    engine.greet();
     setSnapshot(engine.snapshot());
     const resized = new ResizeObserver(() => engine.resize());
     resized.observe(map);
@@ -197,6 +202,11 @@ export function OfficeView({ visible }: { visible: boolean }) {
     return out;
   }, [auth]);
   useEffect(() => engineRef.current?.setLeds(leds), [leds]);
+  // Addressed as the person asked, from the first-run screen or the settings.
+  const userName = useApp((s) => s.settings.userName);
+  // The manager is named after the vault's owner: set before the chips and the card read the name.
+  useMemo(() => nameTheManager(art, userName, language === 'en' ? 'en' : 'tr'), [userName, language]);
+  useEffect(() => engineRef.current?.setUserName(userName), [userName]);
 
   // The light by the hour, or day all day; the face the canvas writes in.
   const night = prefs.followClock && (now.getHours() >= 20 || now.getHours() < 8);
@@ -263,14 +273,15 @@ export function OfficeView({ visible }: { visible: boolean }) {
     const ok = Object.values(leds).filter((one) => one === 'ok').length;
     const wait = Object.values(leds).filter((one) => one === 'wait').length;
     switch (id) {
-      case 'posta':
-        return t('office.room.posta', { count: stats.today });
       case 'harita':
         return t('office.room.harita', { notes: stats.notes, links: stats.links });
       case 'arsiv':
         return t('office.room.arsiv', { count: stats.receipts });
       case 'pyn':
-        return t('office.room.pyn', { count: stats.generated });
+        // Pyn's room is where notes come in (the old mailroom) and are signed off.
+        return `${t('office.room.posta', { count: stats.today })} · ${t('office.room.pyn', { count: stats.generated })}`;
+      case 'mudur':
+        return t('office.room.mudur', { count: stats.notes });
       case 'salon':
         return t('office.room.salon', { count: people });
       case 'mutfak':
@@ -289,7 +300,8 @@ export function OfficeView({ visible }: { visible: boolean }) {
   const ledWord: Record<Led, Key> = { ok: 'office.tool.ok', wait: 'office.tool.wait', off: 'office.tool.off' };
   const card = selected ? art.CHARACTERS[selected] : null;
   const agent = selected ? byId[selected] : undefined;
-  const cardLabel = !card ? '' : card.kind === 'pyn' ? t('office.card.boss') : card.kind === 'cat' ? t('office.card.cat') : t('office.card.agent');
+  const CARD_LABEL: Record<string, Key> = { pyn: 'office.card.boss', cat: 'office.card.cat', mudur: 'office.card.manager', dev: 'office.card.dev' };
+  const cardLabel = !card ? '' : t(CARD_LABEL[card.kind ?? ''] ?? 'office.card.agent');
   const roomDef = room ? art.MAP.rooms.find((one) => one.id === room) : undefined;
   // The cat drinks no tea.
   const bars: Array<[Key, number, string]> = [
@@ -299,12 +311,45 @@ export function OfficeView({ visible }: { visible: boolean }) {
   ];
   const people = room ? snapshot.filter((one) => one.room === room) : [];
 
-  // The tools a live conversation could be written by: signed in, or a model server up.
-  const liveTools = useMemo(() => {
-    const signed = (auth ?? []).filter((one) => !one.local && one.installed && one.signedIn).map((one) => one.id as string);
-    const local = (clis ?? []).filter((one) => one.local === 'up').map((one) => one.id as string);
-    return [...signed, ...local];
-  }, [auth, clis]);
+  // The tools a live conversation can be written by, each with whether it can now (a model server up, Claude Code signed in).
+  const talk = useTalk();
+  const talkTools = useTalkTools();
+  const toolReady = talkTools.some((one) => one.id === talk.tool && one.state === 'ready');
+  // The chosen tool's models, its loaded ones first: a different model can write the office's talk than the one chatting.
+  const models = useTalkModels(talk.live ? talk.tool : null, toolReady);
+
+  // A conversation written by the chosen model, about the notes worked on last, said in the office.
+  const [writing, setWriting] = useState(false);
+  const writeTalk = async () => {
+    const tool: TalkTool | null = talk.tool;
+    if (!tool || !toolReady || writing) return;
+    setWriting(true);
+    setLastTalk(t('office.settings.writing'));
+    // Not the cat, and not the manager: that is the person, who speaks for themselves.
+    const cast = Object.entries(art.CHARACTERS)
+      .filter(([, one]) => one.kind !== 'cat' && one.kind !== 'mudur')
+      .map(([id, one]) => {
+        const person = one as { name: string; role: string; roleEn: string; bio?: string };
+        return { id, name: person.name, role: language === 'en' ? person.roleEn : person.role, bio: person.bio ?? '' };
+      });
+    try {
+      const lines = await window.cortex.office.talk({ tool, model: talk.model, cast, language: language === 'en' ? 'en' : 'tr' });
+      engineRef.current?.speak(lines);
+      setLastTalk(t('office.settings.lastNow', { tool: TALK_TOOL_NAME[tool] + (talk.model ? ` · ${talk.model}` : '') }));
+    } catch (err) {
+      setLastTalk(t('office.settings.failed', { reason: refusal(err instanceof Error ? err.message : String(err)) }));
+    } finally {
+      setWriting(false);
+    }
+  };
+  const writeRef = useRef(writeTalk);
+  writeRef.current = writeTalk;
+  // Every few minutes while the office is in front; a hidden tab spends no tokens.
+  useEffect(() => {
+    if (!talk.live || !talk.tool || !visible) return;
+    const timer = setInterval(() => void writeRef.current(), talk.every * 60_000);
+    return () => clearInterval(timer);
+  }, [talk.live, talk.tool, talk.every, visible]);
 
   const pickCharacter = (id: string) => {
     engineRef.current?.focus(id);
@@ -374,6 +419,14 @@ export function OfficeView({ visible }: { visible: boolean }) {
 
         <div className="ofis-hud ofis-box" data-ofis-hud>
           <span className="ofis-hud-dot" />
+          {userName ? (
+            <>
+              <span lang={language === 'en' ? 'en' : 'tr'} style={{ fontWeight: 700 }} data-ofis-name>
+                {t('office.name', { owner: possessive(userName, language === 'en' ? 'en' : 'tr') })}
+              </span>
+              <span className="ofis-dim">·</span>
+            </>
+          ) : null}
           <span style={{ fontWeight: 700 }}>{t('office.live')}</span>
           <span className="ofis-dim">·</span>
           <span style={{ fontWeight: 600, color: night ? '#F2C14E' : '#5BD77A' }}>{t(night ? 'office.night' : 'office.open')}</span>
@@ -391,48 +444,69 @@ export function OfficeView({ visible }: { visible: boolean }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div className="ofis-row">
                 <span style={{ fontWeight: 700 }}>{t('office.settings.live')}</span>
-                <button type="button" role="switch" aria-checked={prefs.live} className="ofis-switch" onClick={() => change({ live: !prefs.live })} data-ofis-live>
+                <button type="button" role="switch" aria-checked={talk.live} className="ofis-switch" onClick={() => talk.change({ live: !talk.live })} data-ofis-live>
                   <span />
                 </button>
               </div>
               <div className="ofis-hint-text">{t('office.settings.live.hint')}</div>
             </div>
-            {prefs.live ? (
+            {talk.live ? (
               <div className="ofis-sep" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   <span className="ofis-small-label">{t('office.settings.tool')}</span>
-                  {liveTools.length ? (
-                    <div className="ofis-tools">
-                      {liveTools.map((id) => (
-                        <button key={id} type="button" className="ofis-tool" aria-pressed={prefs.tool === id} onClick={() => change({ tool: id })}>
-                          <i style={{ background: '#5BD77A' }} />
-                          {TOOL_NAME[id] ?? id}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="ofis-hint-text">{t('office.settings.tool.none')}</div>
-                  )}
+                  <div className="ofis-tools">
+                    {talkTools.map(({ id, state }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        className="ofis-tool"
+                        aria-pressed={talk.tool === id}
+                        title={t(TALK_STATE_WORD[state])}
+                        onClick={() => talk.change({ tool: id, model: null })}
+                        data-ofis-tool={id}
+                        data-ofis-tool-state={state}
+                      >
+                        <i style={{ background: state === 'ready' ? '#5BD77A' : '#8A93A3' }} />
+                        {TALK_TOOL_NAME[id]}
+                      </button>
+                    ))}
+                  </div>
+                  {talk.tool && !toolReady ? <div className="ofis-hint-text">{t(talk.tool === 'claude' ? 'office.settings.tool.signedOut' : 'office.settings.tool.off', { tool: TALK_TOOL_NAME[talk.tool] })}</div> : null}
                 </div>
+                {talk.tool && toolReady ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }} data-ofis-models>
+                    <span className="ofis-small-label">{t('office.settings.model')}</span>
+                    {!models ? (
+                      <div className="ofis-hint-text">{t('office.settings.model.loading')}</div>
+                    ) : models.models.length ? (
+                      <div className="ofis-tools">
+                        <button type="button" className="ofis-tool" aria-pressed={talk.model === null} onClick={() => talk.change({ model: null })} data-ofis-model="">
+                          {t(talk.tool === 'claude' ? 'office.settings.model.quick' : 'office.settings.model.loaded')}
+                        </button>
+                        {models.models.map((name) => (
+                          <button key={name} type="button" className="ofis-tool" aria-pressed={talk.model === name} onClick={() => talk.change({ model: name })} title={name} data-ofis-model={name}>
+                            {models.loaded.includes(name) ? <i style={{ background: '#5BD77A' }} /> : null}
+                            <span className="ofis-model-name">{name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="ofis-hint-text">{t('office.settings.model.none')}</div>
+                    )}
+                  </div>
+                ) : null}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   <span className="ofis-small-label">{t('office.settings.every')}</span>
                   <div className="ofis-segments">
-                    {FREQUENCIES.map((minutes) => (
-                      <button key={minutes} type="button" aria-pressed={prefs.every === minutes} onClick={() => change({ every: minutes })}>
+                    {TALK_EVERY.map((minutes) => (
+                      <button key={minutes} type="button" aria-pressed={talk.every === minutes} onClick={() => talk.change({ every: minutes })}>
                         {t('office.settings.minutes', { count: minutes })}
                       </button>
                     ))}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  className="ofis-cta"
-                  onClick={() => {
-                    engineRef.current?.triggerConvo();
-                    setLastTalk(t('office.settings.lastNow', { tool: TOOL_NAME[prefs.tool ?? ''] ?? '—' }));
-                  }}
-                >
-                  {t('office.settings.now')}
+                <button type="button" className="ofis-cta" disabled={writing || !toolReady} onClick={() => void writeTalk()} data-ofis-talk>
+                  {t(writing ? 'office.settings.writing' : 'office.settings.now')}
                 </button>
                 {lastTalk ? <div className="ofis-hint-text">{lastTalk}</div> : null}
               </div>
@@ -610,8 +684,8 @@ export function OfficeView({ visible }: { visible: boolean }) {
                 <button key={id} type="button" className="ofis-chip" aria-pressed={selected === id} onClick={() => pickCharacter(id)} data-ofis-chip={id}>
                   <i style={{ background: character.color }} />
                   <span style={{ fontWeight: 700 }}>{character.name}</span>
-                  <span>{byId[id]?.mood ?? '🙂'}</span>
-                  <span className="ofis-dim">{act.length > 22 ? `${act.slice(0, 21)}…` : act}</span>
+                  <span className="ofis-chip-mood">{byId[id]?.mood ?? '🙂'}</span>
+                  <span className="ofis-dim" title={act}>{act.length > 12 ? `${act.slice(0, 11)}…` : act}</span>
                 </button>
               );
             })}

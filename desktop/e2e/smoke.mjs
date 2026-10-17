@@ -36,6 +36,9 @@ const check = (label, condition) => {
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-'));
 const vaultDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-vault-')));
 const vaultNote = (relative) => path.join(vaultDir, ...relative.split('/'));
+// The engine package the app came with, stood in for: the settings offer it, the run never installs it.
+const enginePackages = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-paket-'));
+fs.writeFileSync(path.join(enginePackages, 'beyin-v3-9.9.9.zip'), '');
 const write = (relative, text) => {
   fs.mkdirSync(path.dirname(vaultNote(relative)), { recursive: true });
   fs.writeFileSync(vaultNote(relative), text);
@@ -73,6 +76,11 @@ const lmStudio = http.createServer((request, response) => {
     if (request.url === '/api/v0/models') {
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ data: [{ id: 'qwen-e2e', type: 'llm', state: 'loaded', loaded_context_length: 16384 }] }));
+    } else if (request.url === '/v1/chat/completions' && JSON.parse(body).stream === false) {
+      // The office's live conversation: asked once, not streamed (electron/services/officeTalk.ts).
+      lmBodies.push(JSON.parse(body));
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ choices: [{ message: { content: '{"lines":[{"who":"defne","text":"«Plan» notuna dipnot lazım."},{"who":"pyn","text":"Hmm."}]}' } }] }));
     } else if (request.url === '/v1/chat/completions') {
       lmBodies.push(JSON.parse(body));
       response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -116,6 +124,7 @@ const launch = () =>
       // The model servers: LM Studio's stand-in, and Ollama where nothing answers; never the machine's own.
       CORTEX_TEST_LMSTUDIO: lmStudioBase,
       CORTEX_TEST_OLLAMA: 'http://127.0.0.1:9',
+      CORTEX_ENGINE_PACKAGES: enginePackages,
     },
   });
 
@@ -164,18 +173,52 @@ await page.waitForLoadState('domcontentloaded');
 // Once the window is there: asked of the main process before it, an evaluation can be lost while the app starts.
 await holdBrowser();
 const shownSoon = (locator, timeout = 10_000) => locator.first().waitFor({ timeout }).then(() => true, () => false);
+/** Whether `test` comes true within a while: for what the run sees outside the window (a file). */
+async function soon(test, timeout = 8_000) {
+  for (const end = Date.now() + timeout; Date.now() < end; await new Promise((done) => setTimeout(done, 100))) {
+    if (test()) return true;
+  }
+  return false;
+}
+/** The vault's engine stood in for, for voice typing: installed, its commands kept in `folder`, what it is asked logged there. */
+const voiceStandIn = (folder) => String.raw`
+import json, os, sys
+folder = ${JSON.stringify(folder)}
+args = sys.argv[1:]
+with open(os.path.join(folder, 'istenen.log'), 'a', encoding='utf-8') as log:
+    log.write(' '.join(args) + '\n')
+kept = os.path.join(folder, 'komutlar.json')
+commands = json.load(open(kept, encoding='utf-8')) if os.path.exists(kept) else {
+    'kaydet': ['kaydet'], 'sil': ['sil', 'temizle', 'hepsini sil'], 'kelime_sil': ['son kelimeyi sil'],
+    'cumle_sil': ['son cümleyi sil'], 'iptal': ['iptal', 'vazgeç']}
+if args[:2] == ['ses', 'ayar'] and '--komutlar' in args:
+    commands.update(json.loads(args[args.index('--komutlar') + 1]))
+    json.dump(commands, open(kept, 'w', encoding='utf-8'))
+said = os.path.join(folder, 'soz.txt')
+if args[:2] == ['ses', 'ayar'] and '--uyandirma-sozu' in args:
+    open(said, 'w', encoding='utf-8').write(args[args.index('--uyandirma-sozu') + 1])
+phrase = open(said, encoding='utf-8').read() if os.path.exists(said) else 'pyn not al'
+if args[:2] == ['yakala', 'durum']:
+    print(json.dumps({'status': 'tamam', 'kurulu': True}))
+elif args[:1] == ['ses']:
+    print(json.dumps({'kurulu': True, 'acik': True, 'uyandirma': False, 'otomatik_dinle': True, 'motor': 'vulkan',
+                      'model': 'large-v3-turbo (ekran kartı, Vulkan)', 'komutlar': commands, 'adla_kaydet': ['gönder', 'tamam'], 'uyandirma_sozu': phrase}, ensure_ascii=False))
+else:
+    print('bilinmeyen komut', file=sys.stderr)
+    sys.exit(2)
+`;
 
 console.log('\nFirst opening');
-check('a first run opens on choosing the vault', await shownSoon(page.locator('[data-welcome]'), 30_000));
+check('a first run opens on the first-run screen, Pyn asking how to address the person', await shownSoon(page.locator('[data-onboarding-step="name"]'), 30_000));
 check(
   'in Turkish, unless chosen otherwise, cased as Turkish',
-  (await page.locator('[data-welcome-choose]').textContent())?.trim() === 'Kasayı seç' && (await page.evaluate(() => document.documentElement.lang)) === 'tr',
+  (await page.locator('[data-onboarding-next]').textContent())?.trim() === 'Devam' && (await page.evaluate(() => document.documentElement.lang)) === 'tr',
 );
 await shoot('01-welcome-tr.png');
 await page.locator('[data-language="en"]').click();
 check(
   'English is one choice away, and the choice is kept by the main process',
-  (await shownSoon(page.getByRole('button', { name: 'Choose the vault' }))) &&
+  (await shownSoon(page.getByRole('button', { name: 'Next' }))) &&
     (await page.evaluate(() => document.documentElement.lang)) === 'en' &&
     (await page.evaluate(() => window.cortex.bootstrap())).settings.language === 'en',
 );
@@ -191,7 +234,7 @@ const windowAlone = await page.evaluate(async () => {
   });
   return { node: typeof require + typeof process, bridge: Object.keys(window.cortex).sort(), fetched, image, opened: window.open('https://example.com/') === null };
 });
-check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,notes,on,settings,vault');
+check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,notes,office,on,settings,setup,vault');
 check('it reaches nothing on the network: no request, no image', windowAlone.fetched === 'blocked' && windowAlone.image === 'blocked');
 check('and opens no window of its own', windowAlone.opened && app.windows().length === 1);
 
@@ -200,8 +243,54 @@ console.log('\nThe vault');
 await app.evaluate(({ dialog }, dir) => {
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
 }, vaultDir);
+/*
+  The first-run screen (src/onboarding/): the name first, then each thing to
+  set up in turn, each skippable but the vault; nothing is installed here.
+*/
+const onward = async () => {
+  const skip = page.locator('[data-onboarding-skip]');
+  await ((await skip.count()) ? skip : page.locator('[data-onboarding-next]')).click();
+};
+await page.locator('[data-onboarding-name]').fill('Tolga');
+check('a name alone is offered with Bey and Hanım', await shownSoon(page.locator('[data-onboarding-name-chip="Tolga Bey"]')));
+await page.locator('[data-onboarding-name-chip="Tolga Bey"]').click();
+await page.locator('[data-onboarding-next]').click();
+check(
+  'how to address the person is kept by the main process',
+  await page.waitForFunction(async () => (await window.cortex.bootstrap()).settings.userName === 'Tolga Bey', null, { timeout: 5_000 }).then(() => true, () => false),
+);
+check('and the next step says it', (await shownSoon(page.locator('[data-onboarding-step="vault"]'))) && (await page.locator('[data-onboarding] h1').textContent())?.includes('Tolga Bey'));
+check('the vault cannot be skipped: Next waits for it', (await page.locator('[data-onboarding-skip]').count()) === 0 && (await page.locator('[data-onboarding-next]').isDisabled()));
 await page.locator('[data-welcome-choose]').click();
-check('a vault chosen, Pyn opens first, where the person talks to their AI', await shownSoon(page.locator('[data-chat-view]'), 15_000));
+check('a vault chosen there is said by its name', await shownSoon(page.locator('[data-onboarding-ready]')));
+await shoot('01b-onboarding-vault.png');
+await page.locator('[data-onboarding-next]').click();
+if (await page.locator('[data-onboarding-step="python"]').count()) await onward();
+check('Pyn’s memory comes next, each step said before it is done', await shownSoon(page.locator('[data-onboarding-step="engine"] [data-onboarding] h1, [data-onboarding-step="engine"] h1')));
+await shoot('01c-onboarding-engine.png');
+await onward();
+check('then the AI tools', await shownSoon(page.locator('[data-onboarding-step="tools"]')));
+check(
+  'a sign-in the tool keeps is not called ready: it may have run out, and signing in again is offered',
+  (await shownSoon(page.locator('[data-onboarding-tool-state="onboarding.tools.kept"]'))) &&
+    (await page.locator('[data-onboarding-tool="claude"] [data-onboarding-tool-login]').count()) === 1 &&
+    // A model server asked just now, its model loaded, is what counts as ready without a sign-in.
+    (await page.locator('[data-onboarding-tool="lmstudio"] [data-onboarding-tool-state="onboarding.tools.serving"]').count()) === 1,
+);
+await shoot('01c2-onboarding-tools.png');
+await onward();
+if (process.platform === 'win32') {
+  check('then voice typing', await shownSoon(page.locator('[data-onboarding-step="voice"]')));
+  await onward();
+}
+check(
+  'the last step lists what was left, to be set up later from the settings',
+  (await shownSoon(page.locator('[data-onboarding-step="done"]'))) && (await page.locator('[data-onboarding-summary="engine"]').textContent())?.includes('skipped'),
+);
+await shoot('01d-onboarding-done.png');
+await page.locator('[data-onboarding-finish]').click();
+check('then Pyn opens, where the person talks to their AI', await shownSoon(page.locator('[data-chat-view]'), 15_000));
+check('and the first-run screen is gone through for good', (await page.evaluate(() => window.cortex.bootstrap())).settings.onboarded === true);
 await page.locator('[data-app-view="notes"]').click();
 check('and the notes are one press away', await shownSoon(page.locator('[data-notes-view]'), 15_000));
 check('the window is told the vault by its name', (await page.locator('[data-vault-name]').textContent())?.trim() === path.basename(vaultDir));
@@ -336,9 +425,33 @@ check(
 );
 await page.locator('[data-settings-open]').click();
 check('the gear in the top bar opens the settings', await shownSoon(page.locator('[data-settings]')));
+check(
+  'Cortex stays at the bottom right when the window is closed, unless told otherwise',
+  (await page.locator('[data-settings-background]').getAttribute('aria-checked')) === 'true',
+);
+/*
+  Cortex set up from the app (src/ui/SetupSections.tsx): this vault, a copy of
+  the template, has no engine; the settings offer the one the app came with,
+  and voice typing waits for it. Nothing is installed by the run.
+*/
+check(
+  'a vault without Cortex’s memory is offered it, from the package the app came with (or told Python is needed)',
+  (await shownSoon(page.locator('[data-settings-section="cortex"] [data-setup-note="none"], [data-settings-section="cortex"] [data-setup-note="no-python"]'))) &&
+    ((await page.locator('[data-setup-note="no-python"]').count()) === 1 || (await page.locator('[data-setup-engine]').count()) === 1),
+);
+check(
+  'and voice typing waits for the memory',
+  process.platform !== 'win32' || (await shownSoon(page.locator('[data-settings-section="voice"] [data-setup-note="needs-engine"]'))),
+);
 await page.waitForTimeout(400);
 await shoot('07b-settings.png');
 await page.locator('[data-settings-all-files]').click();
+check('a setting changed says it was kept', await shownSoon(page.locator('[data-settings-saved="shown"]'), 3_000));
+// A name being typed gets a Kaydet button beside it, gone once the field says what is kept.
+await page.locator('[data-settings-name]').fill('Tolga');
+check('a name being typed gets a save button', await shownSoon(page.locator('[data-settings-name-save]'), 3_000));
+await page.locator('[data-settings-name]').fill('Tolga Bey');
+check('and none once it is what is kept', (await page.locator('[data-settings-name-save]').count()) === 0);
 await page.locator('[data-settings-name-icons]').click();
 check(
   'a setting changed is kept by the main process at once',
@@ -357,6 +470,55 @@ check('Ctrl+, opens them too', await shownSoon(page.locator('[data-settings]')))
 await page.locator('[data-settings-name-icons]').click();
 await page.keyboard.press('Escape');
 check('and the emoji go again', await page.waitForFunction(() => document.querySelector('[data-tree-path="🎯 100-Command-Center"]')?.textContent?.trim() === '100-Command-Center', null, { timeout: 5_000 }).then(() => true, () => false));
+/*
+  The spoken commands, set from the settings (src/ui/SetupSections.tsx): a
+  stand-in for the vault's engine says voice typing is installed and keeps what
+  it is asked. Words changed in a command's field go to the engine's own
+  setting, `ses ayar --komutlar`. Windows only, as voice typing is.
+*/
+if (process.platform === 'win32' && (await page.evaluate(() => window.cortex.setup.status())).python) {
+  const askedLog = path.join(enginePackages, 'istenen.log');
+  fs.writeFileSync(vaultNote('beyin.py'), voiceStandIn(enginePackages));
+  fs.writeFileSync(vaultNote('.beyin-version'), '9.9.9\n');
+  await page.keyboard.press('Control+,');
+  const saveWords = page.locator('[data-setup-voice-command="kaydet"]');
+  check(
+    'installed voice typing shows the spoken commands, each one’s words there to change',
+    (await shownSoon(saveWords, 15_000)) && (await saveWords.inputValue()) === 'kaydet' &&
+      (await page.locator('[data-setup-voice-command="kelime_sil"]').inputValue()) === 'son kelimeyi sil',
+  );
+  await page.locator('[data-setup-voice-commands]').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  await shoot('07c-voice-commands.png');
+  await saveWords.fill('kaydet,  tamamdır ');
+  check('words changed in a command’s field get a save button', await shownSoon(page.locator('[data-setup-voice-command-save]'), 3_000));
+  await saveWords.press('Enter');
+  check(
+    'and words changed there are set with the engine’s own setting',
+    await soon(() => fs.existsSync(askedLog) && fs.readFileSync(askedLog, 'utf8').includes('ses ayar --komutlar {"kaydet":["kaydet","tamamdır"]}')),
+  );
+  check('and shown as the engine kept them', await page.waitForFunction(() => document.querySelector('[data-setup-voice-command="kaydet"]')?.value === 'kaydet, tamamdır', null, { timeout: 5_000 }).then(() => true, () => false));
+  // The wake phrase: "Pyn, not al" or "Hey Pyn", set with the engine's own setting.
+  const hey = page.locator('[data-setup-voice-phrase="hey pyn"]');
+  await hey.scrollIntoViewIfNeeded();
+  await hey.click();
+  check(
+    'the wake phrase is chosen there: "Hey Pyn" set with the engine’s own setting, and shown chosen',
+    (await soon(() => fs.readFileSync(askedLog, 'utf8').includes('ses ayar --uyandirma-sozu hey pyn'))) &&
+      (await page.waitForFunction(() => document.querySelector('[data-setup-voice-phrase="hey pyn"]')?.getAttribute('aria-pressed') === 'true', null, { timeout: 5_000 }).then(() => true, () => false)),
+  );
+  await page.locator('[data-setup-voice-phrase="ikisi"]').click();
+  check(
+    'or both at once',
+    (await soon(() => fs.readFileSync(askedLog, 'utf8').includes('ses ayar --uyandirma-sozu ikisi'))) &&
+      (await page.waitForFunction(() => document.querySelector('[data-setup-voice-phrase="ikisi"]')?.getAttribute('aria-pressed') === 'true', null, { timeout: 5_000 }).then(() => true, () => false)),
+  );
+  await page.waitForTimeout(300);
+  await shoot('07e-voice-phrase.png');
+  await page.keyboard.press('Escape');
+  fs.rmSync(vaultNote('beyin.py'));
+  fs.rmSync(vaultNote('.beyin-version'));
+}
 await notesView.locator('[data-tree-path="Notes/settings.json"]').click();
 check(
   'a JSON file is shown as the text it is, read only',
@@ -551,18 +713,30 @@ await shoot('06-graph.png');
 console.log('\nOffice');
 await page.locator('[data-app-view="office"]').click();
 check('the office opens in its own tab, its map drawn and its log begun', (await shownSoon(page.locator('[data-office-view] [data-ofis-canvas]'))) && (await page.locator('[data-ofis-line]').count()) >= 1);
+check('and greets the person as they asked to be addressed', (await page.locator('[data-ofis-line]').allTextContents()).some((line) => line.includes('Tolga Bey')));
 await page.waitForTimeout(1_500);
 await shoot('16-office.png');
-// The map is fitted to the canvas and centred: the mailroom's middle (tile 7, 8) is found from the canvas's size.
+// The brain around the map is fitted to the canvas and centred (the frame is 1168 by 832, the map
+// 976 by 672 inside it at 96, 48): Pyn's room's middle (tile 7, 8) is found from the canvas's size.
 const officeBox = await page.locator('[data-ofis-canvas]').boundingBox();
 if (officeBox) {
-  const zoom = Math.min(4, Math.min(officeBox.width / 976, officeBox.height / 672));
-  await page.mouse.click(officeBox.x + officeBox.width / 2 + (7 * 16 + 8 - 488) * zoom, officeBox.y + officeBox.height / 2 + (8 * 16 + 8 - 336) * zoom);
+  const zoom = Math.min(4, Math.min(officeBox.width / 1168, officeBox.height / 832));
+  await page.mouse.click(officeBox.x + officeBox.width / 2 + (7 * 16 + 8 - 488) * zoom, officeBox.y + officeBox.height / 2 + (8 * 16 + 8 - 368) * zoom);
 }
 check(
   'a room clicked says what goes on in it, counted from the vault',
-  (await shownSoon(page.locator('[data-ofis-room="posta"]'))) && /\d+ notes changed today/.test((await page.locator('[data-ofis-room-status]').textContent()) ?? ''),
+  (await shownSoon(page.locator('[data-ofis-room="pyn"]'))) && /\d+ notes changed today/.test((await page.locator('[data-ofis-room-status]').textContent()) ?? ''),
 );
+// The manager is the vault's owner, and Tolga, who wrote Cortex, has a desk of his own.
+check(
+  'the office and its manager carry the name the person gave, Tolga is at his desk',
+  ((await page.locator('[data-ofis-name]').textContent()) ?? '').includes("Tolga Bey's brain") &&
+    ((await page.locator('[data-ofis-chip="mudur"]').textContent()) ?? '').includes('Tolga Bey') &&
+    ((await page.locator('[data-ofis-chip="tolga"]').textContent()) ?? '').includes('Tolga'),
+);
+await page.locator('[data-ofis-chip="tolga"]').click();
+await page.waitForTimeout(900);
+await shoot('16b-office-tolga.png');
 await page.locator('[data-ofis-chip="defne"]').click();
 check(
   'a character’s chip opens its card, with the tool it works with',
@@ -572,6 +746,37 @@ await page.waitForTimeout(800);
 await shoot('17-office-card.png');
 await page.locator('[data-ofis-gear]').click();
 check('the gear opens the office’s settings, live conversations off', (await shownSoon(page.locator('[data-ofis-settings]'))) && (await page.locator('[data-ofis-live]').getAttribute('aria-checked')) === 'false');
+// Live conversations by a model chosen here: LM Studio's stand-in writes one about the vault's notes, and the team says it.
+await page.locator('[data-ofis-live]').click();
+await page.locator('[data-ofis-tool="lmstudio"]').click();
+check('the tool’s models are offered, the loaded one marked', await shownSoon(page.locator('[data-ofis-model="qwen-e2e"]')));
+await page.locator('[data-ofis-model="qwen-e2e"]').click();
+await page.locator('[data-ofis-talk]').click();
+check(
+  'and the model chosen writes the team a conversation, said in the office and logged',
+  (await shownSoon(page.locator('[data-ofis-line]', { hasText: '«Plan» notuna dipnot lazım.' }), 15_000)) &&
+    lmBodies.some((one) => one.stream === false && one.model === 'qwen-e2e' && JSON.stringify(one.messages).includes('Defne')),
+);
+await shoot('18-office-settings.png');
+// The same choice in the app's settings (Settings → Office): one choice, changed in either place.
+await page.keyboard.press('Escape');
+await page.keyboard.press('Control+,');
+const officeSection = page.locator('[data-settings-section="office"]');
+check(
+  'the app’s settings show the office’s choice: live, LM Studio, the model chosen',
+  (await shownSoon(officeSection.locator('[data-settings-office-model]'))) &&
+    (await officeSection.locator('[data-settings-office-live]').getAttribute('aria-checked')) === 'true' &&
+    (await officeSection.locator('[data-settings-office-tool="lmstudio"]').getAttribute('aria-pressed')) === 'true' &&
+    (await officeSection.locator('[data-settings-office-model]').inputValue()) === 'qwen-e2e',
+);
+await officeSection.locator('[data-settings-office-every="30"]').click();
+await officeSection.scrollIntoViewIfNeeded();
+await page.waitForTimeout(300);
+await shoot('07d-settings-office.png');
+await page.keyboard.press('Escape');
+await page.locator('[data-ofis-gear]').click();
+check('and a change made there is the office’s too', ((await page.locator('.ofis-segments button[aria-pressed="true"]').textContent()) ?? '').includes('30'));
+await page.locator('[data-ofis-live]').click();
 await page.keyboard.press('Escape');
 check('and Escape closes them', await page.locator('[data-ofis-settings]').waitFor({ state: 'detached', timeout: 3_000 }).then(() => true, () => false));
 check(

@@ -8,6 +8,14 @@ Pillow ister; yalnız tasarım değiştiğinde elle çalıştırılır, testler 
 - pyn.ico                  : Windows kısayol ikonu (16-256 px)
 - pyn-yuz/*.svg            : Pyn'in yüzü, vektör (sohbet, Obsidian'da boş sekme); `yuz` adımı
 - pyn-yuz-256.png          : aynı yüzün PNG'si, SVG okumayan yerler için; `yuz` adımı
+
+`yakala` adımı Not al penceresinin mikrofon düğmesini çizer (`tema/ananas/marka/yakala/`):
+yuvarlak, sert gölgeli, kenarları yumuşatılmış; boşta, dinlerken, yazarken ve hazırlanırken,
+üç ekran ölçeğinde. Tk tuvali Windows'ta şekilleri yumuşatmadan çizdiği için düğme resimdir.
+
+`kurulum` adımı masaüstü uygulamasının Windows kurulum sihirbazının görsellerini yazar
+(`desktop/build/`, electron-builder'ın kaynak klasörü): kenar görseli (164x314) ve üst başlık
+(150x57), Pyn'in yüzü ve mühürüyle, Ananas renklerinde.
 - pyn-muhur.six            : `pyn` karşılama kutusundaki mühür (Sixel, terminalde gerçek resim)
 - pyn-muhur-200.png        : Windows Terminal Pyn profilinin köşe filigranı
 
@@ -15,6 +23,8 @@ Ardından: py -3 scripts/ananas_tema.py uret
 
     py -3 scripts/marka_uret.py "C:\\...\\Pyn Tasarım\\docs\\design\\logo"
     py -3 scripts/marka_uret.py yuz "C:\\...\\Pyn'in Yüz Tasarımı\\pyn-yuz"
+    py -3 scripts/marka_uret.py kurulum
+    py -3 scripts/marka_uret.py yakala
 
 `yuz`, Claude Design'ın teslim ettiği SVG'leri (docs/marka/pyn-yuz-brifi.md) alır; PNG'yi
 Edge'in görünmez (headless) kipiyle çizer, pencere açmaz.
@@ -110,8 +120,168 @@ def face(source):
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
 
 
+PAPER, INK, GOLD, MUTED = '#f3efe4', '#1b1712', '#e8b23a', '#75716a'
+FONTS = ROOT / 'tema' / 'ananas' / 'fonts-ttf'
+DESKTOP_BUILD = ROOT / 'desktop' / 'build'
+
+
+def installer_images():
+    """The installer's sidebar (welcome and finish pages) and header, drawn at three times their
+    size and brought down, saved as the 24-bit BMPs NSIS takes."""
+    from PIL import ImageDraw, ImageFont
+    k = 3
+    DESKTOP_BUILD.mkdir(parents=True, exist_ok=True)
+
+    def font(name, size):
+        return ImageFont.truetype(str(FONTS / name), size * k)
+
+    # Sidebar, 164x314: Pyn's face, the name, what it is; a gold band at the foot; an ink edge.
+    w, h = 164 * k, 314 * k
+    side = Image.new('RGB', (w, h), PAPER)
+    face = Image.open(OUT / 'pyn-yuz-256.png').convert('RGBA').resize((116 * k, 116 * k), Image.LANCZOS)
+    side.paste(face, ((w - face.width) // 2, 52 * k), face)
+    d = ImageDraw.Draw(side)
+    d.text((w // 2, 198 * k), 'Cortex', fill=INK, font=font('Fraunces-Bold.ttf', 27), anchor='mm')
+    for i, line in enumerate(('Notların ve yapay zeka', 'araçların için ortak hafıza')):
+        d.text((w // 2, (228 + i * 15) * k), line, fill=MUTED, font=font('SchibstedGrotesk-Regular.ttf', 11), anchor='mm')
+    d.rectangle([0, 288 * k, w, h], fill=GOLD)
+    d.rectangle([0, 288 * k, w, 288 * k + 2 * k], fill=INK)
+    d.rectangle([w - 2 * k, 0, w, h], fill=INK)
+    side = side.resize((164, 314), Image.LANCZOS)
+    for name in ('installerSidebar.bmp', 'uninstallerSidebar.bmp'):
+        side.save(DESKTOP_BUILD / name)
+
+    # Header, 150x57: the seal at its right, on paper.
+    w, h = 150 * k, 57 * k
+    head = Image.new('RGB', (w, h), PAPER)
+    seal = Image.open(OUT / 'pyn-muhur-200.png').convert('RGBA').resize((42 * k, 42 * k), Image.LANCZOS)
+    head.paste(seal, (w - seal.width - 8 * k, (h - seal.height) // 2), seal)
+    head.resize((150, 57), Image.LANCZOS).save(DESKTOP_BUILD / 'installerHeader.bmp')
+    for path in sorted(DESKTOP_BUILD.glob('*.bmp')):
+        print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
+
+
+MIC_STATES = ('bos', 'dinliyor', 'yaziyor', 'kapali')
+MIC_SIZES = (44, 66, 88)  # 1x, 1.5x and 2x of a 44 px button
+
+
+def mic_buttons():
+    """Not al's microphone button, every state at every scale, as PNGs (yakala/mikrofon-<state>-<size>.png)."""
+    from PIL import ImageDraw
+    folder = OUT / 'yakala'
+    folder.mkdir(parents=True, exist_ok=True)
+    colours = {
+        'bos': ('#fffaf0', INK, INK, True),
+        'dinliyor': (GOLD, INK, INK, True),
+        'yaziyor': ('#fffaf0', INK, INK, True),
+        'kapali': ('#f3efe4', '#c9c3b6', '#a5a198', False),
+    }
+    for state in MIC_STATES:
+        fill, ring, glyph, shadow = colours[state]
+        for size in MIC_SIZES:
+            k = 8  # drawn eight times larger, brought down: smooth edges
+            u = size / 44 * k  # one point of the 44 px design, in drawing pixels
+            side = round((size + 3 * size / 44) * k)
+            img = Image.new('RGBA', (side, side), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            r = 20 * u  # the button's radius: 40 of the 44, the rest for the ring and the shadow
+            cx = cy = 22 * u
+            if shadow:
+                d.ellipse([cx - r + 3 * u, cy - r + 3 * u, cx + r + 3 * u, cy + r + 3 * u], fill=INK)
+            d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=fill, outline=ring, width=round(2 * u))
+            if state == 'yaziyor':
+                for dx in (-7, 0, 7):
+                    d.ellipse([cx + (dx - 2.2) * u, cy - 2.2 * u, cx + (dx + 2.2) * u, cy + 2.2 * u], fill=glyph)
+            else:
+                w = 2.4 * u  # the glyph's stroke
+                d.rounded_rectangle([cx - 4.6 * u, cy - 11 * u, cx + 4.6 * u, cy + 3 * u], radius=4.6 * u, fill=glyph)
+                d.arc([cx - 8.6 * u, cy - 8.5 * u, cx + 8.6 * u, cy + 7 * u], 0, 180, fill=glyph, width=round(w))
+                d.line([cx, cy + 7 * u, cx, cy + 10.5 * u], fill=glyph, width=round(w))
+                d.rounded_rectangle([cx - 5.5 * u, cy + 10 * u, cx + 5.5 * u, cy + 10 * u + w], radius=w / 2, fill=glyph)
+            out = img.resize((round(side / k), round(side / k)), Image.LANCZOS)
+            out.save(folder / f'mikrofon-{state}-{size}.png', optimize=True)
+    for path in sorted(folder.iterdir()):
+        print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
+
+
+TRAY_SIZES = (16, 24, 32)  # 1x, 1.5x and 2x of the notification area's icon
+LISTENING = '#d9412b'  # the red of Windows' own "the microphone is in use" mark
+
+
+def tray_icons():
+    """The desktop app's notification-area icon: Pyn's seal, and with a red dot when the
+    microphone listens all the time ("Sürekli dinle"), at each scale (tepsi/pyn-<state>-<size>.png)."""
+    from PIL import ImageDraw
+    folder = OUT / 'tepsi'
+    folder.mkdir(parents=True, exist_ok=True)
+    seal = Image.open(OUT / 'pyn-muhur-200.png').convert('RGBA')
+    for size in TRAY_SIZES:
+        k = 8
+        big = seal.resize((size * k, size * k), Image.LANCZOS)
+        big.resize((size, size), Image.LANCZOS).save(folder / f'pyn-kapali-{size}.png', optimize=True)
+        d = ImageDraw.Draw(big)
+        r, ring = size * k * 0.22, size * k * 0.06  # the dot, and a paper ring that keeps it off the seal
+        cx = cy = size * k - r - ring
+        d.ellipse([cx - r - ring, cy - r - ring, cx + r + ring, cy + r + ring], fill=PAPER)
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=LISTENING)
+        big.resize((size, size), Image.LANCZOS).save(folder / f'pyn-dinliyor-{size}.png', optimize=True)
+    for path in sorted(folder.iterdir()):
+        print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
+
+
+MENU_GLYPHS = ('mikrofon-acik', 'mikrofon-kapali', 'not', 'ayarlar', 'cik')
+
+
+def menu_icons():
+    """The notification-area menu's icons (tepsi/menu-<name>-<16|32>.png): the microphone listening
+    (red) or off (grey, struck through), a note, a gear, the power sign. Gold and mid-tones, so they
+    read on Windows' light menus and dark ones alike; drawn eight times larger and brought down."""
+    from PIL import ImageDraw
+    folder = OUT / 'tepsi'
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in MENU_GLYPHS:
+        for size in (16, 32):
+            k = 8
+            u = size * k / 16  # one point of the 16 px design, in drawing pixels
+            img = Image.new('RGBA', (size * k, size * k), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            w = round(1.6 * u)
+            if name.startswith('mikrofon'):
+                c = LISTENING if name == 'mikrofon-acik' else '#8f8a80'
+                d.rounded_rectangle([5.2 * u, 1.2 * u, 10.8 * u, 9.6 * u], radius=2.8 * u, fill=c)
+                d.arc([3 * u, 4 * u, 13 * u, 12.2 * u], 0, 180, fill=c, width=w)
+                d.line([8 * u, 12.2 * u, 8 * u, 14.2 * u], fill=c, width=w)
+                d.line([5.4 * u, 14.6 * u, 10.6 * u, 14.6 * u], fill=c, width=w)
+                if name == 'mikrofon-kapali':
+                    d.line([2.4 * u, 2.4 * u, 13.6 * u, 13.6 * u], fill=c, width=round(1.8 * u))
+            elif name == 'not':
+                d.rounded_rectangle([3 * u, 1.5 * u, 13 * u, 14.5 * u], radius=1.2 * u, outline=GOLD, width=w)
+                for y in (5.2, 8, 10.8):
+                    d.line([5.4 * u, y * u, 10.6 * u, y * u], fill=GOLD, width=round(1.2 * u))
+            elif name == 'ayarlar':
+                import math
+                cx = cy = 8 * u
+                for i in range(8):
+                    a = i * math.pi / 4
+                    d.line([cx + math.cos(a) * 4 * u, cy + math.sin(a) * 4 * u, cx + math.cos(a) * 6.8 * u, cy + math.sin(a) * 6.8 * u], fill=GOLD, width=round(2.2 * u))
+                d.ellipse([cx - 4.8 * u, cy - 4.8 * u, cx + 4.8 * u, cy + 4.8 * u], outline=GOLD, width=round(2.2 * u))
+            elif name == 'cik':
+                d.arc([2.6 * u, 3 * u, 13.4 * u, 13.8 * u], -60, 240, fill=GOLD, width=w)
+                d.line([8 * u, 1.4 * u, 8 * u, 8 * u], fill=GOLD, width=w)
+            img.resize((size, size), Image.LANCZOS).save(folder / f'menu-{name}-{size}.png', optimize=True)
+    for path in sorted(folder.glob('menu-*')):
+        print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
+
+
 if __name__ == '__main__':
-    if sys.argv[1:2] == ['yuz']:
+    if sys.argv[1:2] == ['tepsi']:
+        tray_icons()
+        menu_icons()
+    elif sys.argv[1:2] == ['yakala']:
+        mic_buttons()
+    elif sys.argv[1:2] == ['kurulum']:
+        installer_images()
+    elif sys.argv[1:2] == ['yuz']:
         face(sys.argv[2] if len(sys.argv) > 2 else '.')
     else:
         main(sys.argv[1] if len(sys.argv) > 1 else '.')

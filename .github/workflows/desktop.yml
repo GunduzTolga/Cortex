@@ -6,8 +6,9 @@ name: desktop
 # the platform the app is for.
 #
 # Only when the app or what it reads changes: desktop/ itself, this file, the
-# template the end-to-end run lays its vault out from, and Pyn's seal, which
-# the window and the installer carry. The engine's own workflows are untouched.
+# template the end-to-end run lays its vault out from, the engine the installer
+# carries (scripts/, VERSION), and Pyn's seal, which the window and the
+# installer carry. The engine's own workflows are untouched.
 on:
   push:
     branches: [main]
@@ -15,12 +16,16 @@ on:
       - 'desktop/**'
       - '.github/workflows/desktop.yml'
       - 'template/**'
+      - 'scripts/**'
+      - 'VERSION'
       - 'tema/ananas/marka/**'
   pull_request:
     paths:
       - 'desktop/**'
       - '.github/workflows/desktop.yml'
       - 'template/**'
+      - 'scripts/**'
+      - 'VERSION'
       - 'tema/ananas/marka/**'
   workflow_dispatch:
 
@@ -71,8 +76,24 @@ jobs:
       # The installer, unsigned: Windows SmartScreen warns before it runs until
       # the app is signed (desktop/README.md). Not a release: a week's copy of
       # what this commit builds, to try by hand.
+      # The engine the app sets up in a vault from its settings, carried inside
+      # it (electron/services/setup.ts): this commit's own, built as a release is.
+      - name: Cortex paketi
+        run: npm run cortex-paket
+
+      # Python for a machine without one: python.org's signed installer, pinned
+      # by its SHA-256 (desktop/python.json), run by the app for this user only.
+      - name: Python
+        run: npm run python-paket
+
+      # Signed when a code-signing certificate is kept in the repository's secrets
+      # (desktop/README.md, "İmza"): WIN_CSC_LINK, the .pfx as base64, and its
+      # password. Without them the installer is built unsigned, as before.
       - name: Kurulum dosyasi
         run: npx electron-builder --win nsis --publish never
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - uses: actions/upload-artifact@v4
         with:

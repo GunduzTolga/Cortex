@@ -5,7 +5,7 @@ import { messageOf } from '@shared/ipcError';
 import { fillTemplate, folderOf, insertTemplate, nameProblem, noteTitle, parseNote, pathKey, shortestLink } from '../../core/vaultNotes';
 import { TemplatePicker, templateText } from './templates';
 import { useT } from '../i18n/useT';
-import { useApp } from '../store/app';
+import { refusal, useApp } from '../store/app';
 import { Spinner } from '../ui/ui';
 import { NoteDocument } from './NoteMarkdown';
 import { NoteEditor, type LinkChoice, type NoteEditorHandle } from './NoteEditor';
@@ -97,7 +97,7 @@ export function NotePane({ path }: { path: string }) {
       setChanged(false);
       setSaving('saved');
     } catch (err) {
-      setFailed(messageOf(err));
+      setFailed(refusal(messageOf(err)));
     }
   }, [path]);
 
@@ -231,7 +231,7 @@ export function NotePane({ path }: { path: string }) {
       if (done.updated.length) toast({ tone: 'success', title: t('notes.rename.updated', { count: done.updated.length }) });
       if (done.skipped.length) toast({ tone: 'error', title: t('notes.rename.skipped', { count: done.skipped.length }), detail: done.skipped.join('\n') });
     } catch (err) {
-      setTitleProblem(messageOf(err));
+      setTitleProblem(refusal(messageOf(err)));
     }
   };
 

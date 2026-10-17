@@ -4,14 +4,17 @@ Offline and silent: nothing is installed, downloaded or recorded. The helper pro
 in for by a small script that speaks the same protocol, and the installer's commands are
 recorded instead of run.
 """
+import gc
 import importlib.util
 import io
 import json
 import os
 from pathlib import Path
+import queue
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -32,6 +35,103 @@ class WordsTest(unittest.TestCase):
         for said in ('not al', 'pyn not', 'bunu not alma', 'pyn notları aç', 'pin kodunu al'):
             self.assertFalse(ses.wake_heard(said), said)
 
+    def test_the_wake_listener_hears_a_grammar_of_the_phrase_and_its_sound_alikes(self):
+        grammar = json.loads(ses.wake_grammar())
+        self.assertEqual(grammar[0], 'pyn not al')
+        self.assertIn('pay not al', grammar, '"payn not al" as the small model hears it')
+        self.assertIn('not al', grammar, 'the rest of the phrase alone: a real voice saying "payn" is mostly [unk] to it')
+        self.assertEqual(grammar[-1], '[unk]', 'anything else is nothing')
+        for heard in ('pay not al', 'bin not al', 'bayan not al'):
+            self.assertTrue(ses.wake_heard(heard), heard)
+        self.assertEqual(json.loads(ses.wake_grammar('hey pyn not al'))[1], 'hey pay not al', 'the name where it is in the phrase')
+
+    def test_what_the_small_model_hears_is_the_phrase_a_candidate_for_whisper_or_nothing(self):
+        for heard in ('pay not al', 'bin not al', 'pyn not al'):
+            self.assertEqual(ses.wake_verdict(heard), 'soz', heard)
+        for heard in ('[unk] not al', 'not al', '[unk] [unk] not al', 'pay [unk] not al'):
+            self.assertEqual(ses.wake_verdict(heard), 'aday', heard)
+        for heard in ('[unk]', '[unk] not', 'not [unk] al', 'pay', ''):
+            self.assertIsNone(ses.wake_verdict(heard), heard)
+
+    def test_whisper_hears_pyns_name_however_it_writes_it_and_no_other_word(self):
+        for written in ('Pyn, not al.', 'Payn not al', 'Pain, not al.', 'Bayın not al.', 'Payın not al', 'Pin not al.',
+                        'Pyn not al. Yarın toplantı var'):
+            self.assertTrue(ses.wake_heard(written), written)
+        for written in ('Bunu not al.', 'Bana not al.', 'Şunu not al', 'Onu not al', 'Not al.', 'Notları al.', ''):
+            self.assertFalse(ses.wake_heard(written), written)
+
+    def test_a_dictation_the_wake_phrase_began_starts_after_the_phrase(self):
+        self.assertEqual(ses.without_wake('Al. Yarın toplantı var'), 'Yarın toplantı var', 'the end of "al" the recording caught')
+        self.assertEqual(ses.without_wake('not al, yarın onda'), 'yarın onda')
+        self.assertEqual(ses.without_wake('Payn, not al. Süt al'), 'Süt al', 'the name however written; the last "al" is a word')
+        self.assertEqual(ses.without_wake('Pyn, not al'), '')
+        for kept in ('Alışveriş listesi', 'Yarın onda', 'Notlar hazır'):
+            self.assertEqual(ses.without_wake(kept), kept)
+
+    def test_hey_pyn_is_heard_with_the_name_last(self):
+        phrase = 'hey pyn'
+        self.assertEqual(json.loads(ses.wake_grammar(phrase)), ['hey pyn', 'hey pay', 'hey bin', 'hey bayan', 'hey', '[unk]'])
+        for written in ('Hey Pyne.', 'Hey Payne, yarın toplantı var', 'hey pin', 'Hey Pain!'):
+            self.assertTrue(ses.wake_heard(written, phrase), written)
+        for written in ('Hey, nasılsın?', 'Hey millet', 'Pyn hey', 'Çok heyecanlıyım'):
+            self.assertFalse(ses.wake_heard(written, phrase), written)
+        self.assertEqual(ses.wake_verdict('hey pay', phrase), 'soz')
+        self.assertEqual(ses.wake_verdict('hey', phrase), 'aday', 'a "hey" alone: Whisper checks the name')
+        self.assertIsNone(ses.wake_verdict('[unk]', phrase))
+        self.assertEqual(ses.without_wake('Pyne, yarın toplantı var', phrase), 'yarın toplantı var', 'the name the recording caught')
+        self.assertEqual(ses.without_wake('Hey Pyn, süt al', phrase), 'süt al')
+        self.assertEqual(ses.without_wake('Yarın toplantı var', phrase), 'Yarın toplantı var')
+        self.assertEqual(ses.wake_verdict('not al'), 'aday', '"Pyn, not al" as it was')
+
+    def test_both_wake_phrases_at_once(self):
+        both = 'ikisi'
+        grammar = json.loads(ses.wake_grammar(both))
+        for line in ('hey pyn', 'hey pay', 'hey', 'pyn not al', 'pay not al', 'not al'):
+            self.assertIn(line, grammar)
+        self.assertEqual(grammar[-1], '[unk]')
+        self.assertEqual(len(grammar), len(set(grammar)), 'each once')
+        for written in ('Hey Pyne.', 'Payn, not al.', 'Pin not al'):
+            self.assertTrue(ses.wake_heard(written, both), written)
+        for written in ('Hey, nasılsın?', 'Bunu not al.'):
+            self.assertFalse(ses.wake_heard(written, both), written)
+        self.assertEqual([ses.wake_verdict(heard, both) for heard in ('hey pay', 'not al', 'hey', '[unk]')], ['soz', 'aday', 'aday', None])
+        self.assertEqual(ses.without_wake('Pyne, yarın toplantı var', both), 'yarın toplantı var')
+        self.assertEqual(ses.without_wake('Al. Süt al', both), 'Süt al')
+        self.assertEqual(ses.phrase_label(both), 'Hey Pyn ya da Pyn, not al')
+
+    def test_the_picture_on_the_clipboard_is_added_by_voice(self):
+        self.assertEqual(ses.command_of('Panodaki resmi ekle.'), ('resim_ekle', ''))
+        self.assertEqual(ses.command_of('Pyn, resmi ekle'), ('resim_ekle', ''))
+        self.assertEqual(ses.command_of('Bu hata tekrar çıktı, panodaki resmi ekle'), ('resim_ekle', 'Bu hata tekrar çıktı'), 'the longest phrase first')
+        self.assertEqual(ses.command_of('Ekran görüntüsünü ekle'), ('resim_ekle', ''))
+        self.assertEqual(ses.command_of('Resimler güzel olmuş'), (None, 'Resimler güzel olmuş'))
+
+    def test_a_wake_phrase_is_named_as_it_is_said(self):
+        self.assertEqual(ses.phrase_label('pyn not al'), 'Pyn, not al')
+        self.assertEqual(ses.phrase_label('hey pyn'), 'Hey Pyn')
+        self.assertEqual(ses.phrase_label(None), 'Pyn, not al')
+
+    def test_the_wake_phrase_is_a_setting_of_its_two(self):
+        tmp = tempfile.TemporaryDirectory(prefix='v3-ses-soz-')
+        self.addCleanup(tmp.cleanup)
+        state = Path(tmp.name) / 'state'
+        out = io.StringIO()
+        from contextlib import redirect_stdout
+        with redirect_stdout(out), mock.patch.object(ses, 'restart_listener', return_value=False):
+            ses.main(['ayar', '--uyandirma-sozu', 'hey pyn', '--json'], state=state)
+        self.assertEqual(json.loads(out.getvalue())['uyandirma_sozu'], 'hey pyn')
+        with self.assertRaises(SystemExit), mock.patch('sys.stderr', io.StringIO()):
+            ses.main(['ayar', '--uyandirma-sozu', 'merhaba', '--json'], state=state)
+
+    def test_whisper_writing_the_phrase_joined_is_still_the_phrase(self):
+        # Seen in the window: "Py notal. Şu an ne yapıyoruz?", the phrase left at the note's start.
+        self.assertEqual(ses.without_wake('Py notal. Şu an ne yapıyoruz?'), 'Şu an ne yapıyoruz?')
+        self.assertEqual(ses.without_wake('Notal, yarın onda'), 'yarın onda')
+        self.assertTrue(ses.wake_heard('Py notal.'))
+        self.assertTrue(ses.wake_heard('Payn notal'))
+        self.assertFalse(ses.wake_heard('Bunu notal.'))
+        self.assertEqual(ses.without_wake('Notalar hazır'), 'Notalar hazır', 'a word that only starts like it is a word')
+
     def test_kaydet_counts_at_the_end_sil_and_iptal_only_alone(self):
         self.assertEqual(ses.command_of('Toplantı notu, kaydet.'), ('kaydet', 'Toplantı notu'))
         self.assertEqual(ses.command_of('Kaydet'), ('kaydet', ''))
@@ -41,6 +141,77 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(ses.command_of('bu satırı sil'), (None, 'bu satırı sil'), 'sil inside a sentence is written')
         self.assertEqual(ses.command_of('   '), (None, ''))
         self.assertEqual(ses.command_of('Haftalık plan kaydı kaydet'), ('kaydet', 'Haftalık plan kaydı'))
+
+    def test_pyn_kaydet_saves_and_the_name_is_not_written(self):
+        self.assertEqual(ses.command_of('Toplantı yarın onda, Pyn kaydet.'), ('kaydet', 'Toplantı yarın onda'))
+        self.assertEqual(ses.command_of('Pyn kaydet'), ('kaydet', ''))
+        self.assertEqual(ses.command_of('pın, kaydet'), ('kaydet', ''))
+        self.assertEqual(ses.command_of('Pyn sil'), ('sil', ''))
+        self.assertEqual(ses.command_of('Pinpon oynadık, kaydet'), ('kaydet', 'Pinpon oynadık'), 'only the name itself is taken off')
+        self.assertEqual(ses.command_of('Market listesi, Payn kaydet.'), ('kaydet', 'Market listesi'), 'the name as Whisper writes it')
+
+    def test_the_window_takes_back_the_last_word_or_sentence(self):
+        self.assertEqual(yakala.without_last_word("Toplantı yarın Ali'ye."), 'Toplantı yarın')
+        self.assertEqual(yakala.without_last_word('tek'), '')
+        self.assertEqual(yakala.without_last_sentence('Py notal. Şu an ne yapıyoruz? Bunların hepsini kay'), 'Py notal. Şu an ne yapıyoruz?')
+        self.assertEqual(yakala.without_last_sentence('Bir. İki.'), 'Bir.')
+        self.assertEqual(yakala.without_last_sentence('Kira 12.500 lira'), '', 'a full stop inside a number ends no sentence')
+        self.assertEqual(yakala.without_last_sentence(''), '')
+
+    def test_the_field_counts_the_lines_a_note_takes_wrapped(self):
+        measure = lambda text: len(text) * 10
+        self.assertEqual(yakala.wrapped_lines('', measure, 100), 1)
+        self.assertEqual(yakala.wrapped_lines('kısa not', measure, 100), 1)
+        self.assertEqual(yakala.wrapped_lines('bir iki üç dört beş altı', measure, 100), 3)
+        self.assertEqual(yakala.wrapped_lines('a\nb', measure, 100), 2)
+        self.assertEqual(yakala.wrapped_lines('x' * 35, measure, 100), 4, 'a word longer than the line breaks inside it')
+
+    def test_the_panel_says_the_commands_by_the_words_set_for_them(self):
+        line = yakala.spoken_commands_line(ses.DEFAULTS['komutlar'])
+        self.assertEqual(line, 'Komutlar: “kaydet” · “resmi ekle” · “son kelimeyi sil” · “son cümleyi sil” · “hepsini sil” · “iptal”')
+        self.assertEqual(yakala.spoken_commands_line({'kaydet': ['tamam'], 'sil': []}), 'Komutlar: “tamam”')
+        self.assertEqual(yakala.spoken_commands_line({}), '')
+
+    def test_the_last_word_or_sentence_is_taken_back_alone_or_at_the_end_everything_only_alone(self):
+        self.assertEqual(ses.command_of('Son kelimeyi sil.'), ('kelime_sil', ''))
+        self.assertEqual(ses.command_of('Toplantı yarın saat beş, son kelimeyi sil'), ('kelime_sil', 'Toplantı yarın saat beş'))
+        self.assertEqual(ses.command_of('Pyn, son cümleyi sil'), ('cumle_sil', ''))
+        self.assertEqual(ses.command_of('Hayır öyle değil, son cümleyi sil.'), ('cumle_sil', 'Hayır öyle değil'))
+        self.assertEqual(ses.command_of('Hepsini sil.'), ('sil', ''))
+        self.assertEqual(ses.command_of('Pyn, hepsini sil'), ('sil', ''))
+        for note in ('Dosyaların hepsini sil', 'Son kelimeyi silmeyi unutma', 'son kelime güzeldi'):
+            self.assertEqual(ses.command_of(note), (None, note), note)
+
+    def test_gonder_tamam_bitti_save_only_right_after_the_name(self):
+        self.assertEqual(ses.command_of('Pyn, gönder.'), ('kaydet', ''))
+        self.assertEqual(ses.command_of('Toplantı yarın onda, Pyn tamam'), ('kaydet', 'Toplantı yarın onda'))
+        self.assertEqual(ses.command_of('Pin bitti.'), ('kaydet', ''))
+        for note in ("Raporu Ali'ye gönder", 'Tamam', 'Proje bitti', 'tamam mı'):
+            self.assertEqual(ses.command_of(note), (None, note), note)
+        self.assertEqual(ses.command_of('Pyn gönder', after_name=[]), (None, 'Pyn gönder'), 'the list is a setting')
+
+    def test_the_small_models_sound_alikes_are_turkish_words_in_a_note_not_the_name(self):
+        # "bin", "pay", "bayan" stand for Pyn only to the wake listener; Whisper writes the name.
+        for note in ("Ali'ye beş bin gönder", 'Fiyat on bin tamam', 'Kira bitti, pay bitti'):
+            self.assertEqual(ses.command_of(note), (None, note), note)
+        self.assertEqual(ses.command_of('Maaş on bin, kaydet'), ('kaydet', 'Maaş on bin'))
+        self.assertEqual(ses.command_of('Bin kaydet'), ('kaydet', 'Bin'))
+        self.assertTrue(ses.wake_heard('pay not al'), 'still the name to the wake listener')
+
+    def test_what_whisper_makes_up_for_silence_is_never_a_note(self):
+        for made_up in ('Altyazı M.K.', 'İzlediğiniz için teşekkürler.', 'Abone olmayı unutmayın!', '[BLANK_AUDIO]', '[Müzik]'):
+            self.assertEqual(ses.clean_spoken(made_up), '', made_up)
+        self.assertEqual(ses.clean_spoken(' Altyazı dosyasını düzelt '), 'Altyazı dosyasını düzelt')
+
+    def test_what_whisper_makes_up_after_the_words_is_cut_so_kaydet_is_still_the_end(self):
+        cleaned = ses.clean_spoken('Toplantı notu, Pyn kaydet. Altyazı M.K.')
+        self.assertEqual(cleaned, 'Toplantı notu, Pyn kaydet')
+        self.assertEqual(ses.command_of(cleaned), ('kaydet', 'Toplantı notu'))
+        self.assertEqual(ses.clean_spoken('Merhaba [Müzik] dünya'), 'Merhaba dünya')
+        prompt = ses.DEFAULTS['ipucu']
+        self.assertEqual(ses.clean_spoken('Süt al. ' + prompt, prompt), 'Süt al', 'its prompt said back')
+        self.assertEqual(ses.clean_spoken(prompt, prompt), '')
+        self.assertEqual(ses.clean_spoken('Yarın konser var, müzik'), 'Yarın konser var, müzik', 'one word is a word')
 
     def test_what_is_said_goes_after_what_was_typed(self):
         self.assertEqual(yakala.with_spoken('', 'merhaba dünya'), 'merhaba dünya')
@@ -64,9 +235,51 @@ class SetupTest(unittest.TestCase):
         self.assertTrue(config['uyandirma'])
         self.assertNotIn('yabanci', config)
         self.assertEqual(config['komutlar']['kaydet'], ['tamam', 'kaydet'])
-        self.assertEqual(config['komutlar']['sil'], ['sil', 'temizle'], 'the other commands keep their words')
+        self.assertEqual(config['komutlar']['sil'], ses.DEFAULTS['komutlar']['sil'], 'the other commands keep their words')
         self.assertFalse(ses.installed(self.state))
         self.assertFalse(ses.usable(self.state))
+
+    def test_commands_saved_as_the_old_defaults_get_the_new_words_ones_chosen_stay(self):
+        ses.ses_dir(self.state).mkdir(parents=True)
+        path = ses.ses_dir(self.state) / ses.CONFIG
+        path.write_text(json.dumps({'komutlar': {'kaydet': ['kaydet'], 'sil': ['sil', 'temizle'], 'iptal': ['iptal', 'vazgeç']}}), encoding='utf-8')
+        config = ses.load_config(self.state)
+        self.assertIn('hepsini sil', config['komutlar']['sil'], 'every older settings file holds the old default')
+        self.assertEqual(config['komutlar']['kelime_sil'], ['son kelimeyi sil'])
+        path.write_text(json.dumps({'komutlar': {'sil': ['temizle']}}), encoding='utf-8')
+        self.assertEqual(ses.load_config(self.state)['komutlar']['sil'], ['temizle'], 'a list someone chose is theirs')
+
+    def ayar(self, *args):
+        out = io.StringIO()
+        from contextlib import redirect_stdout
+        with redirect_stdout(out), mock.patch.object(ses, 'restart_listener', return_value=False):
+            ses.main(['ayar', *args, '--json'], state=self.state)
+        return json.loads(out.getvalue())
+
+    def test_the_commands_words_are_a_setting_checked_before_they_are_kept(self):
+        result = self.ayar('--komutlar', json.dumps({'kaydet': ['kaydet', ' Tamamdır  '], 'kelime_sil': ['geri al'],
+                                                     'adla_kaydet': ['yolla']}, ensure_ascii=False))
+        self.assertEqual(result['komutlar']['kaydet'], ['kaydet', 'Tamamdır'])
+        self.assertEqual(result['komutlar']['kelime_sil'], ['geri al'])
+        self.assertEqual(result['komutlar']['sil'], ses.DEFAULTS['komutlar']['sil'], 'what was not given stays')
+        self.assertEqual(result['adla_kaydet'], ['yolla'])
+        config = ses.load_config(self.state)
+        self.assertEqual(ses.command_of('Bugün bitti, tamamdır', config['komutlar'], config['adla_kaydet']), ('kaydet', 'Bugün bitti'))
+        for wrong, why in (({'kaydet': ['sil']}, 'iki komutta'), ({'uydur': ['x']}, 'Bilinmeyen'), ({'sil': ['a' * 41]}, 'uzun'),
+                           ({'sil': 'sil'}, 'liste'), ({'sil': ['...']}, 'kelime')):
+            with self.assertRaises(SystemExit) as raised:
+                self.ayar('--komutlar', json.dumps(wrong))
+            self.assertIn(why, str(raised.exception), wrong)
+        self.assertEqual(ses.load_config(self.state)['komutlar']['kaydet'], ['kaydet', 'Tamamdır'], 'a refused change keeps nothing')
+        reset = self.ayar('--varsayilan-komutlar')
+        self.assertEqual((reset['komutlar'], reset['adla_kaydet']), (ses.DEFAULTS['komutlar'], ses.DEFAULTS['adla_kaydet']))
+
+    def test_a_microphones_name_is_whole_and_without_the_word_microphone_around_it(self):
+        names = ['Microsoft Sound Mapper - Input', 'Microphone (HyperX Cloud III Wi', 'Microphone (HyperX Cloud III Wireless)']
+        self.assertEqual(ses.mic_label('Microphone (HyperX Cloud III Wi', names), 'HyperX Cloud III Wireless', 'MME cuts at 31 letters')
+        self.assertEqual(ses.mic_label('Mikrofon (USB Audio)'), 'USB Audio')
+        self.assertEqual(ses.mic_label('Headset Microphone'), 'Headset Microphone')
+        self.assertEqual(ses.mic_label(''), '')
 
     def test_the_plan_picks_a_python_with_wheels_and_adds_cuda_only_with_an_nvidia_card(self):
         calls = []
@@ -262,6 +475,38 @@ class SetupTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             ses._download_checked('http://example.invalid/model.bin', target, None)
 
+    def test_a_big_download_says_how_far_it_is_and_the_install_says_each_step_as_a_line(self):
+        data = os.urandom(3 << 20)
+
+        class Response(io.BytesIO):
+            headers = {'Content-Length': str(len(data))}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+        import hashlib
+        said = []
+        with mock.patch('urllib.request.urlopen', lambda url, timeout: Response(data)):
+            ses._download_checked('https://example.invalid/m.bin', Path(self.tmp.name) / 'm.bin', hashlib.sha256(data).hexdigest(), said.append)
+        self.assertEqual(said[-1].strip(), '%100 (3 / 3 MB)')
+        self.assertLessEqual(len(said), 10, 'a tenth at a time, not a line a megabyte')
+
+        def install(state, say):
+            say('Motor: işlemci')
+            say('  %50 (800 / 1600 MB)')
+            return {'status': 'kuruldu', 'motor': 'islemci'}
+
+        out = io.StringIO()
+        from contextlib import redirect_stdout
+        with mock.patch.object(ses, 'install', install), mock.patch.object(ses, 'restart_listener', lambda _state: True), redirect_stdout(out):
+            ses.main(['kur', '--json'], state=self.state)
+        lines = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual(lines[:2], [{'adim': 'Motor: işlemci'}, {'adim': '%50 (800 / 1600 MB)'}])
+        self.assertEqual((lines[-1]['status'], lines[-1]['dinleyici']), ('kuruldu', True), 'the result is the last line')
+
     def test_an_archive_that_reaches_outside_its_folder_is_refused(self):
         archive = Path(self.tmp.name) / 'kotu.zip'
         with zipfile.ZipFile(archive, 'w') as zipped:
@@ -303,6 +548,33 @@ for line in sys.stdin:
 '''
 
 
+class TrialWakeTest(unittest.TestCase):
+    def test_the_wake_trial_says_what_was_heard_and_whether_the_window_would_open(self):
+        events = [{'olay': 'dinliyor', 'sn': 20, 'mikrofon': 'Mikrofon (USB)', 'model': 'large-v3-turbo', 'soz': 'pyn not al'},
+                  {'olay': 'duyulan', 'metin': '[unk] not al'},
+                  {'olay': 'karar', 'karar': 'aday', 'duyulan': '[unk] not al', 'whisper': 'Payn, not al.', 'uyanir': True},
+                  {'olay': 'karar', 'karar': 'aday', 'duyulan': '[unk] not al', 'whisper': 'Bunu not al.', 'uyanir': False},
+                  {'olay': 'karar', 'karar': 'soz', 'duyulan': 'pay not al', 'uyanir': True}]
+        asked = []
+
+        def popen(command, **_options):
+            asked.append(command)
+            lines = [json.dumps(event, ensure_ascii=False) + '\n' for event in events]
+            return types.SimpleNamespace(stdout=iter(lines), wait=lambda: 0)
+
+        said = []
+        with tempfile.TemporaryDirectory(prefix='v3-ses-dene-') as tmp:
+            self.assertEqual(ses.trial_wake(Path(tmp), 20, False, popen=popen, say=said.append), 0)
+        self.assertEqual(asked[0][-2:], ['--dene-uyandirma', '20'])
+        text = '\n'.join(said)
+        self.assertIn('20 saniye dinliyorum · Mikrofon (USB)', text)
+        self.assertIn('"Pyn, not al" de', text)
+        self.assertIn('küçük model: [unk] not al', text)
+        self.assertIn('Whisper: “Payn, not al.” · pencere açılırdı ✓', text)
+        self.assertIn('Whisper: “Bunu not al.” · Pyn\'in adını duymadı, pencere açılmazdı ✗', text)
+        self.assertIn('sözü tam duydu: pencere açılırdı ✓', text)
+
+
 class WorkerTest(unittest.TestCase):
     def test_commands_go_in_and_events_come_out_one_line_each(self):
         with tempfile.TemporaryDirectory(prefix='v3-ses-isci-') as tmp:
@@ -335,15 +607,16 @@ class WorkerTest(unittest.TestCase):
 
 class FakeWorker:
     def __init__(self):
-        self.sent = []
+        self.sent, self.values = [], []
 
     def send(self, command, **values):
         self.sent.append(command)
+        self.values.append(values)
         return True
 
 
 class PopupVoiceTest(unittest.TestCase):
-    """The Beyne at window with a microphone, built on a hidden Tk root and never shown."""
+    """The capture window ("Not al") with a microphone, built on a hidden Tk root and never shown."""
 
     def setUp(self):
         try:
@@ -352,6 +625,9 @@ class PopupVoiceTest(unittest.TestCase):
         except Exception as exc:  # no Tk, or no display
             self.skipTest('Tk yok: %s' % exc)
         self.root.withdraw()
+        # Tk's images are freed here, after the root: freed later on another test's thread, each
+        # one waits there for a main loop that is not running.
+        self.addCleanup(gc.collect)
         self.addCleanup(self.root.destroy)
         from unittest.mock import patch
         # Nothing appears on the screen and nothing is read from the person's clipboard.
@@ -373,6 +649,187 @@ class PopupVoiceTest(unittest.TestCase):
         win = yakala.popup(self.vault, {}, master=self.root, state=Path(self.tmp.name) / 'state', voice=self.link, **options)
         self.root.update_idletasks()
         return win
+
+    @staticmethod
+    def texts(win):
+        canvas = next(child for child in win.winfo_children() if child.winfo_class() == 'Canvas')
+        return [canvas.itemcget(item, 'text') for item in canvas.find_all() if canvas.type(item) == 'text']
+
+    def cards(self):
+        return list((self.vault / yakala.INBOX).glob('*.md'))
+
+    def test_it_is_named_for_what_it_does_and_says_what_to_do_while_it_listens(self):
+        self.link.ready = True
+        win = self.window()
+        texts = self.texts(win)
+        self.assertIn('Not al', texts)
+        self.assertNotIn('Beyne at', texts)
+        self.assertTrue(any(text.startswith('Konuşmak için mikrofona tıkla') for text in texts), 'what a press does')
+        commands = next(text for text in texts if text.startswith('Komutlar:'))
+        for said in ('“kaydet”', '“resmi ekle”', '“son kelimeyi sil”', '“son cümleyi sil”', '“hepsini sil”', '“iptal”'):
+            self.assertIn(said, commands, 'the spoken commands are written down')
+        win.voice_toggle()
+        win.voice_event({'olay': 'dinliyor', 'mikrofon': 'Microphone (HyperX Cloud III Wireless)'})
+        texts = self.texts(win)
+        self.assertIn('● Dinliyorum · Microphone (HyperX Cloud III Wireless)', texts, 'which microphone is listened to')
+        self.assertTrue(any('Susunca yazarım' in text and 'Enter' in text and 'Esc' in text for text in texts),
+                        'how to stop is said while it listens')
+
+    def test_it_listens_as_it_opens_and_typing_lets_the_microphone_go(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        self.assertEqual(self.link.worker.sent, ['dinle'], 'listening at once')
+        win.voice_event({'olay': 'dinliyor'})
+        win.typed()
+        self.assertEqual(self.link.worker.sent, ['dinle', 'iptal'], 'a key typed: the microphone goes')
+        self.assertTrue(any('Yazmaya başladın' in text for text in self.texts(win)))
+        # What the helper still says about that recording changes nothing.
+        for event in ({'olay': 'dinliyor'}, {'olay': 'metin', 'metin': '', 'komut': None}):
+            win.voice_event(event)
+        self.assertIn('Yazmaya başladın; dinlemeyi bıraktım', self.texts(win), 'still let go')
+        win.voice_toggle()
+        self.assertEqual(self.link.worker.sent, ['dinle', 'iptal', 'dinle'], 'and a press listens again')
+
+    def test_opened_before_the_model_is_loaded_it_listens_once_it_is(self):
+        win = self.window(auto_listen=True)
+        self.assertEqual(self.link.worker.sent, [])
+        self.assertTrue(any(text.startswith('Ses hazırlanıyor') for text in self.texts(win)))
+        self.link.ready = True
+        win.voice_event({'olay': 'hazir', 'aciklama': 'large-v3-turbo (ekran kartı, Vulkan)'})
+        self.assertEqual(self.link.worker.sent, ['dinle'])
+
+    def test_opened_listening_it_takes_dictation_until_pyn_kaydet(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        self.assertEqual((self.link.worker.sent, self.link.worker.values), (['dinle'], [{'surekli': True}]),
+                         'one dictation: the helper keeps the microphone open between sentences')
+        win.voice_event({'olay': 'dinliyor'})
+        self.assertTrue(any('Pyn, kaydet' in text for text in self.texts(win)), 'how to finish is said')
+        # A pause: the sentence is written in and the microphone was never let go.
+        win.voice_event({'olay': 'metin', 'metin': 'Cuma günü', 'komut': None, 'son': False})
+        win.update()
+        self.assertEqual(self.link.worker.sent, ['dinle'], 'nothing to ask: it still listens')
+        self.assertTrue(any(text.startswith('● Dinliyorum') for text in self.texts(win)))
+        self.assertEqual(self.cards(), [])
+        win.voice_event({'olay': 'metin', 'metin': 'sunum provası', 'komut': 'kaydet', 'son': True})
+        cards = self.cards()
+        self.assertEqual(len(cards), 1, 'saved without a key pressed')
+        self.assertIn('Cuma günü sunum provası', cards[0].read_text(encoding='utf-8'))
+
+    def test_a_long_silence_ends_the_dictation(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        win.voice_event({'olay': 'dinliyor'})
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': None, 'son': True})  # the helper's own end
+        win.update()
+        self.assertEqual(self.link.worker.sent, ['dinle'], 'it does not listen again by itself')
+        self.assertIn('Bir süredir ses gelmedi; dinlemeyi bıraktım', self.texts(win))
+
+    def test_enter_while_it_listens_ends_it_and_saves_what_was_said(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        win.voice_event({'olay': 'dinliyor'})
+        win.enter()
+        self.assertEqual(self.link.worker.sent, ['dinle', 'bitir'])
+        self.assertEqual(self.cards(), [], 'not saved before the words are written')
+        win.voice_event({'olay': 'ceviriyor'})
+        win.voice_event({'olay': 'metin', 'metin': 'Cuma', 'komut': None, 'son': False})
+        self.assertEqual(self.cards(), [], 'a sentence said before it: the last one is still to come')
+        win.voice_event({'olay': 'metin', 'metin': 'sunum provası', 'komut': None, 'son': True})
+        cards = self.cards()
+        self.assertEqual(len(cards), 1)
+        self.assertIn('Cuma sunum provası', cards[0].read_text(encoding='utf-8'))
+
+    def test_sil_in_a_dictation_clears_the_field_and_it_goes_on_listening(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        win.voice_event({'olay': 'dinliyor'})
+        win.voice_event({'olay': 'metin', 'metin': 'yanlış bir şey', 'komut': None, 'son': False})
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'sil', 'son': False})
+        win.voice_event({'olay': 'metin', 'metin': 'Doğrusu bu', 'komut': 'kaydet', 'son': True})
+        cards = self.cards()
+        self.assertEqual(len(cards), 1)
+        self.assertNotIn('yanlış', cards[0].read_text(encoding='utf-8'))
+        self.assertIn('Doğrusu bu', cards[0].read_text(encoding='utf-8'))
+
+    def field(self, win):
+        return next(child for child in win.winfo_children() if child.winfo_class() == 'Text')
+
+    def test_son_kelimeyi_sil_and_son_cumleyi_sil_take_back_what_was_said_and_it_goes_on(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        win.voice_event({'olay': 'dinliyor'})
+        win.voice_event({'olay': 'metin', 'metin': 'Toplantı yarın.', 'komut': None, 'son': False})
+        win.voice_event({'olay': 'metin', 'metin': 'Saat beş altı', 'komut': 'kelime_sil', 'son': False})
+        self.assertEqual(self.field(win).get('1.0', 'end-1c'), 'Toplantı yarın. Saat beş')
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'cumle_sil', 'son': False})
+        self.assertEqual(self.field(win).get('1.0', 'end-1c'), 'Toplantı yarın.')
+        self.assertEqual(self.link.worker.sent, ['dinle'], 'it still listens')
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'cumle_sil', 'son': False})
+        self.assertTrue(any('Konuş, ben yazayım' in text for text in [self.field(win).get('1.0', 'end-1c')]), 'nothing left: the hint again')
+        win.voice_event({'olay': 'metin', 'metin': 'Saat altıda', 'komut': 'kaydet', 'son': True})
+        self.assertIn('Saat altıda', self.cards()[0].read_text(encoding='utf-8'))
+
+    def test_panodaki_resmi_ekle_adds_the_picture_copied_last_and_the_note_is_saved_with_it(self):
+        from unittest.mock import patch
+        folder = Path(tempfile.mkdtemp(prefix='v3-pano-'))
+        png = folder / 'pano-goruntusu.png'
+        png.write_bytes(bytes.fromhex('89504e470d0a1a0a0000000d4948445200000001000000010806000000'
+                                      '1f15c4890000000d49444154789c6300010000050001'
+                                      '0d0a2db40000000049454e44ae426082'))
+        picture = {'path': str(png), 'folder': str(folder), 'width': 1, 'height': 1, 'age': None, 'stale': False, 'on': False}
+        self.link.ready = True
+        win = self.window(auto_listen=True)  # nothing on the clipboard as it opened
+        win.voice_event({'olay': 'dinliyor'})
+        with patch.object(yakala, 'clipboard_image', lambda *_a: dict(picture)):
+            win.voice_event({'olay': 'metin', 'metin': 'Hata yine çıktı', 'komut': 'resim_ekle', 'son': False})
+        self.assertTrue(any('Panodaki görüntü eklendi' in text for text in self.texts(win)), 'it says the picture goes')
+        win.voice_event({'olay': 'metin', 'metin': 'Ekranı Ali\'ye göster', 'komut': 'kaydet', 'son': True})
+        card = self.cards()[0].read_text(encoding='utf-8')
+        self.assertIn('Hata yine çıktı', card)
+        saved = [path for path in (self.vault / yakala.INBOX / 'dosyalar').glob('*') if not path.name.startswith('.')]
+        self.assertEqual(len(saved), 1, 'the picture is saved with the note')
+
+    def test_panodaki_resmi_ekle_with_nothing_on_the_clipboard_says_so(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        win.voice_event({'olay': 'dinliyor'})
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'resim_ekle', 'son': False})
+        self.assertTrue(any('Panoda görüntü yok' in text for text in self.texts(win)))
+
+    def test_a_long_note_wraps_and_the_window_grows_to_show_it(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        canvas = next(child for child in win.winfo_children() if child.winfo_class() == 'Canvas')
+        before = int(canvas.cget('height'))
+        win.voice_event({'olay': 'dinliyor'})
+        said = 'Şu an ne yapıyoruz? Bunların hepsini kaydedip yarın sabah toplantıda konuşalım, sonra da raporu bitirelim.'
+        win.voice_event({'olay': 'metin', 'metin': said, 'komut': None, 'son': False})
+        field = self.field(win)
+        self.assertEqual(field.get('1.0', 'end-1c'), said, 'all of it in the field')
+        self.assertGreater(int(field.cget('height')), 1, 'more than one line shown')
+        self.assertGreater(int(canvas.cget('height')), before, 'the window grew with it')
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'sil', 'son': False})
+        self.assertEqual((int(field.cget('height')), int(canvas.cget('height'))), (1, before), 'and back once emptied')
+
+    def test_typing_in_a_dictation_keeps_what_was_said_before_but_no_command(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        win.voice_event({'olay': 'dinliyor'})
+        win.typed()
+        self.assertEqual(self.link.worker.sent, ['dinle', 'iptal'])
+        win.voice_event({'olay': 'metin', 'metin': 'Söylenen', 'komut': 'kaydet', 'son': False})
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': None, 'son': True})
+        self.assertEqual(self.cards(), [], 'nothing saved by itself once typing began')
+        win.enter()
+        self.assertIn('Söylenen', self.cards()[0].read_text(encoding='utf-8'))
+
+    def test_the_wake_phrase_said_to_an_open_window_begins_a_dictation(self):
+        self.link.ready = True
+        win = self.window()
+        win.voice_event({'olay': 'dinliyor'})
+        win.voice_event({'olay': 'uyandi'})
+        self.assertTrue(any('Pyn, kaydet' in text for text in self.texts(win)), 'it takes dictation')
 
     def test_what_is_said_is_written_into_the_field_and_kaydet_at_the_end_saves_it(self):
         self.link.ready = True
@@ -399,12 +856,14 @@ class PopupVoiceTest(unittest.TestCase):
     def test_until_the_model_is_loaded_the_microphone_waits_and_a_failure_is_said(self):
         win = self.window()
         win.voice_toggle()
-        self.assertEqual(self.link.worker.sent, [], 'not ready: nothing is recorded')
+        self.assertEqual(self.link.worker.sent, [], 'not ready: nothing is recorded yet')
         self.link.ready = True
         win.voice_event({'olay': 'hazir', 'aciklama': 'large-v3-turbo (işlemci)'})
+        self.assertEqual(self.link.worker.sent, ['dinle'], 'pressed while loading: it listens once loaded')
         win.voice_event({'olay': 'hata', 'neden': 'mikrofon', 'mesaj': 'Mikrofon açılamadı'})
+        self.assertIn('Ses: Mikrofon açılamadı', self.texts(win))
         win.voice_toggle()
-        self.assertEqual(self.link.worker.sent, ['dinle'], 'ready again after the failure')
+        self.assertEqual(self.link.worker.sent, ['dinle', 'dinle'], 'ready again after the failure')
         win.voice_event({'olay': 'metin', 'metin': 'sil bunu', 'komut': None})
         win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'sil'})
         win.voice_event({'olay': 'bitti'})
@@ -507,6 +966,405 @@ class VulkanServerTest(unittest.TestCase):
         first, second = [entry['argv'] for entry in self.seen() if 'argv' in entry]
         self.assertIn('-dev', first)
         self.assertIn('-ng', second)
+
+
+class Sound:
+    """A piece of recorded sound, by name: what the stand-in Whisper is asked to write."""
+
+    def __init__(self, name, seconds=1.0):
+        self.name, self.seconds = name, seconds
+
+    def __len__(self):
+        return int(self.seconds * 16000)
+
+
+class FakeRecorder:
+    """The microphone, played by the test: it says when someone speaks and what each sentence is."""
+
+    def __init__(self, clock):
+        self.clock, self.stream, self.level, self.said = clock, None, 0.0, []
+        self.starts = self.stops = 0
+        self._sentence()
+
+    def _sentence(self):
+        self.spoke, self.started, self.last_voice = False, self.clock.t, self.clock.t
+
+    def start(self, on_chunk=None):
+        self.stream, self.said = 'open', []
+        self.starts += 1
+        self._sentence()
+
+    def speak(self, name):
+        self.said.append(name)
+        self.spoke, self.last_voice = True, self.clock.t
+
+    def cut(self):
+        sound = Sound('+'.join(self.said))
+        self.said = []
+        self._sentence()
+        return sound
+
+    def peek(self):
+        return Sound('+'.join(self.said))
+
+    def stop(self):
+        self.stream = None
+        self.stops += 1
+        sound, self.said = Sound('+'.join(self.said), 1.0 if self.said else 0.0), []
+        return sound
+
+
+class FakeWake:
+    def __init__(self):
+        self.running, self.verdicts, self.text, self.starts = False, [], '', 0
+
+    def start(self):
+        self.running = True
+        self.starts += 1
+
+    def stop(self):
+        self.running = False
+
+    def heard(self, seen=None):
+        if self.verdicts:
+            self.text = '[unk] not al'
+            return self.verdicts.pop(0)
+        return None
+
+    def clip(self):
+        return Sound('once')
+
+
+class ServeTest(unittest.TestCase):
+    """The helper's loop with the microphone, Vosk and Whisper stood in for and the clock held."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-dongu-')
+        self.addCleanup(self.tmp.cleanup)
+        spec = importlib.util.spec_from_file_location('isci_dongu_testi', ses.write_worker(Path(self.tmp.name) / 'state'))
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        helper.ses = ses
+        self.clock = types.SimpleNamespace(t=1000.0)
+        self.recorder, self.wake = FakeRecorder(self.clock), FakeWake()
+        self.events, self.asked, self.written = queue.Queue(), [], {}
+        self.hold = threading.Event()
+        self.hold.set()
+
+        def transcribe(_model, audio, _config, _lock):
+            self.asked.append(audio.name)
+            self.hold.wait(5)
+            return self.written.get(audio.name, '')
+
+        for name, value in (('Recorder', lambda _config: self.recorder), ('Wake', lambda _state, _config: self.wake),
+                            ('load_model', lambda _state, _config: ('model', 'sahte')), ('release', lambda _model: None),
+                            ('transcribe', transcribe), ('_device_name', lambda _config: 'Mikrofon'),
+                            ('join_audio', lambda *parts: Sound('+'.join(part.name for part in parts if part.name))),
+                            ('out', lambda **event: self.events.put(event)), ('log', lambda _text: None),
+                            ('now', lambda: self.clock.t)):
+            setattr(helper, name, value)
+        self.helper, self.lines = helper, queue.Queue()
+
+    def serve(self, **config):
+        def lines():
+            while True:
+                line = self.lines.get()
+                if line is None:
+                    return
+                yield line
+        settings = dict(ses.DEFAULTS, **config)
+        thread = threading.Thread(target=self.helper.serve, args=(Path(self.tmp.name) / 'state', settings, lines()), daemon=True)
+        thread.start()
+        self.addCleanup(lambda: (self.send('kapat'), self.hold.set(), thread.join(5)))
+        self.until('hazir')
+
+    def send(self, command, **values):
+        self.lines.put(json.dumps(dict(values, komut=command)) + '\n')
+
+    def until(self, kind, wait=5.0, **fields):
+        seen, deadline = [], time.monotonic() + wait
+        while time.monotonic() < deadline:
+            try:
+                event = self.events.get(timeout=0.02)
+            except queue.Empty:
+                continue
+            seen.append(event)
+            if event.get('olay') == kind and all(event.get(k) == v for k, v in fields.items()):
+                return event
+        self.fail('no %s %s; saw %s' % (kind, fields, seen))
+
+    def quiet(self, wait=0.4):
+        """What it said in a little while, `seviye` aside."""
+        deadline, seen = time.monotonic() + wait, []
+        while time.monotonic() < deadline:
+            try:
+                event = self.events.get(timeout=0.02)
+            except queue.Empty:
+                continue
+            if event.get('olay') != 'seviye':
+                seen.append(event)
+        return seen
+
+    def pause(self, seconds=1.5):
+        self.clock.t += seconds
+
+    def until_asked(self, *names, wait=5.0):
+        deadline = time.monotonic() + wait
+        while self.asked != list(names) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(self.asked, list(names), 'what Whisper was asked to write')
+
+    def until_recording(self, wait=5.0):
+        deadline = time.monotonic() + wait
+        while self.recorder.stream is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(self.recorder.stream, 'open')
+
+    def test_a_dictation_keeps_the_microphone_open_while_a_sentence_is_written(self):
+        self.serve()
+        self.written.update({'cuma': 'Cuma günü', 'prova': 'sunum provası, Pyn kaydet.'})
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.hold.clear()  # Whisper is slow: the first sentence is still being written...
+        self.recorder.speak('cuma')
+        self.pause()
+        self.until_asked('cuma')
+        self.recorder.speak('prova')  # ...while the next one is said into the open microphone
+        self.assertEqual((self.recorder.stream, self.recorder.stops), ('open', 0), 'never let go between sentences')
+        self.hold.set()
+        first = self.until('metin')
+        self.assertEqual((first['metin'], first['komut'], first['son']), ('Cuma günü', None, False))
+        self.pause()
+        last = self.until('metin')
+        self.assertEqual((last['metin'], last['komut'], last['son']), ('sunum provası', 'kaydet', True))
+        self.assertEqual(self.asked, ['cuma', 'prova'])
+        self.assertIsNone(self.recorder.stream, 'saved: the microphone goes')
+
+    def test_commands_changed_in_the_settings_count_from_the_next_sentence(self):
+        self.serve()
+        state = Path(self.tmp.name) / 'state'
+        ses.save_config(state, dict(ses.load_config(state), komutlar=dict(ses.DEFAULTS['komutlar'], kaydet=['yolla'])))
+        self.send('ayar')  # the listener saw the settings file change
+        self.written.update({'not': 'Market listesi, yolla.'})
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.recorder.speak('not')
+        self.pause()
+        last = self.until('metin')
+        self.assertEqual((last['metin'], last['komut'], last['son']), ('Market listesi', 'kaydet', True))
+
+    def test_a_wake_phrase_changed_in_the_settings_is_listened_for_at_once(self):
+        built = []
+        self.helper.Wake = lambda _state, config: built.append(config['uyandirma_sozu']) or self.wake
+        self.serve(uyandirma=True)
+        deadline = time.monotonic() + 5
+        while not built and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(built, ['pyn not al'])
+        state = Path(self.tmp.name) / 'state'
+        ses.save_config(state, dict(ses.load_config(state), uyandirma=True, uyandirma_sozu='hey pyn'))
+        self.send('uyandirma', acik=True)
+        self.send('ayar')  # the listener saw the settings file change
+        deadline = time.monotonic() + 5
+        while len(built) < 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(built, ['pyn not al', 'hey pyn'], 'the small model listens for the new phrase')
+
+    def test_bitir_writes_the_last_sentence_after_the_ones_before_it(self):
+        self.serve()
+        self.written.update({'bir': 'Birinci', 'iki': 'ikinci'})
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.hold.clear()
+        self.recorder.speak('bir')
+        self.pause()
+        self.until_asked('bir')
+        self.recorder.speak('iki')
+        self.send('bitir')  # Enter
+        self.until('ceviriyor')
+        self.hold.set()
+        events = [e for e in self.quiet(1.0) if e['olay'] == 'metin']
+        self.assertEqual([(e['metin'], e['son']) for e in events], [('Birinci', False), ('ikinci', True)])
+
+    def test_a_dictation_nobody_speaks_into_ends_by_itself(self):
+        self.serve()
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.pause(10)
+        self.assertEqual([e for e in self.quiet() if e['olay'] == 'metin'], [], 'ten seconds of quiet is a pause')
+        self.pause(15)
+        last = self.until('metin')
+        self.assertEqual((last['metin'], last['son']), ('', True))
+        self.assertIsNone(self.recorder.stream)
+
+    def test_a_heard_not_al_whisper_confirms_opens_listening_and_the_phrase_is_not_written(self):
+        self.serve(uyandirma=True)
+        self.written.update({'once': 'Payn, not al.', 'once+al': 'Payn, not al.', 'al+yarin': 'Al. Yarın toplantı var.'})
+        self.wake.verdicts = ['aday']
+        self.until_recording()
+        self.recorder.speak('al')  # the end of "al" the recording caught
+        nothing = self.quiet()
+        self.assertFalse([e for e in nothing if e['olay'] in ('dinliyor', 'uyandi')], 'nobody is told before Whisper says so')
+        self.assertEqual(self.recorder.stream, 'open', 'but the recording has begun: no word after the phrase is lost')
+        self.pause(ses.WAKE_AFTER_SN)
+        self.assertEqual(self.until('uyandi')['mikrofon'], 'Mikrofon', 'the window it opens says which microphone')
+        self.assertEqual(self.asked[0], 'once+al', 'Whisper heard the seconds before it and the phrase\'s end')
+        self.recorder.speak('yarin')
+        self.pause()
+        first = self.until('metin')
+        self.assertEqual((first['metin'], first['son']), ('Yarın toplantı var.', False))
+
+    def test_a_heard_not_al_whisper_does_not_confirm_says_nothing_and_listens_for_the_phrase_again(self):
+        self.serve(uyandirma=True)
+        self.written.update({'once': 'Bunu not al.'})
+        self.wake.verdicts = ['aday']
+        self.until_recording()
+        self.pause(ses.WAKE_AFTER_SN)
+        self.until_asked('once')
+        said = self.quiet(0.6)
+        self.assertFalse([e for e in said if e['olay'] in ('dinliyor', 'uyandi', 'metin')], said)
+        self.assertIsNone(self.recorder.stream, 'the recording let go')
+        self.assertTrue(self.wake.running and self.wake.starts >= 2, 'listening for the phrase again')
+
+    def test_the_whole_phrase_the_small_model_heard_is_checked_by_whisper_too(self):
+        # Seen during a game: talk the small model took for "pay not al" opened the window over it.
+        self.serve(uyandirma=True)
+        self.written.update({'once': 'CS, CS. Ne oldu?'})
+        self.wake.verdicts = ['soz']
+        self.until_recording()
+        self.pause(ses.WAKE_AFTER_SN)
+        self.until_asked('once')
+        said = self.quiet(0.6)
+        self.assertFalse([e for e in said if e['olay'] in ('dinliyor', 'uyandi')], 'Whisper did not hear it: no window')
+        self.written.update({'once': 'Pyn, not al.'})
+        self.wake.verdicts = ['soz']
+        self.until_recording()
+        self.pause(ses.WAKE_AFTER_SN)
+        self.assertEqual(self.until('uyandi')['mikrofon'], 'Mikrofon', 'heard by Whisper: the window opens')
+
+    def test_asked_to_listen_while_a_not_al_is_being_checked_it_listens(self):
+        self.serve(uyandirma=True)
+        self.wake.verdicts = ['aday']
+        self.until_recording()
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.assertEqual(self.recorder.starts, 1, 'the same recording')
+        self.pause(ses.WAKE_AFTER_SN)
+        self.assertFalse([e for e in self.quiet() if e['olay'] == 'uyandi'])
+
+
+class RecorderTest(unittest.TestCase):
+    """The helper's microphone on real sample arrays (numpy, which the engine's own Python may lack)."""
+
+    def setUp(self):
+        try:
+            import numpy
+        except ImportError:
+            self.skipTest('numpy yok')
+        self.np = numpy
+        self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-kayit-')
+        self.addCleanup(self.tmp.cleanup)
+        spec = importlib.util.spec_from_file_location('isci_kayit_testi', ses.write_worker(Path(self.tmp.name) / 'state'))
+        self.helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.helper)
+        self.helper.ses = ses
+        self.clock = types.SimpleNamespace(t=0.0)
+        self.helper.now = lambda: self.clock.t
+        self.streams = []
+        test = self
+
+        class Stream:
+            def __init__(self, callback=None, **_settings):
+                self.callback, self.open = callback, False
+                test.streams.append(self)
+
+            def start(self):
+                self.open = True
+
+            def stop(self):
+                self.open = False
+
+            def close(self):
+                pass
+
+        fake = types.SimpleNamespace(InputStream=Stream, query_devices=lambda *_a: [], default=types.SimpleNamespace(device=[0]))
+        patcher = mock.patch.dict(sys.modules, {'sounddevice': fake})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def feed(self, seconds, loud):
+        """Ten-millisecond blocks into the stream, as the sound card gives them."""
+        stream = self.streams[-1]
+        for _ in range(int(round(seconds * 100))):
+            block = self.np.full((160, 1), 0.1 if loud else 0.0005, dtype='float32')
+            if loud:
+                block[::2] *= -1
+            stream.callback(block, 160, None, None)
+            self.clock.t += 0.01
+
+    def test_a_cut_takes_the_sentence_trimmed_to_its_speech_and_the_stream_goes_on(self):
+        recorder = self.helper.Recorder(dict(ses.DEFAULTS))
+        recorder.start()
+        self.feed(1.0, False)
+        self.feed(1.0, True)
+        self.feed(1.5, False)
+        self.assertTrue(recorder.spoke)
+        self.assertAlmostEqual(self.clock.t - recorder.last_voice, 1.5, places=1)
+        sentence = recorder.cut()
+        self.assertAlmostEqual(len(sentence) / 16000, 0.3 + 1.0 + 0.4, places=1, msg='the speech, a little either side')
+        self.assertTrue(self.streams[-1].open, 'the microphone stays open')
+        self.assertFalse(recorder.spoke, 'the next sentence begins unsaid')
+        self.feed(0.5, True)
+        self.feed(0.2, False)
+        last = recorder.stop()
+        self.assertTrue(recorder.spoke)
+        self.assertFalse(self.streams[-1].open)
+        self.assertAlmostEqual(len(last) / 16000, 0.5 + 0.2, places=1, msg='what was said since the cut, no sound lost between')
+
+    def test_the_wake_listener_keeps_the_last_seconds_and_says_a_candidate_with_what_it_heard(self):
+        heard = {'partial': '[unk]'}
+
+        class Recognizer:
+            def __init__(self, _model, _rate, grammar):
+                self.grammar = json.loads(grammar)
+
+            def Reset(self):
+                pass
+
+            def AcceptWaveform(self, _pcm):
+                return False
+
+            def PartialResult(self):
+                return json.dumps(heard)
+
+        vosk = types.SimpleNamespace(KaldiRecognizer=Recognizer, Model=lambda _path: None, SetLogLevel=lambda _level: None)
+        with mock.patch.dict(sys.modules, {'vosk': vosk}):
+            wake = self.helper.Wake(Path(self.tmp.name) / 'state', dict(ses.DEFAULTS))
+        self.assertIn('not al', wake.recognizer.grammar)
+        wake.start()
+        self.feed(6.0, False)  # six seconds of the room
+        seen = []
+        self.assertIsNone(wake.heard(seen.append))
+        self.assertEqual(seen, ['[unk]'], 'what it heard, each new thing once')
+        heard['partial'] = '[unk] not al'
+        self.feed(0.02, True)
+        self.assertEqual(wake.heard(seen.append), 'aday')
+        self.assertEqual(wake.text, '[unk] not al')
+        self.feed(0.5, True)  # the rest of the phrase, waiting in the queue
+        clip = wake.clip()
+        self.assertLessEqual(len(clip) / 16000, ses.WAKE_CLIP_SN + 0.02, 'only the last few seconds')
+        self.assertGreater(float(abs(clip[-800:]).max()), 0.05, 'what still waited is its end')
+        wake.stop()
+        self.assertFalse(wake.running)
+
+    def test_a_click_is_not_speech_and_nothing_said_is_kept_whole(self):
+        recorder = self.helper.Recorder(dict(ses.DEFAULTS))
+        recorder.start()
+        self.feed(0.5, False)
+        self.feed(0.02, True)  # two loud blocks: a click
+        self.feed(0.5, False)
+        self.assertFalse(recorder.spoke)
+        self.assertAlmostEqual(len(recorder.stop()) / 16000, 1.02, places=1)
 
 
 class HelperModuleTest(unittest.TestCase):

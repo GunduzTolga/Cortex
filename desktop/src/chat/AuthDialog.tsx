@@ -16,7 +16,7 @@ import { useChat } from './chatStore';
  * only whether one is kept.
  */
 
-const NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code', lmstudio: 'LM Studio', ollama: 'Ollama' };
+export const TOOL_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code', lmstudio: 'LM Studio', ollama: 'Ollama' };
 const NOTES: Record<string, Key> = {
   claude: 'auth.note.claude',
   codex: 'auth.note.codex',
@@ -73,7 +73,7 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
       setKey('');
       setBaseUrl('');
       setKeying(false);
-      toast({ tone: 'success', title: t('auth.key.saved', { name: NAMES[tool.id] }) });
+      toast({ tone: 'success', title: t('auth.key.saved', { name: TOOL_NAMES[tool.id] }) });
     } catch (err) {
       failed(err);
     }
@@ -90,7 +90,7 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
   return (
     <li className={`rounded-xl border px-4 py-3 ${focused ? 'border-darkDelegation/40 bg-paper-2' : 'border-zinc-100'}`} data-auth-tool={tool.id}>
       <div className="flex items-center gap-2">
-        <p className="flex-1 text-[13.5px] font-semibold text-darkDelegation">{NAMES[tool.id]}</p>
+        <p className="flex-1 text-[13.5px] font-semibold text-darkDelegation">{TOOL_NAMES[tool.id]}</p>
         <Status tool={tool} refused={refused} />
       </div>
       {tool.detail ? <p className="mt-0.5 truncate text-[11.5px] text-zinc-500" data-auth-detail>{tool.detail}</p> : null}

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { TrashItem, VaultIndex } from '@shared/notes';
 import { messageOf } from '@shared/ipcError';
+import { refusal } from '../store/app';
 import { withoutIcon } from '../../core/titles';
 import { isNotePath, makeResolver, noteTitle, pathKey, type Resolve } from '../../core/vaultNotes';
 
@@ -178,7 +179,7 @@ export const useNotes = create<NotesState>((set, get) => {
       try {
         index = await window.cortex.notes.index();
       } catch (err) {
-        set({ error: messageOf(err) });
+        set({ error: refusal(messageOf(err)) });
         return;
       }
       const paths = [...index.notes.map((note) => note.path), ...index.files.map((file) => file.path)];

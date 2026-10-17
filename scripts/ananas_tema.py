@@ -112,6 +112,10 @@ def brand_text():
              '"""']
     for size in (28, 42, 56, 200):
         lines += [f'MUHUR_{size} = (', *_chunked((MARKA / f'pyn-muhur-{size}.png').read_bytes()), ')']
+    # Not al's microphone button (scripts/marka_uret.py yakala): drawn smooth, as Tk cannot.
+    for path in sorted((MARKA / 'yakala').glob('mikrofon-*.png')):
+        name = path.stem.replace('-', '_').upper()
+        lines += [f'{name} = (', *_chunked(path.read_bytes()), ')']
     lines += ['ICO = (', *_chunked((MARKA / 'pyn.ico').read_bytes()), ')']
     lines += ['SIXEL = (', *_chunked((MARKA / 'pyn-muhur.six').read_bytes()), ')']
     # Only names and sizes here: the font bytes live in beyin_v3_yazitipi.py, which the popup

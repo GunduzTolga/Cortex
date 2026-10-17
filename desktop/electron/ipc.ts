@@ -1,9 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { BootstrapPayload, WindowSettings } from '../shared/api';
-import { readSettings, settingsUnreadable, updateSettings } from './services/settings';
+import { readSettings, settingsUnreadable, tidyName, updateSettings } from './services/settings';
+import { startWithWindows } from './services/tray';
 import { setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
+import * as officeTalk from './services/officeTalk';
+import * as setup from './services/setup';
 import * as vaultNotes from './services/vaultNotes';
 
 /**
@@ -42,8 +45,8 @@ function broadcast(channel: string, payload: unknown): void {
 }
 
 function windowSettings(): WindowSettings {
-  const { language, allFiles, nameIcons } = readSettings();
-  return { language, allFiles, nameIcons };
+  const { language, allFiles, nameIcons, userName, onboarded, background } = readSettings();
+  return { language, allFiles, nameIcons, userName, onboarded, background };
 }
 
 export function registerIpc(): void {
@@ -61,7 +64,11 @@ export function registerIpc(): void {
     if (asked.language === 'en' || asked.language === 'tr' || asked.language === null) change.language = asked.language;
     if (typeof asked.allFiles === 'boolean') change.allFiles = asked.allFiles;
     if (typeof asked.nameIcons === 'boolean') change.nameIcons = asked.nameIcons;
+    if (typeof asked.userName === 'string' || asked.userName === null) change.userName = tidyName(asked.userName);
+    if (typeof asked.onboarded === 'boolean') change.onboarded = asked.onboarded;
+    if (typeof asked.background === 'boolean') change.background = asked.background;
     if (Object.keys(change).length) updateSettings((settings) => Object.assign(settings, change));
+    if (change.background !== undefined) startWithWindows(change.background);
     return windowSettings();
   });
 
@@ -133,6 +140,18 @@ export function registerIpc(): void {
     auth.forgetToolKey(cli);
     return auth.authStatuses();
   });
+
+  // The office's live conversations (services/officeTalk.ts): the window names a tool and a model it was offered.
+  handle('office:models', (tool) => officeTalk.talkModels(tool));
+  handle('office:talk', (request) => officeTalk.officeTalk(request));
+
+  // Cortex's engine and voice typing set up from the app (services/setup.ts): the window names a job, never a program or a file.
+  setup.onSetupPush((payload) => broadcast('setup:event', payload));
+  handle('setup:status', () => setup.setupStatus());
+  handle('setup:installPython', () => setup.installPython());
+  handle('setup:installEngine', () => setup.installEngine());
+  handle('setup:installVoice', () => setup.installVoice());
+  handle('setup:voice', (patch) => setup.setVoice(patch));
 }
 
 export function stopWatching(): void {

@@ -38,6 +38,7 @@ export function Modal({
   onClose,
   children,
   footer,
+  status,
   width = 'max-w-2xl',
   dismissOnBackdrop = true,
 }: {
@@ -46,6 +47,8 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  /** Beside the title: what the dialog wants said now ("Kaydedildi"). */
+  status?: ReactNode;
   width?: string;
   /** Off for a dialog that holds what somebody typed: a stray click on the page behind would throw it away. */
   dismissOnBackdrop?: boolean;
@@ -67,7 +70,10 @@ export function Modal({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="flex h-14 items-center justify-between border-b border-zinc-100 px-6">
-          <h2 className="text-xl leading-none text-darkDelegation">{title}</h2>
+          <div className="flex min-w-0 items-center gap-3">
+            <h2 className="text-xl leading-none text-darkDelegation">{title}</h2>
+            {status}
+          </div>
           <button type="button" onClick={onClose} className="rounded-xl p-2 text-zinc-300 transition-colors hover:bg-zinc-100 hover:text-darkDelegation">
             <X size={16} />
           </button>

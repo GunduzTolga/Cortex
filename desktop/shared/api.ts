@@ -1,6 +1,8 @@
 import type { ChatApi, ChatPush } from './chat';
 import type { AppLanguage } from './language';
 import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
+import type { OfficeApi } from './office';
+import type { SetupApi, SetupPush } from './setup';
 
 /**
  * Everything the window can ask of the main process: the object the preload
@@ -15,6 +17,12 @@ export interface WindowSettings {
   allFiles: boolean;
   /** Names are shown with the emoji they start with on disk (`📥 000-Inbox`); off, without it. */
   nameIcons: boolean;
+  /** How Pyn and the office address the person ("Tolga Bey"); null until they say. */
+  userName: string | null;
+  /** The first-run screen has been gone through. */
+  onboarded: boolean;
+  /** The window closed, Cortex stays in the notification area (the microphone switched from there), and starts there with Windows. */
+  background: boolean;
 }
 
 /** The vault by its folder's name, and whether that folder is still there; never its path. */
@@ -76,6 +84,10 @@ export interface CortexApi {
   notes: NotesApi;
   /** The chat with the person's own AI CLIs (shared/chat.ts). */
   chat: ChatApi;
+  /** Cortex's engine and voice typing set up from the app (shared/setup.ts). */
+  setup: SetupApi;
+  /** The office's live conversations, written by the model chosen in its settings (shared/office.ts). */
+  office: OfficeApi;
   on: {
     /** The vault changed on disk, or another vault was chosen: read the index again. */
     notesChanged(handler: () => void): () => void;
@@ -83,5 +95,9 @@ export interface CortexApi {
     chat(handler: (push: ChatPush) => void): () => void;
     /** A sign-in window was closed: ask the tools' statuses again. */
     authChanged(handler: () => void): () => void;
+    /** A setup job going on: a step, or its end. */
+    setup(handler: (push: SetupPush) => void): () => void;
+    /** The notification-area icon's "Ayarlar": open the settings. */
+    openSettings(handler: () => void): () => void;
   };
 }

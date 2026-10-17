@@ -15,6 +15,10 @@ export function clockText(date?: Date): string;
 export function loopFrame(t: number, fps: number, frames: number, offset?: number): number;
 export const TOOL_STATUS: Record<Art.ToolId, Led>;
 export const TOOL_LABEL: Record<Led, string>;
+/** A name with the possessive ending: "Tolga Bey'in", "Ayşe'nin"; English "Tolga's". Empty for no name. */
+export function possessive(name: string | null | undefined, lang?: 'tr' | 'en'): string;
+/** The manager named after the vault's owner (the character and its room), the manager without a name. */
+export function nameTheManager(art: typeof Art, userName: string | null, lang?: 'tr' | 'en'): void;
 
 export interface AgentSnapshot {
   id: string;
@@ -60,8 +64,15 @@ export class OfficeEngine {
   zoomAt(factor: number, clientX?: number, clientY?: number): void;
   setPreview(canvas: HTMLCanvasElement | null, roomId: string | null): void;
   triggerConvo(): void;
+  /** A conversation a model wrote: said line by line where each person is, and logged. */
+  speak(lines: Array<{ who: string; text: string }>): void;
   snapshot(): AgentSnapshot[];
   setActive(on: boolean): void;
   setLeds(led: Partial<Record<Art.ToolId, Led>>): void;
+  /** How the person is addressed; `{kim}` / `{Kim}` in the office's lines take it. */
+  setUserName(name: string | null): void;
+  who(text: string): string;
+  /** The office opened: a line in the log, a word from Pyn. */
+  greet(): void;
   destroy(): void;
 }

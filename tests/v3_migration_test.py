@@ -137,8 +137,8 @@ class MigrationTest(unittest.TestCase):
         def stop():
             try:
                 os.killpg(writer.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            except (ProcessLookupError, PermissionError):
+                pass  # gone; macOS says EPERM for a group of zombies only
             writer.wait(timeout=60)
         self.addCleanup(stop)
         sentinels = []
