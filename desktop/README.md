@@ -91,6 +91,7 @@ npm run dev          # Vite + Electron, değişiklikte yeniden başlar
 | `npm run typecheck` | Üç TypeScript projesi: pencere, ana süreç, çekirdek tek başına |
 | `npm test` | `node:test`; testler esbuild ile gerçek kaynaktan paketlenir (176 test; bazıları yalnız Windows'ta çalışır, başka yerde atlanır) |
 | `npm run e2e` | Derler ve gerçek Electron uygulamasını Playwright ile sürer. Pencere hiç gösterilmez: ekran dışında çizilir, `capturePage` ile fotoğraflanır (`e2e/screenshots/`). Linux'ta Xvfb altında çalışır. `CORTEX_SHOW=1` pencereyi gösterir. |
+| `npm run vitrin` | README'nin görüntüleri (`docs/gorseller/`): uygulama Türkçe arayüzle, örnek bir lansman kasasıyla, aynı gizli pencerede ekran dışında çizilir; sohbetin ve Beyin'in cevaplarını LM Studio'nun yerine geçen bir test sunucusu yazar. |
 | `npm run package` | Windows NSIS kurulum dosyası (`release/Cortex Setup X.Y.Z.exe`). Windows'ta çalıştır; Linux'ta son adım wine ister. |
 
 CI: `.github/workflows/desktop.yml`. `desktop/`, `template/`, `scripts/`, `VERSION` ya da `tema/ananas/marka/` değiştiğinde Windows'ta çalışır: tip denetimi, testler, uçtan uca koşu, sonra kurulum dosyası. Kurulum dosyası bir hafta boyunca iş akışının çıktısı (`cortex-setup-windows`) olarak indirilebilir.

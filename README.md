@@ -26,12 +26,17 @@
   <a href="#in-english">English</a>
 </p>
 
+<p align="center">
+  <img src="docs/gorseller/pyn.png" width="880" alt="Cortex masaüstü uygulaması: Pyn'e lansman için neler kaldığı soruluyor, cevap ilgili notlara bağlantı veriyor">
+</p>
+
 ---
 
 ## İçindekiler
 
 - [Cortex nedir?](#cortex-nedir)
 - [Neler yapar?](#neler-yapar)
+- [Görüntüler](#görüntüler)
 - [Hızlı başlangıç (Windows)](#hızlı-başlangıç-windows)
 - [Masaüstü uygulaması](#masaüstü-uygulaması)
 - [Not al ve sesle yazma](#not-al-ve-sesle-yazma)
@@ -71,6 +76,21 @@ Cortex'in içinde bir düşünme ortağı da gelir: **Pyn**. Seni tanır, fikirl
 | **Yakala** | Video, makale, tweet, ekran görüntüsü ya da tarayıcıdaki sayfa tek tuşla kasaya; asistan metni çıkarıp derslerini notlara bağlar. |
 | **Gizlilik** | Notlar ve arama indeksi senin bilgisayarında. Özel notlar ve adında "Şifreler", "Özel" gibi sözcükler geçen klasörler otomatik bağlama girmez. |
 
+## Görüntüler
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/gorseller/beyin.png" alt="Beyin: bir beynin içine çizilmiş piksel sanatı ofis; ekip son notlar hakkında konuşuyor"><br><sub><b>Beyin:</b> Pyn'in ekibi bir beynin içindeki ofiste çalışır; istersen son notların hakkında konuşurlar.</sub></td>
+    <td width="50%"><img src="docs/gorseller/notlar.png" alt="Notlar: lansman planı notu, görevler, uyarı kutusu ve geri bağlantılar"><br><sub><b>Notlar:</b> Obsidian'sız okuma ve yazma; wiki bağlantıları, görevler, geri bağlantılar.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/gorseller/grafik.png" alt="Grafik: lansman notları ve aralarındaki bağlantılar"><br><sub><b>Grafik:</b> notların ve aralarındaki bağlantılar.</sub></td>
+    <td width="50%"><img src="docs/gorseller/ayarlar-ses.png" alt="Ayarlar, Sesle yazma: sürekli dinleme, uyandırma sözü İkisi de, sesli komutlar"><br><sub><b>Sesle yazma:</b> "Hey Pyn" ya da "Pyn, not al"; sesli komutların sözleri Ayarlar'dan değişir.</sub></td>
+  </tr>
+</table>
+
+<sub>Görüntüler uygulamanın kendisinden, örnek bir kasayla alındı (`desktop/e2e/vitrin.mjs`). Sohbetteki cevabı ve Beyin'deki konuşmayı, LM Studio'nun yerine geçen bir test sunucusu yazdı.</sub>
+
 ## Hızlı başlangıç (Windows)
 
 Terminal gerekmez; uygulama gerekeni kendisi kurar.
@@ -86,6 +106,8 @@ Terminal gerekmez; uygulama gerekeni kendisi kurar.
    5. **Sesle yazma:** isteğe bağlı, tek düğmeyle.
 
    Her adım ne yaptığını söyler; isteğe bağlı olanlar **Atla** ile geçilir ve sonra Ayarlar'dan kurulur.
+
+   <img src="docs/gorseller/ilk-kurulum.png" width="640" alt="İlk kurulum ekranı: Memnun oldum, Tolga Bey. Notların nerede dursun?">
 4. **Konuş.** Pyn ekranında aracını seç ve yaz. İstersen ilk mesajın şu olsun: *"Beni tanımak için kısa sorular sor; cevapları notlarıma kaydet."*
 
 ## Masaüstü uygulaması

@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.core.json",
     "test": "node scripts/test.mjs",
     "e2e": "npm run build && node scripts/e2e.mjs",
+    "vitrin": "npm run build && node e2e/vitrin.mjs",
     "cortex-paket": "node scripts/cortex-paket.mjs",
     "python-paket": "node scripts/python-paket.mjs",
     "package": "npm run build && electron-builder --win",
