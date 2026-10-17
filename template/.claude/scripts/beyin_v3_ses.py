@@ -1232,6 +1232,24 @@ def transcribe(model, audio, config, lock):
         return ' '.join(s.text.strip() for s in segments).strip()
 
 
+# The wake listener's microphone: no sound for this long and it is opened again. Nothing at all
+# comes from a stream whose device went away; only exact zeros come from one that is not a microphone.
+WAKE_STALL_SN, WAKE_SILENT_SN = 5.0, 30.0
+
+
+def _refresh_audio():
+    """The sound devices listed anew (PortAudio started again): a headset that connected, or became
+    Windows' default, after the helper started is found. Only while no stream is open."""
+    try:
+        import sounddevice as sd
+        sd._terminate()
+        sd._initialize()
+        return True
+    except Exception as exc:
+        log('ses aygıtları yenilenemedi: ' + str(exc)[:200])
+        return False
+
+
 def _device(config):
     """The configured microphone by a part of its name; else the system's default."""
     import sounddevice as sd
@@ -1370,7 +1388,21 @@ class Wake:
         self.recognizer.Reset()
         self.recent.clear()
         self.kept = 0
-        self.recorder.start(on_chunk=self.audio.put)
+        self.last_audio = self.last_sound = now()
+        self.recorder.start(on_chunk=self._took)
+
+    def _took(self, chunk):
+        # The stream's thread: when sound last came, and when it was more than digital silence.
+        moment = now()
+        self.last_audio = moment
+        if len(chunk) and float(abs(chunk).max()) > 0.0:
+            self.last_sound = moment
+        self.audio.put(chunk)
+
+    def stalled(self, moment):
+        """Whether its microphone has gone quiet in a way no room is: nothing from the stream for
+        WAKE_STALL_SN (its device went away), or only exact zeros for WAKE_SILENT_SN."""
+        return moment - self.last_audio > WAKE_STALL_SN or moment - self.last_sound > WAKE_SILENT_SN
 
     def stop(self):
         self.recorder.stop()
@@ -1476,6 +1508,8 @@ def serve(state, config, lines=None):
     # Each recording is a turn. What Whisper writes back names its turn: a turn ended by what
     # was said in it ("kaydet") is gone from `turns`, and nothing it still writes is news.
     turn, turns = 0, {}
+    # When the wake listener may try its microphone again, how long it waits after the next trouble.
+    wake_retry = {'at': 0.0, 'wait': 5.0, 'failed': False}
 
     def begin(continuous=False, woke=False, checking=None):
         """Recording. `checking`: begun on a heard "not al" Whisper has yet to confirm; nobody is
@@ -1485,9 +1519,15 @@ def serve(state, config, lines=None):
             wake.stop()
         try:
             recorder.start()
-        except Exception as exc:
-            out(olay='hata', neden='mikrofon', mesaj=str(exc)[:300])
-            return False
+        except Exception:
+            # A microphone that was not there when the helper started (a headset as Windows signs
+            # in): the device list made anew, and once more.
+            _refresh_audio()
+            try:
+                recorder.start()
+            except Exception as exc:
+                out(olay='hata', neden='mikrofon', mesaj=str(exc)[:300])
+                return False
         mode, turn = 'kayit', turn + 1
         turns[turn] = {'continuous': continuous, 'woke': woke, 'first': True, 'checking': checking}
         if checking is None:
@@ -1635,13 +1675,25 @@ def serve(state, config, lines=None):
                 end()
             elif not recorder.spoke and moment - recorder.started > 12:
                 end(keep=False)  # nothing said: let the microphone go
-        elif mode == 'bos' and wake_on and 'model' in loaded:
+        elif mode == 'bos' and wake_on and 'model' in loaded and moment >= wake_retry['at']:
             try:
                 if wake is None:
                     wake = Wake(state, config)
                 if not wake.running:
                     wake.start()
+                    if wake_retry['failed']:
+                        log('uyandırma: mikrofon yeniden açıldı')
+                        wake_retry['failed'] = False
+                elif wake.stalled(moment):
+                    # A headset that went away, or a device that is not the microphone: opened again
+                    # a little later, the device list made anew.
+                    log('uyandırma: mikrofondan ses gelmiyor; %d sn sonra yeniden açılacak' % wake_retry['wait'])
+                    wake.stop()
+                    _refresh_audio()
+                    wake_retry.update(at=moment + wake_retry['wait'], wait=min(60.0, wake_retry['wait'] * 2), failed=True)
                 else:
+                    if moment - wake.last_sound < 1.0:
+                        wake_retry['wait'] = 5.0  # it hears: the next trouble starts the waits over
                     # Whatever the small model heard, the phrase whole or only "not al", Whisper
                     # checks it before a window opens: held to a grammar, the small model takes
                     # talk for the phrase (seen during a game), and a window must not open over it.
@@ -1650,8 +1702,17 @@ def serve(state, config, lines=None):
                         wake.stop()
                         begin(continuous=True, woke=True, checking={'clip': clip, 'sent': False})
             except Exception as exc:
-                out(olay='hata', neden='uyandirma', mesaj=str(exc)[:300])
-                wake_on = False
+                # The microphone could not be opened (a wireless headset not ready as Windows signs
+                # in). It used to switch the wake phrase off until always-listen was switched off and
+                # on again; now it is tried again, waiting longer each time, up to a minute.
+                log('uyandırma: mikrofon açılamadı (%s); %d sn sonra yeniden denenecek' % (str(exc)[:160], wake_retry['wait']))
+                try:
+                    if wake is not None and wake.running:
+                        wake.stop()
+                except Exception:
+                    pass
+                _refresh_audio()
+                wake_retry.update(at=moment + wake_retry['wait'], wait=min(60.0, wake_retry['wait'] * 2), failed=True)
         elif wake is not None and wake.running and not wake_on:
             wake.stop()
 

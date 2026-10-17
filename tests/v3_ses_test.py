@@ -1017,10 +1017,17 @@ class FakeRecorder:
 class FakeWake:
     def __init__(self):
         self.running, self.verdicts, self.text, self.starts = False, [], '', 0
+        self.fail, self.stall, self.last_sound = 0, False, 0.0
 
     def start(self):
-        self.running = True
         self.starts += 1
+        if self.fail:
+            self.fail -= 1
+            raise OSError('Error opening InputStream: Invalid device')
+        self.running = True
+
+    def stalled(self, _moment):
+        return self.stall
 
     def stop(self):
         self.running = False
@@ -1048,6 +1055,7 @@ class ServeTest(unittest.TestCase):
         self.clock = types.SimpleNamespace(t=1000.0)
         self.recorder, self.wake = FakeRecorder(self.clock), FakeWake()
         self.events, self.asked, self.written = queue.Queue(), [], {}
+        self.logged, self.refreshed = [], []
         self.hold = threading.Event()
         self.hold.set()
 
@@ -1060,7 +1068,8 @@ class ServeTest(unittest.TestCase):
                             ('load_model', lambda _state, _config: ('model', 'sahte')), ('release', lambda _model: None),
                             ('transcribe', transcribe), ('_device_name', lambda _config: 'Mikrofon'),
                             ('join_audio', lambda *parts: Sound('+'.join(part.name for part in parts if part.name))),
-                            ('out', lambda **event: self.events.put(event)), ('log', lambda _text: None),
+                            ('out', lambda **event: self.events.put(event)), ('log', self.logged.append),
+                            ('_refresh_audio', lambda: self.refreshed.append(1) or True),
                             ('now', lambda: self.clock.t)):
             setattr(helper, name, value)
         self.helper, self.lines = helper, queue.Queue()
@@ -1152,6 +1161,56 @@ class ServeTest(unittest.TestCase):
         self.pause()
         last = self.until('metin')
         self.assertEqual((last['metin'], last['komut'], last['son']), ('Market listesi', 'kaydet', True))
+
+    def wait_for(self, test, wait=5.0):
+        deadline = time.monotonic() + wait
+        while not test() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        return test()
+
+    def test_a_microphone_not_there_yet_at_start_is_tried_again_and_the_wake_phrase_stays_on(self):
+        # Seen as "on first start it never works; switching the microphone off and on fixes it":
+        # a headset not ready as Windows signs in switched the wake phrase off for good.
+        self.wake.fail = 2
+        self.serve(uyandirma=True)
+        self.assertTrue(self.wait_for(lambda: self.wake.starts == 1))
+        self.assertTrue(self.wait_for(lambda: len(self.refreshed) == 1), 'the device list made anew')
+        self.assertIn('mikrofon açılamadı', self.logged[0])
+        self.assertFalse(self.wake.running)
+        self.pause(5)  # the first wait
+        self.assertTrue(self.wait_for(lambda: self.wake.starts == 2))
+        time.sleep(0.2)
+        self.assertEqual(self.wake.starts, 2, 'then a longer wait')
+        self.pause(10)
+        self.assertTrue(self.wait_for(lambda: self.wake.running), 'listening again, never switched off')
+        self.assertTrue(self.wait_for(lambda: 'mikrofon yeniden açıldı' in self.logged[-1]))
+        self.assertEqual([e for e in self.quiet(0.2) if e['olay'] == 'hata'], [], 'nobody is bothered with it')
+
+    def test_a_wake_microphone_gone_quiet_is_opened_again(self):
+        self.serve(uyandirma=True)
+        self.assertTrue(self.wait_for(lambda: self.wake.running))
+        self.wake.stall = True
+        self.assertTrue(self.wait_for(lambda: not self.wake.running), 'let go')
+        self.assertEqual(len(self.refreshed), 1)
+        self.assertIn('mikrofondan ses gelmiyor', self.logged[-1])
+        self.wake.stall = False
+        self.pause(5)
+        self.assertTrue(self.wait_for(lambda: self.wake.running and self.wake.starts == 2), 'and opened again')
+
+    def test_a_recording_whose_microphone_fails_lists_the_devices_anew_and_tries_once_more(self):
+        self.serve()
+        tries = []
+        real = self.recorder.start
+
+        def start(*args, **kwargs):
+            tries.append(1)
+            if len(tries) == 1:
+                raise OSError('Error opening InputStream: Invalid device')
+            return real(*args, **kwargs)
+        self.recorder.start = start
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.assertEqual((len(tries), len(self.refreshed)), (2, 1))
 
     def test_a_wake_phrase_changed_in_the_settings_is_listened_for_at_once(self):
         built = []
