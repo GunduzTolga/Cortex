@@ -591,8 +591,11 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
         self.bitmap = {'image': True, 'png': None, 'dib': make_dib(self.pixels, bits=32)}
         Photo.opened = []
 
-    def popup(self, clip, payload, script, context=None):
+    def popup(self, clip, payload, script, context=None, copied_now=True):
+        """`copied_now`: the clipboard changed after the listener started (fresh text goes by default);
+        False: it was already there (unknown age: the text is offered, Tab adds it)."""
         roots = []
+        context = dict(context or {}, clipboard_generation='test-run', clipboard_baseline=41 if copied_now else 42)
         fake = types.ModuleType('tkinter')
         fake.Tk = lambda: roots.append(Root(script)) or roots[-1]
         fake.Canvas, fake.Entry, fake.Text, fake.PhotoImage, fake.TclError = Canvas, Entry, Text, Photo, RuntimeError
@@ -603,6 +606,8 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
                 patch.dict(os.environ, environment, clear=True), \
                 patch.object(yakala, '_clipboard', return_value=clip), \
                 patch.object(yakala, '_clipboard_payload', return_value=payload, create=True) as probe, \
+                patch.object(yakala, '_clipboard_sequence', return_value=42, create=True), \
+                patch.object(yakala, 'resolve_state', return_value=Path(self.tmp.name) / 'state'), \
                 patch.object(yakala, '_style_mac'):
             result = yakala.popup(self.vault, context)
         return result, roots[0], probe
@@ -721,6 +726,23 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
         probe.assert_not_called()
         self.assertFalse(any('Panoda' in text for text in root.seen[0][1]))
         self.assertEqual(Photo.opened, [])
+
+    @unittest.skipUnless(os.name == 'nt', 'the clipboard sequence number is Windows only')
+    def test_text_of_unknown_age_is_offered_not_saved_by_enter(self):
+        # Copied before the listener started (a password, hours ago): Enter saves only the typed line.
+        result, root, _ = self.popup('gizli-parola-123', None, [('look', None), ('type', 'süt al'), ('key', '<Return>')],
+                                     copied_now=False)
+        body = self.card(result)['body']
+        self.assertIn('> süt al', body)
+        self.assertNotIn('gizli-parola-123', body)
+        placeholder, texts = root.seen[0]
+        self.assertEqual(placeholder, 'Aklındakini yaz…')
+        self.assertIn('Tab: panoyu ekle', texts)
+        # Tab adds it, and once saved the same copy is not fresh any more.
+        result, _, _ = self.popup('gizli-parola-123', None, [('key', '<Tab>'), ('look', None), ('type', 'not'), ('key', '<Return>')],
+                                  copied_now=False)
+        self.assertIn('> gizli-parola-123', self.card(result)['body'])
+        self.assertFalse(yakala.clipboard_fresh(self.vault, 42, Path(self.tmp.name) / 'state', 41, 'test-run'))
 
     def test_without_a_picture_the_popup_is_unchanged(self):
         for payload in (None, {'image': False, 'png': None, 'dib': None}):

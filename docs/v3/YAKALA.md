@@ -58,6 +58,8 @@ gösterir. Seçtiğin tuşu başka bir uygulama zaten kullanıyorsa komut uyarı
 3. Bir sayfada eklentiye bas, "Beyne at" şablonunu seç, istersen **Neden** bölümüne bir satır yaz, ekle.
 
 Web Clipper sayfayı tarayıcının içinden okur; giriş isteyen sayfalar (Gmail, ücretli makale) da böylece yakalanır.
+Kart adları kısayolla yakalananlarla aynı biçimde, boşluksuz ve kesme işaretsiz yazılır
+(`2026-10-17-1430-sayfa-basligi`). Cortex 1.0.25'ten önce içe aktardıysan `yakala kur`dan sonra şablonu bir kez daha içe aktar.
 
 ## Kullanım
 
@@ -74,6 +76,21 @@ küçük resmiyle bir **GÖRSEL** kartı olarak gösterir ve Enter onu kartın d
 Son 10 dakikada alınmış görüntü ekli gelir; daha eski ya da kaynağı bilinmeyen bir görüntü
 pencerede görünür ama `Tab` ile eklemeden karta girmez. Panoda metin ya da bağlantı varsa
 pencere eskisi gibi onu yakalar.
+
+**Açık sayfa (Windows):** Chrome, Edge, Brave, Vivaldi ya da Opera öndeyken kısayola basarsan
+açık sayfanın bağlantısı da gelir; tarayıcının adres çubuğundan okunur, yazıp Enter'a basmadığın
+taslak adres sayılmaz. Pencerede **Bu sayfayı nota bağla** işaretli gelir: tıklarsan ya da `Alt+S`
+ile kaldırırsan not, sayfa olmadan düz not olarak kaydedilir. "Pyn, not al" ile açılan pencere
+sayfayı okumaz, hemen açılır. Okuma en çok bir saniye sürer; tarayıcı cevap vermezse pencere
+sayfasız açılır.
+
+**Panodaki metin (Windows):** yalnız son kayıttan sonra (ya da dinleyici açıldıktan sonra)
+kopyaladığın metin nota işaretli gelir. Daha önce kopyalanmış, yaşı bilinmeyen metin
+**Panodaki metni de ekle** seçeneği olarak görünür, `Tab` ya da tıklamayla eklenir. Saatler önce
+kopyaladığın bir parola, Enter'a bastın diye nota girmez.
+
+**Pencere:** boş bir yerinden tutup sürükleyebilirsin. Kısayola hangi ekrandaki pencerede
+bastıysan o ekranda açılır.
 
 ## Sesle yazma (Windows, isteğe bağlı)
 
@@ -115,6 +132,7 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
 - Oyun oynarken ya da uzun konuşmalarda mikrofonun dinlemesini istemezsen masaüstü uygulamasının sağ alttaki simgesinden "Sürekli dinle"yi kapat.
 - **Tutmuyorsa:** `py -3 beyin.py ses dene --uyandirma` 20 saniye dinler; her denemede küçük modelin ne duyduğunu, Whisper'ın ne yazdığını ve pencerenin açılıp açılmayacağını söyler. `state/ses/isci.log` her uyandırma kararını yazar (söylediklerini değil).
 - Bluetooth kulaklıkta mikrofon açıkken müzik ve video sesi kötüleşir; bu özelliği USB ya da dahili mikrofonla kullan.
+- Mikrofon açılamazsa (Windows açılırken kablosuz kulaklık henüz hazır değilse) dinleyici birkaç saniye sonra yeniden dener, ses aygıtlarını yeniden tarar; mikrofondan uzun süre hiç ses gelmezse akışı yeniden açar. Ne olduğunu `state/ses/isci.log` yazar.
 
 **Kısayol:** 1.0.12'den beri Ctrl+Alt+C. Eskiden varsayılan olan Ctrl+Alt+B kendiliğinden Ctrl+Alt+C olur; kendin seçtiğin bir tuş değişmez. Değiştirmek için: `beyin.py yakala kisayol ctrl+alt+x`.
 
@@ -156,7 +174,7 @@ Ayarlar `state/ses/ayar.json` içinde; sorun olursa `state/ses/isci.log` dosyas�
 | Kaynak | Yol |
 |---|---|
 | Web Clipper ile gelen sayfa | Yakalanan metin kullanılır, ağa çıkılmaz |
-| YouTube | [Defuddle](https://github.com/kepano/defuddle) ile bölümlü transkript; olmazsa `yt-dlp` altyazısı; o da yoksa yalnız ses indirilir, yerel Whisper ile yazıya dökülür, ses silinir |
+| YouTube | Videoda konuşulan dil `yt-dlp`'den öğrenilir; [Defuddle](https://github.com/kepano/defuddle) o dilde bölümlü transkript için sorulur; olmazsa o dildeki `yt-dlp` altyazısı (tek tek istenir, YouTube'un HTTP 429'una takılmaz); o da yoksa yalnız ses indirilir, yerel Whisper konuşulan dille yazıya döker, ses silinir. Kart transkriptin dilini (`dil`) ve kullanılan altyazıyı (`altyazi`) yazar; dublajlı bir videoda dil belirlenemezse ya da transkript başka dildeyse `uyari` ekler |
 | X, Reddit, GitHub, makale | Defuddle; yoksa düz HTTP ile metin |
 | Mail | Seçili metin; tamamı için ajanın Gmail/Outlook bağlantısı |
 | PDF, metin dosyası | `pdftotext` ya da doğrudan okuma; görselleri ajan açar |
@@ -172,6 +190,10 @@ Hiçbiri zorunlu değil; varsa işleme genişler, yoksa elde olanla devam edilir
 - **Node.js** (`npx`): Defuddle için. Sabit sürüm (`defuddle@0.19.4`) çalıştırılır.
 - **yt-dlp**: video altyazısı ve ses.
 - **Whisper**: Mac'te `mlx_whisper`, diğerlerinde `whisper` ya da `whisper-ctranslate2`. Ses indirmeyi istemezsen `isle --ses-yok`.
+  Modeli `BEYIN_WHISPER_MODEL` ortam değişkeniyle seçersin (ör. `large-v3-turbo`; `whisper-ctranslate2`'nin
+  varsayılanı `small`, Türkçede çok kelime karıştırır). NVIDIA kartta CUDA kütüphanesi yüklenemezse
+  (ör. `cublas64_12.dll`) ses bir kez işlemciyle yeniden yazıya dökülür; kart Whisper'ın kendi hata satırını yazar.
+  Bu, sesle yazmanın Whisper'ından ayrıdır; o kendi motorunu kullanır.
 - **pdftotext** (Poppler): PDF metni.
 
 ## Gizlilik
@@ -179,7 +201,8 @@ Hiçbiri zorunlu değil; varsa işleme genişler, yoksa elde olanla devam edilir
 - Yakalama ağa çıkmaz; yalnız vault'a bir dosya yazar.
 - Ağ yalnız `isle` adımında ve yalnız yakaladığın kaynaklar için kullanılır. Defuddle,
   X gönderisi sayfada yoksa gönderi adresini FxTwitter API'sine sorar.
-- Mail, pano metni ve dosya kartları `visibility: private` ile yazılır.
+- Mail, pano metni ve dosya kartları `visibility: private` ile yazılır. Windows'ta pano metni,
+  görüntüsü ya da dosyası eklenen sayfa kartı da (daha önce yakalanmış bir sayfanınki dahil) private olur.
 - Sesle yazmada ses yalnız bellekte tutulur, yazıya çevrilince atılır; hiçbir yere gönderilmez ve diske yazılmaz.
 - Kaldırmak için `python3 beyin.py yakala kaldir`: kısayol, skill ve bildirim gider, kartların kalır.
 
@@ -199,6 +222,12 @@ Yakalanan içerik dışarıdan gelir; Cortex onu veri olarak tutar, talimat olar
   (UNC), `..` ya da Windows aygıt adı (`CON`, `NUL`…) varsa dosya hiç açılmadan reddedilir.
 - **Windows'ta komut satırı.** Yardımcı araçlara giden adresler `cmd.exe`'den geçmez: `npx` doğrudan
   `node.exe` ile çalıştırılır. `&` içeren YouTube bağlantıları artık kesilmez ve komut olarak yorumlanamaz.
+  Süresi dolan bir yardımcı aracın açtığı bütün alt süreçler de (Defuddle'ın `node`'u, `yt-dlp`'nin `ffmpeg`'i)
+  kapatılır; `isle` asılı kalmaz. Obsidian, OneDrive ya da bir virüs taraması kilitlediği için yazılamayan
+  bir kart yalnız kendi hatası olur, kuyruğun kalanı işlenir.
+- **Tarayıcı adresi ayrı süreçte.** Adres çubuğu kısa ömürlü ayrı bir süreçte, bir saniyelik süreyle
+  okunur; donan bir tarayıcı dinleyiciyi ve sesle yazmayı durduramaz. Yerel ya da özel bir sayfanın
+  adresi kaynak sayılmaz.
 - **Ham metin sınırlı.** `.ham/` kayıtları `kaynak_guveni: guvenilmeyen` taşır ve kaynak metni her dosyaya
   özgü rastgele bir başlangıç/bitiş işaretiyle çevrilir. Kaynağın kendi yazdığı "kaynak bitti" ya da
   "kullanıcı talimatı" başlıkları bu sınırı kapatmaz. Bu işaretler prompt injection'a karşı tek başına
