@@ -12,6 +12,7 @@ const voice = (change: Partial<VoiceStatus>): VoiceStatus => ({
   engine: 'vulkan',
   model: 'large-v3-turbo',
   commands: null,
+  wakePhrase: 'pyn not al',
   ...change,
 });
 
@@ -20,7 +21,7 @@ test('the icon’s menu says whether the microphone listens and switches it, ope
   assert.deepEqual(
     items.map((item) => [item.label, item.action ?? null, item.icon ?? null, item.enabled ?? true]),
     [
-      ['Mikrofon dinliyor: "Pyn, not al"', null, 'mikrofon-acik', false],
+      ['Mikrofon dinliyor: “Pyn, not al”', null, 'mikrofon-acik', false],
       ['Sürekli dinlemeyi kapat', 'wake', 'mikrofon-kapali', true],
       ['', null, null, true],
       ['Not al', 'note', 'not', true],
@@ -32,10 +33,12 @@ test('the icon’s menu says whether the microphone listens and switches it, ope
   );
   assert.ok(items.filter((item) => item.type !== 'separator').every((item) => item.icon), 'every item has an icon: nothing looks pushed aside');
   const off = trayItems(voice({}), false, false, true);
-  assert.deepEqual([off[0].label, off[1].label, off[1].icon], ['Mikrofon kapalı', 'Sürekli dinle ("Pyn, not al")', 'mikrofon-acik']);
+  assert.deepEqual([off[0].label, off[1].label, off[1].icon], ['Mikrofon kapalı', 'Sürekli dinle (“Pyn, not al”)', 'mikrofon-acik']);
   assert.equal(trayItems(voice({ wake: true }), false, true, true)[1].enabled, false, 'not while a switch is under way');
-  assert.equal(trayItems(voice({}), true, false, true)[1].label, 'Listen all the time ("Pyn, not al")', 'in the window’s language');
+  assert.equal(trayItems(voice({}), true, false, true)[1].label, 'Listen all the time (“Pyn, not al”)', 'in the window’s language');
   assert.equal(trayItems(voice({}), false, false, false)[3].enabled, false, 'no vault: no note to take');
+  assert.equal(trayItems(voice({ wakePhrase: 'hey pyn' }), false, false, true)[1].label, 'Sürekli dinle (“Hey Pyn”)', 'the phrase chosen');
+  assert.equal(trayItems(voice({ wakePhrase: 'ikisi', wake: true }), false, false, true)[0].label, 'Mikrofon dinliyor: “Hey Pyn” ya da “Pyn, not al”', 'both');
 });
 
 test('without voice typing set up, or switched off, there is no microphone to switch', () => {
@@ -49,7 +52,7 @@ test('without voice typing set up, or switched off, there is no microphone to sw
 });
 
 test('the icon says whether the microphone listens', () => {
-  assert.equal(trayTooltip(voice({ wake: true }), false), 'Cortex · mikrofon "Pyn, not al" için dinliyor');
+  assert.equal(trayTooltip(voice({ wake: true }), false), 'Cortex · mikrofon “Pyn, not al” için dinliyor');
   assert.equal(trayTooltip(voice({ wake: false }), false), 'Cortex · mikrofon kapalı');
   assert.equal(trayTooltip(null, true), 'Cortex · the microphone is off');
 });

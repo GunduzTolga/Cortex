@@ -22,12 +22,26 @@ export interface VoiceStatus {
   model: string | null;
   /** The spoken commands' words; null from an engine that cannot set them yet. */
   commands: VoiceCommands | null;
+  /** What opens yakala while the microphone listens all the time. */
+  wakePhrase: WakePhrase;
+}
+
+/** The wake phrases there are: Pyn's name first, or last, or either of the two ('ikisi'). */
+export type WakePhrase = 'pyn not al' | 'hey pyn' | 'ikisi';
+export const WAKE_PHRASES: readonly WakePhrase[] = ['pyn not al', 'hey pyn', 'ikisi'];
+
+/** A wake phrase as a person says it, in quotes: “Pyn, not al”, “Hey Pyn”, or both. */
+export function wakePhraseLabel(phrase: WakePhrase | null | undefined, english = false): string {
+  if (phrase === 'ikisi') return `“Hey Pyn” ${english ? 'or' : 'ya da'} “Pyn, not al”`;
+  return phrase === 'hey pyn' ? '“Hey Pyn”' : '“Pyn, not al”';
 }
 
 /** What can be said into yakala's window, each by the words set for it (`ses ayar --komutlar`). */
 export interface VoiceCommands {
   /** Writes and saves; at a sentence's end too ("…, kaydet"). */
   kaydet: string[];
+  /** The picture copied last goes with the note; at a sentence's end too. */
+  resim_ekle: string[];
   /** Save too, but only right after Pyn's name ("Pyn, gönder"): anywhere else they are the note's words. */
   adla_kaydet: string[];
   /** Takes the last word back; at a sentence's end too. */
@@ -40,7 +54,7 @@ export interface VoiceCommands {
   iptal: string[];
 }
 
-export const VOICE_COMMANDS = ['kaydet', 'adla_kaydet', 'kelime_sil', 'cumle_sil', 'sil', 'iptal'] as const;
+export const VOICE_COMMANDS = ['kaydet', 'adla_kaydet', 'resim_ekle', 'kelime_sil', 'cumle_sil', 'sil', 'iptal'] as const;
 
 /** A command's words as a person may set them; the engine checks them again. */
 export const COMMAND_WORDS = { most: 8, longest: 40 } as const;
@@ -53,6 +67,7 @@ export interface VoicePatch {
   commands?: Partial<VoiceCommands>;
   /** Every command back to its first words. */
   defaultCommands?: boolean;
+  wakePhrase?: WakePhrase;
 }
 
 export type SetupJob = 'python' | 'engine' | 'voice';

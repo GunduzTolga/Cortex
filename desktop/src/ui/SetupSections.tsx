@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Download, Mic, RefreshCw, RotateCcw } from 'lucide-react';
-import { COMMAND_WORDS, VOICE_COMMANDS } from '@shared/setup';
-import type { SetupJob, SetupStatus, VoiceCommands } from '@shared/setup';
+import { COMMAND_WORDS, VOICE_COMMANDS, WAKE_PHRASES, wakePhraseLabel } from '@shared/setup';
+import type { SetupJob, SetupStatus, VoiceCommands, WakePhrase } from '@shared/setup';
 import type { Key } from '../i18n';
-import { useT } from '../i18n/useT';
+import { useLanguage, useT } from '../i18n/useT';
 import { useSetup } from '../store/setup';
-import { SaveButton, Section } from './settingsParts';
+import { Row, SaveButton, Section, Segments } from './settingsParts';
 import { Button, Spinner, Switch, inputClass } from './ui';
 
 /**
@@ -156,6 +156,7 @@ function VoiceCommandsBlock({ commands, busy }: { commands: VoiceCommands; busy:
 
 function VoiceSection({ status }: { status: SetupStatus }) {
   const t = useT();
+  const english = useLanguage() === 'en';
   const steps = useSetup((s) => s.steps);
   const error = useSetup((s) => s.error);
   const run = useSetup((s) => s.run);
@@ -172,7 +173,23 @@ function VoiceSection({ status }: { status: SetupStatus }) {
         <>
           <Switch checked={voice.on} onChange={(on) => void set({ on })} label={t('setup.voice.on')} hint={t('setup.voice.on.hint')} data-setup-voice-on />
           <Switch checked={voice.auto} onChange={(auto) => void set({ auto })} label={t('setup.voice.auto')} hint={t('setup.voice.auto.hint')} data-setup-voice-auto />
-          <Switch checked={voice.wake} onChange={(wake) => void set({ wake })} label={t('setup.voice.wake')} hint={t('setup.voice.wake.hint')} data-setup-voice-wake />
+          <Switch
+            checked={voice.wake}
+            onChange={(wake) => void set({ wake })}
+            label={t('setup.voice.wake', { phrase: wakePhraseLabel(voice.wakePhrase, english) })}
+            hint={t('setup.voice.wake.hint', { phrase: wakePhraseLabel(voice.wakePhrase, english) })}
+            data-setup-voice-wake
+          />
+          <Row label={t('setup.voice.phrase')}>
+            <Segments<WakePhrase>
+              label={t('setup.voice.phrase')}
+              data="setup-voice-phrase"
+              chosen={voice.wakePhrase}
+              onChoose={(wakePhrase) => void set({ wakePhrase })}
+              options={WAKE_PHRASES.map((phrase) => ({ id: phrase, label: phrase === 'ikisi' ? t('setup.voice.phrase.both') : wakePhraseLabel(phrase) }))}
+            />
+          </Row>
+          <Note data="phrase">{t(voice.wakePhrase === 'hey pyn' ? 'setup.voice.phrase.hey' : voice.wakePhrase === 'ikisi' ? 'setup.voice.phrase.ikisi' : 'setup.voice.phrase.notAl')}</Note>
           <Note data="engine">{t('setup.voice.engine', { engine: t(ENGINE_NAME[voice.engine]), model: voice.model ?? '' })}</Note>
           {voice.commands ? <VoiceCommandsBlock commands={voice.commands} busy={busy} /> : null}
         </>

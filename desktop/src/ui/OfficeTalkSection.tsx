@@ -2,7 +2,7 @@ import type { TalkTool } from '@shared/office';
 import type { Key } from '../i18n';
 import { useT } from '../i18n/useT';
 import { TALK_EVERY, TALK_TOOL_NAME, useTalk, useTalkModels, useTalkTools, type TalkToolState } from '../office/talkPrefs';
-import { Row, Section } from './settingsParts';
+import { Row, Section, Segments } from './settingsParts';
 import { Switch, inputClass } from './ui';
 
 /**
@@ -19,32 +19,6 @@ function Note({ children, data }: { children: React.ReactNode; data?: string }) 
     <p className="px-3 text-[11.5px] leading-relaxed text-zinc-500" data-settings-office-note={data}>
       {children}
     </p>
-  );
-}
-
-/** Buttons side by side, the chosen one raised, as the language switch is. */
-function Segments<T extends string | number>({ options, chosen, onChoose, label, data }: { options: Array<{ id: T; label: React.ReactNode; title?: string }>; chosen: T | null; onChoose: (id: T) => void; label: string; data: string }) {
-  return (
-    <div role="group" aria-label={label} className="flex shrink-0 items-center rounded-lg bg-zinc-100 p-0.5">
-      {options.map((one) => {
-        const current = one.id === chosen;
-        return (
-          <button
-            key={String(one.id)}
-            type="button"
-            title={one.title}
-            aria-pressed={current}
-            onClick={() => onChoose(one.id)}
-            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] font-semibold transition-colors ${
-              current ? 'bg-paper-2 text-darkDelegation shadow-[0_1px_2px_rgba(27,23,18,0.12)]' : 'text-zinc-500 hover:text-darkDelegation'
-            }`}
-            {...{ [`data-${data}`]: String(one.id) }}
-          >
-            {one.label}
-          </button>
-        );
-      })}
-    </div>
   );
 }
 

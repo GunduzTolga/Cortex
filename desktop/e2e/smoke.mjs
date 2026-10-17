@@ -194,11 +194,15 @@ commands = json.load(open(kept, encoding='utf-8')) if os.path.exists(kept) else 
 if args[:2] == ['ses', 'ayar'] and '--komutlar' in args:
     commands.update(json.loads(args[args.index('--komutlar') + 1]))
     json.dump(commands, open(kept, 'w', encoding='utf-8'))
+said = os.path.join(folder, 'soz.txt')
+if args[:2] == ['ses', 'ayar'] and '--uyandirma-sozu' in args:
+    open(said, 'w', encoding='utf-8').write(args[args.index('--uyandirma-sozu') + 1])
+phrase = open(said, encoding='utf-8').read() if os.path.exists(said) else 'pyn not al'
 if args[:2] == ['yakala', 'durum']:
     print(json.dumps({'status': 'tamam', 'kurulu': True}))
 elif args[:1] == ['ses']:
     print(json.dumps({'kurulu': True, 'acik': True, 'uyandirma': False, 'otomatik_dinle': True, 'motor': 'vulkan',
-                      'model': 'large-v3-turbo (ekran kartı, Vulkan)', 'komutlar': commands, 'adla_kaydet': ['gönder', 'tamam']}, ensure_ascii=False))
+                      'model': 'large-v3-turbo (ekran kartı, Vulkan)', 'komutlar': commands, 'adla_kaydet': ['gönder', 'tamam'], 'uyandirma_sozu': phrase}, ensure_ascii=False))
 else:
     print('bilinmeyen komut', file=sys.stderr)
     sys.exit(2)
@@ -494,6 +498,23 @@ if (process.platform === 'win32' && (await page.evaluate(() => window.cortex.set
     await soon(() => fs.existsSync(askedLog) && fs.readFileSync(askedLog, 'utf8').includes('ses ayar --komutlar {"kaydet":["kaydet","tamamdır"]}')),
   );
   check('and shown as the engine kept them', await page.waitForFunction(() => document.querySelector('[data-setup-voice-command="kaydet"]')?.value === 'kaydet, tamamdır', null, { timeout: 5_000 }).then(() => true, () => false));
+  // The wake phrase: "Pyn, not al" or "Hey Pyn", set with the engine's own setting.
+  const hey = page.locator('[data-setup-voice-phrase="hey pyn"]');
+  await hey.scrollIntoViewIfNeeded();
+  await hey.click();
+  check(
+    'the wake phrase is chosen there: "Hey Pyn" set with the engine’s own setting, and shown chosen',
+    (await soon(() => fs.readFileSync(askedLog, 'utf8').includes('ses ayar --uyandirma-sozu hey pyn'))) &&
+      (await page.waitForFunction(() => document.querySelector('[data-setup-voice-phrase="hey pyn"]')?.getAttribute('aria-pressed') === 'true', null, { timeout: 5_000 }).then(() => true, () => false)),
+  );
+  await page.locator('[data-setup-voice-phrase="ikisi"]').click();
+  check(
+    'or both at once',
+    (await soon(() => fs.readFileSync(askedLog, 'utf8').includes('ses ayar --uyandirma-sozu ikisi'))) &&
+      (await page.waitForFunction(() => document.querySelector('[data-setup-voice-phrase="ikisi"]')?.getAttribute('aria-pressed') === 'true', null, { timeout: 5_000 }).then(() => true, () => false)),
+  );
+  await page.waitForTimeout(300);
+  await shoot('07e-voice-phrase.png');
   await page.keyboard.press('Escape');
   fs.rmSync(vaultNote('beyin.py'));
   fs.rmSync(vaultNote('.beyin-version'));

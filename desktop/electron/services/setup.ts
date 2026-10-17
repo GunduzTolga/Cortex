@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { app } from 'electron';
-import { COMMAND_WORDS, VOICE_COMMANDS } from '../../shared/setup';
-import type { SetupJob, SetupPush, SetupStatus, VoiceCommands, VoiceEngine, VoiceStatus } from '../../shared/setup';
+import { COMMAND_WORDS, VOICE_COMMANDS, WAKE_PHRASES } from '../../shared/setup';
+import type { SetupJob, SetupPush, SetupStatus, VoiceCommands, VoiceEngine, VoiceStatus, WakePhrase } from '../../shared/setup';
 import pythonPin from '../../python.json';
 import { childEnv } from './acp';
 import { pythonOf } from './localChat';
@@ -226,6 +226,7 @@ export function voiceOf(result: Record<string, unknown>): VoiceStatus | null {
     // The model's name only: where it runs is said by `engine`, not twice (`large-v3-turbo (ekran kartı, Vulkan)`).
     model: typeof result.model === 'string' ? result.model.replace(/\s*\([^)]*\)\s*$/, '') : null,
     commands: commandsOf(result),
+    wakePhrase: WAKE_PHRASES.includes(result.uyandirma_sozu as WakePhrase) ? (result.uyandirma_sozu as WakePhrase) : 'pyn not al',
   };
 }
 
@@ -239,6 +240,7 @@ function commandsOf(result: Record<string, unknown>): VoiceCommands | null {
   return {
     kaydet: wordsOf(said.kaydet),
     adla_kaydet: wordsOf(result.adla_kaydet),
+    resim_ekle: wordsOf(said.resim_ekle),
     kelime_sil: wordsOf(said.kelime_sil),
     cumle_sil: wordsOf(said.cumle_sil),
     sil: wordsOf(said.sil),
@@ -499,6 +501,7 @@ export async function setVoice(patch: unknown): Promise<SetupStatus> {
   if (typeof asked.wake === 'boolean') args.push('--uyandirma', asked.wake ? 'ac' : 'kapat');
   if (typeof asked.auto === 'boolean') args.push('--otomatik', asked.auto ? 'ac' : 'kapat');
   if (asked.defaultCommands === true) args.push('--varsayilan-komutlar');
+  if (WAKE_PHRASES.includes(asked.wakePhrase as WakePhrase)) args.push('--uyandirma-sozu', asked.wakePhrase as WakePhrase);
   const commands = commandsPatch(asked.commands);
   if (commands) args.push('--komutlar', JSON.stringify(commands));
   const vault = vaultOrNull();

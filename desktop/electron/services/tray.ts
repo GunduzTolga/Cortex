@@ -1,7 +1,7 @@
 import { app, Menu, nativeImage, Tray } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { VoiceStatus } from '../../shared/setup';
+import { wakePhraseLabel, type VoiceStatus } from '../../shared/setup';
 import { readSettings } from './settings';
 import { onVoiceStatus, openNoteWindow, setupStatus, setVoice } from './setup';
 
@@ -39,13 +39,14 @@ export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boo
   const say = (tr: string, en: string) => (english ? en : tr);
   const usable = Boolean(voice?.installed && voice.on);
   const listening = listensAlways(voice);
+  const phrase = wakePhraseLabel(voice?.wakePhrase, english);
   const separator: TrayItem = { label: '', type: 'separator' };
   return [
     {
       label: !usable
         ? say('Sesle yazma kurulu değil', 'Voice typing is not set up')
         : listening
-          ? say('Mikrofon dinliyor: "Pyn, not al"', 'The microphone listens: "Pyn, not al"')
+          ? say(`Mikrofon dinliyor: ${phrase}`, `The microphone listens: ${phrase}`)
           : say('Mikrofon kapalı', 'The microphone is off'),
       type: 'normal',
       enabled: false,
@@ -54,7 +55,7 @@ export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boo
     ...(usable
       ? [
           {
-            label: listening ? say('Sürekli dinlemeyi kapat', 'Stop listening all the time') : say('Sürekli dinle ("Pyn, not al")', 'Listen all the time ("Pyn, not al")'),
+            label: listening ? say('Sürekli dinlemeyi kapat', 'Stop listening all the time') : say(`Sürekli dinle (${phrase})`, `Listen all the time (${phrase})`),
             type: 'normal' as const,
             enabled: !busy,
             icon: listening ? ('mikrofon-kapali' as const) : ('mikrofon-acik' as const),
@@ -73,7 +74,8 @@ export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boo
 
 /** What the icon says when the pointer rests on it. */
 export function trayTooltip(voice: VoiceStatus | null, english: boolean): string {
-  if (listensAlways(voice)) return english ? 'Cortex · the microphone listens for "Pyn, not al"' : 'Cortex · mikrofon "Pyn, not al" için dinliyor';
+  const phrase = wakePhraseLabel(voice?.wakePhrase, english);
+  if (listensAlways(voice)) return english ? `Cortex · the microphone listens for ${phrase}` : `Cortex · mikrofon ${phrase} için dinliyor`;
   return english ? 'Cortex · the microphone is off' : 'Cortex · mikrofon kapalı';
 }
 

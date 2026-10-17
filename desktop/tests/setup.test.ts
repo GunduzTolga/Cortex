@@ -68,7 +68,11 @@ test('the voice status is the engine’s, the model by its name only', () => {
     engine: 'vulkan',
     model: 'large-v3-turbo',
     commands: null,
+    wakePhrase: 'pyn not al',
   });
+  assert.equal(voiceOf({ kurulu: true, uyandirma_sozu: 'hey pyn' })?.wakePhrase, 'hey pyn');
+  assert.equal(voiceOf({ kurulu: true, uyandirma_sozu: 'ikisi' })?.wakePhrase, 'ikisi', 'both at once');
+  assert.equal(voiceOf({ kurulu: true, uyandirma_sozu: 'merhaba' })?.wakePhrase, 'pyn not al', 'only a phrase there is');
   assert.equal(voiceOf({ kurulu: false, motor: 'bilinmeyen' })?.engine, 'islemci');
   assert.equal(voiceOf({ status: 'tamam' }), null, 'not a voice status');
 });
@@ -78,6 +82,7 @@ test('the spoken commands are the engine’s, and what a window asks is tidied b
   assert.deepEqual(voiceOf({ kurulu: true, komutlar: said, adla_kaydet: ['gönder'] })?.commands, {
     kaydet: ['kaydet'],
     adla_kaydet: ['gönder'],
+    resim_ekle: [],
     kelime_sil: ['son kelimeyi sil'],
     cumle_sil: [],
     sil: ['sil', 'hepsini sil'],
@@ -176,6 +181,8 @@ test('voice typing is set up from the app: yakala first if it is not, then the e
   assert.ok(asked(vault).includes('ses ayar --komutlar {"kaydet":["kaydet","tamam"]}'));
   await setVoice({ defaultCommands: true });
   assert.ok(asked(vault).includes('ses ayar --varsayilan-komutlar'));
+  await setVoice({ wakePhrase: 'hey pyn' });
+  assert.ok(asked(vault).includes('ses ayar --uyandirma-sozu hey pyn'));
 });
 
 test('a job that fails says why, and the next one may start', { skip: !hasPython || process.platform !== 'win32' }, async () => {
