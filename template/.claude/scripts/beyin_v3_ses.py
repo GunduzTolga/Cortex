@@ -86,9 +86,11 @@ DEFAULTS = {
     'mikrofon': None,
     'ipucu': 'Cortex, Pyn, yakala, kasa, not, makbuz, Claude, Codex.',
     # Said alone, with or without Pyn's name before: "sil" empties the field, "iptal" closes it.
-    # "kaydet" and taking the last word or sentence back count at a sentence's end too.
+    # "kaydet", the clipboard's picture added ("panodaki resmi ekle") and taking the last word or
+    # sentence back count at a sentence's end too.
     'komutlar': {
         'kaydet': ['kaydet'],
+        'resim_ekle': ['resmi ekle', 'panodaki resmi ekle', 'görüntüyü ekle', 'panodaki görüntüyü ekle', 'ekran görüntüsünü ekle'],
         'sil': ['sil', 'temizle', 'hepsini sil'],
         'kelime_sil': ['son kelimeyi sil'],
         'cumle_sil': ['son cümleyi sil'],
@@ -138,13 +140,13 @@ def worker_command(state, *extra):
 
 COMMANDS = tuple(DEFAULTS['komutlar'])
 # Commands that count at the end of a sentence too ("…, kaydet"); the others only said alone.
-AT_END = ('kaydet', 'kelime_sil', 'cumle_sil')
+AT_END = ('kaydet', 'resim_ekle', 'kelime_sil', 'cumle_sil')
 # A command's words as earlier versions wrote them into every settings file: the new default.
 OLD_COMMANDS = {'sil': (['sil', 'temizle'],)}
 # What a person may set a command's words to.
 MOST_PHRASES, LONGEST_PHRASE = 8, 40
 # What a running helper takes up when the settings file changes (`ayar`); the rest needs a restart.
-LIVE_SETTINGS = ('komutlar', 'adla_kaydet', 'sessizlik_sn', 'en_uzun_sn', 'surekli_bekle_sn', 'ipucu')
+LIVE_SETTINGS = ('komutlar', 'adla_kaydet', 'sessizlik_sn', 'en_uzun_sn', 'surekli_bekle_sn', 'ipucu', 'uyandirma_sozu')
 
 
 def load_config(state):
@@ -235,6 +237,11 @@ NAME_SAID = 'payn'
 # freely, it wrote "payn not al" as "aynen" or "pan am". Given the phrase as a grammar it hears
 # one of these instead (tried on synthesized "payn not al": "pay not al", every time).
 WAKE_NAMES = ('pay', 'bin', 'bayan')
+# The wake phrases a person may choose: Pyn's name first or last. "Hey Pyn" is shorter and was
+# heard more surely, but every "hey" said nearby is a candidate Whisper checks for a moment.
+WAKE_PHRASES = ('pyn not al', 'hey pyn', 'ikisi')
+# 'ikisi': either opens the window; the small model listens for both.
+BOTH_PHRASES = ('hey pyn', 'pyn not al')
 
 
 def tr_lower(text):
@@ -256,6 +263,30 @@ def _name_like(word, head):
     return any(difflib.SequenceMatcher(None, word, form).ratio() >= 0.6 for form in forms)
 
 
+def phrase_label(phrase):
+    """A wake phrase as a person says it: "Pyn, not al", "Hey Pyn"; both, one or the other."""
+    if phrase == 'ikisi':
+        return ' ya da '.join(phrase_label(one) for one in BOTH_PHRASES)
+    said = words(phrase or DEFAULTS['uyandirma_sozu'])
+    at_name = _name_at(said)
+    shown = [('Pyn' if at == at_name else word) for at, word in enumerate(said)]
+    if at_name == 0 and len(shown) > 1:
+        return shown[0] + ', ' + ' '.join(shown[1:])
+    text = ' '.join(shown)
+    return text[:1].upper() + text[1:]
+
+
+def _name_at(said):
+    """Where Pyn's name is in a wake phrase's words: first in "pyn not al", last in "hey pyn"."""
+    return next((at for at, word in enumerate(said) if word == 'pyn' or word in NAME_SPELLINGS), 0)
+
+
+def _matches(got, said, at_name, offset=0):
+    """Whether heard words are these words of the phrase (from `offset` on): its name loosely,
+    the rest as said."""
+    return len(got) >= len(said) and all(_name_like(got[i], word) if offset + i == at_name else got[i] == word for i, word in enumerate(said))
+
+
 def _apart(got, said, ends=None):
     """Heard words with the phrase's own words written as one taken apart: Whisper writes
     "not al" as "notal" too. With `ends` (where each word ends in the text), theirs alongside."""
@@ -271,18 +302,16 @@ def _apart(got, said, ends=None):
 
 def wake_heard(text, phrase=DEFAULTS['uyandirma_sozu']):
     """Whether the wake phrase is in what was heard. The rest of the phrase must be there as
-    said ("not al", or "notal" as one word); the name before it is matched loosely, since nobody
+    said ("not al", or "notal" as one word; "hey"); the name is matched loosely, since nobody
     spells "Pyn" alike."""
+    if phrase == 'ikisi':
+        return any(wake_heard(text, one) for one in BOTH_PHRASES)
     want = words(phrase)
     got = _apart(words(text), want)
     if not want:
         return False
-    head, tail = want[0], want[1:]
-    for at in range(len(got) - len(want) + 1):
-        window = got[at:at + len(want)]
-        if window[1:] == tail and _name_like(window[0], head):
-            return True
-    return False
+    at_name = _name_at(want)
+    return any(_matches(got[at:at + len(want)], want, at_name) for at in range(len(got) - len(want) + 1))
 
 
 def wake_verdict(text, phrase=DEFAULTS['uyandirma_sozu']):
@@ -290,11 +319,16 @@ def wake_verdict(text, phrase=DEFAULTS['uyandirma_sozu']):
     when only the rest of it is ("not al"), after a word the small model does not know or after
     nothing. Said by a real voice, the name is mostly such a word: whether it was Pyn's name,
     Whisper decides from the sound (wake_heard on what it writes). None otherwise."""
+    if phrase == 'ikisi':
+        verdicts = [wake_verdict(text, one) for one in BOTH_PHRASES]
+        return 'soz' if 'soz' in verdicts else 'aday' if 'aday' in verdicts else None
     if wake_heard(text, phrase):
         return 'soz'
-    tail = words(phrase)[1:]
-    got = _apart(words(text), words(phrase))
-    if tail and any(got[at:at + len(tail)] == tail for at in range(len(got) - len(tail) + 1)):
+    said = words(phrase)
+    at_name = _name_at(said)
+    rest = said[:at_name] + said[at_name + 1:]
+    got = _apart(words(text), said)
+    if rest and any(got[at:at + len(rest)] == rest for at in range(len(got) - len(rest) + 1)):
         return 'aday'
     return None
 
@@ -305,25 +339,34 @@ def wake_grammar(phrase=DEFAULTS['uyandirma_sozu']):
     The model knows no "pyn": it leaves the word out, so "not al" was in the grammar already, and
     a real voice saying "payn" is mostly heard as "[unk] not al". "bunu not al" is heard so too:
     "not al" is never the phrase by itself, only a candidate Whisper checks (wake_verdict)."""
+    if phrase == 'ikisi':
+        heard = []
+        for one in BOTH_PHRASES:
+            heard += [line for line in json.loads(wake_grammar(one)) if line != '[unk]' and line not in heard]
+        return json.dumps(heard + ['[unk]'], ensure_ascii=False)
     said = words(phrase)
     if not said:
         return json.dumps(['[unk]'])
-    head, tail = said[0], ' '.join(said[1:])
-    names = [head] + [name for name in WAKE_NAMES if name != head]
-    phrases = [(name + ' ' + tail).strip() for name in names] + ([tail] if tail else [])
+    at_name = _name_at(said)
+    before, name, after = said[:at_name], said[at_name], said[at_name + 1:]
+    names = [name] + [one for one in WAKE_NAMES if one != name]
+    phrases = [' '.join(before + [one] + after) for one in names] + ([' '.join(before + after)] if before or after else [])
     return json.dumps(phrases + ['[unk]'], ensure_ascii=False)
 
 
 def without_wake(text, phrase=DEFAULTS['uyandirma_sozu']):
     """Dictation begun by the wake phrase, without what of the phrase its recording caught at the
-    start ("al.", "not al,", "Pyn, not al"): the note begins after it."""
+    start ("al.", "not al,", "Pyn, not al"; "Pyn," of "Hey Pyn"): the note begins after it."""
+    if phrase == 'ikisi':
+        for one in BOTH_PHRASES:
+            if without_wake(text, one) != text.strip():
+                return without_wake(text, one)
+        return text.strip()
     said = words(phrase)
+    at_name = _name_at(said)
     got, ends = _apart(words(text), said, [m.end() for m in re.finditer(r'\w+', tr_lower(text))])
     for size in range(len(said), 0, -1):
-        if len(got) < size or got[1:size] != said[len(said) - size + 1:]:
-            continue
-        first = said[len(said) - size]
-        if got[0] == first or (size == len(said) and _name_like(got[0], first)):
+        if _matches(got[:size], said[len(said) - size:], at_name, len(said) - size):
             return text[ends[size - 1]:].lstrip(' ,.;:!?…-').strip()
     return text.strip()
 
@@ -812,7 +855,7 @@ def trial_line(event):
     if kind == 'dinliyor':
         return ('%g saniye dinliyorum · %s · Whisper: %s\n"%s" de; birkaç kez, farklı tonlarda dene.'
                 % (event.get('sn') or 0, event.get('mikrofon') or 'varsayılan mikrofon', event.get('model') or '?',
-                   'Pyn, ' + ' '.join(words(event.get('soz') or '')[1:]) if event.get('soz') else 'Pyn, not al'))
+                   phrase_label(event.get('soz'))))
     if kind == 'duyulan':
         return '  küçük model: ' + str(event.get('metin') or '')
     if kind == 'karar' and event.get('karar') == 'soz':
@@ -863,6 +906,7 @@ def main(argv=None, vault=None, state=None):
     setting.add_argument('--ses', choices=('ac', 'kapat'), help='Sesle yazmayı aç ya da kapat')
     setting.add_argument('--model', help='Whisper modeli, örnek: large-v3-turbo, small')
     setting.add_argument('--motor', choices=('otomatik',) + ENGINES, help='Yazan motor: otomatik, cuda, vulkan ya da islemci')
+    setting.add_argument('--uyandirma-sozu', choices=WAKE_PHRASES, help='Uyandırma sözü: "pyn not al", "hey pyn" ya da ikisi de ("ikisi")')
     setting.add_argument('--komutlar', help='Sesli komutların sözleri, JSON: {"kaydet": ["kaydet", "tamam"], "adla_kaydet": ["gönder"]}')
     setting.add_argument('--varsayilan-komutlar', action='store_true', help='Sesli komutları ilk hallerine döndür')
     trial = sub.add_parser('dene', help='Birkaç saniye kaydedip yazıya çevir')
@@ -906,6 +950,8 @@ def main(argv=None, vault=None, state=None):
             config['model'] = config['cpu_model'] = args.model
         if args.motor:
             config['motor'] = args.motor
+        if args.uyandirma_sozu:
+            config['uyandirma_sozu'] = args.uyandirma_sozu
         if args.varsayilan_komutlar:
             config['komutlar'] = json.loads(json.dumps(DEFAULTS['komutlar']))
             config['adla_kaydet'] = list(DEFAULTS['adla_kaydet'])
@@ -1562,7 +1608,13 @@ def serve(state, config, lines=None):
                     fresh = ses.load_config(state)
                 except Exception:
                     fresh = {}
+                phrase = config.get('uyandirma_sozu')
                 config.update({key: fresh[key] for key in ses.LIVE_SETTINGS if key in fresh})
+                if config.get('uyandirma_sozu') != phrase and wake is not None:
+                    # Another wake phrase: the small model listens with its grammar from now on.
+                    if wake.running:
+                        wake.stop()
+                    wake = None
         moment = now()
         if mode == 'kayit' and checking is not None:
             if not checking['sent'] and moment - recorder.started >= ses.WAKE_AFTER_SN:

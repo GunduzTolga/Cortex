@@ -43,7 +43,7 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(grammar[-1], '[unk]', 'anything else is nothing')
         for heard in ('pay not al', 'bin not al', 'bayan not al'):
             self.assertTrue(ses.wake_heard(heard), heard)
-        self.assertEqual(json.loads(ses.wake_grammar('hey pyn not al'))[1], 'pay pyn not al')
+        self.assertEqual(json.loads(ses.wake_grammar('hey pyn not al'))[1], 'hey pay not al', 'the name where it is in the phrase')
 
     def test_what_the_small_model_hears_is_the_phrase_a_candidate_for_whisper_or_nothing(self):
         for heard in ('pay not al', 'bin not al', 'pyn not al'):
@@ -67,6 +67,61 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(ses.without_wake('Pyn, not al'), '')
         for kept in ('Alışveriş listesi', 'Yarın onda', 'Notlar hazır'):
             self.assertEqual(ses.without_wake(kept), kept)
+
+    def test_hey_pyn_is_heard_with_the_name_last(self):
+        phrase = 'hey pyn'
+        self.assertEqual(json.loads(ses.wake_grammar(phrase)), ['hey pyn', 'hey pay', 'hey bin', 'hey bayan', 'hey', '[unk]'])
+        for written in ('Hey Pyne.', 'Hey Payne, yarın toplantı var', 'hey pin', 'Hey Pain!'):
+            self.assertTrue(ses.wake_heard(written, phrase), written)
+        for written in ('Hey, nasılsın?', 'Hey millet', 'Pyn hey', 'Çok heyecanlıyım'):
+            self.assertFalse(ses.wake_heard(written, phrase), written)
+        self.assertEqual(ses.wake_verdict('hey pay', phrase), 'soz')
+        self.assertEqual(ses.wake_verdict('hey', phrase), 'aday', 'a "hey" alone: Whisper checks the name')
+        self.assertIsNone(ses.wake_verdict('[unk]', phrase))
+        self.assertEqual(ses.without_wake('Pyne, yarın toplantı var', phrase), 'yarın toplantı var', 'the name the recording caught')
+        self.assertEqual(ses.without_wake('Hey Pyn, süt al', phrase), 'süt al')
+        self.assertEqual(ses.without_wake('Yarın toplantı var', phrase), 'Yarın toplantı var')
+        self.assertEqual(ses.wake_verdict('not al'), 'aday', '"Pyn, not al" as it was')
+
+    def test_both_wake_phrases_at_once(self):
+        both = 'ikisi'
+        grammar = json.loads(ses.wake_grammar(both))
+        for line in ('hey pyn', 'hey pay', 'hey', 'pyn not al', 'pay not al', 'not al'):
+            self.assertIn(line, grammar)
+        self.assertEqual(grammar[-1], '[unk]')
+        self.assertEqual(len(grammar), len(set(grammar)), 'each once')
+        for written in ('Hey Pyne.', 'Payn, not al.', 'Pin not al'):
+            self.assertTrue(ses.wake_heard(written, both), written)
+        for written in ('Hey, nasılsın?', 'Bunu not al.'):
+            self.assertFalse(ses.wake_heard(written, both), written)
+        self.assertEqual([ses.wake_verdict(heard, both) for heard in ('hey pay', 'not al', 'hey', '[unk]')], ['soz', 'aday', 'aday', None])
+        self.assertEqual(ses.without_wake('Pyne, yarın toplantı var', both), 'yarın toplantı var')
+        self.assertEqual(ses.without_wake('Al. Süt al', both), 'Süt al')
+        self.assertEqual(ses.phrase_label(both), 'Hey Pyn ya da Pyn, not al')
+
+    def test_the_picture_on_the_clipboard_is_added_by_voice(self):
+        self.assertEqual(ses.command_of('Panodaki resmi ekle.'), ('resim_ekle', ''))
+        self.assertEqual(ses.command_of('Pyn, resmi ekle'), ('resim_ekle', ''))
+        self.assertEqual(ses.command_of('Bu hata tekrar çıktı, panodaki resmi ekle'), ('resim_ekle', 'Bu hata tekrar çıktı'), 'the longest phrase first')
+        self.assertEqual(ses.command_of('Ekran görüntüsünü ekle'), ('resim_ekle', ''))
+        self.assertEqual(ses.command_of('Resimler güzel olmuş'), (None, 'Resimler güzel olmuş'))
+
+    def test_a_wake_phrase_is_named_as_it_is_said(self):
+        self.assertEqual(ses.phrase_label('pyn not al'), 'Pyn, not al')
+        self.assertEqual(ses.phrase_label('hey pyn'), 'Hey Pyn')
+        self.assertEqual(ses.phrase_label(None), 'Pyn, not al')
+
+    def test_the_wake_phrase_is_a_setting_of_its_two(self):
+        tmp = tempfile.TemporaryDirectory(prefix='v3-ses-soz-')
+        self.addCleanup(tmp.cleanup)
+        state = Path(tmp.name) / 'state'
+        out = io.StringIO()
+        from contextlib import redirect_stdout
+        with redirect_stdout(out), mock.patch.object(ses, 'restart_listener', return_value=False):
+            ses.main(['ayar', '--uyandirma-sozu', 'hey pyn', '--json'], state=state)
+        self.assertEqual(json.loads(out.getvalue())['uyandirma_sozu'], 'hey pyn')
+        with self.assertRaises(SystemExit), mock.patch('sys.stderr', io.StringIO()):
+            ses.main(['ayar', '--uyandirma-sozu', 'merhaba', '--json'], state=state)
 
     def test_whisper_writing_the_phrase_joined_is_still_the_phrase(self):
         # Seen in the window: "Py notal. Şu an ne yapıyoruz?", the phrase left at the note's start.
@@ -113,8 +168,8 @@ class WordsTest(unittest.TestCase):
 
     def test_the_panel_says_the_commands_by_the_words_set_for_them(self):
         line = yakala.spoken_commands_line(ses.DEFAULTS['komutlar'])
-        self.assertEqual(line, 'Sesli komutlar: “Pyn, kaydet” · “son kelimeyi sil” · “son cümleyi sil” · “hepsini sil” · “iptal”')
-        self.assertEqual(yakala.spoken_commands_line({'kaydet': ['tamam'], 'sil': []}), 'Sesli komutlar: “Pyn, tamam”')
+        self.assertEqual(line, 'Komutlar: “kaydet” · “resmi ekle” · “son kelimeyi sil” · “son cümleyi sil” · “hepsini sil” · “iptal”')
+        self.assertEqual(yakala.spoken_commands_line({'kaydet': ['tamam'], 'sil': []}), 'Komutlar: “tamam”')
         self.assertEqual(yakala.spoken_commands_line({}), '')
 
     def test_the_last_word_or_sentence_is_taken_back_alone_or_at_the_end_everything_only_alone(self):
@@ -610,8 +665,8 @@ class PopupVoiceTest(unittest.TestCase):
         self.assertIn('Not al', texts)
         self.assertNotIn('Beyne at', texts)
         self.assertTrue(any(text.startswith('Konuşmak için mikrofona tıkla') for text in texts), 'what a press does')
-        commands = next(text for text in texts if text.startswith('Sesli komutlar'))
-        for said in ('“Pyn, kaydet”', '“son kelimeyi sil”', '“son cümleyi sil”', '“hepsini sil”', '“iptal”'):
+        commands = next(text for text in texts if text.startswith('Komutlar:'))
+        for said in ('“kaydet”', '“resmi ekle”', '“son kelimeyi sil”', '“son cümleyi sil”', '“hepsini sil”', '“iptal”'):
             self.assertIn(said, commands, 'the spoken commands are written down')
         win.voice_toggle()
         win.voice_event({'olay': 'dinliyor', 'mikrofon': 'Microphone (HyperX Cloud III Wireless)'})
@@ -714,6 +769,33 @@ class PopupVoiceTest(unittest.TestCase):
         self.assertTrue(any('Konuş, ben yazayım' in text for text in [self.field(win).get('1.0', 'end-1c')]), 'nothing left: the hint again')
         win.voice_event({'olay': 'metin', 'metin': 'Saat altıda', 'komut': 'kaydet', 'son': True})
         self.assertIn('Saat altıda', self.cards()[0].read_text(encoding='utf-8'))
+
+    def test_panodaki_resmi_ekle_adds_the_picture_copied_last_and_the_note_is_saved_with_it(self):
+        from unittest.mock import patch
+        folder = Path(tempfile.mkdtemp(prefix='v3-pano-'))
+        png = folder / 'pano-goruntusu.png'
+        png.write_bytes(bytes.fromhex('89504e470d0a1a0a0000000d4948445200000001000000010806000000'
+                                      '1f15c4890000000d49444154789c6300010000050001'
+                                      '0d0a2db40000000049454e44ae426082'))
+        picture = {'path': str(png), 'folder': str(folder), 'width': 1, 'height': 1, 'age': None, 'stale': False, 'on': False}
+        self.link.ready = True
+        win = self.window(auto_listen=True)  # nothing on the clipboard as it opened
+        win.voice_event({'olay': 'dinliyor'})
+        with patch.object(yakala, 'clipboard_image', lambda *_a: dict(picture)):
+            win.voice_event({'olay': 'metin', 'metin': 'Hata yine çıktı', 'komut': 'resim_ekle', 'son': False})
+        self.assertTrue(any('Panodaki görüntü eklendi' in text for text in self.texts(win)), 'it says the picture goes')
+        win.voice_event({'olay': 'metin', 'metin': 'Ekranı Ali\'ye göster', 'komut': 'kaydet', 'son': True})
+        card = self.cards()[0].read_text(encoding='utf-8')
+        self.assertIn('Hata yine çıktı', card)
+        saved = [path for path in (self.vault / yakala.INBOX / 'dosyalar').glob('*') if not path.name.startswith('.')]
+        self.assertEqual(len(saved), 1, 'the picture is saved with the note')
+
+    def test_panodaki_resmi_ekle_with_nothing_on_the_clipboard_says_so(self):
+        self.link.ready = True
+        win = self.window(auto_listen=True)
+        win.voice_event({'olay': 'dinliyor'})
+        win.voice_event({'olay': 'metin', 'metin': '', 'komut': 'resim_ekle', 'son': False})
+        self.assertTrue(any('Panoda görüntü yok' in text for text in self.texts(win)))
 
     def test_a_long_note_wraps_and_the_window_grows_to_show_it(self):
         self.link.ready = True
@@ -1070,6 +1152,23 @@ class ServeTest(unittest.TestCase):
         self.pause()
         last = self.until('metin')
         self.assertEqual((last['metin'], last['komut'], last['son']), ('Market listesi', 'kaydet', True))
+
+    def test_a_wake_phrase_changed_in_the_settings_is_listened_for_at_once(self):
+        built = []
+        self.helper.Wake = lambda _state, config: built.append(config['uyandirma_sozu']) or self.wake
+        self.serve(uyandirma=True)
+        deadline = time.monotonic() + 5
+        while not built and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(built, ['pyn not al'])
+        state = Path(self.tmp.name) / 'state'
+        ses.save_config(state, dict(ses.load_config(state), uyandirma=True, uyandirma_sozu='hey pyn'))
+        self.send('uyandirma', acik=True)
+        self.send('ayar')  # the listener saw the settings file change
+        deadline = time.monotonic() + 5
+        while len(built) < 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(built, ['pyn not al', 'hey pyn'], 'the small model listens for the new phrase')
 
     def test_bitir_writes_the_last_sentence_after_the_ones_before_it(self):
         self.serve()

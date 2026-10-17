@@ -1251,9 +1251,10 @@ def _attachment(canvas, root, y, width, pad, kind, headline, detail='', thumb=No
     return items, x, height
 
 
-def _image_card(canvas, root, image, y, width, pad, changed):
+def _image_card(canvas, root, image, y, width, pad, changed, hooks=None):
     """The clipboard picture as one compact row: the picture small, whether it goes with the note,
-    its facts, and a box to tick; Tab or a click switches it. Calls changed(on), returns the next y."""
+    its facts, and a box to tick; Tab or a click switches it. Calls changed(on), returns the next y.
+    `hooks` gets `switch(on)`: the voice's "panodaki resmi ekle" turns it on."""
     import tkinter.font as tkfont
     P, state = PALETTE, {'on': bool(image['on'])}
     thumb = _image_thumb(root, image, box=(64, 32))
@@ -1290,9 +1291,14 @@ def _image_card(canvas, root, image, y, width, pad, changed):
         state['on'] = not state['on']
         draw()
         return 'break'
+    def switch(on):
+        state['on'] = bool(on)
+        draw()
     for item in items + key + [label, box, tick, headline]:
         canvas.tag_bind(item, '<Button-1>', toggle)
     root.bind('<Tab>', toggle)
+    if hooks is not None:
+        hooks['switch'] = switch
     draw()
     return y + height + 16
 
@@ -1447,13 +1453,14 @@ def spoken_commands_line(commands):
     """The voice panel's line of what can be said, each command by its first words (for
     "sil", the longest: "hepsini sil" says what it does)."""
     parts = []
-    for name in ('kaydet', 'kelime_sil', 'cumle_sil', 'sil', 'iptal'):
+    for name in ('kaydet', 'resim_ekle', 'kelime_sil', 'cumle_sil', 'sil', 'iptal'):
         said = [' '.join(one.split()) for one in (commands or {}).get(name) or [] if isinstance(one, str) and one.strip()]
         if name == 'sil':
             said.sort(key=lambda one: -len(one.split()))
         if said:
-            parts.append('“' + ('Pyn, ' if name == 'kaydet' else '') + said[0] + '”')
-    return 'Sesli komutlar: ' + ' · '.join(parts) if parts else ''
+            parts.append('“' + said[0] + '”')
+    # Short, to fit the window's width: the line above says "Pyn, kaydet" already.
+    return 'Komutlar: ' + ' · '.join(parts) if parts else ''
 
 
 def _spoken_commands(state):
@@ -1682,6 +1689,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         y += 30
 
     # Clipboard image: shown before it is attached; Tab or a click takes it off or puts it back.
+    image_card = {}
     if image:
         def image_changed(on):
             nonlocal placeholder_text
@@ -1689,7 +1697,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             placeholder_text = 'Neden kaydediyorsun?' if on else 'Aklındakini yaz…'
             if hint['on']:
                 show_hint()
-        y = _image_card(canvas, root, image, y, W, pad, image_changed)
+        y = _image_card(canvas, root, image, y, W, pad, image_changed, image_card)
 
     # Footer: status on the left, key hints on the right.
     y += 6
@@ -1873,6 +1881,26 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             entry.mark_set('insert', 'end')
             entry.see('end')
 
+        def add_picture():
+            """"panodaki resmi ekle" said: the picture copied last goes with the note. The one the
+            window found on opening is switched on; without one the clipboard is read now."""
+            nonlocal placeholder_text
+            if image_card.get('switch'):
+                image_card['switch'](True)
+                voice_set(voice_mode['now'], '✓ Panodaki görüntü eklendi', 'ok')
+                return
+            picture = clipboard_image('', {})
+            if not picture:
+                voice_set(voice_mode['now'], 'Panoda görüntü yok: önce bir görüntü kopyala', 'bad')
+                return
+            # Its temp copy goes with the window, as the one found on opening does.
+            root.bind('<Destroy>', lambda event: _image_done(picture) if event.widget is root else None, add='+')
+            files[:] = [picture['path']]
+            placeholder_text = 'Neden kaydediyorsun?'
+            if hint['on']:
+                show_hint()
+            voice_set(voice_mode['now'], '✓ Panodaki görüntü eklendi · %d×%d' % (picture['width'], picture['height']), 'ok')
+
         def take_back(command):
             """"son kelimeyi sil" or "son cümleyi sil" said: the field without its last word or sentence."""
             if hint['on']:
@@ -1923,6 +1951,8 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                     voice_set(voice_mode['now'])
                 elif event.get('komut') in ('kelime_sil', 'cumle_sil'):
                     take_back(event.get('komut'))
+                elif event.get('komut') == 'resim_ekle':
+                    add_picture()
             elif kind == 'metin':
                 heard['since'] = None
                 voice_set('hazir')
@@ -1930,6 +1960,8 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                 write_in(spoken)
                 if command in ('kelime_sil', 'cumle_sil'):
                     take_back(command)
+                elif command == 'resim_ekle':
+                    add_picture()
                 wanted, pending['save'] = pending['save'], False
                 if command == 'kaydet' or (wanted and (spoken or not hint['on'])):
                     save()
