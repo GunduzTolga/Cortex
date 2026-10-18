@@ -270,13 +270,21 @@ check('Pyn’s memory comes next, each step said before it is done', await shown
 await shoot('01c-onboarding-engine.png');
 await onward();
 check('then the AI tools', await shownSoon(page.locator('[data-onboarding-step="tools"]')));
-check(
-  'a sign-in the tool keeps is not called ready: it may have run out, and signing in again is offered',
-  (await shownSoon(page.locator('[data-onboarding-tool-state="onboarding.tools.kept"]'))) &&
-    (await page.locator('[data-onboarding-tool="claude"] [data-onboarding-tool-login]').count()) === 1 &&
-    // A model server asked just now, its model loaded, is what counts as ready without a sign-in.
-    (await page.locator('[data-onboarding-tool="lmstudio"] [data-onboarding-tool-state="onboarding.tools.serving"]').count()) === 1,
-);
+{
+  const kept = await shownSoon(page.locator('[data-onboarding-tool="claude"] [data-onboarding-tool-state="onboarding.tools.kept"]'));
+  // Signing in opens the tool's own console window: offered on Windows only (electron/services/auth.ts, canLogin).
+  const again = (await page.locator('[data-onboarding-tool="claude"] [data-onboarding-tool-login]').count()) === (process.platform === 'win32' ? 1 : 0);
+  // A model server asked just now, its model loaded, is what counts as ready without a sign-in.
+  const serving = await shownSoon(page.locator('[data-onboarding-tool="lmstudio"] [data-onboarding-tool-state="onboarding.tools.serving"]'));
+  check('a sign-in the tool keeps is not called ready: it may have run out, and signing in again is offered', kept && again && serving);
+  if (!(kept && again && serving)) {
+    // Which part, and what the rows said: a hidden window's picture can be an earlier frame.
+    const rows = await page.locator('[data-onboarding-tool]').evaluateAll((items) =>
+      items.map((li) => `${li.getAttribute('data-onboarding-tool')}: ${li.querySelector('[data-onboarding-tool-state]')?.getAttribute('data-onboarding-tool-state')}${li.querySelector('[data-onboarding-tool-login]') ? ' + sign-in' : ''}`),
+    );
+    console.log(`       kept ${kept}, sign-in offered as expected ${again}, serving ${serving}; rows: ${rows.join(' | ') || 'none'}`);
+  }
+}
 await shoot('01c2-onboarding-tools.png');
 await onward();
 if (process.platform === 'win32') {
