@@ -3,8 +3,9 @@ import { AlertTriangle, Brain, Check, ChevronRight, FileText, Globe, ListChecks,
 // The small face: drawn for 24-32 px. While Pyn is still writing, the thinking one.
 import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz-kucuk.svg';
 import thinkingFace from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz-kucuk-dusunuyor.svg';
+import { turkishOf } from '@shared/refusalsTr';
 import type { Key } from '../i18n';
-import { useT } from '../i18n/useT';
+import { useLanguage, useT } from '../i18n/useT';
 import { NoteMarkdown } from '../notes/NoteMarkdown';
 import { noteFor, useNotes } from '../notes/notesStore';
 import { Spinner } from '../ui/ui';
@@ -97,6 +98,7 @@ const ERRORS: Record<string, Key> = {
 
 function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?: () => void }) {
   const t = useT();
+  const language = useLanguage();
   const working = live && !turn.end;
   const answered = turn.asked.filter((one) => one.answer !== undefined);
   return (
@@ -148,7 +150,8 @@ function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?
               <AlertTriangle size={13} />
               {t(ERRORS[turn.end.error ?? ''] ?? 'chat.error.other')}
             </p>
-            <p className="mt-0.5 break-words font-mono text-[11px] text-zinc-500">{turn.end.message}</p>
+            {/* What the main process said, in English; a CLI's own words are left as they came. */}
+            <p className="mt-0.5 break-words font-mono text-[11px] text-zinc-500">{language === 'en' ? turn.end.message : turkishOf(turn.end.message)}</p>
             {turn.end.error === 'auth' && onSignIn ? (
               <button type="button" onClick={onSignIn} className="mt-2 rounded-lg border-[1.5px] border-darkDelegation bg-gold px-2.5 py-1 text-[11.5px] font-semibold text-darkDelegation hover:bg-signal" data-chat-sign-in>
                 {t('chat.signIn')}

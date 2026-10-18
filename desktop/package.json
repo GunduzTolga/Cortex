@@ -1,7 +1,7 @@
 {
   "name": "cortex-desktop",
   "productName": "Cortex",
-  "version": "1.0.9",
+  "version": "1.0.25",
   "description": "Cortex'in masaüstü uygulaması: kasayı Obsidian gibi okur ve yazar.",
   "private": true,
   "type": "module",
@@ -14,6 +14,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.core.json",
     "test": "node scripts/test.mjs",
     "e2e": "npm run build && node scripts/e2e.mjs",
+    "vitrin": "npm run build && node e2e/vitrin.mjs",
+    "cortex-paket": "node scripts/cortex-paket.mjs",
+    "python-paket": "node scripts/python-paket.mjs",
     "package": "npm run build && electron-builder --win",
     "package:dir": "npm run build && electron-builder --win --dir"
   },
@@ -86,8 +89,26 @@
         "to": "pyn.ico"
       },
       {
+        "from": "../tema/ananas/marka/tepsi",
+        "to": "tepsi"
+      },
+      {
         "from": "../LICENSE",
         "to": "LICENSE"
+      },
+      {
+        "from": "cortex-paket",
+        "to": "cortex",
+        "filter": [
+          "beyin-v3-*.zip"
+        ]
+      },
+      {
+        "from": "python-paket",
+        "to": "python",
+        "filter": [
+          "python-*.exe.paket"
+        ]
       },
       {
         "from": "../MARKA.md",
@@ -103,15 +124,17 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
+      "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Cortex",
       "installerIcon": "../tema/ananas/marka/pyn.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/uninstallerSidebar.bmp",
+      "installerHeader": "build/installerHeader.bmp",
       "uninstallerIcon": "../tema/ananas/marka/pyn.ico",
       "installerLanguages": [
-        "tr_TR",
-        "en_US"
+        "tr_TR"
       ],
       "language": "1055"
     }

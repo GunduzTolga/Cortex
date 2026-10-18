@@ -6,7 +6,7 @@ import sys
 import unicodedata
 
 NAMES = ('Core.md', 'Soul.md', 'Kurallar.md', 'Last-Session.md', 'Threads.md', 'Journal.md')
-FLOORS = {'Kurallar.md': .4, 'Last-Session.md': .2}
+FLOORS = {'Kurallar.md': .4, 'Last-Session.md': .15, 'Threads.md': .12, 'Core.md': .08}
 # Hygiene limits in characters for the two handoff files that are meant to be rewritten,
 # not appended to (#96). Rules, identity and the Journal accumulate by design and are only
 # measured. 0 turns a limit off; beyin.py preferences changes them.
@@ -15,7 +15,7 @@ LIMIT_RANGE = (1000, 200000)
 DEFAULT_DIRECTORY = '🔮 850-Companion'
 STARTERS = {
     'Core.md': '# Düşünme ortağı\n\nKullanıcının düşünme ortağı ve ikinci beyniyim. Kimliğimi ve çalışma biçimimi birlikte belirleriz.\n\n## Kullanıcı ve ortak çalışma biçimi\nHenüz kişiselleştirilmedi. Kullanıcının adı, tercih ettiği hitap, çalışma alanı ve beklentilerini konuşarak öğren. Bilinmeyen geçmişi uydurma.\n\n## Kalıcı tercihler\nKullanıcının açıkça belirttiği tercihleri ve dayandıkları kaynağı burada tut.\n',
-    'Kurallar.md': '# Kullanıcının düzeltmeleri\n\nHenüz kaydedilmiş bir düzeltme yok. Açık kullanıcı düzeltmelerini tarih ve kapsamıyla, her kuralı bir iki satırda kaydet; uzun gerekçe ve olayın anlatımı ayrı bir nota gider. Geçici istekleri kalıcı kurala dönüştürme.\n',
+    'Kurallar.md': '# Kullanıcının düzeltmeleri\n\nHenüz kaydedilmiş bir düzeltme yok. Açık kullanıcı düzeltmelerini tarihiyle, her kuralı bir iki satırda kaydet; uzun gerekçe ve olayın anlatımı ayrı bir nota gider. Tek bir projeye ya da alana ait kural `projects/<proje>/Kurallar.md` dosyasına gider, burada yalnız `[kapsam: <proje>]` etiketli tek satırlık işaretçi kalır. Geçici istekleri kalıcı kurala dönüştürme.\n',
     'Last-Session.md': '# Son oturum\n\nHenüz bir çalışma sonucu kaydedilmedi. Anlamlı çalışma sonunda sonuç, gerekçe, açık kalan adım ve kaynak bağlantılarını `## YYYY-MM-DD HH:MM · <etiket> · <session_id[:8]>` başlığıyla buraya yaz. Paralel oturumlarda yalnız kendi kartını düzenle, başka oturumların kartlarını ezme.\n',
     'Threads.md': '# Threads\n\n## Active Threads\nHenüz açık bir konu kaydedilmedi.\n\n## Closed Threads\n',
     'Journal.md': '# Journal\n\nOrtak çalışmadan doğan gözlemler, öğrenimler ve açık sorular. Çıkarımları kesin kullanıcı bilgisi olarak sunma.\n',
@@ -290,7 +290,7 @@ def stamp(header):
     return (date[0], clock[0].rjust(5, '0') if clock else '') if date else None
 
 
-def excerpt(name, text):
+def excerpt(name, text, project=None):
     if name == 'Threads.md':
         # Same active headings compaction recognizes (beyin_v3_compact.ACTIVE), so a
         # '## Açık konular' file does not inject its closed threads too (#153).
@@ -327,7 +327,7 @@ def excerpt(name, text):
         if previous:
             return text[:previous.start()]
     if name == 'Kurallar.md':
-        return without_v2_window(text)
+        return filter_scoped_rules(without_v2_window(text), active_project=project)
     return text
 
 
@@ -385,6 +385,67 @@ def without_reasons(text):
 
 RULE = re.compile(r'^(?:[-*+]|\d+[.)])[ \t]')
 FENCE = re.compile(r'[ \t]{0,3}(`{3,}|~{3,})')
+SCOPE_TAG = re.compile(r'(?i)(?:\[(?:scope|kapsam):\s*([^\]]+)\]|\b(?:scope|kapsam):\s*([a-zA-Z0-9_\-]+(?:\s*,\s*[a-zA-Z0-9_\-]+)*))')
+
+
+def scope_key(value):
+    # Match Turkish uppercase and dotted/dotless i consistently with source names.
+    return fold(str(value).strip())
+
+
+def rule_scopes(rule_text):
+    """Set of lower-cased scope names for a rule, or empty set for global."""
+    scopes = set()
+    for match in SCOPE_TAG.finditer(rule_text):
+        raw = match.group(1) or match.group(2)
+        if raw:
+            for item in raw.split(','):
+                cleaned = scope_key(item)
+                if cleaned and cleaned not in ('global', 'genel', 'all', 'herkes'):
+                    scopes.add(cleaned)
+    return scopes
+
+
+def filter_scoped_rules(text, active_project=None):
+    """Keep global rules and rules matching active_project; filter out rules for other projects.
+
+    If active_project is None, all rules are retained for backwards compatibility.
+    """
+    if not active_project or not isinstance(active_project, str):
+        return text
+    active = scope_key(active_project)
+    lines = text.split('\n')
+    filtered_lines = []
+    current_rule = []
+    current_scopes = set()
+    is_rule = False
+
+    def flush():
+        nonlocal current_rule, current_scopes, is_rule
+        if current_rule:
+            if not current_scopes or active in current_scopes:
+                filtered_lines.extend(current_rule)
+            current_rule = []
+            current_scopes = set()
+            is_rule = False
+
+    for line in lines:
+        if RULE.match(line):
+            flush()
+            is_rule = True
+            current_rule.append(line)
+            current_scopes.update(rule_scopes(line))
+        elif is_rule:
+            if line.strip() == '' or line.startswith('#'):
+                flush()
+                filtered_lines.append(line)
+            else:
+                current_rule.append(line)
+                current_scopes.update(rule_scopes(line))
+        else:
+            filtered_lines.append(line)
+    flush()
+    return '\n'.join(filtered_lines)
 
 
 def rule_starts(text):
@@ -460,8 +521,11 @@ def clip(text, budget, tail=False, both=False):
     return marker + text[-keep:] if tail else text[:keep] + marker
 
 
-def context(store, budget, session, harness, query='', receipt='', warning=''):
-    """Budget actual displayed text, not repeated JSON metadata; never cut a record header."""
+def context(store, budget, session, harness, query='', receipt='', warning='', project=None, report=None):
+    """Budget actual displayed text, not repeated JSON metadata; never cut a record header.
+
+    A dict passed as report receives the companion Kurallar.md share of the returned text
+    (#374); doctor reads it, the hooks pass nothing."""
     target = directory(store.vault_root)
     hygiene_line = ''
     if target is not None:
@@ -475,7 +539,7 @@ def context(store, budget, session, harness, query='', receipt='', warning=''):
         return clip(header + 'Multiple companion directories: read the user-selected identity sources.\n', budget)
     snapshot = store.source_snapshot(NAMES, budget_chars=200000,
                                      source_directory=target.relative_to(store.vault_root).as_posix(),
-                                     text_transform=excerpt)
+                                     text_transform=lambda name, text: excerpt(name, text, project=project))
     records = snapshot['records']
     notice = ''
     if snapshot['missing_sources']:
@@ -484,6 +548,35 @@ def context(store, budget, session, harness, query='', receipt='', warning=''):
         notice += 'Changed companion sources excluded; read current files.\n'
     sections = [(f'\n[{r["source"]}]\n', r['text'], Path(r['source']).name)
                 for r in records]
+    if project and isinstance(project, str) and project.strip():
+        proj_clean = project.strip()
+        if not (proj_clean.startswith(('/', '\\')) or '..' in proj_clean.replace('\\', '/').split('/')):
+            for folder in ('projects', 'Projeler', 'projeler'):
+                found = False
+                for p_name in ('Kurallar.md', '.rules.md', 'rules.md'):
+                    lexical = store.vault_root / folder / proj_clean / p_name
+                    from beyin_v3 import _path_redirected
+                    if any(_path_redirected(part) for part in (lexical, *lexical.parents)
+                           if part != store.vault_root and part.is_relative_to(store.vault_root)):
+                        continue
+                    candidate = lexical.resolve()
+                    try:
+                        if candidate.is_relative_to(store.vault_root.resolve()) and candidate.is_file() and not candidate.is_symlink():
+                            p_rel = candidate.relative_to(store.vault_root.resolve()).parent.as_posix()
+                            project_snapshot = store.source_snapshot(
+                                [p_name], source_directory=p_rel, budget_chars=200000,
+                                text_transform=lambda name, text: filter_scoped_rules(
+                                    without_v2_window(text), active_project=project))
+                            for record in project_snapshot['records']:
+                                if record['text'].strip():
+                                    sections.append((f"\n[{record['source']}]\n", record['text'], 'Kurallar.md'))
+                                    found = True
+                            if found:
+                                break
+                    except (ValueError, OSError):
+                        pass
+                if found:
+                    break
     fixed = len(header) + len(notice) + sum(len(label) for label, _, _ in sections)
     if fixed > budget:
         return clip(header + notice + 'Read companion files: ' + ', '.join(r['source'] for r in records), budget)
@@ -509,16 +602,19 @@ def context(store, budget, session, harness, query='', receipt='', warning=''):
             parts = [(label, without_reasons(body) if name == 'Kurallar.md' else body, name)
                      for label, body, name in parts]
             lengths = share(available, parts)
-        rendered = header + notice
+        rendered, rules = header + notice, None
         for i, (label, body, name) in enumerate(parts):
+            if name == 'Kurallar.md' and i < len(records):  # project rule files come after the records
+                rules = {'chars': len(sections[i][1]), 'share': lengths[i], 'clipped': lengths[i] < len(body),
+                         'reasons_omitted': body != sections[i][1]}
             rendered += label + clip(body, lengths[i], both=name == 'Kurallar.md',
                                      tail=name == 'Kurallar.md' or (name == 'Journal.md' and not re.search(r'(?m)^## ', body)))
-        return rendered
+        return rendered, rules
 
     needed = sum(len(body) for _, body, _ in sections)
     available = max(0, int(budget * .83) - fixed)
     companion_clipped = needed > available
-    text = companion(available)
+    text, rules = companion(available)
     extra = ''
     index = store.source_snapshot(['index.md'], source_directory='knowledge', budget_chars=4000)
     if index['records']:
@@ -537,9 +633,9 @@ def context(store, budget, session, harness, query='', receipt='', warning=''):
     retrieval_share = max(0, budget - int(budget * .83) - len(extra))
     if query:
         retrieval_budget = min(remaining, retrieval_share) if companion_clipped else remaining
-        ranked = store.context_for(harness, query, budget_chars=max(0, retrieval_budget - 100))
+        ranked = store.context_for(harness, query, project=project, budget_chars=max(0, retrieval_budget - 100))
     elif not companion_clipped and remaining > 200:
-        ranked = store.snapshot_context(budget_chars=min(1500, max(0, remaining - 100)))
+        ranked = store.snapshot_context(project=project, budget_chars=min(1500, max(0, remaining - 100)))
     else:
         ranked = {'records': []}
     used = {r['source'] for r in records}
@@ -561,7 +657,21 @@ def context(store, budget, session, harness, query='', receipt='', warning=''):
         extra += clip(receipt, budget - len(text) - len(extra))
     # Retrieval takes its share first; every character it did not use goes back to the
     # clipped companion sources instead of being dropped.
-    regained = companion(budget - fixed - len(extra))
+    regained, regained_rules = companion(budget - fixed - len(extra))
     if len(text) < len(regained) <= budget - len(extra):
-        text = regained
+        text, rules = regained, regained_rules
+    if report is not None and rules:
+        report['Kurallar.md'] = rules
     return text + extra
+
+
+def rules_opening(store, budget, receipt=''):
+    """Read-only (#374): Kurallar.md's share of the opening SessionStart renders at budget.
+
+    The hook's own code path with a session id of the same length, so the numbers are the
+    hook's. While the rules are clipped, share is the largest rule text (without its reasons
+    when reasons_omitted) that would arrive whole beside the other companion files as they
+    are now. None without a rules section."""
+    report = {}
+    context(store, budget, '0' * 24, 'claude', receipt=receipt, report=report)
+    return report.get('Kurallar.md')

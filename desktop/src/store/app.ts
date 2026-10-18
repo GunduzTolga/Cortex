@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { BootstrapPayload, VaultStatus, WindowSettings } from '@shared/api';
 import { messageOf } from '@shared/ipcError';
+import { turkishOf } from '@shared/refusalsTr';
+import { useSaved } from './saved';
 
 /**
  * What the window holds around the notes screen: whether it has heard from
@@ -44,10 +46,15 @@ interface AppState {
 
 let toastSeq = 0;
 
+/** A sentence the main process said (English), in the window's language: Turkish unless English is chosen. */
+export function refusal(message: string): string {
+  return useApp.getState().settings.language === 'en' ? message : turkishOf(message);
+}
+
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
   bootError: null,
-  settings: { language: null, allFiles: false, nameIcons: false },
+  settings: { language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true },
   vault: { vault: null, missing: false },
   settingsUnreadable: null,
   version: '',
@@ -69,6 +76,7 @@ export const useApp = create<AppState>((set, get) => ({
   async setSettings(patch) {
     try {
       set({ settings: await window.cortex.settings.set(patch) });
+      useSaved.getState().flash();
     } catch (err) {
       get().toast({ tone: 'error', title: 'Cortex', detail: messageOf(err) });
     }
@@ -99,7 +107,9 @@ export const useApp = create<AppState>((set, get) => ({
   toast(toast) {
     toastSeq += 1;
     const id = `toast-${toastSeq}`;
-    set((state) => ({ toasts: [...state.toasts, { ...toast, id }] }));
+    // The detail is often a sentence the main process threw, in English: in a Turkish window it is said in Turkish under its Turkish title.
+    const detail = toast.detail && get().settings.language !== 'en' ? turkishOf(toast.detail) : toast.detail;
+    set((state) => ({ toasts: [...state.toasts, { ...toast, detail, id }] }));
     if (!toast.sticky) setTimeout(() => get().dismissToast(id), toast.tone === 'error' ? 9000 : 4500);
   },
 

@@ -139,11 +139,13 @@ class YakalaUnitTest(unittest.TestCase):
         except Exception as exc:
             self.skipTest('no Tk display: ' + type(exc).__name__)
         state = Path(self.tmp.name) / 'state'
-        names = ('Local\\CortexTestKilit-' + str(os.getpid()), 'Local\\CortexTestDur-' + str(os.getpid()))
+        names = tuple('Local\\CortexTest%s-%d' % (kind, os.getpid()) for kind in ('Kilit', 'Dur', 'Ac'))
         code = ('import sys; sys.path.insert(0, %r); import beyin_v3_yakala as y; '
-                'sys.exit(y.listen_windows(%r, %r, spec="ctrl+alt+shift+f11", mutex_name=%r, stop_name=%r))'
+                'sys.exit(y.listen_windows(%r, %r, spec="ctrl+alt+shift+f11", mutex_name=%r, stop_name=%r, open_name=%r))'
                 % (str(SCRIPTS), str(self.vault), str(state), *names))
-        listener = subprocess.Popen([sys.executable, '-c', code])
+        # Its windows are built and never shown: nothing appears on the screen of whoever runs the tests.
+        hidden = dict(os.environ, BEYIN_YAKALA_GIZLI='1')
+        listener = subprocess.Popen([sys.executable, '-c', code], env=hidden)
         self.addCleanup(lambda: listener.poll() is None and listener.kill())
 
         def info():
@@ -156,7 +158,7 @@ class YakalaUnitTest(unittest.TestCase):
             time.sleep(0.05)
         if not info().get('kisayol_calisiyor'):
             self.skipTest('the test hotkey is held elsewhere on this machine')
-        twin = subprocess.run([sys.executable, '-c', code], timeout=60)
+        twin = subprocess.run([sys.executable, '-c', code], timeout=60, env=hidden)
         self.assertEqual(twin.returncode, 0)  # one listener per user: the second steps aside
         user32 = ctypes.windll.user32
         user32.PostThreadMessageW.argtypes = [ctypes.c_ulong, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
@@ -166,7 +168,21 @@ class YakalaUnitTest(unittest.TestCase):
         while info().get('son_pencere', 0) < pressed and time.monotonic() < deadline:
             time.sleep(0.01)
         self.assertGreaterEqual(info().get('son_pencere', 0), pressed)
+        # `yakala pencere` (the desktop app's "Not al") asks the running listener for its window:
+        # it takes the request (the auto-reset event is down again a moment later).
+        self.assertTrue(yakala.open_windows_listener(open_name=names[2]))
+        time.sleep(1.0)
+        kernel32 = ctypes.windll.kernel32
+        kernel32.OpenEventW.restype = ctypes.c_void_p
+        kernel32.OpenEventW.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_wchar_p]
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        event = kernel32.OpenEventW(0x00100000, False, names[2])  # SYNCHRONIZE
+        self.assertTrue(event)
+        self.assertEqual(kernel32.WaitForSingleObject(event, 0), 258, 'the listener took the request')  # WAIT_TIMEOUT
+        kernel32.CloseHandle(event)
         self.assertTrue(yakala.stop_windows_listener(stop_name=names[1], mutex_name=names[0], wait=10))
+        self.assertFalse(yakala.open_windows_listener(open_name=names[2]), 'no listener: the window opens by itself')
         self.assertEqual(listener.wait(timeout=10), 0)
 
     def test_vtt_text(self):
@@ -338,7 +354,7 @@ class YakalaInstalledTest(unittest.TestCase):
     def test_windows_shortcuts(self):
         appdata = Path(self.env['APPDATA'])
         installed = self.entry('kur')
-        self.assertEqual(installed['kisayol'], 'Ctrl+Alt+B')
+        self.assertEqual(installed['kisayol'], 'Ctrl+Alt+C')
         start = appdata / 'Microsoft/Windows/Start Menu/Programs/Beyne At.lnk'
         sendto = appdata / 'Microsoft/Windows/SendTo/Beyne At.lnk'
         self.assertTrue(start.is_file() and sendto.is_file())
@@ -355,6 +371,42 @@ class YakalaInstalledTest(unittest.TestCase):
         self.entry('kur', '--kisayol-yok')
         self.entry('kaldir')
         self.assertEqual(own.read_text(encoding='utf-8'), 'kendi skill\'im\n')
+
+
+class ListenerRestartTest(unittest.TestCase):
+    def test_an_update_that_changes_only_a_module_it_loaded_restarts_the_listener(self):
+        import types
+        with tempfile.TemporaryDirectory(prefix='v3-dinleyici-') as tmp:
+            folder = Path(tmp).resolve()
+            script, voice, other = folder / 'beyin_v3_yakala.py', folder / 'beyin_v3_ses.py', Path(tmp).resolve().parent / 'baska.py'
+            for path in (script, voice):
+                path.write_text('', encoding='utf-8')
+            module = types.ModuleType('beyin_v3_ses_dinleyici_testi')
+            module.__file__ = str(voice)
+            with patch.dict(sys.modules, {module.__name__: module}):
+                stamps = yakala._own_modules(script)
+            self.assertEqual(set(stamps), {script, voice}, 'its own script and what it loaded from the engine, nothing else')
+            self.assertNotIn(other, stamps)
+            self.assertEqual(yakala._own_modules(script, list(stamps)), stamps)
+            os.utime(voice, (stamps[voice] + 5, stamps[voice] + 5))
+            self.assertNotEqual(yakala._own_modules(script, list(stamps)), stamps, 'the voice module changed: restart')
+
+
+class HotkeyMoveTest(unittest.TestCase):
+    def test_the_old_default_moves_to_ctrl_alt_c_once_and_a_chosen_key_stays(self):
+        with tempfile.TemporaryDirectory(prefix='v3-tus-') as tmp:
+            state = Path(tmp)
+            path = state / yakala.STATE_FILE
+            path.write_text(json.dumps({'schema': 1, 'kisayol': 'Ctrl+Alt+B', 'tus': 'ctrl+alt+b'}), encoding='utf-8')
+            self.assertEqual(yakala.saved_hotkey(state), 'ctrl+alt+c')
+            saved = json.loads(path.read_text(encoding='utf-8'))
+            self.assertEqual(saved['tus'], 'ctrl+alt+c', 'kept, so the listener and the hints agree')
+            if os.name == 'nt':
+                self.assertEqual(saved['kisayol'], 'Ctrl+Alt+C')
+            path.write_text(json.dumps({'schema': 1, 'kisayol': 'Ctrl+Alt+B', 'tus': 'ctrl+alt+b', 'tus_secildi': True}), encoding='utf-8')
+            self.assertEqual(yakala.saved_hotkey(state), 'ctrl+alt+b', 'chosen by the person: never moved')
+            path.write_text(json.dumps({'schema': 1, 'tus': 'ctrl+shift+space'}), encoding='utf-8')
+            self.assertEqual(yakala.saved_hotkey(state), 'ctrl+shift+space')
 
 
 if __name__ == '__main__':

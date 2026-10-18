@@ -14,12 +14,13 @@ import posixpath
 import re
 import sqlite3
 import stat
+import sys
 import unicodedata
 import urllib.parse
 
 
 # Every supported client. "manual" is accepted for receipts only.
-HARNESSES = ("codex", "claude", "antigravity", "hermes", "opencode", "omp", "gemini", "qwen")
+HARNESSES = ("codex", "claude", "antigravity", "hermes", "opencode", "omp", "kiro", "gemini", "qwen")
 
 # rejected_at grammar: a date, optionally with an RFC 3339-style time.
 REJECTED_AT = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?)?", re.ASCII)
@@ -28,12 +29,90 @@ REJECTED_AT = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ](?:[01]\d|2[0-3]):[0-5]\d(?::
 RECENCY_ALIASES = ("updated", "modified", "last_modified", "date_modified")
 
 
+def _in_package_container(pinned: str) -> bool:
+    """True when a pinned path runs through an MSIX package container."""
+    parts = [part.lower() for part in pinned.replace("\\", "/").split("/") if part]
+    return "packages" in parts and "localcache" in parts[parts.index("packages") + 1:]
+
+
+def default_state(vault: Path) -> Path:
+    """Keep mutable state outside the vault, separated by canonical vault path."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData/Local")))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library/Application Support"
+    else:
+        base = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state")))
+    key = hashlib.sha256(str(Path(vault).resolve()).encode()).hexdigest()[:16]
+    return base / "beyin-v3" / key
+
+
+def resolve_state(vault: Path, pinned: Path) -> Path:
+    """Resolve a foreign OS/user's conventional default; preserve custom and local pins."""
+    expected = default_state(vault).resolve()
+    raw = str(pinned)
+    if not raw:
+        return expected
+    if _in_package_container(raw):
+        return Path(pinned).expanduser().resolve()
+    portable = raw.replace("\\", "/")
+    # Match complete standard layouts, rather than a generic /state/ or /local/ suffix.
+    # A copied vault normally changes its absolute path and therefore its hash.
+    conventional = re.fullmatch(
+        r"(?:[A-Za-z]:/Users/[^/]+/AppData/Local|/home/[^/]+/\.local/state|"
+        r"/root/\.local/state|/Users/[^/]+/Library/Application Support)/beyin-v3/[0-9a-f]{16}",
+        portable, re.IGNORECASE)
+    local_parent = str(expected.parent).replace("\\", "/").casefold()
+    if conventional and portable.rsplit("/", 1)[0].casefold() != local_parent:
+        return expected
+    if not Path(pinned).expanduser().is_absolute():
+        if re.match(r"^[A-Za-z]:[/\\]", raw) or (sys.platform == "win32" and raw.startswith(("/", "\\"))):
+            return expected
+    return Path(pinned).expanduser().resolve()
+# Privacy must work in the contracted standalone core/no-sync checkout too.
+# Hygiene imports this same predicate instead of making retrieval depend on it.
+SENSITIVE_WORDS = re.compile(
+    r'(?:kasa|sifre|parola|kimlik|kimlig|finans|finansal|musteri|vergi|fatura|maas|ozel|gizli|gizlilik)'
+    r'(?:ler|lar)?(?:i|im|in|imiz|leri|lari)?'
+    r'|(?:private|secret|password|credential)s?')
+_SENSITIVE_FOLD = str.maketrans({'ş': 's', 'ğ': 'g', 'ü': 'u', 'ö': 'o', 'ç': 'c', 'ı': 'i', 'â': 'a', 'î': 'i', 'û': 'u'})
+
+def sensitive_fold(name):
+    """NFC, Turkish-aware casefold and ASCII-fold a name: 'MÜŞTERİLER' and NFD 'Şifre' both fold."""
+    text = unicodedata.normalize('NFC', str(name)).replace('İ', 'i').replace('I', 'i').lower()
+    return unicodedata.normalize('NFC', text.replace('̇', '')).translate(_SENSITIVE_FOLD)
+
+
+def sensitive_excluded(name):
+    """True when a directory name carries a kasa-class word (any position, any case/normal form)."""
+    return any(SENSITIVE_WORDS.fullmatch(word) for word in re.findall(r'[^\W\d_]+', sensitive_fold(name)))
+
+
+def sensitive_source(source):
+    """A vault-relative source inside a sensitive folder must not enter the memory index or context."""
+    return isinstance(source, str) and any(sensitive_excluded(part) for part in Path(source).parts[:-1])
+
+
 class RevisionConflict(ValueError):
     pass
 
 
 class ReceiptConflict(ValueError):
     pass
+
+
+MAX_RECEIPT_LINKS = 20
+
+
+def _plain_link(value):
+    """An http(s) URL a receipt may name as an external result: no spaces, controls or credentials."""
+    if not 0 < len(value) <= 2048 or re.search(r"[\s\x00-\x1f\x7f]", value):
+        return False
+    try:
+        parts = urllib.parse.urlsplit(value)
+        return parts.scheme in ("http", "https") and bool(parts.hostname) and parts.username is None and parts.password is None
+    except ValueError:
+        return False
 
 
 def _json(value):
@@ -263,9 +342,6 @@ def _scope_path(value):
 
 
 def _scope_key(value):
-    # macOS and Windows vaults are case-insensitive and macOS may store names decomposed
-    # (NFD): a folder typed as "projeler/arşiv" must still claim "Projeler/Arşiv", or its
-    # notes fall through to the shared scope of every project.
     return unicodedata.normalize("NFC", value.replace("\\", "/")).casefold()
 
 
@@ -295,6 +371,7 @@ def read_project_scopes(vault_root):
     folders maps a vault-relative folder to a project; a record's own non-empty project
     field wins. shared_unscoped lets a project query also see records no folder or field
     assigns to any project. Another project's records never enter a project's scope.
+    Missing folders are skipped with a warning so unrelated projects remain fully functional (#317).
     """
     path = Path(vault_root) / PROJECT_SCOPES_FILE
     if path.is_symlink():
@@ -317,7 +394,9 @@ def read_project_scopes(vault_root):
             raise ValueError("project scope names must be non-empty strings")
         folder = _scope_path(folder)
         if not _scope_folder_exists(vault_root, folder):
-            raise ValueError("project scope folder not found in the vault: " + folder)
+            print(f"Warning: project scope folder not found in the vault: {folder}", file=sys.stderr)
+            # Keep the boundary for stale indexed rows used by explicit --no-sync.
+            # Dropping it would expose the other project's notes as shared_unscoped.
         key = _scope_key(folder)
         if mapped.get(key, project) != project:
             raise ValueError("project scope folder is assigned twice: " + folder)
@@ -429,6 +508,59 @@ def _tokens(text):
 STOPWORDS = _tokens("the a an is are was were what which who when where how why of to in on at for from with and or does did do has have latest current please tell about my our this that it its project projects status decision decisions show find get ve veya bir bu su o ne kim nasil hangi nedir neydi mi mu icin ile bana benim bizim olarak olan oldu en son guncel soyle getir bul yok say ignore disregard no")
 
 
+def _strict_terms(terms):
+    """Filter out non-topical terms in strict mode (#358).
+
+    Drops single-character tokens and numeric-only tokens shorter than 3 digits
+    (e.g. '1', '2', '42'). Preserves years ('2026'), 3+ digit numbers ('200'),
+    and alphanumeric identifiers ('722b4dd').
+    """
+    return {t for t in terms if len(t) >= 2 and not (t.isdigit() and len(t) < 3)}
+
+
+def _name_candidates(record):
+    """Candidate names for title-salience matching (#354): title, stem, stripped stem, aliases."""
+    candidates = []
+    title = str(record.get("title", "")).strip()
+    if title:
+        candidates.append(title[:160])
+    source = str(record.get("source", "")).strip()
+    if source:
+        stem = Path(source).stem.replace("-", " ").replace("_", " ").strip()
+        if stem:
+            candidates.append(stem[:160])
+            stripped = re.sub(r"^[0-9]+[ \t\-_]+", "", stem).strip()
+            if stripped and stripped != stem:
+                candidates.append(stripped[:160])
+    aliases = record.get("aliases", [])
+    if isinstance(aliases, list):
+        for a in aliases[:32]:
+            if isinstance(a, str) and a.strip():
+                candidates.append(a.strip()[:160])
+    return candidates
+
+
+NAME_GENERIC_TERMS = _tokens("durum proje projeler not notlar karar kararlar arsiv sablon genel ozet guncel")
+
+
+def _name_match_score(record, terms):
+    """Salience signal when query terms contain all meaningful words of a note's name (#354).
+
+    Returns the number of matching name terms (higher = more specific title match),
+    or 0 if no candidate name is fully covered by the query terms.
+    """
+    if not terms:
+        return 0
+    best_score = 0
+    for cand in _name_candidates(record):
+        cand_tokens = _tokens(cand) - STOPWORDS
+        meaningful = {t for t in cand_tokens if len(t) >= 2}
+        if meaningful and meaningful - NAME_GENERIC_TERMS and meaningful.issubset(terms):
+            if len(meaningful) > best_score:
+                best_score = len(meaningful)
+    return best_score
+
+
 def _path_redirected(path):
     """Symlinks and Windows reparse points require a fresh realpath check."""
     try:
@@ -440,8 +572,11 @@ def _path_redirected(path):
 
 
 class MemoryStore:
-    def __init__(self, state_dir, vault_root, read_only=False):
+    def __init__(self, state_dir, vault_root, read_only=False, busy_timeout=10):
         self.read_only = bool(read_only)
+        # Seconds a connection waits for another process's write lock. A hook reading
+        # while the sync worker commits passes its remaining budget instead of the default.
+        self.busy_timeout = float(busy_timeout)
         self.vault_root = Path(vault_root).expanduser().resolve()
         if not self.vault_root.is_dir():
             raise ValueError("vault_root must be an existing directory")
@@ -492,10 +627,10 @@ class MemoryStore:
     @contextmanager
     def _connect(self):
         if self.read_only:
-            db = sqlite3.connect(self.database.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
+            db = sqlite3.connect(self.database.resolve().as_uri() + "?mode=ro", uri=True, timeout=self.busy_timeout)
             db.execute("PRAGMA query_only=ON")
         else:
-            db = sqlite3.connect(self.database, timeout=10)
+            db = sqlite3.connect(self.database, timeout=self.busy_timeout)
         try:
             with db:
                 yield db
@@ -669,9 +804,16 @@ class MemoryStore:
         with self._connect() as db:
             current = db.execute("SELECT payload FROM records WHERE id=?", (record_id,)).fetchone()
             rows = db.execute("SELECT sequence,event_type,record_id,revision,record FROM events WHERE record_id=? ORDER BY sequence", (record_id,)).fetchall()
+            quarantined = {}
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='receipt_view_history'").fetchone():
+                quarantined = dict(db.execute("SELECT source,through_sequence FROM receipt_view_history"))
         if not rows or (not current and rows[-1][1] != "delete"):
             return []
         boundary = json.loads(current[0] if current else rows[-1][4])
+        # A formerly indexed receipt view cannot authorize its own leaked audit
+        # trail. Later clean notes at a retired path have sequences past the cutoff.
+        if rows[-1][0] <= quarantined.get(boundary.get("source"), 0):
+            return []
         if (boundary.get("visibility") not in allowed or boundary.get("trust") == "untrusted" or
                 boundary.get("trusted") is False or boundary.get("status") == "untrusted" or
                 boundary.get("kind") == "untrusted"):
@@ -686,10 +828,11 @@ class MemoryStore:
                 return []
         return [{"sequence": row[0], "event_type": row[1], "record_id": row[2], "revision": row[3], "record": record}
                 for row in rows if (record := json.loads(row[4])).get("visibility") in allowed and
+                row[0] > quarantined.get(record.get("source"), 0) and
                 record.get("trust") != "untrusted" and record.get("trusted") is not False and
                 record.get("status") != "untrusted" and record.get("kind") != "untrusted"]
 
-    def submit_receipt(self, event_id, summary, refs, harness):
+    def submit_receipt(self, event_id, summary, refs, harness, links=None):
         self._require_writable()
         if not isinstance(event_id, str) or not event_id.strip():
             raise ValueError("event_id required")
@@ -700,13 +843,18 @@ class MemoryStore:
         if not isinstance(refs, list) or not refs:
             raise ValueError("source refs required")
         event = {"event_id": event_id, "summary": summary, "refs": [self._source(ref) for ref in refs], "harness": harness}
+        if links:
+            if not isinstance(links, list) or len(links) > MAX_RECEIPT_LINKS or not all(
+                    isinstance(link, str) and _plain_link(link) for link in links):
+                raise ValueError("links must be http(s) URLs without spaces or credentials")
+            event["links"] = list(links)
         payload = _json(event)
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             old = db.execute("SELECT payload FROM receipts WHERE id=?", (event_id,)).fetchone()
             if old:
                 previous = json.loads(old[0])
-                if previous["summary"] != summary or previous["refs"] != event["refs"]:
+                if (previous["summary"], previous["refs"], previous.get("links")) != (summary, event["refs"], event.get("links")):
                     raise ReceiptConflict("event_id reused with different payload")
                 event = previous
             db.execute("INSERT OR IGNORE INTO receipts VALUES (?,?)", (event_id, payload))
@@ -726,9 +874,9 @@ class MemoryStore:
         return self._retrieve(query, project, audience, statuses, limit, 0,
                               strict=strict, candidate_only=True)
 
-    def snapshot_context(self, audience="internal", budget_chars=6000, limit=5):
+    def snapshot_context(self, audience="internal", budget_chars=6000, limit=5, project=None):
         """Explicit bounded current-state snapshot; normal empty queries abstain."""
-        return self._retrieve("", audience=audience, statuses=("active", "waiting"),
+        return self._retrieve("", project=project, audience=audience, statuses=("active", "waiting"),
                               limit=limit, budget_chars=budget_chars, snapshot=True)
 
     def source_snapshot(self, source_names, audience="internal", budget_chars=3000, source_directory=None, text_transform=None):
@@ -766,6 +914,8 @@ class MemoryStore:
         candidates = {name: [] for name in source_names}
         stale_count = 0
         for record in records:
+            if sensitive_source(record.get("source")):
+                continue
             if (record.get("visibility") not in allowed or record.get("trust") == "untrusted" or
                     record.get("trusted") is False or record.get("status") == "untrusted" or
                     record.get("kind") == "untrusted" or _rejected_inference(record)):
@@ -809,30 +959,51 @@ class MemoryStore:
                     "missing_sources": list(source_names), "stale_excluded": stale_count,
                     "truncated": bool(chosen)}
         share = available // max(1, len(chosen))
-        tail_names = {"Journal.md", "Kurallar.md"}
+        # A record shorter than its share hands the rest to the longer ones (#374): an equal
+        # split cut a 45k Kurallar.md to its fifth of the bound while the handoff files used a
+        # fraction of theirs, so the companion layer clipped and counted rules on a fragment.
+        lengths, left = sorted(len(record["text"]) for record in chosen), available
+        for index, length in enumerate(lengths[:-1]):
+            if length > share:
+                break
+            left -= length
+            share = left // (len(lengths) - index - 1)
         marker = "[truncated]"
         for record in chosen:
             text = record["text"]
             if len(text) > share:
                 keep = max(0, share - len(marker) - 1)
+                name = Path(record["source"]).name
                 if not keep:
                     record["text"] = marker
-                elif Path(record["source"]).name in tail_names:
+                elif name == "Journal.md":
                     record["text"] = marker + "\n" + text[-keep:]
+                elif name == "Kurallar.md" and keep > 1:
+                    # Head and tail, as the companion layer shows a rule set: the head holds
+                    # the summary and the oldest rules, the tail the newest corrections (#374).
+                    keep -= 1
+                    record["text"] = text[:keep - keep // 2] + "\n" + marker + "\n" + text[len(text) - keep // 2:]
                 else:
                     record["text"] = text[:keep] + "\n" + marker
                 result["truncated"] = True
-        while len(_json(result)) > budget_chars and any(record["text"] for record in chosen):
+        prefix, suffix, middle = marker + "\n", "\n" + marker, "\n" + marker + "\n"
+        while any(record["text"] for record in chosen):
+            # JSON escapes can still overflow; cut the whole excess at once. One character
+            # per pass re-serialized the result for every newline of a long record (#374).
+            over = len(_json(result)) - budget_chars
+            if over <= 0:
+                break
             record = max(chosen, key=lambda item: len(item["text"]))
             text = record["text"]
-            prefix = marker + "\n"
-            suffix = "\n" + marker
             if text.startswith(prefix) and len(text) > len(prefix):
-                record["text"] = prefix + text[len(prefix) + 1:]
+                record["text"] = prefix + text[len(prefix) + over:]
             elif text.endswith(suffix) and len(text) > len(suffix):
-                record["text"] = text[:-len(suffix) - 1] + suffix
+                record["text"] = text[:max(0, len(text) - len(suffix) - over)] + suffix
+            elif Path(record["source"]).name == "Kurallar.md" and text.find(middle) > 0:
+                head, tail = text.split(middle, 1)
+                record["text"] = head[:max(0, len(head) - over)] + middle + tail
             else:
-                record["text"] = text[:-1]
+                record["text"] = text[:max(0, len(text) - over)]
             result["truncated"] = True
         return result
 
@@ -858,15 +1029,32 @@ class MemoryStore:
         weighted.sort(key=lambda item: -item[0])
         return weighted
 
-    def _strict_rank(self, ranked, terms, vocabularies):
-        """Keep only meaningful lexical matches; see STRICT_* for the calibrated rules."""
-        return self._by_weight([(weight, record) for weight, shared_count, record in self._lexical_weights(ranked, terms, vocabularies)
-                                if shared_count >= self.STRICT_MIN_SHARED and weight >= self.STRICT_MIN_WEIGHT])
+    @staticmethod
+    def _name_candidates(record):
+        return _name_candidates(record)
+
+    @staticmethod
+    def _name_match_score(record, terms):
+        return _name_match_score(record, terms)
+
+    def _strict_rank(self, ranked, terms, vocabularies, name_scores=None):
+        """Keep meaningful matches without making one-word queries impossible."""
+        min_shared = min(self.STRICT_MIN_SHARED, len(terms))
+        min_weight = self.STRICT_SINGLE_TERM_MIN_WEIGHT if len(terms) == 1 else self.STRICT_MIN_WEIGHT
+        weighted = []
+        for weight, shared_count, record in self._lexical_weights(ranked, terms, vocabularies):
+            if shared_count >= min_shared and weight >= min_weight:
+                if name_scores and record["id"] in name_scores:
+                    weight += self.NAME_MATCH_STRICT_WEIGHT * name_scores[record["id"]]
+                weighted.append((weight, record))
+        return self._by_weight(weighted)
 
     BM25_K1 = 1.5
     BM25_B = 0.75
+    NAME_MATCH_WEIGHT = 20.0
+    NAME_MATCH_STRICT_WEIGHT = 10.0
 
-    def _weighted_rank(self, ranked, terms, term_counts):
+    def _weighted_rank(self, ranked, terms, term_counts, name_scores=None):
         """Order without dropping anything: Okapi BM25 over stem counts, no thresholds.
 
         A raw shared-term count favours whichever note has the largest vocabulary, so one long
@@ -885,11 +1073,14 @@ class MemoryStore:
             weight = sum(math.log((total - frequency[term] + 0.5) / (frequency[term] + 0.5) + 1) *
                          counts[term] * (self.BM25_K1 + 1) / (counts[term] + norm)
                          for term in terms if counts.get(term))
+            if name_scores and record["id"] in name_scores:
+                weight += self.NAME_MATCH_WEIGHT * name_scores[record["id"]]
             weighted.append((weight, record))
         return self._by_weight(weighted)
 
-    # Strict automatic context: used by the per-turn hook so that a single shared common
-    # word never pulls an unrelated note into the prompt. Weight = sum of relative idf over
+    # Strict automatic context: multiword queries need two shared words so that an incidental
+    # common word cannot pull an unrelated note into the prompt. One-word queries use a
+    # separate weight floor and still reject weak matches. Weight = sum of relative idf over
     # shared terms, divided by log(10 + note vocabulary size). Relative idf (idf / idf of a
     # term seen in exactly one note) keeps the scale independent of vault size, so the
     # threshold works for a 20-note vault and a 300-note vault alike.
@@ -897,6 +1088,8 @@ class MemoryStore:
     # relevant 0.33-1.21; 0.30 silenced 6/7 irrelevant and kept 7/7 relevant.
     STRICT_MIN_SHARED = 2
     STRICT_MIN_WEIGHT = 0.30
+    # A single query term cannot meet the two-term gate; still exclude incidental long-note hits.
+    STRICT_SINGLE_TERM_MIN_WEIGHT = 0.20
     STRICT_EXCLUDE = ("daily/",)  # session logs are records, not knowledge; they match everything
 
     # Per-turn strict context ranks Markdown passages instead of whole notes and delivers the
@@ -924,6 +1117,9 @@ class MemoryStore:
         eligible = []
         stale_count = 0
         for record in records:
+            # Old indexes can still hold these notes until the next sync. Never deliver them.
+            if sensitive_source(record.get("source")):
+                continue
             if record["visibility"] not in allowed or record.get("trust") == "untrusted" or record.get("trusted") is False or record.get("status") == "untrusted" or record.get("kind") == "untrusted" or _rejected_inference(record) != rejected_only:
                 continue
             if project is not None:
@@ -959,13 +1155,29 @@ class MemoryStore:
         eligible, stale_count = self._eligible(audience, project, records=records)
         superseded = self._superseded_ids(records)
         allowed_statuses = _allowed_statuses(statuses)
+        if strict:
+            try:
+                from beyin_v3_passage import _path_key, settings
+            except ImportError:
+                # Without the exclusion policy, strict fallback must not deliver sources.
+                return [] if candidate_only else pack_context([], limit, budget_chars, stale_count)
+            prefixes = tuple(_path_key(prefix) for prefix in settings(self.state_dir)["exclude"])
+            eligible = [record for record in eligible
+                        if not _path_key(str(record.get("source", ""))).startswith(prefixes)]
         query_tokens = _tokens(query)
         project_tokens = _tokens(project or "")
         terms = query_tokens - STOPWORDS - project_tokens
         scoped_listing = project is not None and bool(query_tokens & project_tokens) and not (query_tokens - STOPWORDS - project_tokens)
+        if strict:
+            terms = _strict_terms(terms)
+            if not terms and not scoped_listing and not snapshot:
+                if candidate_only:
+                    return []
+                return pack_context([], limit, budget_chars, stale_count)
         ranked = []
         vocabularies = {}
         term_counts = {}
+        name_scores = {}
         for record in eligible:
             if record["id"] in superseded:
                 continue
@@ -977,19 +1189,26 @@ class MemoryStore:
             aliases = record.get("aliases", [])
             aliases = aliases if isinstance(aliases, list) else []
             alias_text = " ".join(a[:160] for a in aliases[:32] if isinstance(a, str))
-            counts = _token_counts(record["text"] + " " + _json(record["facts"]) + " " + str(record.get("title", "")) + " " + alias_text)
+            name_score = self._name_match_score(record, terms)
+            # A filename is a salience signal only for an actual topical name match.
+            # Unrelated/generic stems must not widen candidates or dilute BM25 lengths.
+            source_stem = (Path(record.get("source", "")).stem.replace("-", " ").replace("_", " ")
+                           if name_score else "")
+            counts = _token_counts(record["text"] + " " + _json(record["facts"]) + " " + str(record.get("title", "")) + " " + alias_text + " " + source_stem)
             for stopword in STOPWORDS & counts.keys():
                 del counts[stopword]
             vocabulary = set(counts)
             vocabularies[record["id"]] = vocabulary
             term_counts[record["id"]] = counts
+            if name_score:
+                name_scores[record["id"]] = name_score
             score = len(terms & vocabulary)
-            if score or scoped_listing or snapshot:
+            if score or name_score or scoped_listing or snapshot:
                 ranked.append((score, record))
         if strict and not snapshot:
-            ranked = self._strict_rank(ranked, terms, vocabularies)
+            ranked = self._strict_rank(ranked, terms, vocabularies, name_scores=name_scores)
         else:
-            ranked = self._weighted_rank(ranked, terms, term_counts)
+            ranked = self._weighted_rank(ranked, terms, term_counts, name_scores=name_scores)
         if candidate_only:
             return [record for _, record in ranked[:limit]]
         return pack_context([record for _, record in ranked], limit, budget_chars, stale_count)

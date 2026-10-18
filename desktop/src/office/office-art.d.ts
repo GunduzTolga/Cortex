@@ -27,11 +27,14 @@ export interface Character {
   tool: ToolId | null;
   /** The colour it is named in: its chip, its lines in the log. */
   color: string;
-  kind?: 'pyn' | 'cat';
+  /** Pyn, the manager (named after the vault's owner), Tolga the developer, the cat; an agent has none. */
+  kind?: 'pyn' | 'cat' | 'mudur' | 'dev';
   /** CORTEX · AJAN, CORTEX · PATRON, CORTEX · OFİS KEDİSİ. */
   label: string;
   home?: string;
   bio: string;
+  /** Tea, food and energy run down slowly and never low: Tolga's. */
+  hardy?: boolean;
 }
 
 export interface Room {
@@ -110,3 +113,24 @@ export function roomAt(tx: number, ty: number): string | null;
 export function buildCollision(): { w: number; h: number; blocked: Uint8Array; isBlocked(x: number, y: number): boolean };
 /** The seats and spots that cannot be walked to from the newsroom: empty when the map is right. */
 export function checkReachability(): string[];
+
+/** The brain around the map (docs/ofis: ek brif "Cortex Ofisi: beynin içindeki ofis"). */
+export type LightMode = 'sabah' | 'ogle' | 'aksam' | 'gece';
+export type RoomId = 'pyn' | 'harita' | 'arsiv' | 'mudur' | 'salon' | 'mutfak' | 'toplanti' | 'sunucu' | 'dinlenme';
+export const BRAIN: {
+  /** The frame around the map, in pixels, multiples of 16. */
+  margin: { top: number; right: number; bottom: number; left: number };
+  /** The framed world: the map and its margins. */
+  w: number;
+  h: number;
+  /** Where the map sits in the framed world. */
+  map: { x: number; y: number; w: number; h: number };
+  /** Where a room's sparks leave from; each is the first point of one of NEURON_PATHS. */
+  anchors: Record<RoomId, [number, number]>;
+};
+/** The brain's eight tones in each light: outline, sulcus, deep shade, shade, body, light, bright, cerebellum. */
+export const BRAIN_PALETTES: Record<LightMode, string[]>;
+/** Paints the frame from (0,0), BRAIN.w × BRAIN.h; the map's rectangle is left untouched. */
+export function paintBrain(ctx: CanvasRenderingContext2D, mode: LightMode): void;
+/** The sparks' paths along the folds' middles (hopping a groove where a fold ends), in the frame's coordinates, 4–12 points each, straight between points. */
+export const NEURON_PATHS: Array<Array<[number, number]>>;

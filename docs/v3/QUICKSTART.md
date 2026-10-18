@@ -1,7 +1,7 @@
 # Cortex local foundation quickstart
 
 Cortex is an **opt-in project-local installation**. The Python installer wires Claude,
-Codex and Antigravity to one source-backed engine. It installs no system service,
+Codex, Antigravity and Kiro to one source-backed engine. It installs no system service,
 connects no account, calls no model and does not enable Mem0. Existing legacy
 installers are separate; run the Cortex installer below to choose this runtime.
 
@@ -109,7 +109,10 @@ options. Command-line `--status` can be repeated. `--limit` defaults to 5 and
 choose its harness using `--harness`. Reuse an event ID only for the same outcome.
 Prefer receipt flags to avoid preparing JSON: `--event-id`, exactly one of
 `--summary` or `--summary-file PATH` (UTF-8), and at least one repeatable `--ref`.
-`--session` is optional. Summary text and line endings are preserved; literal
+`--session` is optional. `--link URL` (JSON `links`) names an external result such as
+a pull request or a published page; it is repeatable, only http(s), never read and never
+a vault source, so it adds to `--ref` rather than replacing it. A link with credentials or
+a known secret pattern is refused. Summary text and line endings are preserved; literal
 `\n` in `--summary` is not expanded. `--file` cannot be combined with these flags.
 Task patch JSON requires `id`, `expected_revision`, and `changes`. A revision
 conflict requires reading current state and reconciling the intended change.
@@ -167,7 +170,9 @@ Repeating installation is idempotent; edits to managed files require reconciliat
 In Codex, open `/hooks` and review/trust the installed definitions. The installer
 never fabricates trust hashes or bypasses review. Antigravity also requires
 trusting the vault folder before project hooks can run; review its folder trust
-prompt in the client. Start a fresh Claude/Codex/Antigravity session. Files
+prompt in the client. Kiro IDE 1.x and CLI V3 load `.kiro/hooks/beyin-v3.json`;
+review it in the Agent Hooks panel or CLI `/hooks` (see [KIRO.md](KIRO.md)).
+Start a fresh Claude/Codex/Antigravity/Kiro session. Files
 existing on disk do not prove actual client delivery.
 
 For Antigravity print mode, explicitly attach the vault workspace. Running from
@@ -199,7 +204,7 @@ updates. Plain notes are indexed too. Receipts write a source note before local
 state acknowledgement. `sync` handles edited and deleted sources. This supersedes
 using low-level `ingest` as the routine source management path.
 
-Shared skills live in `.agents/skills`; Claude sees a project-local mirror.
+Shared skills live in `.agents/skills`; Claude and Kiro see project-local mirrors.
 POSIX defaults to symlinks and Windows to tracked copies. Copy reconciliation
 preserves simultaneous conflicting changes and reports them. `skill-import`
 imports only the explicitly selected directory; no global skill scan occurs.
@@ -213,7 +218,7 @@ warning, but they no longer stop queued event metadata from being processed;
 only source synchronization failures do that.
 
 `doctor` also reads `AGENTS.md`, `CLAUDE.md`, the companion `Kurallar.md` and
-every Markdown file under `.agents/skills` and `.claude/skills` for `[[wikilink]]`
+every Markdown file under `.agents/skills`, `.claude/skills` and `.kiro/skills` for `[[wikilink]]`
 and `[text](path)` links that resolve to nothing inside the vault, and lists them
 with file and line under `instruction_references`. Code blocks, inline code,
 URLs and links that leave the vault are skipped. It is information only: it
@@ -221,8 +226,9 @@ makes no model call, writes nothing and does not change the doctor status.
 
 Hooks enqueue only event metadata, never raw prompts or transcripts. They start
 an opportunistic detached Python worker. Startup waits at most 1.5 seconds for
-source synchronization before context; a slow sync reports pending instead of
-presenting stale context as fresh. Stop and edit hooks return promptly. If a
+source synchronization before context; a slower sync keeps running and the turn
+reads the previous index, labeled as such, never as fresh context. Before the
+first index exists the hook reports pending only. Stop and edit hooks return promptly. If a
 worker fails, metadata stays queued and the next event retries. Explicit repeated
 `event_id` values deduplicate queue acknowledgement; client events without an ID
 receive new local IDs. This is not a blanket exactly-once transport guarantee. There is no
@@ -264,7 +270,11 @@ python3 scripts/install_v3.py --vault /absolute/path/to/vault --uninstall
 ```
 
 Use the same `--state` if installation used an override. Uninstall refuses files
-changed since installation rather than overwriting edits. Source notes, receipt
+whose managed part changed since installation rather than overwriting edits. Text
+you added outside that part (below the block in `AGENTS.md`, permissions in
+`.claude/settings.local.json`, tables in `.codex/config.toml`) stays, also after a
+reinstall or update; a file the installer created is removed only when nothing
+else is left in it. Source notes, receipt
 notes, canonical skills and the memory database remain. Reverted Codex definitions
 may require renewed `/hooks` trust review.
 

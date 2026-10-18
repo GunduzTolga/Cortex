@@ -146,7 +146,7 @@ function defRows(name, list, o = {}) {
 function floor(name, n, fn, group = 'zemin') {
   for (let v = 0; v < n; v++) def(`${name}_${v}`, 16, 16, { layer: 'floor', ax: 0, ay: 0, group }, (b) => fn(b, v, rng(1000 + v * 97 + name.length * 13)));
 }
-// Posta: sıcak ahşap parke
+// Müdür odası: sıcak ahşap parke
 floor('floor_wood', 4, (b, v, rnd) => {
   for (let p = 0; p < 4; p++) {
     const y = p * 4, light = rnd() < 0.3;
@@ -250,7 +250,7 @@ function face(style, fn) {
   FACE[style] = [];
   for (let r = 0; r < 3; r++) { const set = []; for (let v = 0; v < 2; v++) { const n = `wall_${style}_${r}_${v}`; def(n, 16, 16, { layer: 'floor', ax: 0, ay: 0, group: 'duvar' }, (b) => { fn(b, r, v); if (r === 0) { b.hl(0, 0, 16, 'rgba(12,10,22,0.35)'); b.hl(0, 1, 16, 'rgba(12,10,22,0.15)'); } }); set.push(n); } FACE[style].push(set); }
 }
-face('plaster', (b, r, v) => { // posta: sıcak sıva + ahşap lambri altı
+face('plaster', (b, r, v) => { // müdür odası: sıcak sıva + ahşap lambri altı
   b.r(0, 0, 16, 16, K[6]); if (v) { b.p(5, 6, K[5]); b.p(11, 10, K[7]); }
   if (r === 0) b.hl(0, 3, 16, K[7]);
   if (r === 2) { b.r(0, 4, 16, 12, W[3]); b.hl(0, 4, 16, W[5]); b.hl(0, 5, 16, W[4]); b.vl(v ? 0 : 8, 6, 7, W[2]); b.r(0, 13, 16, 3, W[1]); b.hl(0, 13, 16, W[2]); }
@@ -539,7 +539,7 @@ def('door_glass', 32, 48, { layer: 'wall', ax: 0, ay: 0, frames: 4, fps: 8 }, (b
   b.vl(0, 0, 48, S[0]); b.vl(31, 0, 48, S[0]); b.vl(1, 3, 45, S[2]); b.vl(30, 3, 45, S[2]);
 });
 
-// ═════════════ POSTA ODASI ═════════════
+// ═════════════ ASANSÖR VE POSTA EŞYALARI ═════════════
 wall('elevator', 40, 48, { frames: 5, fps: 6, light: { x: 16, y: 4, r: 10, color: '#ffb347' } }, (b, f) => {
   b.r(0, 0, 32, 48, S[2]); b.r(1, 1, 30, 47, S[3]); b.hl(1, 1, 30, S[4]);
   b.r(9, 2, 14, 6, K[0]); b.r(10, 3, 12, 4, K[1]); rows(b, 14, 3, ['DED', '..E', '.DD', '..E'].map(r => r.replace(/[DE]/g, 'E'))); b.p(11, 4, O[3]); b.p(11, 5, O[2]); // kat göstergesi
@@ -697,7 +697,7 @@ wall('trophy_shelf', 32, 16, {}, (b) => {
   b.hl(0, 12, 32, W[1]); b.hl(0, 11, 32, W[4]); b.hl(1, 13, 30, W[2]); b.shadow(1, 14, 31, 1, SH2);
   for (const [x, h, c] of [[3, 8, O[3]], [11, 10, O[4]], [20, 7, K[6]], [27, 6, W[4]]]) { const y = 11 - h; b.r(x - 1, y, 5, 3, c); b.hl(x - 1, y, 5, lt(c)); b.p(x - 2, y + 1, c); b.p(x + 4, y + 1, c); b.vl(x + 1, y + 3, h - 5, dk(c)); b.r(x, 9, 3, 2, W[1]); }
 });
-def('exec_desk', 64, 48, { solid: [0, 18, 64, 18], light: { x: 18, y: 8, r: 24, color: '#5fd0e0' } }, (b) => {
+function execDesk(b, plate) {
   b.shadow(1, 38, 63, 2); b.shadow(47, 46, 17, 2);
   box(b, 46, 18, 18, 28, 4, W, 2);                       // L dönüşü
   box(b, 0, 14, 64, 26, 14, W, 2); b.r(3, 30, 58, 8, W[1]); b.r(4, 31, 56, 6, W[2]); b.hl(4, 31, 56, W[3]);
@@ -706,11 +706,17 @@ def('exec_desk', 64, 48, { solid: [0, 18, 64, 18], light: { x: 18, y: 8, r: 24, 
   b.r(46, 16, 12, 6, W[4]); b.r(47, 17, 10, 4, W[1]); paper(b, 48, 15, 8, 4, false);             // evrak sepeti
   b.r(4, 18, 3, 4, R[2]); b.r(5, 15, 1, 3, W[3]); b.p(5, 14, W[5]); b.hl(3, 22, 5, K[7]);          // onay mührü
   b.r(12, 21, 14, 3, K[2]); b.hl(13, 22, 12, K[4]);                                            // klavye
-  // "PYN" isimlik
-  b.r(22, 32, 20, 7, O[1]); b.r(23, 33, 18, 5, O[3]); b.hl(23, 33, 18, O[4]);
-  rows(b, 25, 34, ['aa.a.a.a..a', 'aa..a..aa.a', 'a...a..a.aa'].map(r => r));
+  if (plate === 'mudur') {                                                                     // müdürün isimliği: adı kasanın sahibinin, yazısız
+    b.r(20, 32, 24, 7, O[1]); b.r(21, 33, 22, 5, O[3]); b.hl(21, 33, 22, O[4]); b.hl(24, 35, 16, O[2]);
+  } else {                                                                                       // "PYN" isimlik
+    b.r(22, 32, 20, 7, O[1]); b.r(23, 33, 18, 5, O[3]); b.hl(23, 33, 18, O[4]);
+    rows(b, 25, 34, ['aa.a.a.a..a', 'aa..a..aa.a', 'a...a..a.aa'].map(r => r));
+  }
   b.r(50, 26, 10, 6, W[1]); b.r(51, 27, 8, 4, B[2]); b.hl(51, 27, 8, B[3]);                   // dosya
-});
+}
+const EXEC = { solid: [0, 18, 64, 18], light: { x: 18, y: 8, r: 24, color: '#5fd0e0' } };
+def('exec_desk', 64, 48, EXEC, (b) => execDesk(b, 'pyn'));
+def('exec_desk_mudur', 64, 48, EXEC, (b) => execDesk(b, 'mudur'));
 def('exec_chair', 20, 30, { group: 'sandalye' }, (b) => {
   b.shadow(3, 27, 15, 2); b.hl(3, 26, 14, K[2]); for (const x of [3, 9, 10, 16]) b.p(x, 27, K[1]); b.r(9, 19, 2, 7, K[3]);
   box(b, 2, 0, 16, 16, 3, R, 2); for (let y = 5; y < 15; y += 3) for (let x = 5; x < 15; x += 3) b.p(x, y, R[1]); b.hl(4, 2, 12, R[4]);
@@ -803,6 +809,13 @@ deskUp('desk_terminal', {}, (b, f) => {
   b.hl(26, 11, 4, K[6]); b.r(26, 12, 4, 2, R[3]); b.r(27, 14, 2, 1, R[2]); b.r(26, 15, 4, 2, R[3]); b.hl(25, 17, 6, K[5]); // çay bardağı
 });
 deskDown('desk_shared_down', { light: null }, (b) => { deskBase(b, 32, K, 5); kb(b, 10, 10, 12); monBack(b, 9, 4, 14, 12); });
+// Tolga'nın masası: Cortex'i yazan yazılımcı. İki ekran, renkli tuşlu klavye, ananaslı kupa, önünde "TOLGA" isimliği.
+deskDown('desk_tolga', {}, (b) => {
+  deskBase(b, 32, W, 4); kb(b, 10, 10, 12, [R[4], O[4], G[4], C[4], B[4], P[4]]); mouse(b, 24, 11);
+  monBack(b, 2, 3, 13, 11); monBack(b, 17, 3, 13, 11); mug(b, 27, 12, O[3]);
+  b.r(5, 22, 22, 7, O[1]); b.r(6, 23, 20, 5, O[3]); b.hl(6, 23, 20, O[4]);
+  rows(b, 7, 24, ['aaa.aaa.a...aa...a.', '.a..a.a.a...a.a.aaa', '.a..aaa.aaa.aaa.a.a']);
+});
 deskUp('desk_shared_up', { light: null, frames: 1 }, (b) => { deskBase(b, 32, K, 5); monFront(b, 9, 0, 14, 12, 'off', 0); kb(b, 10, 17, 12); });
 deskUp('desk_shared_up_reserved', { light: null, frames: 1 }, (b) => {
   deskBase(b, 32, K, 5); monFront(b, 9, 0, 14, 12, 'off', 0); kb(b, 10, 17, 12);
@@ -1076,6 +1089,11 @@ const HEAD = {
     up: [5, '...hHHHh....', '..AAAAAAAA..', '.hHdHdHdHHd.', '.HdHdHdHdHd.', '.HHdHdHdHHd.', '.HdHdHdHdHd.', '.dHHhHHhHHd.', 'BdHHHHHHHHdB', 'BSdHdHHdHdSB', '.SSSHdHdSSS.', '..SSHdHdSS..', '....HdHd....', '....dHdH....', '.....dd.....'],
     side: [5, '...hHHHh....', '..hAAAAAAd..', '.hHdHdHdHHd.', 'hHdHdHdHdHd.', 'HdHdHdHdHHd.', 'dHdHdHHSSSS.', 'HdHdHBSSSSS.', 'dHdHHBSSSSS.', 'HdHdHBSSSSSS', 'dHd.SSSSSSS.', '.d...SSSSSS.', 'Hd..........', 'dH..........', '.d..........'],
   },
+  tolga: {
+    down: [4, '....hhhhh...', '..hhHHHHHh..', '.hHHHHHHHHd.', '.HHHhHHHHHHd', '.HHHHHHHHHd.', '.dHSSSSSSHd.', '.SSSSSSSSSS.', '.SSSSSSSSSS.', 'sSSSSSSSSSSs', 'sSSSSSSSSSSs', '.SSSSSSSSSS.', '..SSSSSSSS..'],
+    up: [4, '....hhhhh...', '..hhHHHHHh..', '.hHHHHHHHHd.', '.HHHHhHHHHHd', '.HHHHHHHHHd.', '.HHHHHHHHHd.', '.HHHHHHHHHd.', '.dHHHHHHHdd.', 'sSdHHHHHdSSs', 'sSSddddddSSs', '.SSSSSSSSSS.', '..SSSSSSSS..'],
+    side: [4, '.....hhhh...', '...hhHHHHhh.', '..hHHHHHHHHd', '.HHHHHHHHHHd', '.HHHHHHHHHd.', '.HHHHHHHdSS.', '.dHHHHSSSSS.', '.dHHHSSSSSS.', '.ddHSSSSSSS.', '.SdHsSSSSSSS', '.SSSSSSSSSS.', '..SSSSSSSS..'],
+  },
   husnu: {
     down: [6, '...SSSSSS...', '..SSSSSSSS..', '.SSSSSSSSSS.', '.hSSSSSSSSh.', '.HSSSSSSSSH.', 'HHSSSSSSSSHH', 'sHSSSSSSSSHs', 'sdSSSSSSSSds', '.SSSSSSSSSS.', '..SSSSSSSS..'],
     up: [6, '...SSSSSS...', '..SSSSSSSS..', '.SSSSSSSSSS.', '.SSSSSSSSSS.', '.HSSSSSSSSH.', 'HHHSSSSSSHHH', 'sHHHHHHHHHHs', 'sdHHHHHHHHds', '.SdddddddSS.', '..SSSSSSSS..'],
@@ -1084,10 +1102,17 @@ const HEAD = {
 };
 
 const RS = RAMPS;
-/** 12 ajan + Pyn + Tekir. look: üretecin kullandığı parçalar (renkler palet içinden). */
+/** 12 ajan + Pyn + müdür + Tolga + Tekir. look: üretecin kullandığı parçalar (renkler palet içinden).
+ *  Müdürün adı kasanın sahibinin adıdır (ilk açılışta sorulan hitap; ofis-engine.js nameTheManager). */
 export const CHARACTERS = {
   pyn: { name: 'Pyn', role: 'Patron', roleEn: 'Boss', tool: null, color: '#F2C14E', kind: 'pyn', label: 'CORTEX · PATRON', home: 'pyn',
     bio: 'Ofisin patronu, huysuz bakışlı bir ananas. Az konuşur, her şeyi bir "Hmm." ile onaylar; ekibiyle gizlice gurur duyar.', look: { body: [O[1], O[3], O[4]], leaf: [G[1], G[2], G[3], G[4]], tie: [B[0], B[1]] } },
+  mudur: { name: 'Müdür', role: 'Müdür', roleEn: 'Manager', tool: null, color: '#F5F0E6', kind: 'mudur', label: 'CORTEX · MÜDÜR', home: 'mudur',
+    bio: 'Ofisin müdürü, bu beynin sahibi. Lacivert takımını hiç çıkarmaz; işler yolunda gidince kollarını kavuşturup gülümser.',
+    look: { skin: 'sk1', hair: 'tolga', hc: [W[2], W[3], W[4]], top: { kind: 'blazer', c: [B[0], B[1], B[2]], inner: [B[3], B[4], K[7]] }, bottom: { kind: 'pants', c: [B[0], B[1], B[2]] }, shoes: { kind: 'shoe', c: [K[0], K[1], K[2]] }, tie: [S[3], S[4]], stubble: true, smile: true } },
+  tolga: { name: 'Tolga', role: 'Yazılımcı', roleEn: 'Developer', tool: null, color: '#7C9CF0', kind: 'dev', label: 'CORTEX · YAZILIMCI', home: 'tolga', hardy: true,
+    bio: 'Cortex\'i yazan yazılımcı; bu ofisin her tuğlası onun klavyesinden çıktı. Hızlı karar verir, tek pikseli kaçırmaz, terminali sevmez: her şey uygulamanın içinden kurulsun. Gece ikide "yarın devam" der, sabah ilk o gelir.',
+    look: { skin: 'sk1', hair: 'tolga', hc: [W[2], W[3], W[4]], top: { kind: 'hoodie', c: [B[0], B[1], B[2]], mark: O[4] }, bottom: { kind: 'pants', c: [K[1], K[2], K[3]] }, shoes: { kind: 'sneaker', c: [K[4], K[6], K[7]] }, stubble: true, smile: true, neckphones: true } },
   defne: { name: 'Defne', role: 'Kıdemli yazar', roleEn: 'Senior writer', tool: 'claude', color: '#E07A5F', home: 'defne',
     bio: 'Uzun ve özenli cümleler kurar, dipnotsuz metin teslim etmez. Her karardan önce bir kez "emin misin?" diye sorar.',
     look: { skin: 'sk2', hair: 'defne', hc: [W[2], W[3], W[4]], top: { kind: 'cardigan', c: [R[3], R[4], R[5]], inner: [W[5], W[6], K[7]] }, bottom: { kind: 'pants', c: [K[0], K[1], K[2]] }, shoes: { kind: 'shoe', c: [W[0], W[1], W[2]] }, glasses: K[1], blush: true } },
@@ -1191,7 +1216,8 @@ function torsoFront(b, r, L, back) {
     case 'cardigan': b.r(7, y0, 2, 6, inn[1]); b.p(7, y0, inn[2]); b.p(8, y0 + 2, inn[0]); b.p(8, y0 + 4, inn[0]); b.p(6, y0 + 4, c[0]); break;
     case 'hoodie': b.p(6, y0, c[2]); b.p(9, y0, c[2]); b.p(6, y0 + 1, K[5]); b.p(9, y0 + 1, K[5]); b.p(6, y0 + 2, K[4]); b.p(9, y0 + 2, K[4]); b.p(7, y0 + 2, T.mark); b.p(8, y0 + 3, T.mark); b.p(7, y0 + 4, T.mark); b.hl(6, y0 + 5, 4, c[0]); break;
     case 'vest': b.r(5, y0 + 1, 6, 5, v[1]); b.vl(5, y0 + 2, 4, v[0]); b.vl(10, y0 + 2, 4, v[0]); b.p(7, y0 + 1, c[1]); b.p(8, y0 + 1, c[1]); b.p(7, y0 + 2, c[1]); b.p(6, y0, K[7]); b.p(9, y0, K[7]); b.hl(5, y0 + 6, 6, v[0]); for (let x = 6; x < 10; x += 2) b.p(x, y0 + 4, v[2]); break;
-    case 'blazer': b.r(7, y0, 2, 5, inn[1]); b.p(6, y0 + 1, c[2]); b.p(9, y0 + 1, c[2]); b.p(6, y0 + 2, c[2]); b.p(9, y0 + 2, c[2]); b.p(9, y0 + 4, K[5]); break;
+    case 'blazer': b.r(7, y0, 2, 5, inn[1]); b.p(6, y0 + 1, c[2]); b.p(9, y0 + 1, c[2]); b.p(6, y0 + 2, c[2]); b.p(9, y0 + 2, c[2]); b.p(9, y0 + 4, K[5]);
+      if (L.tie) { b.p(6, y0, inn[1]); b.p(9, y0, inn[1]); b.hl(7, y0, 2, L.tie[0]); for (let y = y0 + 1; y < y0 + 4; y++) { b.p(7, y, L.tie[1]); b.p(8, y, L.tie[0]); } b.p(7, y0 + 4, L.tie[0]); } break;
     case 'varsity': b.hl(5, y0 + 6, 6, K[6]); b.p(9, y0 + 2, K[7]); b.p(9, y0 + 3, K[7]); b.p(6, y0, c[2]); b.p(9, y0, c[2]); break;
     case 'turtleneck': b.r(7, y0, 2, 6, inn[1]); b.hl(6, y0, 4, inn[2]); b.p(6, y0 + 1, c[2]); b.p(9, y0 + 1, c[2]); break;
     case 'shirtvest': b.r(5, y0 + 1, 6, 5, v[1]); b.vl(5, y0 + 2, 4, v[0]); b.vl(10, y0 + 2, 4, v[0]); b.r(7, y0, 2, 3, c[2]); b.p(7, y0 + 3, c[1]); b.p(8, y0 + 4, v[2]); b.p(8, y0 + 5, v[2]); b.hl(5, y0 + 6, 6, v[0]); b.hl(6, y0, 4, c[2]); break;
@@ -1242,6 +1268,8 @@ function faceDown(b, r, L, oy) {
   if (r.mouth === 1) { b.p(7, 14 + oy, R[2]); }
   if (r.mouth === 2) { b.p(7, 14 + oy, R[1]); b.p(8, 14 + oy, R[1]); }
   if (r.mouth === 3) { b.r(7, 14 + oy, 2, 2, K[0]); b.p(7, 15 + oy, R[3]); }
+  if (L.stubble) { for (const [x, y] of [[3, 14], [12, 14], [4, 15], [5, 15], [6, 15], [9, 15], [10, 15], [11, 15]]) b.p(x, y + oy, sk[0]); }
+  if (L.smile && !r.mouth) { b.p(6, 14 + oy, lid); b.p(9, 14 + oy, lid); b.hl(7, 15 + oy, 2, lid); }
   if (L.beard) { const h = L.hc[2]; b.p(3, 13 + oy, h); b.p(12, 13 + oy, h); b.p(3, 14 + oy, h); b.p(12, 14 + oy, h); b.p(4, 15 + oy, h); b.p(11, 15 + oy, h); b.hl(5, 15 + oy, 6, sk[0]); b.p(6, 15 + oy, h); b.p(9, 15 + oy, h); b.p(7, 15 + oy, h); b.p(8, 15 + oy, h); }
   if (L.mustache === 'bushy') { b.hl(5, 14 + oy, 6, L.hc[1]); b.p(5, 15 + oy, L.hc[1]); b.p(10, 15 + oy, L.hc[1]); b.p(6, 14 + oy, L.hc[2]); }
   if (L.mustache === 'white') { b.hl(6, 14 + oy, 4, K[7]); b.p(5, 15 + oy, K[6]); b.p(10, 15 + oy, K[6]); }
@@ -1277,7 +1305,7 @@ function torsoSide(b, r, L) {
   const T = L.top, c = T.c, y0 = 17 + r.by, k = T.kind, v = T.vest, inn = T.inner;
   b.r(6, y0, 5, 7, c[1]); b.hl(6, y0, 5, c[2]); b.vl(10, y0 + 1, 6, c[0]); b.hl(6, y0 + 6, 5, c[0]); b.p(6, y0, null);
   if (k === 'plaid') { for (let y = y0; y < y0 + 8; y++) for (let x = 6; x < 11; x++) { if (x % 3 === 1) b.p(x, y, c[0]); else if ((y - y0) % 3 === 2) b.p(x, y, c[2]); } b.p(5, y0 + 6, c[1]); }
-  if (k === 'cardigan' || k === 'blazer' || k === 'turtleneck') { b.vl(10, y0, 6, inn[1]); if (k === 'turtleneck') b.r(8, y0, 3, 1, inn[1]); }
+  if (k === 'cardigan' || k === 'blazer' || k === 'turtleneck') { b.vl(10, y0, 6, inn[1]); if (k === 'turtleneck') b.r(8, y0, 3, 1, inn[1]); if (L.tie) b.vl(10, y0 + 1, 4, L.tie[1]); }
   if (k === 'hoodie' || k === 'varsity') { b.r(5, y0, 2, 2, c[2]); b.p(10, y0 + 1, K[5]); b.p(10, y0 + 2, K[4]); if (k === 'varsity') b.hl(6, y0 + 6, 5, K[6]); }
   if (k === 'vest' || k === 'shirtvest') { b.r(6, y0 + 1, 4, 5, v[1]); b.vl(6, y0 + 1, 5, v[2]); b.p(10, y0, K[7]); b.p(9, y0 + 3, v[2]); }
   if (k === 'overalls') { b.r(8, y0 + 3, 3, 4, v[1]); b.vl(8, y0, 3, v[1]); b.p(8, y0 + 3, O[4]); }
@@ -1311,6 +1339,8 @@ function faceSide(b, r, L, oy) {
   if (L.blush) b.p(10, 14 + oy, R[5]);
   if (L.lips) b.p(12, 14 + oy, L.lips);
   if (r.mouth >= 2) b.p(12, 14 + oy, R[1]);
+  if (L.stubble) b.hl(8, 15 + oy, 3, sk[0]);
+  if (L.smile && !r.mouth) { b.p(11, 15 + oy, lid); b.p(12, 14 + oy, lid); }
   if (L.beard) { const h = L.hc[1]; b.hl(7, 14 + oy, 3, h); b.hl(7, 15 + oy, 5, h); b.p(12, 15 + oy, h); }
   if (L.mustache === 'bushy') { b.r(11, 14 + oy, 3, 1, L.hc[1]); b.p(11, 15 + oy, L.hc[1]); }
   if (L.mustache === 'white') { b.r(11, 14 + oy, 3, 1, K[7]); }
@@ -1471,10 +1501,10 @@ export function cellOf(id) { return CHARACTERS[id].kind === 'cat' ? { w: 16, h: 
 // ═════════════ HARİTA ═════════════
 const MW = 61, MH = 42;
 const ROOM_DEFS = [
-  { id: 'posta', tr: 'POSTA ODASI', en: 'MAILROOM', x: 1, y: 4, w: 14, h: 9, floor: 'w', face: 'plaster', faceY: 1 },
+  { id: 'pyn', tr: "PYN'İN ODASI", en: "PYN'S OFFICE", x: 1, y: 4, w: 14, h: 9, floor: 'r', face: 'lambri', faceY: 1 },
   { id: 'harita', tr: 'HARİTA ODASI', en: 'MAP ROOM', x: 16, y: 4, w: 14, h: 9, floor: 'c', face: 'paint', faceY: 1 },
   { id: 'arsiv', tr: 'ARŞİV', en: 'ARCHIVE', x: 31, y: 4, w: 14, h: 9, floor: 'h', face: 'library', faceY: 1 },
-  { id: 'pyn', tr: "PYN'İN ODASI", en: "PYN'S OFFICE", x: 46, y: 4, w: 14, h: 9, floor: 'r', face: 'lambri', faceY: 1 },
+  { id: 'mudur', tr: 'MÜDÜR ODASI', en: "MANAGER'S OFFICE", x: 46, y: 4, w: 14, h: 9, floor: 'w', face: 'plaster', faceY: 1 },
   { id: 'salon', tr: 'YAZI İŞLERİ', en: 'NEWSROOM', x: 1, y: 17, w: 59, h: 11, floor: 't', face: 'salon', faceY: 14 },
   { id: 'mutfak', tr: 'MUTFAK', en: 'KITCHEN', x: 1, y: 32, w: 14, h: 9, floor: 'k', face: 'tile', faceY: 29 },
   { id: 'toplanti', tr: 'TOPLANTI', en: 'MEETING ROOM', x: 16, y: 32, w: 14, h: 9, floor: 'b', face: 'meeting', faceY: 29 },
@@ -1517,16 +1547,13 @@ function deskSet(id, desk, chair, cx, ty, dir, o = {}) {
   return seat(id, cx, sy, dir, 'desk_' + id);
 }
 
-// ── POSTA ODASI
-put('elevator', 20, 16, { id: 'elevator' }); put('wall_clock', 66, 22); put('mail_slots', 88, 22, { id: 'mail_slots' });
-put('screen_list_s', 148, 24); put('screen_chart_s', 186, 24); put('fire_ext', 222, 34);
-put('reception', 28, 120, { solid: [0, 8, 48, 22] }); put('plant_small', 64, 66);
-put('sorting_table', 96, 96, { id: 'desk_umut' }); put('desk_lamp', 130, 94, { z: 24 });
-seat('umut', 120, 110, 'down', 'desk_umut');
-put('scanner', 200, 64, { solid: [1, 6, 14, 16] }); put('boxes_stack', 220, 66); put('coat_rack_bag', 220, 104); put('box_single', 200, 142);
-put('chair_plastic', 150, 66, { z: -10 }); put('chair_plastic', 168, 66, { z: -10 });
-seat('wait_1', 158, 80, 'down'); seat('wait_2', 176, 80, 'down');
-put('mail_cart', 156, 150); put('trash_bin', 200, 186); put('plant_tall', 220, 170);
+// ── PYN'İN ODASI (eski posta odası): notlar asansörle buraya gelir, Umut ayırıp Pyn'e verir
+put('elevator', 20, 16, { id: 'elevator' }); put('diploma_0', 60, 26); put('diploma_1', 78, 26); put('portrait_pineapple', 108, 20); put('trophy_shelf', 142, 30); put('wall_clock', 182, 24); put('bookshelf_dark', 204, 16);
+put('exec_chair', 118, 84, { z: -14 }); put('exec_desk', 96, 90, { id: 'desk_pyn' }); seat('pyn', 128, 110, 'down', 'desk_pyn');
+put('guest_chair', 100, 144); put('guest_chair', 140, 144); seat('guest_1', 108, 158, 'up'); seat('guest_2', 148, 158, 'up');
+put('sorting_table', 176, 96, { id: 'desk_umut' }); put('desk_lamp', 210, 94, { z: 24 }); seat('umut', 200, 110, 'down', 'desk_umut');
+put('floor_lamp', 56, 66); put('coat_rack', 216, 160); put('pineapple_plant', 180, 172);
+put('sofa_leather', 24, 104); put('coffee_table_small', 26, 134); put('plant_tall', 220, 122);
 
 // ── HARİTA ODASI
 put('corkboard', 272, 18, { id: 'corkboard' });
@@ -1545,16 +1572,16 @@ put('card_catalog', 584, 96); put('chair_wood_down', 664, 88, { z: -14 });
 put('reading_desk', 648, 96, { id: 'desk_kaan' }); seat('kaan', 672, 110, 'down', 'desk_kaan');
 put('plant_tall', 700, 64); put('trash_bin', 700, 112); put('file_boxes', 650, 176); put('file_boxes', 668, 176); put('hand_truck', 690, 176); put('plant_small', 584, 176);
 
-// ── PYN'İN ODASI
-put('bookshelf_dark', 740, 16); put('diploma_0', 780, 26); put('diploma_1', 798, 26); put('portrait_pineapple', 828, 20); put('trophy_shelf', 862, 30); put('wall_clock', 902, 24); put('bookshelf_dark', 924, 16);
-put('exec_chair', 838, 84, { z: -14 }); put('exec_desk', 816, 90, { id: 'desk_pyn' }); seat('pyn', 848, 110, 'down', 'desk_pyn');
-put('guest_chair', 820, 144); put('guest_chair', 860, 144); seat('guest_1', 828, 158, 'up'); seat('guest_2', 868, 158, 'up');
-put('aquarium', 920, 76, { id: 'aquarium' }); put('floor_lamp', 776, 66); put('coat_rack', 936, 160); put('pineapple_plant', 900, 172);
+// ── MÜDÜR ODASI (eski Pyn odası): müdürün masası, arkasında şehre bakan pencere
+put('bookshelf_dark', 740, 16); put('diploma_0', 780, 26); put('diploma_1', 798, 26); put('window_view', 816, 20); put('trophy_shelf', 868, 30); put('wall_clock', 904, 24); put('bookshelf_dark', 924, 16);
+put('exec_chair', 838, 84, { z: -14 }); put('exec_desk_mudur', 816, 90, { id: 'desk_mudur' }); seat('mudur', 848, 110, 'down', 'desk_mudur');
+put('guest_chair', 820, 144); put('guest_chair', 860, 144); seat('guest_3', 828, 158, 'up'); seat('guest_4', 868, 158, 'up');
+put('aquarium', 920, 76, { id: 'aquarium' }); put('floor_lamp', 776, 66); put('coat_rack', 936, 160); put('plant_bush', 900, 172);
 put('sofa_leather', 744, 104); put('coffee_table_small', 746, 134); put('plant_tall', 940, 122);
 
 // ── YAZI İŞLERİ (salon) — kuzey yüzü
 put('window_blinds', 22, 230); put('fire_ext', 60, 240); put('poster_wave', 80, 228);
-for (const [x, id] of [[147, 'posta'], [387, 'harita'], [627, 'arsiv'], [867, 'pyn']]) put('room_sign', x, 232, { id: 'sign_' + id });
+for (const [x, id] of [[147, 'pyn'], [387, 'harita'], [627, 'arsiv'], [867, 'mudur']]) put('room_sign', x, 232, { id: 'sign_' + id });
 put('tv_dash', 168, 228); put('poster_cortex', 226, 228); put('window_blinds', 260, 230); put('ac_unit', 304, 226);
 put('tv_list', 404, 228); put('clock_big', 470, 226, { id: 'clock_salon' }); put('sticky_board', 514, 232); put('window_blinds', 556, 230);
 put('window_blinds', 648, 230); put('ac_unit', 690, 226); put('painting_a', 732, 234); put('window_blinds', 760, 230); put('fire_ext', 800, 240);
@@ -1569,7 +1596,7 @@ deskSet('toprak', 'desk_toprak', 'chair_mustard_up', 80, 22, 'up');
 deskSet('asya', 'desk_asya', 'chair_purple_up', 112, 22, 'up');
 deskSet('berk', 'desk_berk', 'chair_blue_up', 144, 22, 'up');
 // Masa grubu B (boş ortak masalar)
-deskSet('shared_1', 'desk_shared_down', 'chair_grey_down', 256, 19, 'down', { push: 5 });
+deskSet('tolga', 'desk_tolga', 'chair_black_down', 256, 19, 'down');  // Tolga, ortak masaların başında
 deskSet('shared_2', 'desk_shared_down', 'chair_grey_down', 288, 19, 'down', { push: 5 });
 deskSet('shared_3', 'desk_shared_up', 'chair_grey_up', 256, 22, 'up', { push: 5 });
 deskSet('shared_4', 'desk_shared_up_reserved', 'chair_grey_up', 288, 22, 'up', { push: 5 });
@@ -1619,10 +1646,10 @@ put('pouf_a', 784, 604); put('pouf_b', 806, 604); put('floor_lamp', 744, 520); p
 put('cat_bed', 896, 612, { id: 'catbed' }); seat('catbed', 904, 624, 'down', 'catbed');
 
 // Etkileşim noktaları (kare, bakış yönü)
-spot('elevator', 2, 4, 'up', 'posta'); spot('mail_slots', 7, 4, 'up', 'posta'); spot('scanner', 12, 6, 'up', 'posta'); spot('reception', 3, 10, 'up', 'posta');
+spot('elevator', 2, 4, 'up', 'pyn'); spot('pyn_door', 7, 12, 'up', 'pyn');
 spot('corkboard', 22, 4, 'up', 'harita'); spot('map_table', 22, 6, 'down', 'harita'); spot('whiteboard', 17, 7, 'up', 'harita');
 spot('filing', 33, 8, 'up', 'arsiv'); spot('card_catalog', 37, 8, 'up', 'arsiv'); spot('shelves', 40, 4, 'up', 'arsiv');
-spot('aquarium', 58, 7, 'up', 'pyn'); spot('pyn_door', 52, 12, 'up', 'pyn');
+spot('aquarium', 58, 7, 'up', 'mudur'); spot('mudur_door', 52, 12, 'up', 'mudur');
 spot('printer', 49, 19, 'up', 'salon'); spot('cooler_salon', 56, 19, 'up', 'salon'); spot('tea_cart', 11, 25, 'down', 'salon');
 spot('talk_a', 23, 24, 'side', 'salon'); spot('talk_b', 25, 24, 'left', 'salon'); spot('standing', 35, 23, 'up', 'salon');
 spot('tea', 5, 33, 'up', 'mutfak'); spot('fridge', 9, 33, 'up', 'mutfak'); spot('vending', 11, 33, 'up', 'mutfak'); spot('cooler_kitchen', 13, 33, 'up', 'mutfak');
@@ -1689,3 +1716,315 @@ export function checkReachability() {
   for (const s of SPOTS) if (dist[s.y * MW + s.x] < 0) bad.push('spot:' + s.id);
   return bad;
 }
+
+
+// ═════════════ BEYİN ÇERÇEVESİ (ek brif: ofis, kullanıcının beyninin içinde) ═════════════
+// Haritanın çevresi bir beyin: iki yarıküre, üstte ortada yarık, yanlarda Sylvius yarığıyla ayrılan şakak lobu,
+// altta yarıkürelerin altından taşan tek parça, geniş beyincik (sap onun arkasında kalır, görünmez). Kıvrımlar kıvrıla kıvrıla akan tüpler: oluklar dallanır,
+// bazıları kör biter, dış kenar her olukta içeri kıvrılır. Harita dikdörtgeni hiç boyanmaz. Haritaya yaklaştıkça kıvrımlar
+// incelir ve doku bir pervazla duvara iner: ofis beynin içine oyulmuş, bir pencereden görülüyor gibi.
+// Doku 2×2'lik iri piksellerle çizilir (yalnız fillRect, tam sayı): motor bütün beyni ~0,45× sığdırınca da kıvrımlar okunsun.
+// Desen sabit tohumlu; her çağrı aynı pikselleri verir.
+//
+//  BRAIN.margin  üst 48, sağ 96, alt 112, sol 96 (16'nın katları). Alt brifteki gibi 112: beyincik sığsın.
+//                Üst 48 (64 yerine): Ofis sekmesinde darboğaz yükseklik, harita en küçük pencerede biraz daha büyük kalır.
+//  BRAIN.w, h    çerçeveli dünya: 1168 × 832. BRAIN.map: haritanın bu dünyadaki dikdörtgeni.
+//  BRAIN.anchors oda → [x, y]: o odanın dış duvarının yanında, bir kıvrımın ortasında. Her biri NEURON_PATHS'teki bir yolun ilk noktası.
+//  NEURON_PATHS  kıvrımların orta çizgisi boyunca yollar (kıvrım bitince bir oluğun üstünden sonrakine atlar), çerçeve koordinatında, 4–12 nokta. Noktalar arası düz gidilir;
+//                kıvılcımın 7×7'si yolun her yerinde dokunun içinde, haritadan en az 6 piksel uzakta kalır.
+//  paintBrain(ctx, mode)  çerçeveyi (0,0)'dan çizer. mode: 'sabah' | 'ogle' | 'aksam' | 'gece' (BRAIN_PALETTES).
+//  SPRITES.kivilcim     7×7, çapa ortada, 6 kare: 0 doğarken ve sönerken, 1–5 akarken döngü.
+//                       pal: { renk: 'altin' | 'turkuaz', gece: true }; gecede çevresinde bir halka daha parlar.
+//  SPRITES.kivilcim_iz  3×3, 2 kare: kıvılcımın 5 ve 10 piksel gerisine.
+
+const BR_M = { top: 48, right: 96, bottom: 112, left: 96 };
+const BR_W = MW * 16 + BR_M.left + BR_M.right, BR_H = MH * 16 + BR_M.top + BR_M.bottom;
+const BR_X0 = BR_M.left, BR_Y0 = BR_M.top, BR_X1 = BR_X0 + MW * 16, BR_Y1 = BR_Y0 + MH * 16;
+// İri piksel ızgarası (1 = 2×2 piksel).
+const GW = BR_W / 2, GH = BR_H / 2, GX0 = BR_X0 / 2, GY0 = BR_Y0 / 2, GX1 = BR_X1 / 2, GY1 = BR_Y1 / 2, GCX = GW / 2;
+const brStep = (a, b, t) => { const k = Math.min(1, Math.max(0, (t - a) / (b - a))); return k * k * (3 - 2 * k); };
+function brHash(a, b, seed) {
+  let h = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263) ^ Math.imul(seed, 1442695041);
+  h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function brNoise(x, y, p, seed) {
+  const fx = x / p, fy = y / p, ix = Math.floor(fx), iy = Math.floor(fy), tx = fx - ix, ty = fy - iy, sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+  const a = brHash(ix, iy, seed), b = brHash(ix + 1, iy, seed), c = brHash(ix, iy + 1, seed), d = brHash(ix + 1, iy + 1, seed);
+  return (a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy) * 2 - 1;
+}
+function brRng(seed) {
+  let s = seed >>> 0;
+  return () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+/** Haritanın duvarından kaç iri piksel dışarıda (0: duvara bitişik halka). */
+const brRing = (x, y) => Math.max(GX0 - 1 - x, x - GX1, GY0 - 1 - y, y - GY1, 0);
+// Yarıküre: köşeleri ayrı ayrı yuvarlak bir kutu; ortaya bakan köşeler üstte yarığı, altta beyinciğin göründüğü oyuğu açar.
+const HB = { x0: 2, x1: GCX, y0: 2, y1: GH - 32, ot: 72, it: 20, ib: 22, ob: 76 };
+function brHemi(x, y, side) {
+  const m = side ? GW - x : x, cx = (HB.x0 + HB.x1) / 2, cy = (HB.y0 + HB.y1) / 2;
+  const r = y < cy ? (m < cx ? HB.ot : HB.it) : (m < cx ? HB.ob : HB.ib);
+  const qx = Math.abs(m - cx) - ((HB.x1 - HB.x0) / 2 - r), qy = Math.abs(y - cy) - ((HB.y1 - HB.y0) / 2 - r);
+  const s = Math.abs(x - GCX) / GCX, inset = brStep(0.62, 1, s) * (5 * (1 - brStep(150, 236, y)) + 2.5 * brStep(318, 384, y));
+  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r + inset;
+}
+// Kenar tümsekleri: her yarıkürenin çevresi 17–37 iri piksellik loblara bölünür; lobların arası bir çentik, her çentikten bir oluk girer.
+const BR_HEM = [0, 1].map((side) => {
+  const cx = side ? GW - 147 : 147, cy = (HB.y0 + HB.y1) / 2, N = 1440, r = new Float32Array(N + 1), S = new Float32Array(N + 1);
+  for (let j = 0; j <= N; j++) { const t = j / N * 2 * Math.PI, ca = Math.cos(t), sa = Math.sin(t); let rr = 0; while (rr < 440 && brHemi(cx + ca * rr, cy + sa * rr, side) <= 0) rr += 0.5; r[j] = rr; }
+  for (let j = 1; j <= N; j++) S[j] = S[j - 1] + Math.hypot(r[j] - r[j - 1], (r[j] + r[j - 1]) / 2 * 2 * Math.PI / N);
+  const rnd = brRng(101 + side), raw = [], deep = []; let s = 0; while (s < S[N]) { raw.push(s); deep.push(3.5 + rnd() * 3); s += 17 + rnd() * 20; }
+  const notch = raw.map((v) => v * S[N] / s); notch.push(S[N]);
+  return { cx, cy, N, r, S, notch, deep };
+});
+function brLobeF(x, y, side) {
+  const H = BR_HEM[side]; let t = Math.atan2(y - H.cy, x - H.cx); if (t < 0) t += 2 * Math.PI;
+  const u = t / (2 * Math.PI) * H.N, j = Math.min(H.N - 1, Math.floor(u)), s = H.S[j] + (H.S[j + 1] - H.S[j]) * (u - j), n = H.notch;
+  let lo = 0, hi = n.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (n[m] <= s) lo = m; else hi = m; }
+  return [(s - n[lo]) / (n[hi] - n[lo]), H.deep[lo % H.deep.length]];
+}
+// Sylvius yarığı: iki yanda, dış kenardan haritaya doğru yukarı kıvrılan uzun oluk (sağdaki biraz farklı).
+const BR_SYL = [[[-2, 252], [20, 240], [41, 204]], [[GW + 2, 244], [GW - 22, 233], [GW - 41, 198]]].map(([a, b, c]) => {
+  const pts = []; for (let i = 0; i <= 48; i++) { const t = i / 48, u = 1 - t; pts.push([u * u * a[0] + 2 * u * t * b[0] + t * t * c[0], u * u * a[1] + 2 * u * t * b[1] + t * t * c[1]]); } return pts;
+});
+function brSylvian(x, y) {
+  let best = 99;
+  for (const pts of BR_SYL) {
+    if (Math.abs(x - pts[24][0]) > 40 || Math.abs(y - pts[24][1]) > 40) continue;
+    for (let i = 1; i < pts.length; i++) {
+      const [ax, ay] = pts[i - 1], [bx, by] = pts[i], dx = bx - ax, dy = by - ay, t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)));
+      best = Math.min(best, Math.hypot(x - ax - dx * t, y - ay - dy * t));
+    }
+  }
+  return best;
+}
+// Beyincik: yarıkürelerin altından taşan tek, geniş, yassı bir yay; ortada hafif bir çentik ve iki ince oluk (vermis)
+// iki yarısını belli eder. Yapraklar kavisli, birbirine paralel.
+const BR_CBL = { cx: GCX, cy: HB.y1 - 18, rx: 132, ry: 44 };
+/** Beyincik yaprağının sırası (0: dışarıda). */
+function brCerebellum(x, y) {
+  const dx = x - BR_CBL.cx, dy = y - BR_CBL.cy;
+  const e = Math.hypot(dx / BR_CBL.rx, dy / BR_CBL.ry) + (dy > 0 ? 0.06 * Math.max(0, 1 - Math.abs(dx) / 22) : 0);
+  return e > 1 ? 0 : 1 + Math.floor(e * 11 + 0.4 * brNoise(x, y, 14, 3) + 0.5);
+}
+function brChamfer(D) {
+  for (let y = 1; y < GH - 1; y++) for (let x = 1; x < GW - 1; x++) { const i = y * GW + x; if (D[i]) D[i] = Math.min(D[i], D[i - 1] + 3, D[i - GW] + 3, D[i - GW - 1] + 4, D[i - GW + 1] + 4); }
+  for (let y = GH - 2; y > 0; y--) for (let x = GW - 2; x > 0; x--) { const i = y * GW + x; if (D[i]) D[i] = Math.min(D[i], D[i + 1] + 3, D[i + GW] + 3, D[i + GW + 1] + 4, D[i + GW - 1] + 4); }
+  return D;
+}
+
+// kind: 0 boş, 1 beyin, 2 beyincik, 9 harita. sul: 1 oluk, 2 orta yarık.
+// Oluklar çizgi olarak büyütülür: çentiklerden içeri, sonra boş kalan yerlere serbest kıvrımlar. Her oluk çevresinde 5 iri piksel
+// (haritaya yakın 4) yer tutar; başka bir oluğa yaklaşan ya kör biter ya da ona T diye bağlanır. Kıvrımlar 4–10 iri piksel kalınlıkta,
+// duvara yaklaştıkça incelir; oluklar duvara kadar iner, harita kıvrımları kesen bir pencere gibi durur.
+// Renk sırası: 1 kontur, 2 oluk, 3 derin gölge, 4 gölge, 5 gövde, 6 ışık, 7 parlak, 8 beyincik.
+function brainBuild() {
+  const N = GW * GH, kind = new Uint8Array(N), sul = new Uint8Array(N), band = new Int8Array(N), claim = new Int16Array(N);
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+    const i = y * GW + x, cx = x + 0.5, cy = y + 0.5;
+    if (x >= GX0 && x < GX1 && y >= GY0 && y < GY1) { kind[i] = 9; continue; }
+    let inside = brRing(x, y) <= 3;
+    if (!inside) {
+      const side = cx < GCX ? 0 : 1; let sd = brHemi(cx, cy, side);
+      if (sd < 2 && sd > -14) {
+        const [f, dep] = brLobeF(cx, cy, side);
+        sd += dep * (1 - Math.sqrt(Math.max(0, 1 - (2 * f - 1) ** 2))) * brStep(5, 16, Math.abs(cx - GCX)) + 4.5 * Math.max(0, 1 - brSylvian(cx, cy) / 3.5);
+      }
+      inside = sd <= 0;
+    }
+    if (inside) { kind[i] = 1; continue; }
+    const c = brCerebellum(cx, cy); if (c) { kind[i] = 2; band[i] = c; }
+  }
+  const E = new Uint16Array(N); for (let i = 0; i < N; i++) E[i] = kind[i] === 1 || kind[i] === 9 ? 9999 : 0; brChamfer(E);
+  const at = (x, y) => (x < 0 || y < 0 || x >= GW || y >= GH ? -1 : (y | 0) * GW + (x | 0));
+  const stake = (x, y, id, r = brRing(x | 0, y | 0) < 12 ? 4 : 5) => {
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { if (dx * dx + dy * dy > r * r) continue; const j = at(x + dx, y + dy); if (j >= 0 && !claim[j]) claim[j] = id; }
+  };
+  const fis = (x, y) => (x === GCX - 1 || x === GCX) && (y < GY0 || y >= GY1);
+  for (let y = 0; y < GH; y++) for (let x = GCX - 1; x <= GCX; x++) { const i = y * GW + x; if (kind[i] === 1 && fis(x, y)) { sul[i] = 2; stake(x, y, 1); } }
+  let id = 3;
+  for (const pts of BR_SYL) {
+    for (const [px, py] of pts) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const x = Math.floor(px) + dx, y = Math.floor(py) + dy, j = at(x, y);
+      if (j >= 0 && kind[j] === 1 && brRing(x, y) >= 3 && Math.hypot(x + 0.5 - px, y + 0.5 - py) < 0.8) sul[j] = 1;
+    }
+    for (const [px, py] of pts) stake(px, py, id); id++;
+  }
+  const rnd = brRng(7);
+  const ok = (x, y, cid, edge) => { const j = at(x, y); return j >= 0 && kind[j] === 1 && brRing(x | 0, y | 0) >= 3 && (!edge || E[j] >= 6) && (!claim[j] || claim[j] === cid); };
+  function grow(x, y, th, cid, steps, fromEdge, avoid) {
+    const pts = []; let k = (rnd() - 0.5) * 0.16;
+    for (let t = 0; t < steps; t++) {
+      const j = at(x, y);
+      if (!ok(x, y, cid, !(fromEdge && t < 14))) {
+        if (j >= 0 && claim[j] && claim[j] !== cid && kind[j] === 1 && rnd() < 0.7) {
+          const ext = []; let ex = x, ey = y;
+          for (let e = 0; e < 16; e++) { const q = at(ex, ey); if (q < 0 || kind[q] !== 1) break; if (sul[q]) { pts.push(...ext); break; } ext.push([ex, ey]); ex += Math.cos(th) * 0.5; ey += Math.sin(th) * 0.5; }
+        }
+        break;
+      }
+      const near = (list, minIdx) => list.some(([qx, qy], n) => n < minIdx && Math.abs(qx - x) < 5 && Math.abs(qy - y) < 5 && Math.hypot(qx - x, qy - y) < 5);
+      if (near(pts, t - 14) || (avoid && near(avoid.slice(16), avoid.length))) break;
+      pts.push([x, y]);
+      th += k; k = Math.max(-0.2, Math.min(0.2, k + (rnd() - 0.5) * 0.05));
+      x += Math.cos(th) * 0.5; y += Math.sin(th) * 0.5;
+    }
+    return pts;
+  }
+  function lay(pts, cid) {
+    for (const [px, py] of pts) { const j = at(px, py); if (j >= 0 && kind[j] === 1 && brRing(px | 0, py | 0) >= 2) sul[j] = 1; }
+    for (let n = 0; n < pts.length; n += 2) stake(pts[n][0], pts[n][1], cid);
+  }
+  for (const [side, H] of BR_HEM.entries()) {
+    for (let n = 0; n < H.notch.length - 1; n++) {
+      let jj = 0; while (jj < H.N && H.S[jj] < H.notch[n]) jj++;
+      const t = jj / H.N * 2 * Math.PI, rr = H.r[jj] - H.deep[n] - 0.5, x = H.cx + Math.cos(t) * rr, y = H.cy + Math.sin(t) * rr;
+      if (Math.abs(x - GCX) < 14 || at(x, y) < 0 || kind[at(x, y)] !== 1) continue;
+      const pts = grow(x, y, t + Math.PI + (rnd() - 0.5) * 0.6, id, 14 + Math.floor(rnd() * 70), true);
+      if (pts.length >= 4) lay(pts, id); id++;
+    }
+  }
+  for (let attempt = 0; attempt < 5000; attempt++) {
+    const x = 1 + rnd() * (GW - 2), y = 1 + rnd() * (GH - 2), j = at(x, y);
+    if (kind[j] !== 1 || claim[j] || E[j] < 9 || brRing(x | 0, y | 0) < 6) continue;
+    const th = rnd() * 2 * Math.PI, fwd = grow(x, y, th, id, 24 + Math.floor(rnd() * 100), false);
+    const back = grow(x - Math.cos(th) * 0.5, y - Math.sin(th) * 0.5, th + Math.PI, id, 10 + Math.floor(rnd() * 60), false, fwd);
+    const pts = [...back.reverse(), ...fwd];
+    if (pts.length >= 10) lay(pts, id); id++;
+  }
+  // Oluklara (ve beynin kenarına) uzaklık, 3 = bir iri piksel.
+  const D = new Uint16Array(N); for (let i = 0; i < N; i++) D[i] = kind[i] === 1 && !sul[i] ? 9999 : 0; brChamfer(D);
+  const out = new Uint8Array(N), k = (x, y) => (x < 0 || y < 0 || x >= GW || y >= GH ? 0 : kind[y * GW + x]);
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+    const i = y * GW + x, v = kind[i]; if (v === 9) continue;
+    const kl = k(x - 1, y), kr = k(x + 1, y), ku = k(x, y - 1), kb = k(x, y + 1);
+    if (v === 0) { if ((kl && kl !== 9) || (kr && kr !== 9) || (ku && ku !== 9) || (kb && kb !== 9)) out[i] = 1; continue; }
+    if (v === 1) {
+      const ring = brRing(x, y), dxp = Math.max(GX0 - 1 - x, x - GX1, 0), dyp = Math.max(GY0 - 1 - y, y - GY1, 0), back = (y < GY0 && dyp >= dxp) || (x < GX0 && dxp >= dyp);
+      let c;
+      if (ring === 0) c = 1;
+      else if (sul[i] === 2) c = x === GCX - 1 ? 1 : 2;
+      else if (kl === 0 || ku === 0) c = 7;
+      else if ((kr !== 1 && kr !== 9) || (kb !== 1 && kb !== 9)) c = 4;
+      else if (ring === 1) c = back ? 3 : 6;
+      else if (sul[i]) c = 2;
+      else if (fis(x + 1, y)) c = 3;
+      else if (fis(x - 1, y)) c = 6;
+      else {
+        const d = D[i], gx = D[i + 1] - D[i - 1], gy = D[i + GW] - D[i - GW], g = gx + gy;
+        if (g < 0) c = d <= 3 ? 3 : d <= 8 ? 4 : 5;
+        else if (g > 0) c = d <= 4 ? 6 : d <= 7 ? (gx > 0 && gy > 0 ? 7 : 6) : 5;
+        else c = 5;
+      }
+      out[i] = c;
+    } else if (v === 2) {
+      const b = band[i], other = (xx, yy) => k(xx, yy) === 2 && band[yy * GW + xx] !== b;
+      const vx = Math.abs(x + 0.5 - GCX) - 11 - 0.04 * (y - HB.y1) ** 2 / 4;
+      out[i] = ku === 1 || k(x, y - 2) === 1 ? 3 : vx >= -0.5 && vx < 0.5 ? 3 : vx >= 0.5 && vx < 1.5 ? 6 : other(x, y - 1) ? 3 : other(x, y + 1) ? 4 : other(x, y - 2) ? 6 : kr === 0 || kb === 0 ? 4 : kl === 0 || ku === 0 ? 6 : 8;
+    }
+  }
+  return { kind, sul, D, out };
+}
+const BR_G = brainBuild();
+
+/** Işık modlarına göre beynin tonları: öğle esas; sabah biraz sıcak, akşam turuncuya çalar, gece koyulaşır. */
+export const BRAIN_PALETTES = {};
+{
+  const NOON = ['#2a1b22', '#5a3a47', '#7c5663', '#9c7380', '#bf939d', '#d9b1b6', '#f0d3cf', '#ad838d'];
+  const LIGHT = { sabah: [[1.03, 1, 0.95], [10, 6, 0]], ogle: [[1, 1, 1], [0, 0, 0]], aksam: [[1, 0.84, 0.72], [4, 0, 0]], gece: [[0.4, 0.42, 0.6], [0, 0, 6]] };
+  const hex = (c) => c.toString(16).padStart(2, '0');
+  for (const [mode, [mul, add]] of Object.entries(LIGHT))
+    BRAIN_PALETTES[mode] = NOON.map((h) => { const n = parseInt(h.slice(1), 16); return '#' + [n >> 16, (n >> 8) & 255, n & 255].map((c, j) => hex(Math.max(0, Math.min(255, Math.round(c * mul[j] + add[j]))))).join(''); });
+}
+/** Çerçeveyi (0,0)'dan BRAIN.w × BRAIN.h olarak çizer; haritanın dikdörtgenine dokunmaz. */
+export function paintBrain(ctx, mode = 'ogle') {
+  const g = BR_G.out, pal = BRAIN_PALETTES[mode] || BRAIN_PALETTES.ogle;
+  for (let y = 0; y < GH; y++) {
+    const row = y * GW; let x = 0;
+    while (x < GW) { const c = g[row + x]; if (!c) { x++; continue; } let e = x + 1; while (e < GW && g[row + e] === c) e++; ctx.fillStyle = pal[c - 1]; ctx.fillRect(x * 2, y * 2, (e - x) * 2, 2); x = e; }
+  }
+}
+
+// Sinyal kıvılcımı: altın (ofisin vurgusu) ya da turkuaz (ekranların ışığı). Sıra: merkez, çekirdek, hale, gece halkası.
+const BR_SPARK = { altin: [O[5], O[4], O[3], O[1]], turkuaz: [K[7], C[4], C[3], C[1]] };
+def('kivilcim', 7, 7, { ax: 3, ay: 3, layer: 'top', frames: 6, fps: 10, group: 'beyin' }, (b, f, pal) => {
+  const [hi, core, halo, ring] = BR_SPARK[pal.renk] || BR_SPARK.altin, size = [0, 1, 2, 3, 2, 1][f];
+  for (let y = 0; y < 7; y++) for (let x = 0; x < 7; x++) {
+    const dx = Math.abs(x - 3), dy = Math.abs(y - 3), m = dx + dy, c = Math.max(dx, dy);
+    let col = null;
+    if (size === 0) col = m === 0 ? core : m === 1 ? halo : null;
+    else if (size === 1) col = m === 0 ? hi : m === 1 ? core : m === 2 ? halo : null;
+    else if (c <= 1) col = m === 0 || (size === 3 && m === 1) ? hi : core;
+    else if (c === 2 && m <= 3) col = halo;
+    if (!col && pal.gece && (size >= 2 ? (c === 3 && m <= 3) || (c === 2 && m === 4) : size === 1 && m === 3 && c <= 2)) col = ring;
+    if (col) b.p(x, y, col);
+  }
+});
+def('kivilcim_iz', 3, 3, { ax: 1, ay: 1, layer: 'top', frames: 2, group: 'beyin' }, (b, f, pal) => {
+  const [, core, halo] = BR_SPARK[pal.renk] || BR_SPARK.altin;
+  if (f === 0) { b.p(1, 1, core); b.p(0, 1, halo); b.p(2, 1, halo); b.p(1, 0, halo); b.p(1, 2, halo); } else b.p(1, 1, halo);
+});
+
+// Kıvılcım yolları: bir kıvrımın orta çizgisinde (oluklara en uzak yer) yürünür, sonra 4–12 noktaya indirilir.
+function brWalkD(x, y) {
+  const gx = Math.floor(x), gy = Math.floor(y); if (gx < 0 || gy < 0 || gx >= GW || gy >= GH) return 0;
+  const i = gy * GW + gx; if (BR_G.kind[i] !== 1 || BR_G.sul[i] || brRing(gx, gy) < 4 || (Math.abs(gx + 0.5 - GCX) < 5 && (gy < GY0 || gy >= GY1))) return 0;
+  return BR_G.D[i];
+}
+function brCellOK(wx, wy) {
+  const gx = Math.floor(wx / 2), gy = Math.floor(wy / 2);
+  if (brRing(gx, gy) < 3) return false;
+  for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const x = gx + dx, y = gy + dy; if (x < 0 || y < 0 || x >= GW || y >= GH || BR_G.kind[y * GW + x] !== 1) return false; }
+  return true;
+}
+function brWalk(sx, sy, heading, maxLen) {
+  const gx = sx / 2, gy = sy / 2; let best = null;
+  for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) {
+    const v = brWalkD(gx + dx, gy + dy); if (v < 6) continue;
+    const s = v - 0.6 * Math.hypot(dx, dy); if (!best || s > best[2]) best = [Math.floor(gx + dx) + 0.5, Math.floor(gy + dy) + 0.5, s];
+  }
+  if (!best) return null;
+  let [x, y] = best, th = heading, len = 0, step = 0, hops = 0; const pts = [[x, y]], seen = new Map();
+  while (len < maxLen / 2) {
+    let pick = null;
+    for (const reach of [1.5, 3, 4.5]) {
+      if (reach > 1.5 && hops >= 3) break;
+      for (let q = -4; q <= 4; q++) {
+        const a = th + q * (reach > 1.5 ? 0.12 : 0.24), nx = x + reach * Math.cos(a), ny = y + reach * Math.sin(a), v = brWalkD(nx, ny); if (v < 5) continue;
+        const cell = Math.floor(ny) * GW + Math.floor(nx), was = seen.get(cell); if (was !== undefined && step - was > 3) continue;
+        const s = v - 0.9 * Math.abs(q); if (!pick || s > pick[3]) pick = [nx, ny, a, s, cell, reach];
+      }
+      if (pick) break;
+    }
+    if (!pick) break;
+    [x, y, th] = pick; len += pick[5]; step++; if (pick[5] > 1.5) hops++; seen.set(pick[4], step); pts.push([x, y]);
+  }
+  const L = len * 2; if (L < 72) return null;
+  const n = Math.max(4, Math.min(12, Math.round(L / 30) + 1)), out = [], cum = [0];
+  for (let q = 1; q < pts.length; q++) cum.push(cum[q - 1] + Math.hypot(pts[q][0] - pts[q - 1][0], pts[q][1] - pts[q - 1][1]));
+  for (let q = 0, j = 0; q < n; q++) { const t = cum[cum.length - 1] * q / (n - 1); while (j < pts.length - 1 && cum[j] < t) j++; out.push([Math.round(pts[j][0] * 2), Math.round(pts[j][1] * 2)]); }
+  for (let q = 1; q < out.length; q++) {
+    const [ax, ay] = out[q - 1], [bx, by] = out[q], m = Math.ceil(Math.hypot(bx - ax, by - ay));
+    for (let s = 0; s <= m; s++) if (!brCellOK(ax + (bx - ax) * s / m, ay + (by - ay) * s / m)) return q >= 4 ? out.slice(0, q) : null;
+  }
+  return out;
+}
+function brPath(x, y, heading, maxLen) {
+  const vert = Math.abs(Math.sin(heading)) > 0.5;
+  for (const o of [0, 12, -12, 24, -24, 40, -40, 56, -56]) for (const a of [heading, heading + Math.PI]) { const p = vert ? brWalk(x, y + o, a, maxLen) : brWalk(x + o, y, a, maxLen); if (p) return p; }
+  return null;
+}
+
+/** Kıvılcımların izlediği yollar (çerçeve koordinatı). İlk dokuzu odaların çapalarından çıkar. */
+export const NEURON_PATHS = [];
+const BR_ANCHORS = {};
+{
+  const T = BR_Y0 - 22, Bt = BR_Y1 + 24, Lx = BR_X0 - 46, Rx = BR_X1 + 46, col = (tx) => BR_X0 + tx * 16, W = Math.PI, E = 0, S = Math.PI / 2, Nn = -Math.PI / 2;
+  const rooms = [['pyn', col(7.5), T, W], ['harita', col(22.5), T, W], ['arsiv', col(37.5), T, E], ['mudur', col(52.5), T, E], ['salon', Lx, BR_Y0 + 21 * 16, S],
+    ['mutfak', col(7.5), Bt, E], ['toplanti', col(22.5), Bt, E], ['sunucu', col(37.5), Bt, W], ['dinlenme', col(52.5), Bt, W]];
+  for (const [id, x, y, a] of rooms) { const p = brPath(x, y, a, 240); if (p) { NEURON_PATHS.push(p); BR_ANCHORS[id] = [p[0][0], p[0][1]]; } }
+  for (const [x, y, a] of [[Lx, 200, Nn], [Lx, 560, S], [Rx, 200, Nn], [Rx, 560, S], [col(13), T, E], [col(47), T, W], [col(14), Bt, W], [col(46), Bt, E], [Lx - 16, 420, Nn], [Rx + 16, 420, S]]) {
+    const p = brPath(x, y, a, 320); if (p) NEURON_PATHS.push(p);
+  }
+}
+/** Çerçeveli dünya: motor dünyayı w × h kurar, haritayı margin kadar kaydırır. */
+export const BRAIN = { margin: { ...BR_M }, w: BR_W, h: BR_H, map: { x: BR_X0, y: BR_Y0, w: MW * 16, h: MH * 16 }, anchors: BR_ANCHORS };

@@ -1,15 +1,19 @@
 # Cortex masaüstü uygulaması
 
-Cortex'in Windows masaüstü uygulaması. İlk ekranı Pyn: kendi yapay zekâ araçlarınla kasanın hafızası üzerinden konuştuğun sohbet. Yanında kasanı Obsidian'a gerek kalmadan okuyup yazan not ekranı ve grafik var. Sonraki aşamada Cortex'i kendisi kuracak.
+Cortex'in Windows masaüstü uygulaması. Terminal gerektirmeden kurulur ve gerekeni kendisi kurar: Python (yoksa), kasadaki Cortex hafıza motoru, yakala ve sesle yazma. İlk ekranı Pyn: kendi yapay zeka araçlarınla kasanın hafızası üzerinden konuştuğun sohbet. Yanında kasanı Obsidian'a gerek kalmadan okuyup yazan not ekranı, grafik ve Pyn'in ekibinin çalıştığı Beyin ekranı var; sağ alttaki simgeden Not al penceresi ve mikrofon yönetilir.
 
-Bu klasör **Aşama 1** (notlar) ve **Aşama 2'nin büyük kısmı** (Pyn'in sohbeti, araç girişleri, yerel modeller, ayarlar). Uygulama motora dokunmaz: sohbetteki araç kasada başlatılır, hafızayı motorun oradaki hook'ları verir.
+Uygulama motorun kodunu değiştirmez: kendi sürümündeki motor paketini kasaya kurar ve günceller, sohbetteki araç kasada başlatılır, hafızayı motorun oradaki hook'ları verir.
 
 ## Ne yapar
 
-- **İlk açılış:** Kasa seçilmemişse kasa seçme ekranıyla açılır. Klasör, sistemin kendi klasör seçme penceresiyle seçilir. Uygulama sonraki açılışlarda aynı kasayla açılır.
+- **İlk kurulum ekranı:** önce "Sana nasıl hitap edeyim?" sorusu, sonra sırayla kasa (sistemin klasör seçme penceresiyle), Python (bilgisayarda yoksa; python.org'un imzalı 3.12.10 kurucusu uygulamayla gelir, yalnız o kullanıcı için kurulur, yönetici izni istemez), Pyn'in hafızası (Cortex kasaya kurulur), yapay zeka aracı (girişler) ve sesle yazma. Her adım ne yaptığını söyler; isteğe bağlı olanlar "Atla" ile geçilir ve sonra Ayarlar'dan yapılır. Uygulama sonraki açılışlarda aynı kasayla açılır.
+- **Kurulum dosyası:** yönetici izni istemez, konum sormadan yalnız o kullanıcı için standart yere kurulur. Yeniden kurulumda notlara ve ayarlara dokunulmaz.
 - **Dil:** Türkçe varsayılan. İngilizce üst çubuktan, ayarlardan ya da ilk ekrandan seçilir; seçim kalıcıdır.
-- **Ayarlar:** üst çubuktaki dişli ya da Ctrl+, açar. Dil, kasa, dosya ağacının nasıl göstereceği (bütün dosya türleri; adlardaki emojiler) ve yapay zekâ araçlarının girişleri buradadır. Her değişiklik ana süreçte `settings.json`'a o an yazılır; kaydet düğmesi yoktur.
-- **Pyn (ilk ekran):** Kişinin kendi yapay zekâ aracıyla sohbet. Araç şunlardan biridir: **Claude Code**, kendi yapılandırılmış modunda (`claude -p --input-format stream-json --output-format stream-json`, Claude Agent SDK'nın onu sürdüğü gibi); **Codex**, kendi uygulama sunucusuyla (`codex app-server`, JSON-RPC); ya da Agent Client Protocol (ACP) konuşan **OpenCode** (`opencode acp`), **Gemini CLI** ve **Qwen Code** (`--acp`). Bilgisayarındaki yerel modeller için **LM Studio** ve **Ollama** da listede: Cortex onların kendi sunucusuyla doğrudan konuşur.
+- **Ayarlar:** üst çubuktaki dişli ya da Ctrl+, açar. Bölümler: Genel (dil, hitap, kasa, sağ altta çalışmaya devam et), Notlar (dosya ağacının görünüşü: bütün dosya türleri, adlardaki emojiler), Yapay zeka araçları (girişler, API anahtarları), Beyin (canlı konuşmalar), Cortex (kasadaki hafızanın kurulumu ve güncellenmesi), Sesle yazma (kurulum, sürekli dinleme, uyandırma sözü, sesli komutlar), İlk kurulum ekranı ve Hakkında. Seçimler ana süreçte `settings.json`'a o an yazılır ve "Kaydedildi" görünür; yazılan alanların (hitap, sesli komutlar) yanında Kaydet düğmesi vardır.
+- **Sağ alttaki simge:** pencere kapanınca uygulama bildirim alanında kalır ve kurulu uygulama Windows'la (`--gizli`) başlar; ikisi de Ayarlar → Genel'den kapatılır. Menü: mikrofonun durumu ve uyandırma sözü, Sürekli dinle aç/kapat (dinlerken simgede kırmızı nokta), Not al, Cortex'i aç, Ayarlar, Çık.
+- **Not al ve ses:** Not al penceresini kasanın yakala dinleyicisi açar (`beyin.py yakala pencere`); Ctrl+Alt+C, simgenin menüsü ya da uyandırma sözü ("Hey Pyn", "Pyn, not al" ya da ikisi de). Sesle yazma ve sesli komutlar ("Pyn, kaydet", "panodaki resmi ekle", "son kelimeyi sil", "son cümleyi sil", "hepsini sil", "iptal") Ayarlar → Sesle yazma'dan kurulur ve değiştirilir; ses yerelde Whisper ile yazıya dökülür.
+- **Cortex güncellemesi:** kasadaki Cortex uygulamanın taşıdığı sürümden eskiyse ana ekranda "Cortex güncellemesi hazır" bildirimi çıkar, ayar dişlisinde altın nokta yanar; Güncelle uygulamayla gelen paketten günceller (`beyin.py update --package`), notlara dokunmaz.
+- **Pyn (ilk ekran):** Kişinin kendi yapay zeka aracıyla sohbet. Araç şunlardan biridir: **Claude Code**, kendi yapılandırılmış modunda (`claude -p --input-format stream-json --output-format stream-json`, Claude Agent SDK'nın onu sürdüğü gibi); **Codex**, kendi uygulama sunucusuyla (`codex app-server`, JSON-RPC); ya da Agent Client Protocol (ACP) konuşan **OpenCode** (`opencode acp`), **Gemini CLI** ve **Qwen Code** (`--acp`). Bilgisayarındaki yerel modeller için **LM Studio** ve **Ollama** da listede: Cortex onların kendi sunucusuyla doğrudan konuşur.
   - Claude Code'da her sohbet kendi `claude` sürecidir; sohbete devam edilirken oturumu `--resume` ile sürdürülür. Model listesi Claude Code'un kendisinden gelir; izin modu (Önce sor, Düzenlemeleri kabul et, Plan modu, Otomatik) ve efor çiplerle seçilir; "tüm izinleri atla" hiç sunulmaz. Bir ayar değişince süreç turlar arasında kapatılıp aynı oturumda yeni bayrakla açılır. "Her zaman izin ver", Claude Code'un önerdiği kuralı Claude Code'un kendi ayarına yazdırır.
   - Codex'te her kasa için tek sunucu, her sohbet için bir thread vardır; sohbete devam edilirken thread sürdürülür (`thread/resume`). Model listesi sunucudan gelir; sohbet, seçim yapılmamışsa sunucunun işaretlediği varsayılan modelle başlar (`config.toml`'daki model hesabın artık kullanamadığı bir model olabilir). Model, efor, onay politikası ve sandbox her mesajla gönderilir: ayar değişince yeniden başlatma gerekmez. İzin modu: Önce sor, Salt okunur, Kasada sormadan çalış; tam disk erişimi hiç sunulmaz. Komut ve dosya değişikliği onayları aynı kartla sorulur ("Bu sohbette hep izin ver" dahil).
   - araç kasada başlatılır; kasadaki Cortex hook'ları ona kasanın hafızasını verir
@@ -38,10 +42,10 @@ Bu klasör **Aşama 1** (notlar) ve **Aşama 2'nin büyük kısmı** (Pyn'in soh
   - yeniden adlandırmada notun başlığı (`title:` ve ilk başlık) yeni adı izler
   - Markdown olmayan metin dosyaları (JSON, betik, ayar) satır numaralı ve salt okunur gösterilir; JSON renklidir
   - çöp kutusu: silinen not, dosya ve klasör kasanın `.trash/` klasörüne gider; bildirimdeki "Geri al" ya da sol sütundaki Çöp kutusu sekmesiyle geri gelir
-- **Ofis:** dördüncü sekme. Piksel sanatıyla çizilmiş, yaşayan bir ofis: patron Pyn, 12 ajan ve ofis kedisi Tekir dokuz odada çalışıyor. Çizimleri ve arayüzü Claude Design yaptı (brif: `docs/ofis/claude-design-brifi.md`); çizimler `src/office/office-art.js`, motor `src/office/ofis-engine.js`, ikisi de teslim edildiği gibi, motora yalnız küçük ekler yapıldı.
+- **Beyin:** dördüncü sekme (1.0.21'e kadar adı "Ofis"). Bir beynin içine çizilmiş, yaşayan bir piksel sanatı ofis; kıvrımlarında kıvılcımlar akar. Patron Pyn, ilk kurulumda yazılan adı taşıyan müdür ve onun odası, Cortex'i yazan geliştirici Tolga'nın masası, 12 kişilik ekip ve ofis kedisi Tekir dokuz odada çalışıyor. Çizimleri ve arayüzü Claude Design yaptı (brifler: `docs/ofis/claude-design-brifi.md`, `docs/ofis/beyin-cercevesi-brifi.md`); çizimler `src/office/office-art.js`, motor `src/office/ofis-engine.js`.
   - Karaktere tıklayınca kart (rol, ruh hali, ne yaptığı, Çay/Tokluk/Enerji, bugünkü sayaçlar), odaya tıklayınca oda paneli (canlı önizleme, içeridekiler) açılır. Tekerlek yakınlaştırır, sürükleme gezdirir; + − ⤢ Aa düğmeleri, kişi çipleri ve boyu değişen ofis günlüğü var.
   - Gerçek olanlar: sunucu odasındaki kabinlerin ışıkları araçların kendi giriş durumudur; odalar kasanın notlarını, bağlantılarını, makbuzlarını ve bugün değişen notları sayar; ışık gerçek saate uyar (gece lambalar yanar); oda adları pencerenin dilindedir.
-  - Ajanların ne yaptığı şimdilik Claude Design prototipinin betiğidir. Kasadan gelen olaylar ve yapay zekâyla yazılan canlı konuşmalar sonraki adım.
+  - Canlı konuşmalar: sekmenin kendi ayarlarından ya da Ayarlar → Beyin'den bir araç (LM Studio, Ollama ya da Claude Code) ve model seçilirse model son notların başlıklarına ve kısa parçalarına bakıp ekibe konuşma yazar; karakterler baloncukla söyler, konuşma günlüğe düşer. Varsayılan kapalıdır; sekme gizliyken hiçbir şey harcanmaz. Yerel sunucularda hiçbir şey bilgisayardan çıkmaz. Ajanların gün içindeki diğer davranışları Claude Design prototipinin betiğidir.
   - Sekme yalnız öndeyken çizilir; arkadayken motor durur. Yazı tipleri Pixelify Sans ve VT323 (OFL, `licenses/`), uygulamayla gelir.
 - **Cortex'in tuttukları:** Makbuzlar (`receipts/`) dosya adındaki hash yerine içlerindeki `event_id` ile gösterilir; motor onları bu hash'le bulduğu için dosya adı değişmez. Makbuzlar ve motorun ürettiği sayfalar (`generated: true`: `daily/v3`, `knowledge/v3/outcomes`) salt okunurdur: kaydedilmez, taşınmaz, yeniden adlandırılmaz, çöpe atılmaz. Grafikte makbuzlar "Makbuzlar" düğmesiyle açılır.
 - **Dosya biçimi değişmez:** Notlar düz Markdown kalır. Obsidian aynı kasada yanında açık durabilir. Diskte değişen not ekrana yeniden okunur.
@@ -85,11 +89,12 @@ npm run dev          # Vite + Electron, değişiklikte yeniden başlar
 | Komut | Ne yapar |
 | --- | --- |
 | `npm run typecheck` | Üç TypeScript projesi: pencere, ana süreç, çekirdek tek başına |
-| `npm test` | `node:test`; testler esbuild ile gerçek kaynaktan paketlenir (139 test; biri yalnız Windows'ta çalışır, başka yerde atlanır) |
+| `npm test` | `node:test`; testler esbuild ile gerçek kaynaktan paketlenir (176 test; bazıları yalnız Windows'ta çalışır, başka yerde atlanır) |
 | `npm run e2e` | Derler ve gerçek Electron uygulamasını Playwright ile sürer. Pencere hiç gösterilmez: ekran dışında çizilir, `capturePage` ile fotoğraflanır (`e2e/screenshots/`). Linux'ta Xvfb altında çalışır. `CORTEX_SHOW=1` pencereyi gösterir. |
+| `npm run vitrin` | README'nin görüntüleri (`docs/gorseller/`): uygulama Türkçe arayüzle, örnek bir lansman kasasıyla, aynı gizli pencerede ekran dışında çizilir; sohbetin ve Beyin'in cevaplarını LM Studio'nun yerine geçen bir test sunucusu yazar. |
 | `npm run package` | Windows NSIS kurulum dosyası (`release/Cortex Setup X.Y.Z.exe`). Windows'ta çalıştır; Linux'ta son adım wine ister. |
 
-CI: `.github/workflows/desktop.yml`. `desktop/`, `template/` ya da `tema/ananas/marka/` değiştiğinde Windows'ta çalışır: tip denetimi, testler, uçtan uca koşu, sonra kurulum dosyası. Kurulum dosyası bir hafta boyunca iş akışının çıktısı (`cortex-setup-windows`) olarak indirilebilir.
+CI: `.github/workflows/desktop.yml`. `desktop/`, `template/`, `scripts/`, `VERSION` ya da `tema/ananas/marka/` değiştiğinde Windows'ta çalışır: tip denetimi, testler, uçtan uca koşu, sonra kurulum dosyası. Kurulum dosyası bir hafta boyunca iş akışının çıktısı (`cortex-setup-windows`) olarak indirilebilir.
 
 ### Klasörler
 
@@ -106,14 +111,25 @@ scripts/    derleme, geliştirme, test ve e2e betikleri
 ## Ne eksik
 
 - **Sohbetin geri kalanı (Aşama 2):** her turdan önce anlık kopya ve geri alma; kasadan gelen öneriler; silinen sohbetlerin çöp kutusuna düşmesi.
-- **Cortex'i kurma ve güncelleme (Aşama 3):** Cortex'in kendi kurulumcusuyla. Windows'ta Python uygulamayla gelecek (PSF'nin NuGet paketi).
-- **Ananas görünümü (Aşama 4):** Renkler şimdiden Ananas'ın kâğıt ve mürekkebi. Fraunces ve diğer yazı tipleri henüz uygulamayla gelmiyor; sistem yazı tipleri kullanılıyor. Yakala entegrasyonu ve Windows kurulumu için release iş akışı da bu aşamada.
-- **İmza:** Kurulum dosyası imzasız. Windows SmartScreen ilk çalıştırmada uyarır.
+- **Ananas görünümü:** Renkler Ananas'ın kâğıt ve mürekkebi. Fraunces henüz uygulamayla gelmiyor; sistem yazı tipleri kullanılıyor (Beyin'in piksel yazı tipleri geliyor).
+- **Kurulum dosyasının yayımlanması:** release iş akışı yalnız motor paketini yayımlıyor; kurulum dosyası şimdilik desktop iş akışının çıktısı olarak ya da elle sürüme eklenerek dağıtılıyor.
+- **İmza:** Kurulum dosyası imzasız; aşağıda **İmza** bölümü.
 - **Otomatik güncelleme yok.** Yeni sürüm elle kurulur.
-- **Ana süreç cümleleri İngilizce:** Kaydı ya da taşımayı reddeden cümleler (örn. "Not a name a note can have") Krewgent'taki gibi İngilizce gösterilir. Ekranın kendi metinleri Türkçe.
+- **Ana süreç cümleleri:** kaydı ya da taşımayı reddeden cümleler ana süreçte İngilizce yazılır; Türkçe arayüzde pencere onları Türkçe gösterir (`shared/refusalsTr.ts`, eksik kalanı bir test yakalar). Bir aracın ya da modelin kendi hata metni olduğu gibi kalır.
 - **Yazım denetimi:** Sözlükler Google'dan indirilmediği için Chromium'un Hunspell denetimi sözlüksüz kalır. Yazım yalnız platformun kendi denetleyicisinin kullanıldığı yerde denetlenir.
 - **Linkler:** Obsidian'ın setext başlıkları, özellik değerindeki linkler ve aynı adlı iki notun Obsidian'ın kendi dizinine göre çözülmesi desteklenmiyor (`core/vaultNotes.ts` başında yazıyor).
 - **macOS ve Linux:** Kod çalışır ama CI'da denenmiyor ve kurulum dosyası üretilmiyor.
+
+## İmza
+
+- **Neden uyarı çıkıyor:** kurulum dosyası şimdilik imzasız. İnternetten indirilen imzasız bir dosyayı Windows SmartScreen "Windows bilgisayarınızı korudu" diye durdurur: **Ek bilgi → Yine de çalıştır**.
+- **Kendi bilgisayarında:** derlediğin dosyayı doğrudan `desktop\release\` klasöründen çalıştırırsan bu uyarı çıkmaz, çünkü dosya indirilmemiştir.
+- **Herkes için kaldırmanın tek yolu**, güvenilir bir sertifika yetkilisinden alınan kod imzalama sertifikasıdır. Seçenekler ve koşullar değişebilir; almadan önce bakılmalı:
+  - Azure Trusted Signing: en ucuzu ve SmartScreen güvenini hızlı kazanır, ama bireysel geliştiricileri yalnız bazı ülkelerde kabul ediyor.
+  - OV sertifika (Certum gibi; açık kaynak geliştiricilere ucuz bir türü var): SmartScreen ilk zamanlarda yine uyarabilir, dosya indirildikçe güven oluşur.
+  - EV sertifika: pahalı, donanım anahtarı ister.
+- **Sertifika alınınca:** `.pfx` dosyasını base64 yapıp deponun Secrets'ına `WIN_CSC_LINK`, parolasını `WIN_CSC_KEY_PASSWORD` olarak koy. desktop iş akışı kurulum dosyasını kendiliğinden imzalar. Python kurucusu uygulamanın içinde `.paket` olarak durduğu için yeniden imzalanmaz, özeti bozulmaz.
+- **Kendi kendine imzalı sertifika** yalnız onu güvenilir köklere eklediğin bilgisayarda işe yarar; başkalarına dağıtımda SmartScreen'i geçmez.
 
 ## Sahibine sorulanlar
 

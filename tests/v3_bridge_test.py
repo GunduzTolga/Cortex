@@ -1,4 +1,5 @@
 """Global boundary adapters exercised in isolated homes, never user hook settings."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -8,7 +9,7 @@ import tempfile
 import unittest
 import zipfile
 
-from v3_package_helpers import inherited_env
+from v3_package_helpers import inherited_env, install
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'template/.claude/scripts'
@@ -60,6 +61,31 @@ class BridgeTest(unittest.TestCase):
             self.assertEqual(len(event['project_id']), 24)
         self.assertNotIn(str(self.project), json.dumps(events))
         self.assertNotIn('TRANSCRIPT_CANARY', json.dumps(events))
+
+    def test_utf8_bom_stdin_payload_handled_cleanly(self):
+        bom_input = b'\xef\xbb\xbf' + json.dumps(self.payload).encode('utf-8')
+        command = [sys.executable, str(SCRIPTS / 'beyin_v3_bridge.py'),
+                   '--vault', str(self.vault), '--state', str(self.state), '--harness', 'claude',
+                   '--project-root', str(self.root / 'Projects')]
+        result = subprocess.run(command, input=bom_input, capture_output=True, env=self.env,
+                                cwd=self.project, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertIn('hookSpecificOutput', data)
+
+    def test_sensitive_folder_task_cannot_enter_external_project_context(self):
+        secret = self.vault / '🔐 Kasa/task.md'
+        secret.parent.mkdir()
+        secret.write_text('Task details from a private folder', encoding='utf-8')
+        safe = self.vault / 'notes/task.md'
+        safe.parent.mkdir()
+        safe.write_text('Ordinary task', encoding='utf-8')
+        record = {'source': secret.relative_to(self.vault).as_posix(),
+                  'source_sha256': hashlib.sha256(secret.read_bytes()).hexdigest()}
+        self.assertFalse(bridge._fresh(self.vault, record))
+        record = {'source': safe.relative_to(self.vault).as_posix(),
+                  'source_sha256': hashlib.sha256(safe.read_bytes()).hexdigest()}
+        self.assertTrue(bridge._fresh(self.vault, record))
 
     def test_vault_subdirectory_and_other_installed_vault_skip_duplicates(self):
         for cwd in (self.vault, self.vault / 'nested', self.project):
@@ -140,6 +166,105 @@ class BridgeTest(unittest.TestCase):
         self.assertIn('hookSpecificOutput', self.invoke(payload, harness='codex'))
         self.assertEqual(self.invoke(dict(self.payload, cwd=123)), {})
 
+    def agy(self, native, workspaces, cwd=None, **fields):
+        # Antigravity sends camelCase fields, no cwd, and runs the hook in the hooks.json folder.
+        payload = dict(conversationId='agy-conversation', workspacePaths=[str(p) for p in workspaces], **fields)
+        return self.invoke(payload, extra=['--native-event', native], harness='antigravity', cwd=cwd or self.home)
+
+    def test_antigravity_first_workspace_is_the_project_and_only_boundaries_count(self):
+        result = self.agy('PreInvocation', [self.project], invocationNum=0)
+        text = result['injectSteps'][0]['ephemeralMessage']
+        self.assertIn('receipt --harness antigravity', text)
+        self.assertEqual(self.agy('PreInvocation', [self.project], invocationNum=1), {})
+        self.assertEqual(self.agy('Stop', [self.project], fullyIdle=False), {'decision': 'stop'})
+        self.assertEqual(self.agy('Stop', [self.project], fullyIdle=True), {'decision': 'stop'})
+        events = self.queued()
+        self.assertEqual(sorted(e['event'] for e in events), ['SessionStart', 'Stop'])
+        self.assertEqual({e['harness'] for e in events}, {'antigravity'})
+        self.assertEqual({e['project'] for e in events}, {self.project.name})
+        # Same conversation id in another project is a different receipt session.
+        other = self.root / 'Projects' / 'other'; other.mkdir()
+        self.agy('PreInvocation', [other], invocationNum=0)
+        self.assertEqual(len({e['session'] for e in self.queued()}), 2)
+
+    def test_antigravity_needs_an_allowed_workspace_and_none_owned_by_a_vault(self):
+        # The hook process runs in the hooks.json folder; it never stands in for the project.
+        for workspaces in ([], [self.vault], [self.project, self.vault]):
+            self.assertEqual(self.agy('PreInvocation', workspaces, cwd=self.project, invocationNum=0), {})
+        self.assertEqual(self.invoke(dict(conversationId='agy-conversation', invocationNum=0),
+                                     extra=['--native-event', 'PreInvocation'], harness='antigravity'), {})
+        self.assertEqual(self.queued(), [])
+
+    def test_antigravity_relative_workspace_is_never_resolved_against_the_hook_folder(self):
+        # A relative entry would resolve against the hooks.json folder, so its vault check is meaningless.
+        other = self.root / 'Projects' / 'other'; other.mkdir()
+        for workspaces in (['Projects/other'], [str(self.project), 'Projects/other']):
+            self.assertEqual(self.invoke(dict(conversationId='agy-relative', invocationNum=0, workspacePaths=workspaces),
+                                         extra=['--native-event', 'PreInvocation'], harness='antigravity',
+                                         cwd=self.root), {})
+        self.assertEqual(self.queued(), [])
+
+    def test_antigravity_config_is_a_named_hook_whose_command_runs(self):
+        config = self.invoke(extra=['--print-config'], harness='antigravity')
+        self.assertEqual(list(config), ['beyin-v3-bridge'])
+        self.assertEqual(set(config['beyin-v3-bridge']), {'PreInvocation', 'Stop'})
+        command = config['beyin-v3-bridge']['PreInvocation'][0]['command']
+        payload = dict(conversationId='agy-config', invocationNum=0, workspacePaths=[str(self.project)])
+        result = subprocess.run(command, shell=True, input=json.dumps(payload), capture_output=True,
+                                text=True, encoding='utf-8', env=self.env, cwd=self.home, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Receipt session=', json.loads(result.stdout)['injectSteps'][0]['ephemeralMessage'])
+        narrowed = self.invoke(extra=['--print-config', '--event', 'SessionStart'], harness='antigravity')
+        self.assertEqual(set(narrowed['beyin-v3-bridge']), {'PreInvocation'})
+        with self.assertRaises(AssertionError):
+            self.invoke(extra=['--print-config', '--event', 'SessionEnd'], harness='antigravity')
+
+    def test_folder_below_another_installed_vault_is_skipped_for_every_client(self):
+        # The owning vault is found by walking up, so a subfolder is as silent as the vault root.
+        below = self.root / 'Projects' / 'second-vault' / 'notes' / 'deep'; below.mkdir(parents=True)
+        (self.root / 'Projects' / 'second-vault' / '.beyin-runtime.json').write_text('{}')
+        for harness in ('codex', 'claude'):
+            self.assertEqual(self.invoke(dict(self.payload, cwd=str(below)), harness=harness), {})
+        for workspaces in ([below], [self.project, below]):
+            self.assertEqual(self.agy('PreInvocation', workspaces, invocationNum=0), {})
+        self.assertEqual(self.queued(), [])
+
+    def test_antigravity_vault_adapter_labels_the_first_workspace_never_the_hook_folder(self):
+        # A real install: the vault's own .agents/hooks.json shares the bridge's project rule (origin()).
+        installed = install(self.vault, self.state, self.env)
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+        local = json.loads((self.vault / '.agents/hooks.json').read_text(encoding='utf-8'))['beyin-v3']
+        config = self.invoke(extra=['--print-config'], harness='antigravity',
+                             script=self.vault / '.claude/scripts/beyin_v3_bridge.py')['beyin-v3-bridge']
+        # The global hook keeps the timeout the installer chose for the vault's Antigravity hooks.
+        self.assertEqual({native: handlers[0]['timeout'] for native, handlers in config.items()},
+                         {native: handlers[0]['timeout'] for native, handlers in local.items()})
+        hook_folder = self.vault / '.agents'  # Antigravity runs a hook where its hooks.json lives.
+        cases = {'agy-vault': (dict(workspacePaths=[str(self.vault)]), self.vault.name),
+                 'agy-first-of-two': (dict(workspacePaths=[str(self.project), str(self.vault)]), self.project.name),
+                 'agy-cwd-field': (dict(workspacePaths=[str(self.vault)], cwd=str(hook_folder)), self.vault.name),
+                 'agy-no-workspaces': ({}, None),
+                 'agy-null-workspace': (dict(workspacePaths=[None]), None),
+                 'agy-relative-workspace': (dict(workspacePaths=['.']), None),
+                 'agy-cwd-field-only': (dict(cwd=str(hook_folder)), None)}
+        for conversation, (fields, _) in cases.items():
+            result = subprocess.run(local['PreInvocation'][0]['command'], shell=True, capture_output=True, text=True,
+                                    input=json.dumps(dict(fields, conversationId=conversation, invocationNum=0)),
+                                    encoding='utf-8', env=self.env, cwd=hook_folder, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        events = {event['session']: event for event in self.queued()}
+        self.assertEqual(len(events), len(cases))
+        for conversation, (_, label) in cases.items():
+            with self.subTest(conversation=conversation):
+                # The vault adapter keeps the plain conversation id as the session.
+                event = events[hashlib.sha256(conversation.encode()).hexdigest()[:24]]
+                self.assertEqual(event['harness'], 'antigravity')
+                self.assertEqual(event.get('project'), label)
+                self.assertEqual('project_id' in event, label is not None)
+        # The global hook sees the same in-vault conversation and leaves it to the vault.
+        self.assertEqual(self.agy('PreInvocation', [self.vault], invocationNum=0), {})
+        self.assertEqual(len(self.queued()), len(cases))
+
     def test_gap_projection_preserves_project_and_receipt_clears_gap(self):
         self.invoke()
         self.invoke(dict(self.payload, hook_event_name='Stop', event_id='stop'))
@@ -161,7 +286,10 @@ class BridgeTest(unittest.TestCase):
             db.execute("INSERT INTO receipt_checkpoints VALUES ('codex','old',123)")
         hook.drain_queue(self.vault, self.state)
         gaps = json.loads((self.state / 'receipt-gaps.json').read_text(encoding='utf-8'))['checkpoints']
-        self.assertEqual(gaps[0]['session'], 'old')
+        self.assertEqual(gaps, [], 'legacy rows without prompt evidence do not imply missing work')
+        with engine.store._connect() as db:
+            self.assertEqual(db.execute("SELECT harness,session,at FROM receipt_checkpoints WHERE session='old'").fetchone(),
+                             ('codex', 'old', 123.0), 'migration preserves the source row')
 
     def test_installed_zip_config_executes_from_external_project_without_global_writes(self):
         package = self.root / 'candidate.zip'
@@ -345,6 +473,24 @@ class BridgeTest(unittest.TestCase):
         for line in lines[2:]:
             self.assertTrue(line.startswith('- TASK_'))
             self.assertIn(': Action', line)
+
+    def test_project_context_handles_legacy_schema_without_project_id_column(self):
+        engine = SyncEngine(self.vault, self.state)
+        engine.task_create('tasks/legacy_due.md', 'Body', {
+            'id': 'legacy_due', 'title': 'LEGACY_DUE_TASK', 'status': 'active',
+            'due_at': '2026-09-01', 'project': self.project.name, 'owner': 'user'
+        })
+        engine.sync()
+        import sqlite3
+        db = sqlite3.connect(self.state / 'memory.sqlite3')
+        try:
+            db.execute('DROP TABLE IF EXISTS receipt_checkpoints')
+            db.execute('CREATE TABLE receipt_checkpoints(harness TEXT, session TEXT, at REAL, turn_at REAL DEFAULT 0, PRIMARY KEY(harness,session))')
+        finally:
+            db.close()
+        ctx = bridge.project_context(self.vault, self.state, 'test-id', self.project.name, budget=1200)
+        self.assertIn('Project context (' + self.project.name + '):', ctx)
+        self.assertIn('- LEGACY_DUE_TASK', ctx)
 
     def raw(self, data):
         command = [sys.executable, str(SCRIPTS / 'beyin_v3_bridge.py'), '--vault', str(self.vault), '--state',

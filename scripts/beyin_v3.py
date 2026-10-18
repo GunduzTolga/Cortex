@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -21,8 +23,59 @@ def default_state(vault: Path) -> Path:
         base = Path.home() / "Library/Application Support"
     else:
         base = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state")))
-    key = hashlib.sha256(str(vault).encode()).hexdigest()[:16]
+    key = hashlib.sha256(str(Path(vault).resolve()).encode()).hexdigest()[:16]
     return base / "beyin-v3" / key
+
+
+SOURCE_WRITE_COMMANDS = ("note-create", "task-create", "task-update")
+
+
+def mark_session_edit(state: Path) -> None:
+    """Open the Stop reminder's edit window for the Claude Code session that ran this write (#212).
+
+    Bash is not a PostToolUse matcher, so a note or task written through `beyin.py` from the Bash
+    tool was invisible to the receipt reminder. Claude Code sets CLAUDE_CODE_SESSION_ID in Bash
+    subprocesses to the session_id its hooks receive, so the marker names that exact session;
+    other shells and harnesses do not set it and nothing is guessed. Never costs the write itself.
+    """
+    session = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if not session or os.environ.get("BEYIN_V3_NO_RECEIPT_REMINDER") == "1":
+        return
+    try:
+        folder = Path(state) / "receipt-reminders"
+        edited = folder / (hashlib.sha256(session.encode("utf-8")).hexdigest() + ".edited")
+        if edited.exists():
+            return  # the window opened by the first edit stays, as for PostToolUse
+        folder.mkdir(parents=True, exist_ok=True)
+        temporary = folder / (edited.name + "." + str(os.getpid()) + ".tmp")
+        temporary.write_text(json.dumps({"at": time.time()}), encoding="utf-8")
+        os.replace(temporary, edited)
+    except OSError:
+        pass
+
+
+def resolve_state(vault: Path, pinned: Path) -> Path:
+    """Resolve a foreign OS/user's conventional default; preserve custom and local pins."""
+    expected = default_state(vault).resolve()
+    raw = str(pinned)
+    if not raw:
+        return expected
+    if _in_package_container(raw):
+        return Path(pinned).expanduser().resolve()
+    portable = raw.replace("\\", "/")
+    # Match complete standard layouts, rather than a generic /state/ or /local/ suffix.
+    # A copied vault normally changes its absolute path and therefore its hash.
+    conventional = re.fullmatch(
+        r"(?:[A-Za-z]:/Users/[^/]+/AppData/Local|/home/[^/]+/\.local/state|"
+        r"/root/\.local/state|/Users/[^/]+/Library/Application Support)/beyin-v3/[0-9a-f]{16}",
+        portable, re.IGNORECASE)
+    local_parent = str(expected.parent).replace("\\", "/").casefold()
+    if conventional and portable.rsplit("/", 1)[0].casefold() != local_parent:
+        return expected
+    if not Path(pinned).expanduser().is_absolute():
+        if re.match(r"^[A-Za-z]:[/\\]", raw) or (sys.platform == "win32" and raw.startswith(("/", "\\"))):
+            return expected
+    return Path(pinned).expanduser().resolve()
 
 
 def _in_package_container(pinned: str) -> bool:
@@ -116,7 +169,10 @@ def state_location(vault: Path, state: Path, windows=None) -> dict:
             "machine. The installer pins an absolute path, so this one was written by another OS "
             "through a synced vault or edited by hand (#249); the installed beyin.py reads this "
             "machine's default state instead. Installation files are per machine and stay out of "
-            "the sync; see docs/v3/MULTI-MACHINE.md.")
+            "the sync; see https://github.com/GunduzTolga/Cortex/blob/main/docs/v3/MULTI-MACHINE.md.")
+    elif resolve_state(vault, Path(pinned)) != Path(pinned).expanduser().resolve():
+        report['warnings'].append('foreign_default_state: the synced default state belongs to another user or OS; '
+                                  'this machine uses its local default. Reinstall here to bind lifecycle commands.')
     try:
         resolved = Path(pinned).expanduser().resolve()
     except (OSError, ValueError, RuntimeError):
@@ -132,7 +188,7 @@ def state_location(vault: Path, state: Path, windows=None) -> dict:
             "container (Packages\\...\\LocalCache). That path carries the package "
             "identity and goes away when the package is reset or reinstalled under another "
             "identity. Moving the state to a plain local directory is the durable fix; "
-            "see docs/v3/UPDATE.md.")
+            "see https://github.com/GunduzTolga/Cortex/blob/main/docs/v3/UPDATE.md.")
     if report["pin_resolves_elsewhere"] and windows:
         report["warnings"].append(
             "pin_resolves_elsewhere: this process resolves the pinned path to " + str(resolved) +
@@ -153,7 +209,7 @@ def state_location(vault: Path, state: Path, windows=None) -> dict:
             "state_split: this vault has an installed state root on both sides of the package "
             "redirect (" + ", ".join(report["sibling_state_roots"]) + "). Each one carries its own "
             "database, so which half a session reads depends on whether it runs inside the "
-            "package. Keep one and move it out of the container; see docs/v3/UPDATE.md.")
+            "package. Keep one and move it out of the container; see https://github.com/GunduzTolga/Cortex/blob/main/docs/v3/UPDATE.md.")
     return report
 
 
@@ -184,12 +240,13 @@ def receipt_line_endings(vault: Path) -> dict:
                 "warning": "line_endings: core.autocrlf=true and receipts/ is not pinned, so a receipt synced "
                            "from another machine can be checked out as CRLF, which changes its bytes and makes "
                            "the same receipt fail as an event id collision. Add 'receipts/** -text' to the "
-                           "vault's .gitattributes and check the receipts out again; see docs/v3/MULTI-MACHINE.md."}
+                           "vault's .gitattributes and check the receipts out again; see https://github.com/GunduzTolga/Cortex/blob/main/docs/v3/MULTI-MACHINE.md."}
     except Exception as exc:  # no git, a hung git or a broken config must never hide the rest of doctor
         return {"status": "unavailable", "error": type(exc).__name__}
 
 
 def load_engine():
+    _ensure_scripts_path()
     adjacent = Path(__file__).resolve().parent / "beyin_v3.py"
     path = adjacent if adjacent != Path(__file__).resolve() and adjacent.exists() else Path(__file__).resolve().parents[1] / "template/.claude/scripts/beyin_v3.py"
     spec = importlib.util.spec_from_file_location("beyin_v3_shared_engine", path)
@@ -264,7 +321,7 @@ def jev_advice(result):
 
 
 HOOK_FILES = (".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks.json",
-              ".gemini/settings.json", ".qwen/settings.json")
+              ".kiro/hooks/beyin-v3.json", ".gemini/settings.json", ".qwen/settings.json")
 
 
 def _hook_arguments(command: str) -> list:
@@ -293,7 +350,7 @@ def hook_paths(vault: Path) -> dict:
 
     A vault moved to another account or machine together with its hook files keeps commands
     such as C:\\Users\\<old>\\...\\beyin_v3_hook.py; every lifecycle hook then fails with a
-    generic error. Reads only the three hook files; never writes and never walks the vault."""
+    generic error. Reads only managed hook files; never writes and never walks the vault."""
     stale, checked = [], 0
     try:
         here = vault.resolve()
@@ -308,18 +365,26 @@ def hook_paths(vault: Path) -> dict:
         except (OSError, ValueError, UnicodeError):
             stale.append({"file": name, "reason": "unreadable"})
             continue
-        events = data.get("beyin-v3", {}) if name == ".agents/hooks.json" else data.get("hooks", {})
         handlers = []
-        for event, groups in (events.items() if isinstance(events, dict) else ()):
-            for group in groups if isinstance(groups, list) else ():
-                if not isinstance(group, dict):
-                    continue
-                for handler in group.get("hooks", [group]) if "hooks" in group else [group]:
-                    if isinstance(handler, dict) and isinstance(handler.get("command"), str):
-                        handlers.append((event, handler["command"]))
+        if name == ".kiro/hooks/beyin-v3.json":
+            for item in data.get("hooks", []) if isinstance(data.get("hooks"), list) else ():
+                if isinstance(item, dict) and isinstance(item.get("action"), dict):
+                    command = item["action"].get("command")
+                    if isinstance(command, str):
+                        handlers.append((item.get("trigger", ""), command))
+        else:
+            events = data.get("beyin-v3", {}) if name == ".agents/hooks.json" else data.get("hooks", {})
+            for event, groups in (events.items() if isinstance(events, dict) else ()):
+                for group in groups if isinstance(groups, list) else ():
+                    if not isinstance(group, dict):
+                        continue
+                    for handler in group.get("hooks", [group]) if "hooks" in group else [group]:
+                        if isinstance(handler, dict) and isinstance(handler.get("command"), str):
+                            handlers.append((event, handler["command"]))
         for event, command in handlers:
             arguments = _hook_arguments(command)
-            script = next((a for a in arguments if a.replace("\\", "/").endswith("/beyin_v3_hook.py")), None)
+            expected = "/beyin_v3_kiro.py" if name == ".kiro/hooks/beyin-v3.json" else "/beyin_v3_hook.py"
+            script = next((a for a in arguments if a.replace("\\", "/").endswith(expected)), None)
             if script is None:
                 continue
             checked += 1
@@ -348,14 +413,292 @@ def hook_paths(vault: Path) -> dict:
         result["hint"] = ("Hook commands point to another install location (vault moved, or hook files synced "
                           "from another machine). Run the installer again on this machine with this vault; if the "
                           "vault moved from another account or folder, pass the old state folder (or a copy) with "
-                          "--state. Keep hook files out of sync (docs/v3/MULTI-MACHINE.md).")
+                          "--state. Keep hook files out of sync: https://github.com/GunduzTolga/Cortex/blob/main/docs/v3/MULTI-MACHINE.md")
     return result
+
+
+def _hook_commands(argv):
+    """Build POSIX and Windows command strings for hook invocations."""
+    import base64
+    import shlex
+    if any(any(c in str(value) for c in "\n\r\x00") for value in argv):
+        raise ValueError("Newlines or NUL in command paths are unsupported")
+    portable_argv = [str(value).replace("\\", "/") if os.name == "nt" else str(value) for value in argv]
+    posix = shlex.join(portable_argv)
+    script = "& " + " ".join("'" + str(value).replace("'", "''") + "'" for value in argv)
+    script += "; exit $LASTEXITCODE"
+    encoded = base64.b64encode(script.encode("utf-16le")).decode()
+    launcher = "powershell.exe"
+    if os.name == "nt":
+        windows_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR") or r"C:\Windows"
+        launcher_path = str(Path(windows_root) / "System32/WindowsPowerShell/v1.0/powershell.exe").replace("\\", "/")
+        launcher = subprocess.list2cmdline([launcher_path])
+    windows = launcher + " -NoProfile -NonInteractive -EncodedCommand " + encoded
+    return posix, windows
+
+
+def _local_hook_file(root, path):
+    root = root.resolve()
+    path.relative_to(root)
+    cursor = path
+    while cursor != root:
+        if cursor.is_symlink():
+            raise ValueError('hook configuration paths must not be symlinks')
+        cursor = cursor.parent
+    return path
+
+
+def _backup_hook_file(path, raw):
+    # Existing backups are user data too. Exclusive creation preserves all prior copies.
+    index = 0
+    while True:
+        backup = path.with_name(path.name + '.bak' + ('.' + str(index) if index else ''))
+        try:
+            with backup.open('xb') as out:
+                out.write(raw); out.flush(); os.fsync(out.fileno())
+            return backup
+        except FileExistsError:
+            index += 1
+
+
+def _write_hook_json(path, data):
+    import tempfile
+    fd, temporary = tempfile.mkstemp(prefix='.hook-reconcile-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as out:
+            json.dump(data, out, ensure_ascii=False, indent=2)
+            out.write('\n'); out.flush(); os.fsync(out.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def hook_reconcile(vault: Path, state: Path, force: bool = False) -> dict:
+    """Explicitly reconcile hook commands pointing to another install location (#205).
+
+    Creates a .bak backup of each modified hook file before changing it.
+    Replaces stale Python and vault paths with current local interpreter and vault paths.
+    Never runs automatically or silently.
+    """
+    vault = vault.resolve()
+    state = state.resolve()
+    hook_script = vault / ".claude/scripts/beyin_v3_hook.py"
+    kiro_script = vault / ".claude/scripts/beyin_v3_kiro.py"
+    _local_hook_file(vault, hook_script)
+    if not hook_script.is_file():
+        raise RuntimeError(f"Hook script not found at {hook_script}. Reinstall or repair the vault first.")
+    if (vault / ".kiro/hooks/beyin-v3.json").is_file():
+        _local_hook_file(vault, kiro_script)
+        if not kiro_script.is_file():
+            raise RuntimeError(f"Kiro hook adapter not found at {kiro_script}. Reinstall or repair the vault first.")
+
+    for name in HOOK_FILES:
+        _local_hook_file(vault, vault / name)
+    _local_hook_file(state, state / "v3-install.json")
+    paths_report = hook_paths(vault)
+    if paths_report.get("status") == "not_installed":
+        return {
+            "status": "not_installed",
+            "checked": 0,
+            "reconciled_count": 0,
+            "files": [],
+            "message": "No installed hooks found to reconcile.",
+        }
+
+    if paths_report.get("status") != "stale" and not force:
+        return {
+            "status": "ok",
+            "checked": paths_report.get("checked", 0),
+            "reconciled_count": 0,
+            "files": [],
+            "message": "Hook paths are already valid; no reconciliation needed.",
+        }
+
+    stale_files = {item["file"] for item in paths_report.get("stale", [])} if not force else set(HOOK_FILES)
+    reconciled_files = []
+    total_reconciled = 0
+    all_new_commands = []
+    reconciled_originals = {}
+
+    for name in HOOK_FILES:
+        path = vault / name
+        if not path.is_file():
+            continue
+        if name not in stale_files and not force:
+            continue
+
+        try:
+            original_bytes = path.read_bytes()
+            data = json.loads(original_bytes.decode("utf-8"))
+            if not isinstance(data, dict):
+                continue
+        except (OSError, ValueError, UnicodeError):
+            continue
+
+        file_reconciled = 0
+        changes = []
+
+        if name == ".kiro/hooks/beyin-v3.json":
+            for item in data.get("hooks", []) if isinstance(data.get("hooks"), list) else ():
+                if not isinstance(item, dict) or not isinstance(item.get("action"), dict):
+                    continue
+                event = item.get("trigger")
+                old_cmd = item["action"].get("command")
+                if event not in ("SessionStart", "UserPromptSubmit", "PostToolUse", "Stop") or not isinstance(old_cmd, str):
+                    continue
+                args = _hook_arguments(old_cmd)
+                if not any(a.replace("\\", "/").endswith("/beyin_v3_kiro.py") for a in args):
+                    continue
+                posix, windows = _hook_commands([sys.executable, kiro_script, "--vault", vault, "--state", state,
+                                                  "--event", event])
+                all_new_commands.extend([posix, windows])
+                target_cmd = windows if os.name == "nt" else posix
+                if old_cmd != target_cmd or force:
+                    changes.append({"event": event, "old_command": old_cmd, "new_command": target_cmd,
+                                    "old_summary": " ".join(args[:2]),
+                                    "new_summary": f"{sys.executable} {kiro_script}"})
+                    item["action"]["command"] = target_cmd
+                    item["timeout"] = 25 if os.name == "nt" else 10
+                    file_reconciled += 1
+        elif name == ".agents/hooks.json":
+            managed = data.get("beyin-v3")
+            if isinstance(managed, dict):
+                for event in ("PreInvocation", "Stop"):
+                    if event in managed and isinstance(managed[event], list):
+                        posix, windows = _hook_commands([sys.executable, hook_script, "--vault", vault, "--state", state,
+                                                         "--harness", "antigravity", "--event", event])
+                        all_new_commands.extend([posix, windows])
+                        target_cmd = windows if os.name == "nt" else posix
+                        timeout = 20 if os.name == "nt" else 5
+                        for handler in managed[event]:
+                            if isinstance(handler, dict):
+                                old_cmd = handler.get("command", "")
+                                if not isinstance(old_cmd, str):
+                                    continue
+                                args = _hook_arguments(old_cmd)
+                                if not any(a.replace("\\", "/").endswith("/beyin_v3_hook.py") for a in args):
+                                    continue
+                                if old_cmd != target_cmd or force:
+                                    old_args = _hook_arguments(old_cmd)
+                                    changes.append({
+                                        "event": event,
+                                        "old_command": old_cmd,
+                                        "new_command": target_cmd,
+                                        "old_summary": " ".join(old_args[:2]) if len(old_args) >= 2 else old_cmd[:60],
+                                        "new_summary": f"{sys.executable} {hook_script}",
+                                    })
+                                    handler["command"] = target_cmd
+                                    handler["timeout"] = timeout
+                                    file_reconciled += 1
+        else:
+            harness = next((name_part for name_part in ("claude", "gemini", "qwen") if name_part in name), "codex")
+            hooks_map = data.get("hooks", {})
+            if isinstance(hooks_map, dict):
+                argv = [sys.executable, hook_script, "--vault", vault, "--state", state, "--harness", harness]
+                posix, windows = _hook_commands(argv)
+                all_new_commands.extend([posix, windows])
+                target_cmd = windows if os.name == "nt" else posix
+                if harness == "gemini" and os.name == "nt":
+                    # Gemini CLI runs Windows hooks in PowerShell itself: the call operator, unencoded,
+                    # as install_v3.powershell_call writes it.
+                    target_cmd = "& " + " ".join("'" + str(value).replace("'", "''") + "'" for value in argv)
+                    all_new_commands.append(target_cmd)
+
+                for event, groups in hooks_map.items():
+                    if not isinstance(groups, list):
+                        continue
+                    timeout = 3 if event == "SessionEnd" else (20 if os.name == "nt" else 5)
+                    if harness in ("gemini", "qwen"):
+                        timeout *= 1000  # milliseconds in Gemini CLI and Qwen Code
+                    for group in groups:
+                        if not isinstance(group, dict):
+                            continue
+                        handlers = group.get("hooks", [group]) if "hooks" in group else [group]
+                        for handler in handlers:
+                            if not isinstance(handler, dict):
+                                continue
+                            old_cmd = handler.get("command", "")
+                            if not isinstance(old_cmd, str):
+                                continue
+                            args = _hook_arguments(old_cmd)
+                            script = next((a for a in args if a.replace("\\", "/").endswith("/beyin_v3_hook.py")), None)
+                            if script is None:
+                                continue
+                            needs_update = (old_cmd != target_cmd or force or
+                                            (harness == "codex" and handler.get("commandWindows") != windows))
+                            if needs_update:
+                                changes.append({
+                                    "event": event,
+                                    "old_command": old_cmd,
+                                    "new_command": target_cmd,
+                                    "old_summary": " ".join(args[:2]) if len(args) >= 2 else old_cmd[:60],
+                                    "new_summary": f"{sys.executable} {hook_script}",
+                                })
+                                handler["command"] = target_cmd
+                                handler["timeout"] = timeout
+                                if harness == "codex":
+                                    handler["commandWindows"] = windows
+                                file_reconciled += 1
+
+        if file_reconciled > 0:
+            if path.read_bytes() != original_bytes:
+                raise RuntimeError("Hook configuration changed during reconciliation; preserved")
+            backup_path = _backup_hook_file(path, original_bytes)
+            _local_hook_file(vault, path)
+            if path.read_bytes() != original_bytes:
+                raise RuntimeError("Hook configuration changed after backup; preserved")
+            reconciled_originals[name] = original_bytes
+            _write_hook_json(path, data)
+            reconciled_files.append({
+                "file": name,
+                "backup": str(backup_path.relative_to(vault).as_posix()),
+                "reconciled": file_reconciled,
+                "changes": changes,
+            })
+            total_reconciled += file_reconciled
+
+    manifest_path = state / "v3-install.json"
+    if manifest_path.is_file() and (all_new_commands or reconciled_files):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            cmds = set(manifest.get("commands", []))
+            cmds.update(all_new_commands)
+            manifest["commands"] = sorted(cmds)
+            files = manifest.get("files", {})
+            for rec in reconciled_files:
+                name = rec["file"]
+                if name in files and isinstance(files[name], dict):
+                    file_path = vault / name
+                    baseline = base64.b64decode(files[name].get("installed_content") or "")
+                    original = reconciled_originals.get(name, b"")
+                    # Never adopt user edits as installer-owned content.
+                    if file_path.is_file() and baseline.replace(b"\r\n", b"\n") == original.replace(b"\r\n", b"\n"):
+                        file_bytes = file_path.read_bytes()
+                        files[name]["installed_hash"] = hashlib.sha256(file_bytes).hexdigest()
+                        files[name]["installed_content"] = base64.b64encode(file_bytes).decode("ascii")
+            _write_hook_json(manifest_path, manifest)
+        except (OSError, ValueError, UnicodeError):
+            pass
+
+    return {
+        "status": "reconciled" if total_reconciled > 0 else "noop",
+        "checked": paths_report.get("checked", 0),
+        "reconciled_count": total_reconciled,
+        "files": reconciled_files,
+    }
 
 
 def read_json(filename: str):
     if filename == "-":
-        return json.load(sys.stdin)
-    with Path(filename).open(encoding="utf-8") as stream:
+        if hasattr(sys.stdin, "reconfigure"):
+            try:
+                sys.stdin.reconfigure(encoding="utf-8-sig")
+            except Exception:
+                pass
+        raw = sys.stdin.read()
+        return json.loads(raw.lstrip("\ufeff").strip() or "{}")
+    with Path(filename).open(encoding="utf-8-sig") as stream:
         return json.load(stream)
 
 
@@ -363,6 +706,47 @@ def load_skills():
     _ensure_scripts_path()
     import beyin_v3_skills
     return beyin_v3_skills
+
+
+# Hours and minutes are bounded here so every supported Python accepts the same strings
+# (datetime.fromisoformat alone also takes 20260924, 2026-W39-4, a zone-less time or, on newer
+# versions, 24:00).
+RECAP_BOUND = (r"\d{4}-\d{2}-\d{2}"
+               r"(T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2}))?")
+
+
+def recap_bound(value: str):
+    """argparse type of recap --since/--until: a local calendar day or an exact instant.
+
+    YYYY-MM-DD returns a date; the projection compares it with each receipt's local day, the
+    day daily/v3 is named by. A full ISO 8601 timestamp must end in Z or a UTC offset and
+    returns that instant in UTC. A zone-less time is refused instead of guessed.
+    """
+    import re
+    from datetime import date, datetime, timezone
+    try:
+        match = re.fullmatch(RECAP_BOUND, value, re.ASCII)
+        if not match:
+            raise ValueError(value)
+        if match.group(1) is None:
+            return date.fromisoformat(value)
+        stamp = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+        stamp.astimezone()  # from/through report its local day; Windows cannot place every instant
+        return stamp
+    except (ValueError, OverflowError, OSError):
+        raise argparse.ArgumentTypeError(
+            "invalid date format: %r (use YYYY-MM-DD or an ISO 8601 timestamp with Z or a UTC offset, "
+            "such as 2026-09-24T18:30:00+03:00)" % value) from None
+
+
+def recap_bounds_inverted(since, until):
+    """True when --since lies after --until. Two instants compare directly; with a bare date
+    on either side both are compared as local calendar days, the unit a bare date selects."""
+    from datetime import datetime
+    if isinstance(since, datetime) and isinstance(until, datetime):
+        return since > until
+    first, last = (bound.astimezone().date() if isinstance(bound, datetime) else bound for bound in (since, until))
+    return first > last
 
 
 def parser():
@@ -374,11 +758,30 @@ def parser():
     sync_parser = sub.add_parser("sync", help="Reconcile Markdown sources into local state")
     sync_parser.add_argument("--full", action="store_true",
                              help="Read every source instead of trusting unchanged file signatures")
+    sync_parser.add_argument("--recover-views", action="store_true",
+                             help="Archive conflicting receipt views and regenerate from immutable receipts")
+    sub.add_parser("recover-views", help="Archive conflicting receipt views and regenerate from immutable receipts")
     sub.add_parser("skill-sync", help="Reconcile project-local shared skills")
     sub.add_parser("doctor", help="Read local hook health and pending metadata counts")
+    scheduled = sub.add_parser("scheduled-check", help="Sync then doctor for an OS scheduler you set up; no model call, no service")
+    scheduled.add_argument("--notify", action="store_true",
+                           help="Opt-in OS notification when the result changes; issue kinds and counts only")
+    hook_rec = sub.add_parser("hook-reconcile", help="Reconcile stale hook paths with backup")
+    hook_rec.add_argument("--force", action="store_true", help="Reconcile hook paths even if not reported stale")
     recap = sub.add_parser("recap", help="Read recent source-linked outcomes without a model call")
-    recap.add_argument("--days", type=int, default=7, help="Calendar days in UTC, including today (1..366)")
+    recap.add_argument("--days", type=int, help="Calendar days in UTC, including today (1..366, default 7); "
+                                                "not allowed with --since/--until")
     recap.add_argument("--limit", type=int, default=20, help="Maximum recent receipts to return (1..100)")
+    recap.add_argument("--since", type=recap_bound, metavar="DATE",
+                       help="Explicit range start: YYYY-MM-DD (local calendar day, as daily/v3 is named) or an "
+                            "ISO 8601 timestamp with Z or a UTC offset")
+    recap.add_argument("--until", type=recap_bound, metavar="DATE",
+                       help="Explicit range end, inclusive: YYYY-MM-DD covers that whole local day; without "
+                            "--since there is no lower bound")
+    recap.set_defaults(usage_error=recap.error)  # cross-flag checks in main() report with recap's own usage
+    triage = sub.add_parser("triage", help="Vault digestion report: inbox items, stale tasks, and weekly knowledge summary")
+    triage.add_argument("--stale-days", type=int, default=14, help="Days of inactivity before an open task is considered stale (default: 14)")
+    triage.add_argument("--digest-days", type=int, default=7, help="Days to look back for knowledge notes and outcomes (default: 7)")
     settings = sub.add_parser("preferences", help="Control automatic local checks and injected context")
     settings.add_argument("--profile", choices=("normal", "economical", "manual"))
     settings.add_argument("--auto-sync", choices=("on", "off"))
@@ -411,8 +814,20 @@ def parser():
     settings.add_argument("--inbox-folder", action="append",
                           help="Top-level inbox folder name for the report (repeat for several; replaces the "
                                "generic name detection; an empty value returns to it)")
+    settings.add_argument("--index-exclude-dir", action="append", default=[], metavar="NAME",
+                          help="Keep directories with this bare name out of the index, at any depth (repeatable); applied by the next sync")
+    settings.add_argument("--index-include-dir", action="append", default=[], metavar="NAME",
+                          help="Remove a name from the index exclusion list (repeatable)")
     settings.add_argument("--parallel-sessions", choices=("on", "off"),
                           help="Opt-in one-line notice when another session is open on this vault")
+    settings.add_argument("--context-dedupe", choices=("on", "off"),
+                          help="Prevent re-injecting already delivered records within the same session (#363)")
+    settings.add_argument("--hermes-attended-platform", action="append", default=[], metavar="PLATFORM",
+                          help="Treat platform as attended/interactive in Hermes (e.g. slack); repeatable")
+    settings.add_argument("--hermes-unattended-platform", action="append", default=[], metavar="PLATFORM",
+                          help="Treat platform as unattended in Hermes (e.g. custom bot); repeatable")
+    settings.add_argument("--hermes-reset-platforms", action="store_true",
+                          help="Reset Hermes platform overrides to defaults")
     compact = sub.add_parser("companion-compact", help="Move older Last-Session/Threads entries verbatim into a private archive; deletes nothing")
     compact.add_argument("--dry-run", action="store_true", help="Report what would move without writing")
     skill = sub.add_parser("skill-import", help="Import one explicitly chosen skill directory")
@@ -427,7 +842,7 @@ def parser():
     context = sub.add_parser("context", help="Retrieve source-backed shared context")
     context.add_argument("query", nargs="?", help="Query; alternatively use --file")
     context.add_argument("--file", help="JSON retrieval arguments, or - for stdin")
-    context.add_argument("--harness", choices=("codex", "claude", "antigravity", "hermes", "opencode", "omp", "gemini", "qwen"), default="codex")
+    context.add_argument("--harness", choices=("codex", "claude", "antigravity", "hermes", "opencode", "omp", "kiro", "gemini", "qwen"), default="codex")
     context.add_argument("--project")
     context.add_argument("--audience", choices=("internal", "public"), default="internal")
     context.add_argument("--status", action="append", dest="statuses")
@@ -454,26 +869,39 @@ def parser():
     answer.add_argument("--project", required=True)
     receipt = sub.add_parser("receipt", help="Submit an idempotent source-linked receipt")
     receipt.add_argument("--file", help="JSON input path, or - for stdin (default without receipt flags)")
-    receipt.add_argument("--harness", choices=("codex", "claude", "antigravity", "hermes", "opencode", "omp", "gemini", "qwen"), default="codex")
+    receipt.add_argument("--harness", choices=("codex", "claude", "antigravity", "hermes", "opencode", "omp", "kiro", "gemini", "qwen"), default="codex")
     receipt.add_argument("--event-id", help="Required receipt event identifier in flag mode")
     receipt.add_argument("--summary", help="Receipt summary text, preserving literal newlines")
     receipt.add_argument("--summary-file", type=Path, metavar="PATH", help="Read the receipt summary from a UTF-8 file")
     receipt.add_argument("--ref", action="append", help="Vault-relative source path; repeat for multiple refs")
+    receipt.add_argument("--link", action="append",
+                         help="External result as an http(s) URL (pull request, published page); repeatable, never a vault source")
     receipt.add_argument("--session", help="Optional session identifier")
     update = sub.add_parser("task-update", help="Update task with expected revision")
     update.add_argument("--file", default="-", help="JSON {id, expected_revision, changes}")
     history = sub.add_parser("history", help="Read ordered revision snapshots for a record")
     history.add_argument("record_id")
+    pscope = sub.add_parser("project-scope", help="Manage folder project scopes in .beyin-projects.json")
+    pscope.add_argument("action", choices=["list", "add", "remove", "prune"], nargs="?", default="list",
+                        help="Action to perform: list, add, remove, prune")
+    pscope.add_argument("--folder", help="Vault-relative folder path")
+    pscope.add_argument("--project", help="Project identifier for the folder")
+    pscope.add_argument("--shared-unscoped", choices=["on", "off"],
+                        help="Toggle whether unassigned notes are visible in project scope")
+    ingest_server = sub.add_parser("ingest-server", help="Local-first HTTP ingest server for mobile captures")
+    ingest_server.add_argument("--host", default="127.0.0.1", help="Host interface to bind (default 127.0.0.1)")
+    ingest_server.add_argument("--port", type=int, default=8484, help="Port to listen on (default 8484)")
+    ingest_server.add_argument("--token", help="Optional Bearer token for authentication")
     return root
 
 
 def main(argv=None, return_result=False):
     if hasattr(sys.stdin, "reconfigure"):
-        sys.stdin.reconfigure(encoding="utf-8")
+        sys.stdin.reconfigure(encoding="utf-8-sig")
     argument_parser = parser()
     args = argument_parser.parse_args(argv)
     receipt_flags = args.command == "receipt" and any(
-        getattr(args, name) is not None for name in ("event_id", "summary", "summary_file", "ref", "session"))
+        getattr(args, name) is not None for name in ("event_id", "summary", "summary_file", "ref", "link", "session"))
     if receipt_flags:
         for stream in (sys.stdout, sys.stderr):
             if hasattr(stream, "reconfigure"):
@@ -488,6 +916,12 @@ def main(argv=None, return_result=False):
             argument_parser.error("--summary or --summary-file is required in flag mode")
         if not args.ref:
             argument_parser.error("--ref is required in flag mode (at least one)")
+    if args.command == "recap":
+        # Usage errors, raised before any state is opened or synced.
+        if args.days is not None and (args.since is not None or args.until is not None):
+            args.usage_error("argument --days: not allowed with argument --since/--until")
+        if args.since is not None and args.until is not None and recap_bounds_inverted(args.since, args.until):
+            args.usage_error("argument --since: must not be after --until")
     try:
         vault = args.vault.expanduser().resolve()
         if not vault.is_dir():
@@ -503,10 +937,15 @@ def main(argv=None, return_result=False):
         if read_only_context and args.jev:
             raise ValueError("context --no-sync cannot be combined with --jev")
         # The advisor switch reads and writes one small file; it needs no index or sync engine.
-        engine = load_engine() if args.command != "jev" else None
+        engine = load_engine() if args.command not in ("jev", "project-scope", "ingest-server") else None
         store = engine.MemoryStore(state, vault, read_only=read_only_context) if engine else None
-        sync = load_sync()(vault, state) if args.command in ("sync", "recap", "receipt", "task-update", "note-create", "task-create", "context", "jev-review", "jev-answer", "jev-memory", "history") and not read_only_context else None
-        if args.command == "init":
+        sync = load_sync()(vault, state) if args.command in ("sync", "recover-views", "recap", "receipt", "task-update", "note-create", "task-create", "context", "jev-review", "jev-answer", "jev-memory", "history") and not read_only_context else None
+        if args.command == "ingest-server":
+            _ensure_scripts_path()
+            import beyin_v3_ingest_server
+            beyin_v3_ingest_server.run_server(vault, host=args.host, port=args.port, token=args.token)
+            return 0
+        elif args.command == "init":
             result = {"initialized": True, "state": str(state), "network": False,
                       "hooks_installed": False, "optional_provider": None}
         elif args.command == "preferences":
@@ -530,6 +969,10 @@ def main(argv=None, return_result=False):
                 if not inbox_valid:
                     raise ValueError('inbox-report.json in the runtime state is invalid; fix or remove it first')
                 hygiene.check_inbox_settings(dict(current_inbox, **inbox_changes))
+            import beyin_v3_index as index_settings
+            index_changes = bool(args.index_exclude_dir or args.index_include_dir)
+            if index_changes:  # validated before anything is saved
+                index_settings.plan(state, vault, args.index_exclude_dir, args.index_include_dir)
             if hygiene_changes:  # validated before anything is saved, like the companion limits
                 current_hygiene, hygiene_valid = hygiene.read_settings(state)
                 if not hygiene_valid:
@@ -614,6 +1057,20 @@ def main(argv=None, return_result=False):
                 result['inbox_report'], inbox_valid = hygiene.read_inbox_settings(state)
                 if not inbox_valid:
                     result['inbox_report_notice'] = 'inbox-report.json gecersiz; gelen kutusu raporu kapali sayiliyor.'
+            # Machine-local index setting (state/index.json); a release before it ignores the file.
+            if index_changes:
+                result['index_exclusions'] = {'excluded_dirs': index_settings.save(
+                    state, vault, args.index_exclude_dir, args.index_include_dir)}
+                result['index_exclusions_notice'] = 'Klasor haric tutma listesi kaydedildi; bir sonraki sync ile uygulanir.'
+                result['status'] = 'saved'
+            else:
+                excluded_names, index_error, index_present = index_settings.read(state, vault)
+                if index_present:  # a vault that never set this keeps its exact output
+                    result['index_exclusions'] = {'excluded_dirs': excluded_names}
+                if index_error is not None:
+                    result['index_exclusions']['error'] = index_error
+                    result['index_exclusions_notice'] = ('index.json gecersiz; klasor haric tutma listesi uygulanmiyor, '
+                                                         'her sey indeksleniyor.')
             # Machine-local (#170): an older release would reject a new .beyin-preferences.json key.
             import beyin_v3_parallel as parallel
             if args.parallel_sessions is not None:
@@ -623,6 +1080,35 @@ def main(argv=None, return_result=False):
             result['parallel_sessions'] = 'on' if parallel_on else 'off'
             if not parallel_valid:
                 result['parallel_sessions_notice'] = 'parallel-sessions.json gecersiz; paralel oturum bildirimi kapali sayiliyor.'
+            # Machine-local context deduplication (#363)
+            import beyin_v3_dedupe as dedupe
+            if args.context_dedupe is not None:
+                dedupe.save_settings(state, args.context_dedupe == 'on')
+                result['status'] = 'saved'
+            dedupe_on, dedupe_valid = dedupe.read_settings(state)
+            result['context_dedupe'] = 'on' if dedupe_on else 'off'
+            if not dedupe_valid:
+                result['context_dedupe_notice'] = 'context-dedupe.json gecersiz; oturum ici tekrar onleme kapali sayiliyor.'
+            # Machine-local Hermes platform settings (state/hermes-platforms.json, #350)
+            try:
+                import beyin_v3_hermes as hermes_settings
+                if args.hermes_attended_platform or args.hermes_unattended_platform or args.hermes_reset_platforms:
+                    result['hermes_platforms'] = hermes_settings.save_platforms(
+                        state,
+                        attended=args.hermes_attended_platform,
+                        unattended=args.hermes_unattended_platform,
+                        reset=args.hermes_reset_platforms
+                    )
+                    result['status'] = 'saved'
+                else:
+                    h_conf, h_valid = hermes_settings.read_platforms(state, vault)
+                    effective = sorted(hermes_settings.resolve_unattended_platforms(vault, state))
+                    result['hermes_platforms'] = {**h_conf, 'effective_unattended': effective}
+                    if not h_valid:
+                        result['hermes_platforms_notice'] = 'hermes-platforms.json gecersiz; varsayilan platformlar kullaniliyor.'
+            except ImportError:
+                if args.hermes_attended_platform or args.hermes_unattended_platform or args.hermes_reset_platforms:
+                    raise ValueError("Hermes platform settings module is unavailable; reinstall the vault")
         elif args.command == "jev":
             laya = {key: value for key, value in (("base_url", args.base_url), ("model", args.model)) if value is not None}
             if args.mode == "status":
@@ -638,19 +1124,24 @@ def main(argv=None, return_result=False):
                 result = jev_advice(jev_client().set_mode(state, args.mode, enable=args.enable, disable=args.disable,
                                                           provider=args.provider, laya=laya or None))
                 result["changed"] = True
+        elif args.command == "hook-reconcile":
+            result = hook_reconcile(vault, state, force=getattr(args, 'force', False))
         elif args.command == "doctor":
+            _ensure_scripts_path()
+            from beyin_v3_hook_done import summary as hook_done_summary
+            done = hook_done_summary(state, ('codex', 'claude', 'antigravity', 'hermes', 'opencode', 'omp', 'kiro', 'gemini', 'qwen'))
             result = {"pending_events": len(list((state / "hook-queue").glob("*.json"))),
-                      "acknowledged_events": len(list((state / "hook-done").glob("*.json")))}
+                      **done}
             for filename in ("hook-health.json", "hook-error.json", "receipt-gaps.json"):
                 path = state / filename
                 result[filename] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
-            seen = {name: set() for name in ('codex', 'claude', 'antigravity', 'hermes', 'opencode', 'omp', 'gemini', 'qwen')}
-            for path in (state/'hook-done').glob('*.json'):
-                event = json.loads(path.read_text(encoding='utf-8'))
-                if event.get('harness') in seen:
-                    seen[event['harness']].add(event.get('event', 'unknown'))
-            result['lifecycle'] = {name: {'status': 'observed_metadata' if events else 'never_seen', 'events': sorted(events)} for name, events in seen.items()}
             result['legacy_external_schedules'] = 'not_inspected; review custom OS/compiler schedules before migration'
+            try:  # information only: the last scheduled-check run, if the user set one up (#267)
+                _ensure_scripts_path()
+                import beyin_v3_scheduled as scheduled
+                result['scheduled_check'] = scheduled.doctor(state)
+            except Exception as exc:
+                result['scheduled_check'] = {'status': 'unavailable', 'error': type(exc).__name__}
             try:  # information only: a stale-path report must never hide the rest of doctor
                 result['hook_paths'] = hook_paths(vault)
             except Exception as exc:
@@ -687,6 +1178,23 @@ def main(argv=None, return_result=False):
                 result['companion_hygiene'] = companion.hygiene(vault, state)
             except Exception as exc:  # a size report must never hide the rest of doctor
                 result['companion_hygiene'] = {'status': 'unavailable', 'error': type(exc).__name__}
+            # Information only (#374): how much of Kurallar.md the Claude Code opening shows whole.
+            # The hook's own render on a read-only store; never raises the doctor status.
+            try:
+                import beyin_v3_companion as companion
+                prefs = result['preferences']
+                if prefs['context_mode'] == 'off':
+                    result['companion_rules_opening'] = {'status': 'context_off'}
+                else:
+                    from beyin_v3_hook import receipt_context
+                    budget = companion.client_budget('claude', companion.opening_budget(state, prefs['context_chars']))
+                    rules = companion.rules_opening(engine.MemoryStore(state, vault, read_only=True), budget,
+                                                    receipt_context(vault, state))
+                    result['companion_rules_opening'] = dict(
+                        rules or {}, status='clipped' if rules and rules['clipped'] else 'ok' if rules else 'no_rules',
+                        budget=budget, harness='claude')
+            except Exception as exc:  # never hides the rest of doctor
+                result['companion_rules_opening'] = {'status': 'unavailable', 'error': type(exc).__name__}
             try:
                 import beyin_v3_references as references
                 result['instruction_references'] = references.check(vault)
@@ -713,6 +1221,8 @@ def main(argv=None, return_result=False):
             result['skill_conflicts'] = health.get('sync', {}).get('skill_conflicts', [])
             # Entries beside the skills that this vault never owned. Information only.
             result['skill_unmanaged'] = health.get('sync', {}).get('skill_unmanaged', [])
+            from beyin_v3_projections import is_receipt_view_conflict
+            result['receipt_view_conflicts'] = [c for c in health.get('sync', {}).get('conflicts', []) if is_receipt_view_conflict(c)]
             try:
                 result['task_completion'] = load_sync().reader(store).completion_health()
             except Exception as exc:
@@ -765,11 +1275,38 @@ def main(argv=None, return_result=False):
                     result[key] = {'status': 'unavailable', 'error': type(exc).__name__}
             try:  # read-only report of the opt-in parallel-session notice (#170)
                 import beyin_v3_parallel as parallel
-                result['parallel_sessions'] = parallel.doctor(state)
+                result['parallel_sessions'] = parallel.doctor(state, vault=vault)
             except Exception as exc:
                 result['parallel_sessions'] = {'status': 'unavailable', 'error': type(exc).__name__}
+            try:  # read-only report of context deduplication (#363)
+                import beyin_v3_dedupe as dedupe
+                result['context_dedupe'] = dedupe.doctor(state)
+            except Exception as exc:
+                result['context_dedupe'] = {'status': 'unavailable', 'error': type(exc).__name__}
+            # Information only: the user's index exclusions, an index.json that is not applied, and
+            # indexed trees that look vendored. Reads the index and one small file; no vault walk.
+            try:
+                import beyin_v3_index as index_settings
+                try:
+                    with store._connect() as db:
+                        rows = db.execute('SELECT m.source, r.payload FROM markdown_sources m LEFT JOIN records r ON r.id = m.id').fetchall()
+                        indexed_sources = [row[0] for row in rows]
+                        indexed_records = [json.loads(row[1]) if row[1] else {'source': row[0]} for row in rows]
+                except Exception:  # no sync has created the table yet
+                    indexed_sources = []
+                    indexed_records = []
+                result['index_exclusions'] = index_settings.doctor(state, vault, indexed_sources, records=indexed_records)
+                result['index_exclusions']['always_excluded'] = sorted(sys.modules['beyin_v3_sync'].EXCLUDED_DIRS)
+            except Exception as exc:  # never hides the rest of doctor
+                result['index_exclusions'] = {'status': 'unavailable', 'error': type(exc).__name__}
             result['receipt_line_endings'] = receipt_line_endings(vault)  # information only: the status below is untouched
-            result['status'] = ('needs_attention' if health.get('sync', {}).get('status') in ('conflict', 'degraded') or result['hook_paths'].get('status') == 'stale' or result['skill_conflicts'] or result.get('instruction_conflicts') or result['hook-error.json'] or result['task_completion']['strict_issue_count'] or result['task_completion'].get('error') or result['validity']['ignored_rejection_count'] or result['validity'].get('error') else 'pending' if result['pending_events'] else 'observed_metadata' if result['acknowledged_events'] else 'never_seen')
+            try:
+                _ensure_scripts_path()
+                import beyin_v3_projects as projects
+                result['project_scopes'] = projects.check_project_scopes(vault)
+            except Exception as exc:
+                result['project_scopes'] = {'status': 'unavailable', 'error': type(exc).__name__}
+            result['status'] = ('needs_attention' if health.get('sync', {}).get('status') in ('conflict', 'degraded') or result['hook_paths'].get('status') == 'stale' or result['skill_conflicts'] or result.get('instruction_conflicts') or result['hook-error.json'] or result['task_completion']['strict_issue_count'] or result['task_completion'].get('error') or result['validity']['ignored_rejection_count'] or result['validity'].get('error') or result.get('project_scopes', {}).get('status') in ('error', 'warning') else 'pending' if result['pending_events'] else 'observed_metadata' if result['acknowledged_events'] else 'never_seen')
             # Information only: a leftover global OMP hook copy predates the vault-owned plan
             # (OMP.md says the installer never updates or removes it). After an engine update the
             # copy can be older than the installed vault hook, so a session outside the vault can
@@ -798,10 +1335,23 @@ def main(argv=None, return_result=False):
                             result['omp_global_hook'] = {'path': str(global_copy), 'stale': False}
             except Exception as exc:  # a stale-copy report must never hide the rest of doctor
                 result['omp_global_hook'] = {'status': 'unavailable', 'error': type(exc).__name__}
+        elif args.command == "scheduled-check":
+            _ensure_scripts_path()
+            import beyin_v3_scheduled as scheduled
+            result, code = scheduled.run(vault, state, Path(__file__).resolve(), notify=args.notify)
+            if return_result:
+                return result, code
+            print(json.dumps(result, ensure_ascii=True, indent=2))
+            return code
         elif args.command == "skill-sync":
             result = load_skills().sync_skills(vault, state)
         elif args.command == "skill-import":
             result = load_skills().import_skill(vault, state, args.source, name=args.name)
+        elif args.command == "project-scope":
+            _ensure_scripts_path()
+            import beyin_v3_projects as projects
+            result = projects.manage(vault, args.action, folder=args.folder, project=args.project,
+                                     shared_unscoped=args.shared_unscoped)
         elif args.command == "companion-compact":
             _ensure_scripts_path()
             import beyin_v3_compact
@@ -809,22 +1359,35 @@ def main(argv=None, return_result=False):
             if any(entry['status'] == 'compacted' for entry in result['files'].values()):
                 # Index the shorter sources and the private archive before anyone reads them.
                 result['sync'] = {'status': load_sync()(vault, state).sync().get('status')}
-        elif args.command == "sync":
-            result = sync.sync(full=args.full)
+        elif args.command in ("sync", "recover-views"):
+            recover = getattr(args, "recover_views", False) or args.command == "recover-views"
+            result = sync.sync(full=getattr(args, "full", False), recover_views=recover)
         elif args.command == "recap":
-            if not 1 <= args.days <= 366 or not 1 <= args.limit <= 100:
+            days = 7 if args.days is None else args.days
+            if not 1 <= days <= 366 or not 1 <= args.limit <= 100:
                 raise ValueError('recap days must be 1..366 and limit must be 1..100')
             refreshed = sync.sync()
-            if refreshed.get('status') == 'conflict':
+            from beyin_v3_projections import is_receipt_view_conflict
+            source_conflicts = [c for c in refreshed.get('conflicts', []) if not is_receipt_view_conflict(c)]
+            if source_conflicts:
                 raise RuntimeError('Recap blocked: source sync conflict. Run sync to inspect sources.')
             from beyin_v3_projections import recent_receipts
             with store._connect() as db:
-                result = recent_receipts(db, days=args.days, limit=args.limit, vault=vault)
+                # Without the range flags this is exactly the call recap made before they existed.
+                bounds = {name: bound for name, bound in (('since', args.since), ('until', args.until)) if bound is not None}
+                result = recent_receipts(db, days=days, limit=args.limit, vault=vault, **bounds)
+            view_conflicts = [c for c in refreshed.get('conflicts', []) if is_receipt_view_conflict(c)]
+            if view_conflicts:
+                result['view_conflicts'] = view_conflicts
             if refreshed.get('status') == 'degraded':
                 warnings = refreshed.get('warnings', [])
                 result['partial'] = True
                 result['source_sync'] = {'status': 'degraded', 'warnings': warnings[:20],
                                          'warning_count': len(warnings), 'truncated': len(warnings) > 20}
+        elif args.command == "triage":
+            _ensure_scripts_path()
+            import beyin_v3_triage as triage_module
+            result = triage_module.triage(vault, state=state, stale_days=args.stale_days, digest_days=args.digest_days)
         elif args.command == "ingest":
             payload = read_json(args.file)
             result = [store.ingest(record) for record in payload] if isinstance(payload, list) else store.ingest(payload)
@@ -849,7 +1412,9 @@ def main(argv=None, return_result=False):
                 result['source_sync'] = {'status': 'skipped', 'reason': 'explicit_no_sync'}
             else:
                 refreshed = sync.sync()
-                if refreshed.get('status') == 'conflict':
+                from beyin_v3_projections import is_receipt_view_conflict
+                source_conflicts = [c for c in refreshed.get('conflicts', []) if not is_receipt_view_conflict(c)]
+                if source_conflicts:
                     raise RuntimeError('Context blocked: source sync '+str(refreshed.get('status', 'failed'))+'. Run sync with the same vault/state to inspect and reconcile source issues, then retry context.')
                 # Harness selection deliberately does not change retrieval semantics.
                 if args.jev:
@@ -857,6 +1422,9 @@ def main(argv=None, return_result=False):
                     result = advise_context(sync.store, **params)
                 else:
                     result = sync.store.context_for(args.harness, **params)
+                view_conflicts = [c for c in refreshed.get('conflicts', []) if is_receipt_view_conflict(c)]
+                if view_conflicts:
+                    result['view_conflicts'] = view_conflicts
                 if refreshed.get('status') == 'degraded':
                     warnings = refreshed.get('warnings', [])
                     result['partial'] = True
@@ -896,10 +1464,13 @@ def main(argv=None, return_result=False):
                 payload = {"event_id": args.event_id, "summary": summary, "refs": args.ref}
                 if args.session is not None:
                     payload["session"] = args.session
+                if args.link:
+                    payload["links"] = args.link
             else:
                 payload = read_json(args.file if args.file is not None else "-")
             result = sync.receipt(payload["event_id"], payload["summary"],
-                                          payload["refs"], args.harness, session=payload.get('session'))
+                                          payload["refs"], args.harness, session=payload.get('session'),
+                                          links=payload.get('links'))
         elif args.command == "history":
             # History is source-verified, so refresh first like context: an edit
             # made just before this command must not hide the audit trail.
@@ -907,9 +1478,17 @@ def main(argv=None, return_result=False):
             if refreshed.get('status') == 'conflict':
                 raise RuntimeError('History blocked: source sync conflict. Run sync with the same vault/state to inspect and reconcile source issues, then retry history.')
             result = sync.store.history(args.record_id)
+            if refreshed.get('status') == 'degraded':
+                # The public stdout contract remains a JSON list.
+                warnings = refreshed.get('warnings', [])
+                print(json.dumps({'source_sync': {'status': 'degraded', 'warnings': warnings[:20],
+                                                  'warning_count': len(warnings), 'truncated': len(warnings) > 20}},
+                                 ensure_ascii=True), file=sys.stderr)
         else:
             payload = read_json(args.file)
             result = sync.update_task(payload["id"], payload["expected_revision"], payload["changes"])
+        if args.command in SOURCE_WRITE_COMMANDS:
+            mark_session_edit(state)
         if return_result:
             return result, 0
         print(json.dumps(result, ensure_ascii=True, indent=2))

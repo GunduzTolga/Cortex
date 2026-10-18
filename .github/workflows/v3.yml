@@ -28,8 +28,9 @@ jobs:
   stdlib-contracts:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
-    # Windows runs the same suite in 20-25 minutes against 6-9 elsewhere (1.0.9); a hang still shows within the hour.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 15 }}
+    # Windows runs the same suite in 20-25 minutes; elsewhere 6-9 at 1.0.9, 9-14 at 1.0.25 with 1711 tests
+    # (18 October: 15 minutes cut a slow macOS/Ubuntu run short). A hang still shows within the hour.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 30 }}
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +46,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Offline source, runtime, lifecycle and skill contracts
-        run: python -m unittest discover -s tests -p "v3_*test.py"
+        # A hang writes where every thread stands, a few minutes before the job's own limit would only cancel it.
+        run: python scripts/run_v3_tests.py --hang-after ${{ matrix.os == 'windows-latest' && 2400 || 1500 }}
       - name: Frozen development and holdout retrieval gates
         run: python scripts/evaluate_v3.py

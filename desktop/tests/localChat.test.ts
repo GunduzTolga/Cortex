@@ -61,6 +61,14 @@ test('Python is the one the engine runs: BEYIN_PYTHON, else Windows’ py -3, ne
   assert.deepEqual(pythonOf({ PATH: [store, real].join(path.delimiter) }), { command: path.join(real, 'py.exe'), args: ['-3'] });
   assert.deepEqual(pythonOf({ PATH: real, BEYIN_PYTHON: 'C:\\P\\python.exe' }), { command: 'C:\\P\\python.exe', args: [] });
   assert.equal(pythonOf({ PATH: store }), null);
+  // Installed for this user by python.org's installer, the PATH not yet told: found where it puts it.
+  const local = path.join(root, 'Local');
+  fs.mkdirSync(path.join(local, 'Programs', 'Python', 'Python312'), { recursive: true });
+  fs.writeFileSync(path.join(local, 'Programs', 'Python', 'Python312', 'python.exe'), '');
+  assert.deepEqual(pythonOf({ PATH: store, LOCALAPPDATA: local }), { command: path.join(local, 'Programs', 'Python', 'Python312', 'python.exe'), args: [] });
+  fs.mkdirSync(path.join(local, 'Programs', 'Python', 'Launcher'));
+  fs.writeFileSync(path.join(local, 'Programs', 'Python', 'Launcher', 'py.exe'), '');
+  assert.deepEqual(pythonOf({ PATH: store, LOCALAPPDATA: local }), { command: path.join(local, 'Programs', 'Python', 'Launcher', 'py.exe'), args: ['-3'] });
 });
 
 /** A stand-in LM Studio: its model list, and an answer streamed in pieces with its thinking and its count. */

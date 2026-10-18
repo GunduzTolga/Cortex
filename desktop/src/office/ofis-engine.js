@@ -1,7 +1,10 @@
 // ofis-engine.js — Cortex Ofis motoru. Claude Design'ın prototip motoru (teslim: 15 Ekim 2026),
 // uygulamaya şu eklerle alındı: görünmeyen sekmede durur (setActive), sunucu kabinlerinin LED'leri
-// araçların gerçek giriş durumundan gelir (setLeds). Ajanların davranışları hâlâ prototipin betikleri;
-// kasadan gelen olaylar ve canlı konuşmalar sonraki adımda bağlanacak.
+// araçların gerçek giriş durumundan gelir (setLeds), canlı konuşmalar seçilen modelden (speak).
+// Beyin çerçevesi (teslim: 16 Ekim 2026, ek brif): dünya BRAIN.w × BRAIN.h, harita margin kadar kayık;
+// çerçeve her ışık modu için bir kez çizilir, kıvılcımlar NEURON_PATHS boyunca akar, ofisteki olaylar
+// odanın BRAIN.anchors noktasından kıvılcım çıkarır (Claude Design'ın brain-preview.js'i gibi).
+// Müdürün adı kasanın sahibinin adı (nameTheManager); Tolga, Cortex'i yazan yazılımcı, kendi masasında.
 
 const LIGHT_TINT = { sabah: [222, 232, 255], ogle: null, aksam: [255, 196, 150], gece: [66, 80, 132] };
 export const LIGHT_MODES = [['sabah', 'Sabah'], ['ogle', 'Öğle'], ['aksam', 'Akşam'], ['gece', 'Gece']];
@@ -17,6 +20,40 @@ export function loopFrame(t, fps, frames, offset = 0) {
 const TOOL_NAME = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini', qwen: 'Qwen' };
 export const TOOL_STATUS = { claude: 'ok', codex: 'ok', opencode: 'wait', gemini: 'ok', qwen: 'off' };
 export const TOOL_LABEL = { ok: 'giriş yapıldı', wait: 'giriş bekliyor', off: 'kurulu değil' };
+
+/** "Tolga Bey" → "Tolga Bey'in", "Ayşe" → "Ayşe'nin", "Pyn" → "Pyn'in"; English: "Tolga's". */
+export function possessive(name, lang = 'tr') {
+  const text = String(name || '').trim();
+  if (!text) return '';
+  if (lang === 'en') return text + (/s$/i.test(text) ? "'" : "'s");
+  const lower = text.toLocaleLowerCase('tr');
+  const vowels = lower.match(/[aeıioöuü]/g);
+  const last = vowels ? vowels[vowels.length - 1] : 'e';
+  const suffix = { a: 'ın', ı: 'ın', e: 'in', i: 'in', o: 'un', u: 'un', ö: 'ün', ü: 'ün' }[last];
+  return text + "'" + (/[aeıioöuü]$/.test(lower) ? 'n' : '') + suffix;
+}
+
+/**
+ * The manager is named after whoever owns the vault (the first-run screen's "Sana nasıl hitap
+ * edeyim?"): the character, its room's name. Without a name it is the manager. Changes the art's
+ * own records, which the chips, the card and the name tags read.
+ */
+export function nameTheManager(art, userName, lang = 'tr') {
+  const boss = art.CHARACTERS && art.CHARACTERS.mudur;
+  const room = art.MAP && art.MAP.rooms.find((one) => one.id === 'mudur');
+  const name = String(userName || '').trim().slice(0, 24);
+  if (boss) boss.name = name || (lang === 'en' ? 'Manager' : 'Müdür');
+  if (room) {
+    const short = name.length > 14 ? name.slice(0, 13) + '…' : name;
+    room.tr = short ? possessive(short, 'tr').toLocaleUpperCase('tr') + ' ODASI' : 'MÜDÜR ODASI';
+    room.en = short ? (possessive(short, 'en') + ' office').toUpperCase() : "MANAGER'S OFFICE";
+  }
+}
+
+// The office's events that spark from a room of the brain (the log's icon → the room).
+const EVENT_ROOM = { '📬': 'pyn', '✅': 'pyn', '📰': 'salon', '🧾': 'arsiv', '💬': 'salon', '☕': 'mutfak', '🔌': 'sunucu' };
+let sparkSeed = 11;
+const sparkRnd = () => { sparkSeed = (sparkSeed * 16807) % 2147483647; return sparkSeed / 2147483647; };
 
 const CONVO_DB = [
   ['defne', '«Proje planı» notunu baştan okudum, üçüncü madde biraz havada kalmış.'],
@@ -38,10 +75,12 @@ const SCRIPTS = {
   sena: [{ sit: 'sena', pose: 'type', dur: 18, act: 'başlıkları düzeltiyor', notes: 1 }, { act: 'phone', dur: 5, label: 'telefonuna bakıyor' }, { sit: 'sena', pose: 'type', dur: 12, act: 'kırmızı kalemle okuyor' }, { act: 'talk', dir: 'down', dur: 3, label: 'başlığa itiraz ediyor', say: 'Bu başlık olmamış.', icon: 'anger' }],
   kaan: [{ sit: 'kaan', pose: 'type', dur: 18, act: 'makbuzları mühürlüyor' }, { go: 'filing', label: 'dosya dolabına gidiyor' }, { act: 'idle', dir: 'up', dur: 4, label: 'dosya dolabını karıştırıyor' }, { carry: 'folder' }, { go: [41, 6], label: 'dosya taşıyor', files: 1 }, { carry: null }, { log: ['🧾', 'Kaan makbuzu arşive kaldırdı: «Toplantı notları»', null] }, { sit: 'kaan', pose: 'type', dur: 16, act: 'arşiv defterini dolduruyor' }],
   elif: [{ sit: 'elif', pose: 'type', dur: 20, act: 'notlar arasında bağlantı kuruyor', notes: 1 }, { go: 'corkboard', label: 'mantar panoya gidiyor' }, { act: 'idle', dir: 'up', dur: 5, label: 'iplere yeni not bağlıyor', say: 'Bu not şununla bağlantılı!', icon: 'idea' }, { sit: 'elif', pose: 'type', dur: 18, act: 'grafiği düzenliyor' }],
-  umut: [{ sit: 'umut', pose: 'idle', dur: 10, act: 'zarfları ayırıyor' }, { fn: 'elevatorOpen' }, { go: 'elevator', label: 'asansöre gidiyor' }, { act: 'idle', dir: 'up', dur: 2, label: 'yeni notu alıyor' }, { fn: 'elevatorClose' }, { log: ['📬', 'Gelen kutusuna yeni not düştü: «Toplantı notları»', '#F2C14E'] }, { carry: 'envelope' }, { go: [51, 10], label: 'Pyn\'e not götürüyor', files: 1 }, { act: 'carry', dir: 'up', dur: 3, label: 'Pyn\'e not veriyor', say: 'Patron, yeni not geldi!' }, { fn: 'pynApprove' }, { carry: null }, { act: 'idle', dir: 'up', dur: 2, label: 'onayı bekliyor' }, { sit: 'umut', pose: 'idle', dur: 18, act: 'kargo kolilerini sayıyor' }],
+  umut: [{ sit: 'umut', pose: 'idle', dur: 10, act: 'zarfları ayırıyor' }, { fn: 'elevatorOpen' }, { go: 'elevator', label: 'asansöre gidiyor' }, { act: 'idle', dir: 'up', dur: 2, label: 'yeni notu alıyor' }, { fn: 'elevatorClose' }, { log: ['📬', '{Kim} gelen kutusuna yeni not attı: «Toplantı notları»', '#F2C14E'] }, { carry: 'envelope' }, { go: [6, 10], label: 'Pyn\'e not götürüyor', files: 1 }, { act: 'carry', dir: 'up', dur: 3, label: 'Pyn\'e not veriyor', say: 'Patron, {kim} yeni not göndermiş!' }, { fn: 'pynApprove' }, { carry: null }, { act: 'idle', dir: 'up', dur: 2, label: 'onayı bekliyor' }, { sit: 'umut', pose: 'idle', dur: 18, act: 'kargo kolilerini sayıyor' }],
   melis: [{ sit: 'melis', pose: 'type', dur: 20, act: 'araçların kayıtlarına bakıyor' }, { go: 'rack_codex', label: 'Codex kabinine gidiyor' }, { fn: 'codexDown' }, { act: 'idle', dir: 'up', dur: 5, label: 'Codex sunucusunu yeniden başlatıyor', icon: 'alert' }, { fn: 'codexUp' }, { act: 'idle', dir: 'up', dur: 3, label: 'kabloları topluyor', say: 'Kim yine sunucuya çay döktü?' }, { sit: 'melis', pose: 'type', dur: 24, act: 'terminalde' }],
   husnu: [{ go: 'tea', label: 'çay köşesine gidiyor' }, { act: 'idle', dir: 'up', dur: 4, label: 'çay demliyor' }, { carry: 'tray' }, { log: ['☕', 'Hüsnü amca çay dağıtıyor', null] }, { go: [6, 24], label: 'çay dağıtıyor' }, { act: 'carry', dir: 'up', dur: 3, label: 'çay dağıtıyor', say: 'Çaylar taze!', serve: ['toprak', 'asya', 'berk'] }, { go: [17, 18], label: 'çay dağıtıyor' }, { go: [41, 21], label: 'çay dağıtıyor' }, { act: 'carry', dir: 'up', dur: 3, label: 'Sena\'ya çay veriyor', say: 'Buyur evladım.', serve: ['sena'] }, { go: [8, 18], label: 'çay dağıtıyor' }, { act: 'carry', dir: 'down', dur: 3, label: 'çay dağıtıyor', serve: ['defne', 'baran', 'ilgin'] }, { go: 'tea', label: 'mutfağa dönüyor' }, { carry: null }, { sit: 'husnu', pose: 'sleep', dur: 14, act: 'uyukluyor', icon: 'zzz', mood: '😴' }],
   pyn: [{ sit: 'pyn', pose: 'type', dur: 24, act: 'onay bekleyen notlara bakıyor' }, { sit: 'pyn', pose: 'sleep', dur: 9, act: 'gözlerini dinlendiriyor', icon: 'zzz', mood: '😴' }, { sit: 'pyn', pose: 'sit', dur: 6, act: 'düşünüyor', say: 'Hmm.' }],
+  mudur: [{ sit: 'mudur', pose: 'type', dur: 22, act: 'haftanın notlarını okuyor', notes: 1 }, { go: 'aquarium', label: 'akvaryuma gidiyor' }, { act: 'idle', dir: 'up', dur: 6, label: 'balıklara bakıyor', mood: '😌' }, { sit: 'mudur', pose: 'sit', dur: 10, act: 'düşünüyor' }, { go: [8, 10], label: 'Pyn\'in odasına gidiyor' }, { act: 'idle', dir: 'up', dur: 4, label: 'Pyn ile konuşuyor', say: 'Bu haftaki notlar çok iyi.' }, { sit: 'mudur', pose: 'type', dur: 26, act: 'yeni bir not yazıyor', notes: 1 }],
+  tolga: [{ sit: 'tolga', pose: 'type', dur: 26, act: 'Cortex\'e yeni özellik yazıyor', notes: 1 }, { go: 'rack_claude', label: 'sunucu odasına gidiyor' }, { act: 'idle', dir: 'up', dur: 5, label: 'sunucunun kayıtlarını okuyor', say: 'Bir hata daha yakaladım.', icon: 'idea' }, { sit: 'tolga', pose: 'type', dur: 24, act: 'testleri çalıştırıyor' }, { go: 'tea', label: 'çay almaya gidiyor' }, { act: 'idle', dir: 'up', dur: 4, label: 'çay dolduruyor', mood: '😌' }, { sit: 'tolga', pose: 'type', dur: 28, act: 'kodu gözden geçiriyor', say: 'Testler yeşil.' }],
   tekir: [{ place: [804, 553], pose: 'sleep', dir: 'down', dur: 40, act: 'kanepede uyuyor', mood: '😴' }, { place: [804, 553], pose: 'groom', dir: 'side', dur: 5, act: 'tüylerini temizliyor', mood: '😺' }],
 };
 const START = { husnu: 'husnu', tekir: null };
@@ -50,12 +89,15 @@ export class OfficeEngine {
   constructor(canvas, art, cb = {}) {
     this.cv = canvas; this.art = art; this.cb = cb; this.T = 16;
     this.W = art.MAP.w * 16; this.H = art.MAP.h * 16;
+    // The brain around the map: the framed world is B.w × B.h, the map at B.margin (null: the map alone).
+    this.B = art.BRAIN || null; this.brainFrames = {}; this.full = this.B ? this.mk(this.B.w, this.B.h) : null;
+    this.sparks = []; this.spawnT = 0.5; this.sprCache = new Map();
     this.world = this.mk(this.W, this.H); this.base = this.mk(this.W, this.H); this.lightCv = this.mk(this.W, this.H);
     this.cache = new Map(); this.col = art.buildCollision();
     this.zoom = 1; this.camX = this.W / 2; this.camY = this.H / 2; this.camTarget = null;
     this.t = 0; this.speed = 1; this.mode = 'ogle'; this.font = "'Pixelify Sans'"; this.lang = 'tr';
     this.selected = null; this.hover = null; this.room = null; this.preview = null;
-    this.bubbles = []; this.meets = {}; this.led = { ...TOOL_STATUS };
+    this.bubbles = []; this.meets = {}; this.led = { ...TOOL_STATUS }; this.userName = null; this.talkQueue = []; this.talkT = 0;
     this.doorState = {}; this.elevator = { f: 0, open: false };
     this.objects = art.MAP.objects.map((o) => ({ ...o, s: art.SPRITES[o.sprite] }));
     this.seat = Object.fromEntries(art.MAP.seats.map((s) => [s.id, s]));
@@ -71,6 +113,19 @@ export class OfficeEngine {
     this.active = on;
     cancelAnimationFrame(this.raf);
     if (on) { this.last = performance.now(); this.resize(); this.raf = requestAnimationFrame(this.loop); }
+  }
+  /** Kullanıcının hitabı ("Tolga Bey"): satırlardaki {kim} / {Kim} onunla dolar; yoksa "kasanın sahibi". */
+  setUserName(name) { this.userName = name || null; nameTheManager(this.art, this.userName, this.lang); }
+  who(text) {
+    const name = this.userName || (this.lang === 'en' ? 'the owner' : 'kasanın sahibi');
+    const upper = name.charAt(0).toLocaleUpperCase(this.lang === 'en' ? 'en' : 'tr') + name.slice(1);
+    return String(text).replace(/\{Kim\}/g, upper).replace(/\{kim\}/g, name);
+  }
+  /** Ofis açıldığında: günlükte bir satır, Pyn'den bir selam. */
+  greet() {
+    const en = this.lang === 'en';
+    this.log('👋', en ? '{Kim} dropped by the office' : '{Kim} ofise uğradı', '#F2C14E');
+    const pyn = this.byId && this.byId.pyn; if (pyn) this.say(pyn, en ? 'Welcome, {kim}.' : 'Hoş geldin, {kim}.', 4);
   }
   /** Sunucu kabinlerinin LED'leri: { claude: 'ok' | 'wait' | 'off', … }, araçların gerçek giriş durumundan. */
   setLeds(led) { this.led = { ...this.led, ...led }; }
@@ -105,7 +160,8 @@ export class OfficeEngine {
     ids.forEach((id, i) => {
       const ch = A.CHARACTERS[id], s = this.seat[START[id] === undefined ? id : START[id]] || null;
       const ag = { id, ch, x: 480, y: 330, dir: 'down', pose: 'idle', animT: i * 0.37, path: null, step: 0, wait: 0, carry: null, hold: null, act: '', mood: id === 'pyn' ? '😑' : '🙂',
-        needs: { tea: 45 + ((i * 37) % 50), food: 40 + ((i * 53) % 55), energy: 50 + ((i * 29) % 45) }, cnt: { notes: (i * 3) % 7, talks: (i * 2) % 5, files: (i * 5) % 4 }, seatId: null };
+        needs: ch.hardy ? { tea: 96, food: 94, energy: 98 } : { tea: 45 + ((i * 37) % 50), food: 40 + ((i * 53) % 55), energy: 50 + ((i * 29) % 45) },
+        cnt: ch.hardy ? { notes: 12, talks: 6, files: 9 } : { notes: (i * 3) % 7, talks: (i * 2) % 5, files: (i * 5) % 4 }, seatId: null };
       if (s) { ag.x = s.px; ag.y = s.py; ag.dir = s.dir; ag.pose = 'sit'; ag.seatId = s.id; }
       if (id === 'tekir') { ag.x = 804; ag.y = 553; ag.pose = 'sleep'; }
       ag.step = id === 'defne' || id === 'baran' ? 0 : (i % 2); ag.wait = 0; ag.started = false;
@@ -171,6 +227,14 @@ export class OfficeEngine {
       if (m.t >= 3.5) { m.t = 0; m.line++; if (m.line >= CONVO_DB.length) { for (const a of ['defne', 'baran']) { const ag = this.byId[a]; ag.meeting = null; ag.busy = false; ag.wait = 0; ag.pose = 'idle'; } delete this.meets[id]; continue; } this.speakLine(m); }
     }
   }
+  /** Bir modelin yazdığı konuşma: satırlar sırayla, kişi yerindeyken söylenir; günlüğe de düşer. */
+  speak(lines) { this.talkQueue.push(...lines.filter((l) => this.byId[l.who])); this.talkT = 3.4; }
+  updateTalk(dt) {
+    if (!this.talkQueue.length) return;
+    this.talkT += dt; if (this.talkT < 3.4) return;
+    this.talkT = 0; const line = this.talkQueue.shift(); const ag = this.byId[line.who];
+    this.say(ag, line.text, 3.4); this.log(null, line.text, null, line.who);
+  }
   speakLine(m) {
     const [who, text] = CONVO_DB[m.line], other = who === 'defne' ? 'baran' : 'defne';
     this.byId[who].pose = 'talk'; this.byId[other].pose = 'idle';
@@ -187,12 +251,70 @@ export class OfficeEngine {
     setTimeout(() => this.log('✅', 'Pyn onayladı: «Toplantı notları»', '#5BD77A'), 1200 / this.speed);
     setTimeout(() => this.log('📰', 'Yayında: «Toplantı notları»', '#5BD77A'), 9000 / this.speed);
   }
-  say(ag, text, dur = 3.2) { this.bubbles = this.bubbles.filter((b) => b.ag !== ag); this.bubbles.push({ ag, text, t: 0, dur }); }
+  say(ag, text, dur = 3.2) { this.bubbles = this.bubbles.filter((b) => b.ag !== ag); this.bubbles.push({ ag, text: this.who(text), t: 0, dur }); }
   status(ag, icon, dur = 3) { this.bubbles = this.bubbles.filter((b) => b.ag !== ag || b.text); this.bubbles.push({ ag, icon, t: 0, dur }); }
-  log(icon, text, color, who) { this.cb.onLog && this.cb.onLog({ time: clockText(), icon, text, color, who }); }
+  log(icon, text, color, who) {
+    this.cb.onLog && this.cb.onLog({ time: clockText(), icon, text: this.who(text), color, who });
+    // The event sparks from its room: by its icon, or from where the one who said it is.
+    const speaker = who && this.byId && this.byId[who];
+    const room = EVENT_ROOM[icon] || (speaker ? this.art.roomAt(Math.floor(speaker.x / 16), Math.floor(speaker.y / 16)) : null);
+    if (room) this.sparkFrom(room);
+  }
+  // ── Beyin: kıvılcımlar
+  brainFrame(mode) {
+    let c = this.brainFrames[mode];
+    if (!c) { c = this.brainFrames[mode] = this.mk(this.B.w, this.B.h); this.art.paintBrain(c.getContext('2d'), mode); }
+    return c;
+  }
+  spark(path, renk) {
+    if (!path) return;
+    if (this.sparks.length >= 4) this.sparks.shift();
+    const cum = [0];
+    for (let i = 1; i < path.length; i++) cum.push(cum[i - 1] + Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]));
+    this.sparks.push({ path, cum, len: cum[cum.length - 1], d: 0, v: 62 + sparkRnd() * 26, renk: renk || (sparkRnd() < 0.5 ? 'altin' : 'turkuaz'), off: sparkRnd() * 5 });
+  }
+  sparkFrom(room) {
+    const a = this.B && this.B.anchors[room]; if (!a) return;
+    this.spark(this.art.NEURON_PATHS.find((q) => q[0][0] === a[0] && q[0][1] === a[1]), 'altin');
+  }
+  updateSparks(dt) {
+    for (const s of this.sparks) s.d += s.v * dt;
+    this.sparks = this.sparks.filter((s) => s.d < s.len + 12);
+    this.spawnT -= dt;
+    if (this.spawnT <= 0) {
+      this.spawnT = 1.1 + sparkRnd() * 2.2;
+      if (this.sparks.length < 3) { const P = this.art.NEURON_PATHS; this.spark(P[Math.floor(sparkRnd() * P.length)]); }
+    }
+  }
+  sparkAt(s, d) {
+    d = Math.max(0, Math.min(s.len, d)); let i = 1;
+    while (i < s.cum.length - 1 && s.cum[i] < d) i++;
+    const a = s.path[i - 1], b = s.path[i], k = (d - s.cum[i - 1]) / ((s.cum[i] - s.cum[i - 1]) || 1);
+    return [Math.round(a[0] + (b[0] - a[0]) * k), Math.round(a[1] + (b[1] - a[1]) * k)];
+  }
+  sparkSprite(name, f, pal) {
+    const key = name + f + pal.renk + (pal.gece ? 'g' : ''); let c = this.sprCache.get(key);
+    if (!c) { const s = this.art.SPRITES[name]; c = this.mk(s.w, s.h); s.paint(c.getContext('2d'), f, pal); this.sprCache.set(key, c); }
+    return c;
+  }
+  drawSparks(x) {
+    const S = this.art.SPRITES, gece = this.mode === 'gece';
+    for (const s of this.sparks) {
+      const pal = { renk: s.renk, gece };
+      for (const [back, f] of [[10, 1], [5, 0]]) {
+        const d = s.d - back; if (d < 0 || d > s.len) continue;
+        const [px, py] = this.sparkAt(s, d); x.drawImage(this.sparkSprite('kivilcim_iz', f, pal), px - S.kivilcim_iz.ax, py - S.kivilcim_iz.ay);
+      }
+      if (s.d > s.len) continue;
+      const [px, py] = this.sparkAt(s, s.d), f = s.d < 8 || s.d > s.len - 8 ? 0 : 1 + loopFrame(this.t, S.kivilcim.fps, 5, s.off);
+      x.drawImage(this.sparkSprite('kivilcim', f, pal), px - S.kivilcim.ax, py - S.kivilcim.ay);
+    }
+  }
   updateAgent(ag, dt) {
     ag.animT += dt;
-    for (const k of ['tea', 'food', 'energy']) ag.needs[k] = Math.max(8, ag.needs[k] - dt * (k === 'tea' ? 0.35 : 0.18));
+    // A hardy one (Tolga) runs down at a quarter of the pace and never below 72.
+    const hardy = ag.ch.hardy;
+    for (const k of ['tea', 'food', 'energy']) ag.needs[k] = Math.max(hardy ? 72 : 8, ag.needs[k] - dt * (k === 'tea' ? 0.35 : 0.18) * (hardy ? 0.25 : 1));
     if (ag.pose === 'sleep') ag.needs.energy = Math.min(100, ag.needs.energy + dt * 2);
     if (ag.path) {
       const [tx, ty] = ag.path[0], dx = tx - ag.x, dy = ty - ag.y, d = Math.hypot(dx, dy), v = (ag.id === 'umut' ? 52 : ag.id === 'tekir' ? 30 : 40) * dt;
@@ -207,17 +329,24 @@ export class OfficeEngine {
     this.runStep(ag);
   }
   // ── Kamera / giriş
-  minZoom() { const r = this.cv.getBoundingClientRect(); return Math.min(1, Math.min(r.width / this.W, r.height / this.H)); }
-  fitZoom() { const r = this.cv.getBoundingClientRect(); return Math.min(r.width / this.W, r.height / this.H); }
+  // The whole brain fits at the least zoom; the camera stays over the frame, the map inside it.
+  frameSize() { return this.B ? [this.B.w, this.B.h] : [this.W, this.H]; }
+  minZoom() { const r = this.cv.getBoundingClientRect(), [w, h] = this.frameSize(); return Math.min(1, Math.min(r.width / w, r.height / h)); }
+  fitZoom() { const r = this.cv.getBoundingClientRect(), [w, h] = this.frameSize(); return Math.min(r.width / w, r.height / h); }
   clampCam() {
     const r = this.cv.getBoundingClientRect(), hw = r.width / 2 / this.zoom, hh = r.height / 2 / this.zoom;
-    this.camX = hw * 2 >= this.W ? this.W / 2 : Math.max(hw, Math.min(this.W - hw, this.camX));
-    this.camY = hh * 2 >= this.H ? this.H / 2 : Math.max(hh, Math.min(this.H - hh, this.camY));
+    const m = this.B ? this.B.margin : { top: 0, right: 0, bottom: 0, left: 0 };
+    const x0 = -m.left, x1 = this.W + m.right, y0 = -m.top, y1 = this.H + m.bottom;
+    this.camX = hw * 2 >= x1 - x0 ? (x0 + x1) / 2 : Math.max(x0 + hw, Math.min(x1 - hw, this.camX));
+    this.camY = hh * 2 >= y1 - y0 ? (y0 + y1) / 2 : Math.max(y0 + hh, Math.min(y1 - hh, this.camY));
   }
   resize(fit) {
     const r = this.cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1; this.rect = r;
     this.cv.width = Math.max(1, Math.round(r.width * dpr)); this.cv.height = Math.max(1, Math.round(r.height * dpr)); this.dpr = dpr;
-    if (fit) { this.zoom = Math.max(this.minZoom(), Math.min(4, this.fitZoom())); }
+    if (fit) {
+      this.zoom = Math.max(this.minZoom(), Math.min(4, this.fitZoom()));
+      if (this.B) { const m = this.B.margin; this.camX = (this.W + m.right - m.left) / 2; this.camY = (this.H + m.bottom - m.top) / 2; }
+    }
     this.zoom = Math.max(this.minZoom(), this.zoom); this.clampCam();
   }
   toWorld(cx, cy) { const r = this.rect || this.cv.getBoundingClientRect(); return [(cx - r.left - r.width / 2) / this.zoom + this.camX, (cy - r.top - r.height / 2) / this.zoom + this.camY]; }
@@ -257,12 +386,14 @@ export class OfficeEngine {
   destroy() { this.active = false; cancelAnimationFrame(this.raf); const cv = this.cv; cv.removeEventListener('wheel', this.onWheel); cv.removeEventListener('pointerdown', this.onDown); cv.removeEventListener('pointermove', this.onMove); cv.removeEventListener('pointerup', this.onUp); cv.removeEventListener('pointerleave', this.onLeave); }
   // ── Döngü
   loop = (now) => {
-    const dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000)) * this.speed; // a frame's time can come before the start's this.last = now; this.t += dt; this.rect = this.cv.getBoundingClientRect();
+    // A frame's time can come before the start's: dt never goes below zero.
+    const dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000)) * this.speed; this.last = now; this.t += dt; this.rect = this.cv.getBoundingClientRect();
     for (const a of this.agents) this.updateAgent(a, dt);
-    this.updateMeets(dt);
+    this.updateMeets(dt); this.updateTalk(dt / this.speed);
     for (const b of this.bubbles) b.t += dt; this.bubbles = this.bubbles.filter((b) => b.t < b.dur);
     this.updateDoors(dt);
     if (this.camTarget) { const a = this.byId[this.camTarget]; const k = 1 - Math.pow(0.002, dt / this.speed); this.camX += (a.x - this.camX) * k; this.camY += (a.y - 12 - this.camY) * k; this.clampCam(); if (Math.hypot(a.x - this.camX, a.y - 12 - this.camY) < 1) this.camTarget = null; }
+    if (this.B) this.updateSparks(dt);
     this.renderWorld(); this.renderScreen();
     if (this.preview) this.drawPreview();
     this.snapT += dt / this.speed; if (this.snapT > 0.3) { this.snapT = 0; this.cb.onSnapshot && this.cb.onSnapshot(this.snapshot()); }
@@ -339,7 +470,15 @@ export class OfficeEngine {
     const c = this.cv.getContext('2d'), dpr = this.dpr, r = this.cv.getBoundingClientRect();
     c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = '#0B0D11'; c.fillRect(0, 0, this.cv.width, this.cv.height);
     c.setTransform(dpr, 0, 0, dpr, 0, 0); c.imageSmoothingEnabled = false;
-    const [sx, sy] = this.toScreen(0, 0); c.drawImage(this.world, Math.round(sx * dpr) / dpr, Math.round(sy * dpr) / dpr, this.W * this.zoom, this.H * this.zoom);
+    if (this.B) {
+      // The brain, the lit map in it, the sparks over it: one picture, drawn where the camera puts the frame.
+      const m = this.B.margin, f = this.full.getContext('2d'); f.imageSmoothingEnabled = false;
+      f.clearRect(0, 0, this.B.w, this.B.h); f.drawImage(this.brainFrame(this.mode), 0, 0); f.drawImage(this.world, m.left, m.top); this.drawSparks(f);
+      const [sx, sy] = this.toScreen(-m.left, -m.top);
+      c.drawImage(this.full, Math.round(sx * dpr) / dpr, Math.round(sy * dpr) / dpr, this.B.w * this.zoom, this.B.h * this.zoom);
+    } else {
+      const [sx, sy] = this.toScreen(0, 0); c.drawImage(this.world, Math.round(sx * dpr) / dpr, Math.round(sy * dpr) / dpr, this.W * this.zoom, this.H * this.zoom);
+    }
     // oda adları (motor yazar)
     const fs = Math.max(8, Math.round(8.5 * this.zoom));
     c.font = `600 ${fs}px ${this.font}, monospace`; c.textBaseline = 'alphabetic';

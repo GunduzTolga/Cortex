@@ -1,35 +1,22 @@
-import type { ReactNode } from 'react';
-import { FolderOpen, KeyRound } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Check, FolderOpen, KeyRound, ListChecks } from 'lucide-react';
 import { useChat } from '../chat/chatStore';
 import { useT } from '../i18n/useT';
 import { useApp } from '../store/app';
+import { useSaved } from '../store/saved';
 import { LanguageSwitch } from './LanguageSwitch';
-import { Button, Modal, Switch } from './ui';
+import { OfficeTalkSection } from './OfficeTalkSection';
+import { SetupSections } from './SetupSections';
+import { Row, SaveButton, Section } from './settingsParts';
+import { Button, Modal, Switch, inputClass } from './ui';
 
 /**
  * The app's settings, from the gear in the top bar or Ctrl+,: the language
- * and the vault, how the notes tree shows the vault, and the AI tools' sign-ins.
- * Each change is the main process's to keep (electron/services/settings.ts)
+ * and the vault, how the notes tree shows the vault, the AI tools' sign-ins,
+ * and Cortex's own setup, its engine in the vault and voice typing
+ * (SetupSections), so that nothing is installed from a terminal. Each change is the main process's to keep (electron/services/settings.ts)
  * and takes effect at once; there is nothing to save.
  */
-
-function Section({ title, children, data }: { title: string; children: ReactNode; data: string }) {
-  return (
-    <section className="border-b border-zinc-100 py-4 first:pt-0 last:border-b-0 last:pb-0" data-settings-section={data}>
-      <h3 className="mb-2 px-3 text-[10px] font-black uppercase tracking-widest text-zinc-400">{title}</h3>
-      {children}
-    </section>
-  );
-}
-
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-center gap-3 px-3 py-1.5">
-      <span className="min-w-0 flex-1 text-[13px] font-semibold text-darkDelegation">{label}</span>
-      {children}
-    </div>
-  );
-}
 
 export function SettingsDialog() {
   const t = useT();
@@ -40,12 +27,16 @@ export function SettingsDialog() {
   const close = () => useApp.getState().openSettings(false);
   const set = useApp.getState().setSettings;
   return (
-    <Modal open={open} title={t('settings.title')} onClose={close} width="max-w-lg">
+    <Modal open={open} title={t('settings.title')} onClose={close} width="max-w-lg" status={<SavedNote />}>
       <div data-settings>
         <Section title={t('settings.general')} data="general">
           <Row label={t('settings.language')}>
             <LanguageSwitch />
           </Row>
+          <Row label={t('settings.name')}>
+            <NameField />
+          </Row>
+          <Switch checked={settings.background} onChange={(on) => void set({ background: on })} label={t('settings.background')} hint={t('settings.background.hint')} data-settings-background />
           {vault ? (
             <Row label={t('settings.vault')}>
               <span className="min-w-0 truncate text-[12px] text-zinc-500" data-settings-vault>
@@ -78,10 +69,80 @@ export function SettingsDialog() {
             </Button>
           </div>
         </Section>
+        <OfficeTalkSection />
+        <SetupSections open={open} />
+        <Section title={t('settings.onboarding')} data="onboarding">
+          <div className="px-3">
+            <Button
+              tone="ghost"
+              onClick={() => {
+                close();
+                void set({ onboarded: false });
+              }}
+              data-settings-onboarding
+            >
+              <ListChecks size={13} />
+              {t('settings.onboarding.open')}
+            </Button>
+          </div>
+        </Section>
         <Section title={t('settings.about')} data="about">
           <p className="px-3 font-mono text-[12px] text-zinc-500">{t('settings.version', { version })}</p>
         </Section>
       </div>
     </Modal>
+  );
+}
+
+/** How Pyn and the office address the person: kept when the field is left or Enter is pressed. */
+/** "Kaydedildi" for a moment after a setting is kept: every change is kept at once, and says so. */
+function SavedNote() {
+  const t = useT();
+  const at = useSaved((s) => s.at);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!at) return;
+    setShown(true);
+    const timer = setTimeout(() => setShown(false), 2200);
+    return () => clearTimeout(timer);
+  }, [at]);
+  return (
+    <span
+      role="status"
+      aria-live="polite"
+      className={`flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 transition-opacity ${shown ? 'opacity-100' : 'opacity-0'}`}
+      data-settings-saved={shown ? 'shown' : 'hidden'}
+    >
+      <Check size={12} />
+      {t('settings.saved')}
+    </span>
+  );
+}
+
+function NameField() {
+  const t = useT();
+  const saved = useApp((s) => s.settings.userName);
+  const [name, setName] = useState(saved ?? '');
+  useEffect(() => setName(saved ?? ''), [saved]);
+  const changed = name.trim() !== (saved ?? '');
+  const keep = () => {
+    if (changed) void useApp.getState().setSettings({ userName: name.trim() || null });
+  };
+  return (
+    <>
+    {changed ? <SaveButton onSave={keep} data="settings-name-save" /> : null}
+    <input
+      className={`${inputClass.replace('w-full', '')} h-8 w-56 shrink-0`}
+      value={name}
+      maxLength={40}
+      placeholder={t('settings.name.placeholder')}
+      onChange={(event) => setName(event.target.value)}
+      onBlur={keep}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') keep();
+      }}
+      data-settings-name
+    />
+    </>
   );
 }

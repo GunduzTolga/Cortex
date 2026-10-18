@@ -29,9 +29,15 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 import tempfile
 import time
 import unicodedata
+
+_MODULE_DIR = str(Path(__file__).resolve().parent)
+if _MODULE_DIR not in sys.path:
+    sys.path.insert(0, _MODULE_DIR)
+from beyin_v3 import SENSITIVE_WORDS, sensitive_fold as fold, sensitive_excluded, sensitive_source
 
 # Companion memory files grow by design and are compacted by the
 # companion-compact protocol, so they are fully exempt from every scan here
@@ -81,11 +87,7 @@ SORU_SKIP_DIRS = re.compile(r'(?:daily|knowledge|receipts|tasks|notes|nodes|node
 # re.IGNORECASE does not fold Turkish İ/ı either, so the name is folded first.
 # Archives are not kasa-class: they are quiet by design, not private, and the
 # template ships "📦 900-Archive".
-SENSITIVE_WORDS = re.compile(
-    r'(?:kasa|sifre|parola|kimlik|kimlig|finans|finansal|musteri|vergi|fatura|maas|ozel|gizli|gizlilik)'
-    r'(?:ler|lar)?(?:i|im|in|imiz|leri|lari)?'
-    r'|(?:private|secret|password|credential)s?')
-_TR_FOLD = str.maketrans({'ş': 's', 'ğ': 'g', 'ü': 'u', 'ö': 'o', 'ç': 'c', 'ı': 'i', 'â': 'a', 'î': 'i', 'û': 'u'})
+
 TERMINAL_STATUSES = {'done', 'cancelled', 'kapandi'}
 # Directories a walk must never descend into: they are code, not notes.
 CODE_DIRS = {'node_modules', 'venv', '.venv', '__pycache__'}
@@ -97,10 +99,6 @@ FRONT = re.compile(r'\A---\r?\n.*?\r?\n---[ \t]*(?:\r?\n|\Z)', re.S)
 PATCH_PATHS = re.compile(r'(?m)^\*\*\* (?:Add File|Update File|Move to): (.+?)\s*$')
 
 
-def fold(name):
-    """NFC, Turkish-aware casefold and ASCII-fold a name: 'MÜŞTERİLER' and NFD 'Şifre' both fold."""
-    text = unicodedata.normalize('NFC', str(name)).replace('İ', 'i').replace('I', 'i').lower()
-    return unicodedata.normalize('NFC', text.replace('̇', '')).translate(_TR_FOLD)
 
 
 def _name_words(name):
@@ -111,9 +109,6 @@ def _nfc(name):
     return unicodedata.normalize('NFC', str(name))
 
 
-def sensitive_excluded(name):
-    """True when a top-level folder name carries a kasa-class word (any position, any case/normal form)."""
-    return any(SENSITIVE_WORDS.fullmatch(word) for word in _name_words(name))
 
 
 def _archive(name):
@@ -231,6 +226,27 @@ def save_settings(state, changes):
         if os.path.exists(temporary):
             os.unlink(temporary)
     return result
+
+
+def _index_excluded(state, vault):
+    """Predicate for directory names the user keeps out of the index (state/index.json).
+
+    Such a tree is not the user's notes, so the word cap leaves it alone like a code folder.
+    Without a state, a list or a valid file nothing is skipped, as before the setting existed.
+    """
+    if state is None:
+        return lambda name: False
+    try:
+        directory = str(Path(__file__).resolve().parent)
+        if directory not in sys.path:  # loaded by file path: keep the adjacent module importable
+            sys.path.insert(0, directory)
+        from beyin_v3_index import dir_key, exclusions
+        keys = exclusions(state, vault)[0]
+    except Exception:  # a report or a hook signal never fails on this setting
+        keys = frozenset()
+    if not keys:
+        return lambda name: False
+    return lambda name: dir_key(name) in keys
 
 
 def companion_names(vault, state=None):
@@ -381,6 +397,9 @@ def file_over_cap(vault, path, cap=DEFAULT_CAP, state=None):
     relative = _vault_relative(vault, path)
     if relative is None or _excluded(relative, companion_names(vault, state)):
         return None
+    skipped = _index_excluded(state, vault)
+    if any(skipped(part) for part in relative.split('/')[:-1]):
+        return None
     try:
         text = path.read_text(encoding='utf-8', errors='replace')
     except (OSError, ValueError):
@@ -395,6 +414,7 @@ def cap_scan(vault, cap=DEFAULT_CAP, limit=20, state=None):
     """Over-cap user notes across the vault. Informational; the doctor runs it only when opted in."""
     vault = Path(vault).resolve()
     companions = companion_names(vault, state)
+    skipped = _index_excluded(state, vault)
     over, checked, visited, truncated = [], 0, 0, False
     for directory, folders, files in os.walk(vault):
         visited += 1
@@ -407,7 +427,7 @@ def cap_scan(vault, cap=DEFAULT_CAP, limit=20, state=None):
             continue
         folders[:] = [name for name in folders if not name.startswith('.') and name not in CAP_EXCLUDED_DIRS
                       and name not in CODE_DIRS and _nfc(name) not in companions and not _archive(name)
-                      and not (top and sensitive_excluded(name))]
+                      and not (top and sensitive_excluded(name)) and not skipped(name)]
         for name in files:
             if SKILL_OR_INDEX.search(name) or not name.endswith('.md') or name.startswith('.'):
                 continue
@@ -612,8 +632,8 @@ def boundary(vault):
     if kasa:
         report['sensitive_excluded'] = kasa
         report['findings'].append('kasa_excluded: ' + ', '.join(kasa) +
-                                  '; hygiene scans skip these folders, automatic context still follows'
-                                  ' visibility metadata - mark their sources visibility: private for the full guarantee.')
+                                  '; sync and automatic context skip these folders. Use'
+                                  ' visibility: private for additional protection when moving notes.')
     parent = vault.parent
     if (parent / '.obsidian').is_dir():
         report['findings'].append('parent_obsidian_index: parent directory also holds a .obsidian vault root; '

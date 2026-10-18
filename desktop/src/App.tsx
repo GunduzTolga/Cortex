@@ -8,9 +8,11 @@ import { ChatView } from './chat/ChatView';
 import { NotesView } from './notes/NotesView';
 import { GraphView } from './notes/GraphView';
 import { OfficeView } from './office/OfficeView';
+import { Onboarding } from './onboarding/Onboarding';
 import { NotesDialogs } from './notes/NotesMenus';
 import { useNotes } from './notes/notesStore';
-import { useApp } from './store/app';
+import { refusal, useApp } from './store/app';
+import { useSetup } from './store/setup';
 import { useView, type View } from './store/view';
 import { LanguageSwitch } from './ui/LanguageSwitch';
 import { SettingsDialog } from './ui/SettingsDialog';
@@ -18,7 +20,8 @@ import { Toasts } from './ui/Toasts';
 import { Button, Spinner } from './ui/ui';
 
 /**
- * The window: the vault chosen first, then its views - Pyn, where the person
+ * The window: the first-run screen until it has been gone through once
+ * (src/onboarding/), the vault chosen, then its views - Pyn, where the person
  * talks to their own AI (src/chat/), first; the notes (src/notes/); the vault
  * as a graph - each drawn from the first time it is shown and kept after
  * (src/store/view.ts), so the graph is not laid out again at every switch.
@@ -31,10 +34,14 @@ export function App() {
   const vault = useApp((s) => s.vault);
   const unreadable = useApp((s) => s.settingsUnreadable);
   const nameIcons = useApp((s) => s.settings.nameIcons);
+  const onboarded = useApp((s) => s.settings.onboarded);
 
   useEffect(() => {
     void useApp.getState().boot();
   }, []);
+
+  // The notification-area icon's "Ayarlar": the window comes back on its settings.
+  useEffect(() => window.cortex.on.openSettings(() => useApp.getState().openSettings(true)), []);
 
   // The notes are named as the settings say, wherever they are shown (src/notes/notesStore.ts).
   useEffect(() => useNotes.getState().setNameIcons(nameIcons), [nameIcons]);
@@ -49,11 +56,13 @@ export function App() {
   return (
     <>
       {bootError ? (
-        <p className="p-8 text-[13px] text-bad">{bootError}</p>
+        <p className="p-8 text-[13px] text-bad">{refusal(bootError)}</p>
       ) : !ready ? (
         <div className="flex h-full items-center justify-center">
           <Spinner label={t('app.loading')} />
         </div>
+      ) : !onboarded ? (
+        <Onboarding />
       ) : !vault.vault ? (
         <Welcome />
       ) : (
@@ -96,6 +105,28 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
   const shown = useView((state) => state.shown);
   const setView = useView((state) => state.setView);
   const choose = () => void useApp.getState().chooseVault(t('app.vault.failed'));
+
+  // An older Cortex in the vault than the one the app brought: said once, with the button that updates it.
+  const updatable = useSetup((s) => {
+    const engine = s.status?.engine;
+    return Boolean(engine?.installed && engine.bundled && engine.bundled.localeCompare(engine.installed, undefined, { numeric: true }) > 0);
+  });
+  useEffect(() => {
+    void (async () => {
+      await useSetup.getState().refresh();
+      const engine = useSetup.getState().status?.engine;
+      if (!engine?.installed || !engine.bundled || engine.bundled.localeCompare(engine.installed, undefined, { numeric: true }) <= 0) return;
+      useApp.getState().toast({
+        tone: 'info',
+        title: t('setup.update.title', { installed: engine.installed, bundled: engine.bundled }),
+        detail: t('setup.update.detail'),
+        sticky: true,
+        action: { label: t('setup.update.action'), run: () => void useSetup.getState().run('engine') },
+      });
+    })();
+    // Once per vault opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name]);
 
   // A vault gone from disk is said when the window comes back to it too, not only at the start.
   useEffect(() => {
@@ -157,7 +188,12 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
             className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation"
             data-settings-open
           >
-            <Settings size={14} />
+            <span className="relative block">
+              <Settings size={14} />
+              {updatable ? (
+                <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full border border-darkDelegation bg-gold" title={t('setup.update.dot')} data-settings-update-dot />
+              ) : null}
+            </span>
           </button>
           <LanguageSwitch />
         </div>

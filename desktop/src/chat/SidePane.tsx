@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, ExternalLink, FileText, X } from 'lucide-react';
 import type { NoteRead } from '@shared/notes';
 import { messageOf } from '@shared/ipcError';
+import { refusal } from '../store/app';
 import { folderOf } from '../../core/vaultNotes';
 import type { Key } from '../i18n';
 import { useT } from '../i18n/useT';
@@ -63,7 +64,7 @@ function Preview({ path }: { path: string }) {
         setRead(got);
         setFailed(null);
       },
-      (err) => live && setFailed(messageOf(err)),
+      (err) => live && setFailed(refusal(messageOf(err))),
     );
     return () => {
       live = false;
