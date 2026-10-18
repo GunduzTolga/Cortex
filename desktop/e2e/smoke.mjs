@@ -39,6 +39,27 @@ const vaultNote = (relative) => path.join(vaultDir, ...relative.split('/'));
 // The engine package the app came with, stood in for: the settings offer it, the run never installs it.
 const enginePackages = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-paket-'));
 fs.writeFileSync(path.join(enginePackages, 'beyin-v3-9.9.9.zip'), '');
+/*
+  Claude Code as installed, stood in for on the app's PATH: it says only that its sign-in is kept
+  (`claude auth status --json`). The first-run screen lists the tools installed; without it the
+  run saw whatever the machine had - a real `claude` here, none on GitHub's Windows runner (18 October).
+  The chat's own Claude is CORTEX_TEST_CLAUDE's stand-in, as before.
+*/
+const toolBin = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-bin-'));
+fs.writeFileSync(
+  path.join(toolBin, 'claude-status.mjs'),
+  "const [what, how] = process.argv.slice(2);\n" +
+    "if (what === 'auth' && how === 'status') console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', email: 'e2e@example.com' }));\n" +
+    "else process.exit(1);\n",
+);
+// Windows spells it Path: one key, so the child gets one PATH.
+const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
+if (process.platform === 'win32') {
+  // As npm writes a script's shim: the app reads the script it names and runs it with node.
+  fs.writeFileSync(path.join(toolBin, 'claude.cmd'), '@ECHO off\r\nnode "%dp0%\\claude-status.mjs" %*\r\n');
+} else {
+  fs.writeFileSync(path.join(toolBin, 'claude'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(toolBin, 'claude-status.mjs')}" "$@"\n`, { mode: 0o755 });
+}
 const write = (relative, text) => {
   fs.mkdirSync(path.dirname(vaultNote(relative)), { recursive: true });
   fs.writeFileSync(vaultNote(relative), text);
@@ -125,6 +146,7 @@ const launch = () =>
       CORTEX_TEST_LMSTUDIO: lmStudioBase,
       CORTEX_TEST_OLLAMA: 'http://127.0.0.1:9',
       CORTEX_ENGINE_PACKAGES: enginePackages,
+      [pathKey]: `${toolBin}${path.delimiter}${process.env[pathKey] ?? ''}`,
     },
   });
 
