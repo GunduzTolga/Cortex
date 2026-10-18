@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from datetime import datetime, timezone
@@ -299,6 +300,13 @@ class ReceiptProjectionConflictTest(unittest.TestCase):
         self.assertTrue(any(row['source'] == 'Paylaşım/Özet.md' for row in result['records']))
         self.assertEqual(result['source_sync']['warnings'][0]['source'], 'knowledge/v3/outcomes.md')
         hook = self._invoke_hook(self.vault, self.state, scripts=self.vault / '.claude/scripts')
+        # A sync slower than the hook's SYNC_WAIT (GitHub's Windows runner, 18 October) is answered
+        # from the previous index, "still running", as designed; asked again once it is done, the
+        # hook says what that sync found. Waiting also lets it go before the folder is removed.
+        deadline = time.monotonic() + 60
+        while 'V3 source sync is still running' in hook.stdout and time.monotonic() < deadline:
+            time.sleep(0.5)
+            hook = self._invoke_hook(self.vault, self.state, scripts=self.vault / '.claude/scripts')
         self.assertIn('NC-7319', hook.stdout)
         self.assertIn('V3 receipt view preserved', hook.stdout)
         self.assertEqual(view.read_bytes(), before)
