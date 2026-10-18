@@ -625,6 +625,12 @@ class PopupVoiceTest(unittest.TestCase):
         except Exception as exc:  # no Tk, or no display
             self.skipTest('Tk yok: %s' % exc)
         self.root.withdraw()
+        # Built and never shown, as the tests' listener does it: no window put on screen, and on a
+        # Mac none of the native window calls (_style_mac). A Tk update() in a test with them hung
+        # GitHub's macOS runner for good (17-18 October); these tests need no update() either.
+        patcher = mock.patch.dict(os.environ, {'BEYIN_YAKALA_GIZLI': '1'})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         # Tk's images are freed here, after the root: freed later on another test's thread, each
         # one waits there for a main loop that is not running.
         self.addCleanup(gc.collect)
@@ -707,7 +713,6 @@ class PopupVoiceTest(unittest.TestCase):
         self.assertTrue(any('Pyn, kaydet' in text for text in self.texts(win)), 'how to finish is said')
         # A pause: the sentence is written in and the microphone was never let go.
         win.voice_event({'olay': 'metin', 'metin': 'Cuma günü', 'komut': None, 'son': False})
-        win.update()
         self.assertEqual(self.link.worker.sent, ['dinle'], 'nothing to ask: it still listens')
         self.assertTrue(any(text.startswith('● Dinliyorum') for text in self.texts(win)))
         self.assertEqual(self.cards(), [])
@@ -721,7 +726,6 @@ class PopupVoiceTest(unittest.TestCase):
         win = self.window(auto_listen=True)
         win.voice_event({'olay': 'dinliyor'})
         win.voice_event({'olay': 'metin', 'metin': '', 'komut': None, 'son': True})  # the helper's own end
-        win.update()
         self.assertEqual(self.link.worker.sent, ['dinle'], 'it does not listen again by itself')
         self.assertIn('Bir süredir ses gelmedi; dinlemeyi bıraktım', self.texts(win))
 
