@@ -6,6 +6,8 @@
 // odanın BRAIN.anchors noktasından kıvılcım çıkarır (Claude Design'ın brain-preview.js'i gibi).
 // Müdürün adı kasanın sahibinin adı (nameTheManager); Tolga, Cortex'i yazan yazılımcı, kendi masasında.
 
+// Around the brain, and behind a room's preview: Cortex's paper (src/index.css), as the other screens.
+const PAPER = '#F3EFE4', PAPER_DEEP = '#EAE4D6';
 const LIGHT_TINT = { sabah: [222, 232, 255], ogle: null, aksam: [255, 196, 150], gece: [66, 80, 132] };
 export const LIGHT_MODES = [['sabah', 'Sabah'], ['ogle', 'Öğle'], ['aksam', 'Akşam'], ['gece', 'Gece']];
 export function lightForHour(h) { return h >= 6 && h < 10 ? 'sabah' : h >= 10 && h < 17 ? 'ogle' : h >= 17 && h < 20 ? 'aksam' : 'gece'; }
@@ -468,7 +470,7 @@ export class OfficeEngine {
   }
   renderScreen() {
     const c = this.cv.getContext('2d'), dpr = this.dpr, r = this.cv.getBoundingClientRect();
-    c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = '#0B0D11'; c.fillRect(0, 0, this.cv.width, this.cv.height);
+    c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = PAPER; c.fillRect(0, 0, this.cv.width, this.cv.height);
     c.setTransform(dpr, 0, 0, dpr, 0, 0); c.imageSmoothingEnabled = false;
     if (this.B) {
       // The brain, the lit map in it, the sparks over it: one picture, drawn where the camera puts the frame.
@@ -528,7 +530,7 @@ export class OfficeEngine {
   drawPreview() {
     const { canvas, roomId } = this.preview, rm = this.art.MAP.rooms.find((r) => r.id === roomId); if (!rm || !canvas) return;
     const sx = (rm.x - 1) * 16, sy = (rm.faceY - 1) * 16, sw = (rm.w + 2) * 16, sh = (rm.y + rm.h - rm.faceY + 2) * 16;
-    const c = canvas.getContext('2d'); c.imageSmoothingEnabled = false; c.fillStyle = '#0B0D11'; c.fillRect(0, 0, canvas.width, canvas.height);
+    const c = canvas.getContext('2d'); c.imageSmoothingEnabled = false; c.fillStyle = PAPER_DEEP; c.fillRect(0, 0, canvas.width, canvas.height);
     const k = Math.min(canvas.width / sw, canvas.height / sh), w = sw * k, h = sh * k; c.drawImage(this.world, sx, sy, sw, sh, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
   }
   snapshot() {

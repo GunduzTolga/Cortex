@@ -113,6 +113,7 @@ const TURKISH_ALREADY = new Set([
   path.join('electron', 'services', 'setup.ts'),
   path.join('electron', 'services', 'officeTalk.ts'),
   path.join('electron', 'services', 'telegram.ts'),
+  path.join('electron', 'services', 'inbox.ts'),
 ]);
 
 /**

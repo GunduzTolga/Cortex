@@ -73,6 +73,7 @@ const api: CortexApi = {
     login: (cli) => invoke('chat:login', cli),
     setKey: (cli, key, baseUrl) => invoke('chat:setKey', cli, key, baseUrl),
     forgetKey: (cli) => invoke('chat:forgetKey', cli),
+    toInbox: (text) => invoke('chat:toInbox', text),
   },
   office: {
     models: (tool) => invoke('office:models', tool),

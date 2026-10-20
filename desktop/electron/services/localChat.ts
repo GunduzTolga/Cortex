@@ -5,8 +5,9 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { ConfigOption } from '../../shared/chat';
 import { childEnv } from './acp';
-import { type Backend, TurnFailure, scrubberFor } from './chatKit';
+import { type Backend, type Turn, TurnFailure, scrubberFor } from './chatKit';
 import { onPathFile } from './clis';
+import { captureToInbox } from './inbox';
 import { LOCAL, type LocalId, type LocalModels, baseOf, findLocal, localModel } from './localModels';
 import { readSettings } from './settings';
 
@@ -25,15 +26,61 @@ import { readSettings } from './settings';
  * the same. Where the vault has no hook, or Python will not answer, the chat
  * goes on without memory: never a broken turn.
  *
- * The model has no tools here: it reads and writes nothing. The conversation
- * is kept in the app's data folder under the chat's own id, so it goes on
- * after the app is closed, and goes with the chat when the chat is deleted.
+ * The model has one tool: `save_to_inbox`, which adds a card to the vault's
+ * inbox (services/inbox.ts, `beyin.py yakala ekle`), so "save this for later"
+ * is saved, not promised. It reads nothing and changes nothing else. A model
+ * its server says cannot take tools is asked again without it, and the person
+ * still has "Gelen kutusuna at" beside Send (Ctrl+Enter), which keeps a message without the model. The
+ * conversation is kept in the app's data folder under the chat's own id, so it
+ * goes on after the app is closed, and goes with the chat when it is deleted;
+ * the tool's own exchange is not kept, only the answer it led to.
  */
 
 interface Message {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
+
+/** A tool call as the server streams it, put together from its pieces. */
+export interface ToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+/** What goes to the server within one turn: the conversation, and the tool's exchange while it lasts. */
+type Wire = Message | { role: 'assistant'; content: string | null; tool_calls: ToolCall[] } | { role: 'tool'; tool_call_id: string; content: string };
+
+export const SAVE_TOOL = 'save_to_inbox';
+
+/** The one tool, as the OpenAI-compatible endpoint takes it. */
+export const TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: SAVE_TOOL,
+      description:
+        "Save something to the user's Cortex inbox (📥 000-Inbox/Yakala) so it is kept for later: a link, a note, an idea, a task. " +
+        'Call it whenever the user asks to save, keep, note down or remember something for later, or says they will look at something later. ' +
+        'It only adds a card; it never edits or deletes anything.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'What to keep, in the user’s own words (a link may be in it).' },
+          url: { type: 'string', description: 'The link to keep, if there is one.' },
+          why: { type: 'string', description: 'Why it is kept or what to do with it later, if the user said.' },
+        },
+      },
+    },
+  },
+];
+
+/** Rounds of tool calls in one turn; after them the model answers without the tool. */
+const TOOL_ROUNDS = 3;
+/** A server's word that the model takes no tools (Ollama: "… does not support tools"). */
+const NO_TOOLS = /does not support tools|tools? (?:are |is )?not supported|unsupported.*tool/i;
+/** Models their server said take no tools, by server and model: asked without the tool from then on. */
+const toolless = new Set<string>();
 
 interface Session {
   id: string;
@@ -138,19 +185,51 @@ export function hookContext(vault: string, event: 'SessionStart' | 'UserPromptSu
   });
 }
 
-/** What the model is told it is, in the window's language: Pyn, on a model of this machine, with no tools. */
-function preamble(): string {
+/** What the model is told it is, in the window's language: Pyn, on a model of this machine, with one tool that only saves. */
+export function preamble(): string {
   const { language, userName } = readSettings();
   if (language === 'en') {
     return (
-      "You are Pyn, the user's thinking partner, talking with them in the Cortex desktop app. You run on a model on their own computer and have no tools: you cannot read or change files. What their vault remembers is given below and with their messages." +
+      "You are Pyn, the user's thinking partner, talking with them in the Cortex desktop app. You run on a model on their own computer. " +
+      `You have one tool, ${SAVE_TOOL}: it adds a note or a link to their vault's inbox. When they ask you to save, keep or note something, or say they will look at it later, call it. ` +
+      'You cannot read or change any other file. Never say you saved something unless the tool said it was saved; if you have no tool or it failed, say so and point them to the inbox button beside Send (Ctrl+Enter). ' +
+      'You do not remember this chat elsewhere: do not promise to "keep it in mind". What their vault remembers is given below and with their messages.' +
       (userName ? ` Address them as "${userName}".` : '')
     );
   }
   return (
-    'Sen Pyn\'sin: kullanıcının düşünme ortağı. Onunla Cortex masaüstü uygulamasında konuşuyorsun. Kendi bilgisayarındaki bir modelde çalışıyorsun ve aracın yok: dosya okuyamaz, değiştiremezsin. Kasasının hatırladıkları aşağıda ve mesajlarının yanında verilir.' +
+    'Sen Pyn\'sin: kullanıcının düşünme ortağı. Onunla Cortex masaüstü uygulamasında konuşuyorsun. Kendi bilgisayarındaki bir modelde çalışıyorsun. ' +
+    `Tek bir aracın var, ${SAVE_TOOL}: kasasının gelen kutusuna bir not ya da bağlantı ekler. Bir şeyi kaydetmeni, not almanı, saklamanı isterse ya da "sonra bakacağım" derse onu çağır. ` +
+    'Başka hiçbir dosyayı okuyamaz, değiştiremezsin. Araç kaydettiğini söylemeden "kaydettim" deme; aracın yoksa ya da çalışmadıysa bunu söyle ve gönder düğmesinin yanındaki "Gelen kutusuna at" düğmesini (Ctrl+Enter) hatırlat. ' +
+    'Bu sohbeti başka bir yerde hatırlamazsın: "aklımda tutarım" deme. Kasasının hatırladıkları aşağıda ve mesajlarının yanında verilir.' +
     (userName ? ` Ona "${userName}" diye hitap et.` : '')
   );
+}
+
+/** A tool call's arguments as an object: the JSON text a server streams, or an object a server already parsed. */
+export function argumentsOf(call: ToolCall): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(call.function.arguments || '{}') as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** One tool call carried out, told to the window as a step; what the model is told back. */
+async function runTool(call: ToolCall, turn: Turn, stepId: string): Promise<Record<string, unknown>> {
+  const english = readSettings().language === 'en';
+  if (call.function.name !== SAVE_TOOL) return { ok: false, error: `There is no tool named ${call.function.name}.` };
+  turn.emit({ type: 'tool', id: stepId, title: english ? 'Adding to the inbox' : 'Gelen kutusuna ekleniyor', kind: 'edit', status: 'in_progress' });
+  try {
+    const saved = await captureToInbox(argumentsOf(call), 'pyn');
+    turn.emit({ type: 'tool', id: stepId, title: english ? 'Added to the inbox' : 'Gelen kutusuna eklendi', kind: 'edit', status: 'completed', paths: [saved.path] });
+    return { ok: true, saved_to: saved.path, already_there: saved.added === 'existing' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    turn.emit({ type: 'tool', id: stepId, title: english ? 'Not added to the inbox' : 'Gelen kutusuna eklenemedi', kind: 'edit', status: 'failed', output: message });
+    return { ok: false, error: message };
+  }
 }
 
 /** The model's chip: the server's models, the loaded ones first and said so. */
@@ -206,16 +285,19 @@ export function splitter(onText: (text: string) => void, onThought: (text: strin
 function complete(
   id: LocalId,
   model: string,
-  messages: Message[],
+  messages: Wire[],
   signal: AbortSignal,
   onText: (text: string) => void,
   onThought: (text: string) => void,
-): Promise<{ text: string; used: number | null }> {
+  tools?: typeof TOOLS,
+): Promise<{ text: string; used: number | null; calls: ToolCall[] }> {
   const url = new URL(`${baseOf(id)}/v1/chat/completions`);
-  const body = JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true } });
+  const body = JSON.stringify({ model, messages, stream: true, stream_options: { include_usage: true }, ...(tools ? { tools } : {}) });
   return new Promise((resolve, reject) => {
     let text = '';
     let used: number | null = null;
+    // Tool calls by their index: a name and arguments that may come in pieces (LM Studio), or whole (Ollama).
+    const calls: ToolCall[] = [];
     const words = splitter((piece) => ((text += piece), onText(piece)), onThought);
     const request = http.request(
       url,
@@ -244,11 +326,25 @@ function complete(
           const payload = data.slice(5).trim();
           if (payload === '[DONE]') return;
           try {
-            const chunk = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown } }>; usage?: { total_tokens?: unknown } };
+            const chunk = JSON.parse(payload) as {
+              choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; tool_calls?: unknown } }>;
+              usage?: { total_tokens?: unknown };
+            };
             const delta = chunk.choices?.[0]?.delta;
             const thought = delta?.reasoning_content ?? delta?.reasoning;
             if (typeof thought === 'string' && thought) onThought(thought);
             if (typeof delta?.content === 'string' && delta.content) words.feed(delta.content);
+            if (Array.isArray(delta?.tool_calls)) {
+              for (const piece of delta.tool_calls as Array<{ index?: unknown; id?: unknown; function?: { name?: unknown; arguments?: unknown } }>) {
+                const at = typeof piece.index === 'number' ? piece.index : calls.length;
+                const call = (calls[at] ??= { id: '', type: 'function', function: { name: '', arguments: '' } });
+                if (typeof piece.id === 'string' && piece.id) call.id = piece.id;
+                if (typeof piece.function?.name === 'string') call.function.name += piece.function.name;
+                const args = piece.function?.arguments;
+                if (typeof args === 'string') call.function.arguments += args;
+                else if (args && typeof args === 'object') call.function.arguments = JSON.stringify(args);
+              }
+            }
             if (typeof chunk.usage?.total_tokens === 'number') used = chunk.usage.total_tokens;
           } catch {
             /* a line that is not JSON */
@@ -266,7 +362,8 @@ function complete(
           if (buffer) line(buffer);
           buffer = '';
           words.flush();
-          resolve({ text, used });
+          const made = calls.filter(Boolean).map((call, at) => ({ ...call, id: call.id || `call_${at}` }));
+          resolve({ text, used, calls: signal.aborted ? [] : made.filter((call) => call.function.name) });
         };
         response.on('end', finish);
         // Stopped mid-answer: what came so far is the answer.
@@ -275,7 +372,7 @@ function complete(
       },
     );
     request.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.name === 'AbortError') resolve({ text, used });
+      if (err.name === 'AbortError') resolve({ text, used, calls: [] });
       else if (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET') reject(new TurnFailure(`${LOCAL[id].name} is not running. Open it, load a model, and write again.`, 'local-off'));
       else reject(err);
     });
@@ -319,15 +416,43 @@ export const localBackend: Backend = {
     running.set(turn.chatId, stop);
     try {
       const answerId = `turn-${turn.number}`;
-      const { text, used } = await complete(
-        id,
-        model,
-        fitted(session.messages, found.contexts[model]),
-        stop.signal,
-        (piece) => turn.emit({ type: 'text', id: answerId, text: scrub(piece) }),
-        (piece) => turn.emit({ type: 'thought', id: `${answerId}:thought`, text: scrub(piece) }),
-      );
-      if (text) session.messages.push({ role: 'assistant', content: text });
+      const key = `${id}:${model}`;
+      // The tool's exchange in this turn: sent with the conversation while it lasts, never kept.
+      const exchange: Wire[] = [];
+      let answer = '';
+      let used: number | null = null;
+      for (let round = 0; ; round += 1) {
+        const tools = round < TOOL_ROUNDS && !toolless.has(key) ? TOOLS : undefined;
+        let result: { text: string; used: number | null; calls: ToolCall[] };
+        try {
+          result = await complete(
+            id,
+            model,
+            [...fitted(session.messages, found.contexts[model]), ...exchange],
+            stop.signal,
+            (piece) => turn.emit({ type: 'text', id: round ? `${answerId}:${round}` : answerId, text: scrub(piece) }),
+            (piece) => turn.emit({ type: 'thought', id: `${answerId}:thought`, text: scrub(piece) }),
+            tools,
+          );
+        } catch (err) {
+          // A model that takes no tools: asked again without it, and from then on.
+          if (tools && err instanceof TurnFailure && NO_TOOLS.test(err.message)) {
+            toolless.add(key);
+            round -= 1;
+            continue;
+          }
+          throw err;
+        }
+        used = result.used ?? used;
+        if (result.text) answer = answer ? `${answer}\n\n${result.text}` : result.text;
+        if (!result.calls.length || stop.signal.aborted) break;
+        exchange.push({ role: 'assistant', content: result.text || null, tool_calls: result.calls });
+        for (const [at, call] of result.calls.entries()) {
+          const outcome = await runTool(call, turn, `${answerId}:tool:${round}:${at}`);
+          exchange.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(outcome) });
+        }
+      }
+      if (answer) session.messages.push({ role: 'assistant', content: answer });
       const size = found.contexts[model];
       if (used !== null && size) turn.emit({ type: 'usage', used, size, cost: null, currency: null });
       return stop.signal.aborted ? 'cancelled' : 'end_turn';

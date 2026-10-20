@@ -119,4 +119,6 @@ export interface ChatApi {
   /** A key for a tool: kept encrypted by Cortex, or handed to the tool itself (Codex). */
   setKey(cli: CliId, key: string, baseUrl?: string): Promise<CliAuth[]>;
   forgetKey(cli: CliId): Promise<CliAuth[]>;
+  /** A message kept for later as a card in the vault's inbox (`📥 000-Inbox/Yakala`); where the card is. */
+  toInbox(text: string): Promise<{ path: string; added: 'new' | 'existing' }>;
 }
