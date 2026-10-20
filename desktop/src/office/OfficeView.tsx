@@ -61,6 +61,24 @@ interface Line {
   textColor: string;
 }
 
+/**
+ * A colour drawn for the dark monitor, made readable on the paper the office
+ * now sits on: a light one is taken toward the ink until it reads (the
+ * characters' name colours, the engine's gold and green). A dark one is left.
+ */
+export function onPaper(color: string): string {
+  const hex = /^#?([0-9a-f]{6})$/i.exec(color.trim())?.[1];
+  if (!hex) return color;
+  const [r, g, b] = [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  const lin = (v: number) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const light = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  if (light <= 0.2) return color;
+  // Mixed with the ink (#1b1712): the lighter the colour, the more of the ink.
+  const k = Math.min(0.75, (light - 0.2) / (light + 0.05) + 0.15);
+  const mix = (v: number, ink: number) => Math.round(v * (1 - k) + ink * k).toString(16).padStart(2, '0');
+  return `#${mix(r, 0x1b)}${mix(g, 0x17)}${mix(b, 0x12)}`;
+}
+
 let lineSeq = 0;
 function lineOf(entry: LogEntry): Line {
   const who = entry.who ? art.CHARACTERS[entry.who] : undefined;
@@ -69,9 +87,9 @@ function lineOf(entry: LogEntry): Line {
     time: entry.time,
     icon: entry.icon ?? '',
     name: who ? who.name : '',
-    nameColor: who ? who.color : '#E8E6E1',
+    nameColor: who ? onPaper(who.color) : 'var(--ofis-yazi)',
     text: who ? `: ${entry.text}` : entry.text,
-    textColor: who ? '#E8E6E1' : (entry.color ?? '#C9CED8'),
+    textColor: who ? 'var(--ofis-yazi)' : entry.color ? onPaper(entry.color) : 'var(--ofis-yazi-ikincil)',
   };
 }
 
@@ -243,9 +261,9 @@ export function OfficeView({ visible }: { visible: boolean }) {
     if (!offCtx) return;
     art.paintCharacter(offCtx, selected, 'idle', 'down', 0);
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = '#0B0D11';
+    ctx.fillStyle = '#EAE4D6';
     ctx.fillRect(0, 0, 56, 80);
-    ctx.fillStyle = '#141820';
+    ctx.fillStyle = '#E4E0D5';
     ctx.fillRect(0, 62, 56, 18);
     if (cell.h === 16) ctx.drawImage(off, 4, 22, 48, 48);
     else ctx.drawImage(off, 4, -(art.anchors(selected, 'idle', 'down', 0).head[1] - 3) * 3, 48, 96);
@@ -429,7 +447,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
           ) : null}
           <span style={{ fontWeight: 700 }}>{t('office.live')}</span>
           <span className="ofis-dim">·</span>
-          <span style={{ fontWeight: 600, color: night ? '#F2C14E' : '#5BD77A' }}>{t(night ? 'office.night' : 'office.open')}</span>
+          <span style={{ fontWeight: 600, color: night ? 'var(--ofis-altin)' : 'var(--ofis-yesil)' }}>{t(night ? 'office.night' : 'office.open')}</span>
           <span className="ofis-dim">·</span>
           <span className="ofis-num">{clockText(now)}</span>
         </div>
@@ -541,7 +559,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
                 <canvas ref={portraitRef} width={56} height={80} style={{ width: 56, height: 80 }} />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-                <div className="ofis-name" style={{ color: card.color }}>
+                <div className="ofis-name" style={{ color: onPaper(card.color) }}>
                   {card.name}
                 </div>
                 <div className="ofis-dim" style={{ fontSize: 13 }}>

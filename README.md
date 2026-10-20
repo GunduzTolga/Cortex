@@ -295,7 +295,7 @@ Güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Paket önce do�
 
 | Sürüm | Öne çıkan |
 | --- | --- |
-| [1.0.27](docs/v3/releases/1.0.27.md) | Yazdığını yapay zekaya göndermeden gelen kutusuna at: gönderin yanındaki düğme ya da `Ctrl+Enter`. Yerel modeller (Ollama, LM Studio) "bunu kaydet" denince gelen kutusuna ekliyor, "aklımda tutarım" demiyor. |
+| [1.0.27](docs/v3/releases/1.0.27.md) | Yazdığını yapay zekaya göndermeden gelen kutusuna at: gönderin yanındaki düğme ya da `Ctrl+Enter`. Yerel modeller (Ollama, LM Studio) "bunu kaydet" denince gelen kutusuna ekliyor, "aklımda tutarım" demiyor. Beyin ekranı da kâğıt renginde. |
 | [1.0.26](docs/v3/releases/1.0.26.md) | Telegram: telefondan kendi botuna gönderdiğin yazı, bağlantı, fotoğraf ve sesli not gelen kutusuna düşer; bilgisayar kapalıyken gönderdiklerin açılınca gelir, 24 saatten eskiler de. |
 | [1.0.25](docs/v3/releases/1.0.25.md) | Öncülün 3.10 ve 3.11 motoru: BOM ve hassas klasör gizliliği, uzun Kurallar.md, daha iyi arama, Kiro, `scheduled-check`, `triage`; Yakala'da açık sayfanın bağlantısı, pano tazeliği, videonun konuşulan dili. |
 | [1.0.24](docs/v3/releases/1.0.24.md) | İlk açılışta sesli uyandırma çalışmıyordu (kulaklık hazır değilken mikrofon açılamayınca kapanıyordu): artık yeniden deniyor, sonradan bağlanan kulaklığı da buluyor. |
