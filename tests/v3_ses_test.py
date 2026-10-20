@@ -850,6 +850,28 @@ class PopupVoiceTest(unittest.TestCase):
         self.assertEqual(len(cards), 1, 'saved as a card in the inbox')
         self.assertIn('Yarın onda toplantı', cards[0].read_text(encoding='utf-8'))
 
+    def test_a_quiet_microphone_that_hears_speech_is_not_called_silent(self):
+        # Seen: "Mikrofondan ses gelmiyor" over a sentence being written, from a headset with little gain.
+        self.link.ready = True
+        clock = types.SimpleNamespace(t=1000.0)
+        with mock.patch.object(yakala, 'time_now', lambda: clock.t):
+            win = self.window()
+            win.voice_toggle()
+            win.voice_event({'olay': 'dinliyor', 'mikrofon': 'HyperX'})
+            clock.t += 4
+            win.voice_event({'olay': 'seviye', 'deger': 0.1, 'konusma': True})
+            self.assertFalse(any('ses gelmiyor' in text for text in self.texts(win)), 'speech came in')
+            win.voice_event({'olay': 'dinliyor', 'mikrofon': 'HyperX'})
+            clock.t += 4
+            win.voice_event({'olay': 'seviye', 'deger': 0.0})
+            self.assertTrue(any('Mikrofondan ses gelmiyor · HyperX' in text for text in self.texts(win)), 'nothing at all: said')
+            win.voice_event({'olay': 'metin', 'metin': 'Beni duyuyor musun?', 'son': False})
+            self.assertFalse(any('ses gelmiyor' in text for text in self.texts(win)), 'a sentence written: the warning goes')
+            self.assertTrue(any('Dinliyorum' in text for text in self.texts(win)))
+            clock.t += 4
+            win.voice_event({'olay': 'seviye', 'deger': 0.0})
+            self.assertFalse(any('ses gelmiyor' in text for text in self.texts(win)), 'and does not come back in that dictation')
+
     def test_opened_by_the_wake_phrase_it_is_already_listening_and_closing_lets_the_microphone_go(self):
         win = self.window(listening=True)
         win.voice_toggle()
@@ -1201,6 +1223,42 @@ class ServeTest(unittest.TestCase):
         self.wake.stall = False
         self.pause(5)
         self.assertTrue(self.wait_for(lambda: self.wake.running and self.wake.starts == 2), 'and opened again')
+
+    def test_a_microphone_windows_makes_the_default_later_is_listened_to(self):
+        # Seen: "Hey Pyn" never heard after the first start until the wake phrase was switched off and
+        # on; a wireless headset that became Windows' microphone after the helper opened the old one.
+        mics = ['dahili']
+        self.helper._inputs_now = lambda: tuple(mics)
+        self.serve(uyandirma=True)
+        self.assertTrue(self.wait_for(lambda: self.wake.running))
+        self.pause(5)
+        time.sleep(0.2)
+        self.assertEqual((self.wake.starts, self.refreshed), (1, []), 'the same microphone: left as it is')
+        mics[:] = ['hyperx']
+        self.pause(5)
+        self.assertTrue(self.wait_for(lambda: self.wake.starts == 2 and self.wake.running), 'opened again')
+        self.assertEqual(len(self.refreshed), 1, 'on the device list made anew')
+        self.assertIn('mikrofonu değişti', self.logged[-1])
+        self.pause(5)
+        time.sleep(0.2)
+        self.assertEqual(self.wake.starts, 2)
+
+    def test_a_recording_lists_the_devices_anew_when_the_microphones_changed(self):
+        mics = ['dahili']
+        self.helper._inputs_now = lambda: tuple(mics)
+        self.serve()
+        mics[:] = ['hyperx']
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.assertEqual(len(self.refreshed), 1)
+        level = self.until('seviye')
+        self.assertIn('konusma', level)
+
+    def test_the_level_is_on_a_scale_a_quiet_headset_moves(self):
+        self.assertEqual(self.helper.loudness(0.0), 0.0)
+        self.assertEqual(self.helper.loudness(1.0), 1.0)
+        self.assertGreater(self.helper.loudness(0.01), 0.25, 'speech from a headset with little gain shows')
+        self.assertLess(self.helper.loudness(0.0015), 0.05, 'a room\'s faint noise barely does')
 
     def test_a_recording_whose_microphone_fails_lists_the_devices_anew_and_tries_once_more(self):
         self.serve()
