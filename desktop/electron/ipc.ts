@@ -5,6 +5,7 @@ import { startWithWindows } from './services/tray';
 import { setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
+import { captureToInbox } from './services/inbox';
 import * as officeTalk from './services/officeTalk';
 import * as setup from './services/setup';
 import * as telegram from './services/telegram';
@@ -130,6 +131,8 @@ export function registerIpc(): void {
   handle('chat:setOption', (id, option, value) => chat.setChatOption(id, option, value));
   handle('chat:rename', (id, title) => chat.renameChat(id, title));
   handle('chat:remove', (id) => chat.removeChat(id));
+  // A message kept for later in the vault's inbox (services/inbox.ts): words go in, a card's place comes back.
+  handle('chat:toInbox', (text) => captureToInbox({ text }, 'pyn'));
 
   // Signing in to those tools (services/auth.ts): a key goes in and is never sent back.
   auth.onAuthChanged(() => broadcast('chat:authChanged', null));

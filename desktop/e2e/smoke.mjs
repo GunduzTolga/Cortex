@@ -724,6 +724,9 @@ check(
     lmBodies[0].messages.at(-1)?.content === 'merhaba yerel' &&
     ((await page.locator('[data-chat-chip="model"]').textContent()) ?? '').includes('qwen-e2e'),
 );
+check('and it is offered its one tool, which only saves to the inbox', JSON.stringify(lmBodies[0].tools ?? []).includes('save_to_inbox'));
+await page.locator('[data-chat-user]', { hasText: 'merhaba yerel' }).hover();
+check('a message can be kept in the inbox from under it', await shownSoon(page.locator('[data-chat-inbox="button"]').last()));
 await shoot('13b-lmstudio.png');
 await page.locator('[data-app-view="graph"]').click();
 await page.waitForTimeout(1_500);

@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.26" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.26-E8B23A">
+  <img alt="Sürüm 1.0.27" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.27-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
@@ -116,7 +116,7 @@ Terminal gerekmez; uygulama gerekeni kendisi kurar.
 
 Dört ekran:
 
-- **Pyn:** kasanın içinde, kendi aracınla sohbet. Araç kasada başladığı için hafıza tam gelir. Araçlar: Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code; yerel modeller için LM Studio ve Ollama (modeli kendi uygulamasında yüklersin, Cortex onunla doğrudan konuşur). Model, mod ve efor çiplerle seçilir; aracın izin istediği adımlar kartla sorulur. Sohbetin okuduğu ve değiştirdiği notlar yan panelde açılır.
+- **Pyn:** kasanın içinde, kendi aracınla sohbet. Araç kasada başladığı için hafıza tam gelir. Araçlar: Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code; yerel modeller için LM Studio ve Ollama (modeli kendi uygulamasında yüklersin, Cortex onunla doğrudan konuşur; "bunu kaydet" denince yerel model de gelen kutusuna ekler). Her mesajın altındaki **Gelen kutusuna at** mesajı tek tıkla kaydeder. Model, mod ve efor çiplerle seçilir; aracın izin istediği adımlar kartla sorulur. Sohbetin okuduğu ve değiştirdiği notlar yan panelde açılır.
 - **Notlar:** Obsidian'a gerek kalmadan okuma ve yazma: wiki bağlantıları, canlı önizleme, geri bağlantılar, arama, şablonlar, çöp kutusu. Makbuzlar ve motorun ürettiği sayfalar salt okunurdur.
 - **Grafik:** notların ve aralarındaki bağlantılar.
 - **Beyin:** bir beynin içine çizilmiş, yaşayan bir piksel sanatı ofis; kıvrımlarında kıvılcımlar akar. Patron Pyn, ilk açılışta yazdığın adı taşıyan müdür, Cortex'i yazan geliştirici Tolga, 12 kişilik ekip ve kedi Tekir dokuz odada çalışır; karakterlere ve odalara tıklanır. Sunucu odasının ışıkları araçlarının gerçek giriş durumunu, odalar kasanın sayılarını gösterir. İstersen ekip son notların hakkında konuşur: Ayarlar → Beyin'den bir araç (LM Studio, Ollama ya da Claude Code) ve model seçersin.
@@ -295,6 +295,7 @@ Güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Paket önce do�
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.27](docs/v3/releases/1.0.27.md) | Yerel modeller (Ollama, LM Studio) "bunu kaydet" denince gelen kutusuna ekliyor, "aklımda tutarım" demiyor; her mesajın altında **Gelen kutusuna at** düğmesi. |
 | [1.0.26](docs/v3/releases/1.0.26.md) | Telegram: telefondan kendi botuna gönderdiğin yazı, bağlantı, fotoğraf ve sesli not gelen kutusuna düşer; bilgisayar kapalıyken gönderdiklerin açılınca gelir, 24 saatten eskiler de. |
 | [1.0.25](docs/v3/releases/1.0.25.md) | Öncülün 3.10 ve 3.11 motoru: BOM ve hassas klasör gizliliği, uzun Kurallar.md, daha iyi arama, Kiro, `scheduled-check`, `triage`; Yakala'da açık sayfanın bağlantısı, pano tazeliği, videonun konuşulan dili. |
 | [1.0.24](docs/v3/releases/1.0.24.md) | İlk açılışta sesli uyandırma çalışmıyordu (kulaklık hazır değilken mikrofon açılamayınca kapanıyordu): artık yeniden deniyor, sonradan bağlanan kulaklığı da buluyor. |

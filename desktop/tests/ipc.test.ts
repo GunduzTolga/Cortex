@@ -32,7 +32,7 @@ test('the channels are the ones the preload names, no more and no fewer', () => 
   const preload = fs.readFileSync('electron/preload.ts', 'utf8');
   const named = [...preload.matchAll(/invoke\('([^']+)'/g)].map((match) => match[1]).sort();
   assert.deepEqual([...handlers.keys()].sort(), named);
-  assert.deepEqual(named.filter((channel) => channel.startsWith('chat:')), ['chat:answer', 'chat:auth', 'chat:cancel', 'chat:clis', 'chat:forgetKey', 'chat:list', 'chat:login', 'chat:open', 'chat:remove', 'chat:rename', 'chat:send', 'chat:setKey', 'chat:setOption']);
+  assert.deepEqual(named.filter((channel) => channel.startsWith('chat:')), ['chat:answer', 'chat:auth', 'chat:cancel', 'chat:clis', 'chat:forgetKey', 'chat:list', 'chat:login', 'chat:open', 'chat:remove', 'chat:rename', 'chat:send', 'chat:setKey', 'chat:setOption', 'chat:toInbox']);
   const notes = named.filter((channel) => channel.startsWith('notes:'));
   assert.deepEqual(notes, ['notes:asset', 'notes:backlinks', 'notes:binDelete', 'notes:binEmpty', 'notes:binList', 'notes:binRestore', 'notes:create', 'notes:createFolder', 'notes:index', 'notes:move', 'notes:open', 'notes:read', 'notes:rename', 'notes:save', 'notes:search', 'notes:text', 'notes:trash']);
 });
