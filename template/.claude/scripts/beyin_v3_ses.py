@@ -1049,7 +1049,9 @@ phrase N seconds and says what it hears and what it would do.
 import argparse
 import collections
 import io
+import itertools
 import json
+import math
 import os
 from pathlib import Path
 import queue
@@ -1336,6 +1338,51 @@ def transcribe_path(state, config, path):
 # The wake listener's microphone: no sound for this long and it is opened again. Nothing at all
 # comes from a stream whose device went away; only exact zeros come from one that is not a microphone.
 WAKE_STALL_SN, WAKE_SILENT_SN = 5.0, 30.0
+# How often Windows' list of microphones is looked at while the wake listener listens.
+INPUTS_EVERY_SN = 3.0
+CAPTURE_KEY = r'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
+
+
+def _inputs_now():
+    """Windows' microphones as they are now: the default one and the ones plugged in, from the
+    registry (cheap enough to read every few seconds, and read while a stream is open, which
+    PortAudio's own list is not). None where it cannot be read."""
+    try:
+        import winreg
+    except ImportError:
+        return None
+    import struct
+    plugged, default = [], ((), '')
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, CAPTURE_KEY) as devices:
+            for index in itertools.count():
+                try:
+                    name = winreg.EnumKey(devices, index)
+                except OSError:
+                    break
+                try:
+                    with winreg.OpenKey(devices, name) as device:
+                        if winreg.QueryValueEx(device, 'DeviceState')[0] != 1:  # DEVICE_STATE_ACTIVE
+                            continue
+                        plugged.append(name)
+                        # When it was last made the default (a SYSTEMTIME): the newest is the default.
+                        when = struct.unpack('<8H', bytes(winreg.QueryValueEx(device, 'Role:0')[0])[:16])
+                except (OSError, struct.error):
+                    continue
+                when = (when[0], when[1], when[3], when[4], when[5], when[6], when[7])  # the weekday aside
+                if when > default[0]:
+                    default = (when, name)
+    except OSError:
+        return None
+    return default[1], tuple(sorted(plugged))
+
+
+def loudness(peak):
+    """A sample's peak as the window's bars show it, 0 to 1 on a scale of decibels (-54 to -6 dB):
+    a headset with little gain moves them too, and a muted microphone leaves them flat."""
+    if peak <= 0.0:
+        return 0.0
+    return round(max(0.0, min(1.0, (20 * math.log10(peak) + 54) / 48)), 2)
 
 
 def _refresh_audio():
@@ -1602,6 +1649,8 @@ def serve(state, config, lines=None):
             except Exception as exc:
                 written.put(dict(job, hata=str(exc)[:300]))
 
+    # Windows' microphones as the last stream was opened on them, and when they were looked at.
+    inputs = {'seen': _inputs_now(), 'at': 0.0}
     threading.Thread(target=load, daemon=True).start()
     threading.Thread(target=write, daemon=True).start()
     recorder, wake, wake_on = Recorder(config), None, bool(config.get('uyandirma'))
@@ -1612,12 +1661,20 @@ def serve(state, config, lines=None):
     # When the wake listener may try its microphone again, how long it waits after the next trouble.
     wake_retry = {'at': 0.0, 'wait': 5.0, 'failed': False}
 
+    def inputs_changed(moment):
+        """Whether Windows' microphones are not the ones the last stream was opened on."""
+        inputs['at'] = moment
+        return _inputs_now() != inputs['seen']
+
     def begin(continuous=False, woke=False, checking=None):
         """Recording. `checking`: begun on a heard "not al" Whisper has yet to confirm; nobody is
         told until it does, and the sound since is already the dictation's start."""
         nonlocal mode, turn
         if wake is not None and wake.running:
             wake.stop()
+        if inputs_changed(now()):
+            _refresh_audio()  # a headset plugged in, or made the default, since: recorded from it
+            inputs['seen'] = _inputs_now()
         try:
             recorder.start()
         except Exception:
@@ -1764,7 +1821,8 @@ def serve(state, config, lines=None):
         elif mode == 'kayit':
             if moment - last_level >= 0.1:
                 last_level = moment
-                out(olay='seviye', deger=round(min(1.0, recorder.level * 4), 2))
+                # `konusma`: speech above the room's noise, which a quiet microphone has too.
+                out(olay='seviye', deger=loudness(recorder.level), konusma=bool(recorder.spoke))
             spoke_then_quiet = recorder.spoke and moment - recorder.last_voice > float(config['sessizlik_sn'])
             too_long = moment - recorder.started > float(config['en_uzun_sn'])
             if turns[turn]['continuous']:
@@ -1782,9 +1840,18 @@ def serve(state, config, lines=None):
                     wake = Wake(state, config)
                 if not wake.running:
                     wake.start()
+                    inputs.update(seen=_inputs_now(), at=moment)
                     if wake_retry['failed']:
                         log('uyandırma: mikrofon yeniden açıldı')
                         wake_retry['failed'] = False
+                elif moment - inputs['at'] >= INPUTS_EVERY_SN and inputs_changed(moment):
+                    # Another default microphone, or one plugged in: a headset that came after the
+                    # helper started (a wireless one as Windows signs in). The stream stays on the
+                    # one it opened, and "Pyn" said into the headset was never heard until the
+                    # wake phrase was switched off and on. Opened again on the microphone now.
+                    log('uyandırma: Windows\'un mikrofonu değişti; yeniden açılıyor')
+                    wake.stop()
+                    _refresh_audio()
                 elif wake.stalled(moment):
                     # A headset that went away, or a device that is not the microphone: opened again
                     # a little later, the device list made anew.

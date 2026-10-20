@@ -2416,7 +2416,16 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         bars = [canvas.create_rectangle(W - pad - 34 + i * 7, voice_y - 2, W - pad - 30 + i * 7, voice_y + 2,
                                         fill=P['accent'], outline=P['card_line'], width=1, state='hidden')
                 for i in range(5)]
-        heard = {'peak': 0.0, 'since': None, 'device': ''}
+        # `voice`: speech came in since it began listening. `warned`: the line says nothing comes in.
+        heard = {'peak': 0.0, 'since': None, 'device': '', 'voice': False, 'warned': False}
+
+        def heard_voice():
+            """Speech came in: the line no longer says that nothing does."""
+            heard.update(voice=True, since=None)
+            if heard['warned']:
+                heard['warned'] = False
+                if voice_mode['now'] == 'dinliyor':
+                    voice_set('dinliyor')
 
         def voice_set(mode, message=None, tone=None, help_text=None):
             voice_mode['now'] = mode
@@ -2449,18 +2458,23 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                 set_field('Konuş, ben yazayım…' if listening_now else placeholder_text)
                 entry.mark_set('insert', '1.0')
 
-        def level(value):
-            # Five bars, the middle ones the tallest, each as high as the voice is loud.
+        def level(value, speech=False):
+            # Five bars, the middle ones the tallest, each as high as the voice is loud (the
+            # helper gives it on a scale of decibels).
             value = min(1.0, float(value or 0))
             heard['peak'] = max(heard['peak'], value)
+            if speech or value >= 0.25:
+                heard_voice()
             middle = canvas.coords(voice_line)[1]  # the panel moves down as the field grows
             for i, bar in enumerate(bars):
                 height = 2 + round(value * (11 - 3 * abs(2 - i)))
                 x1, _y1, x2, _y2 = canvas.coords(bar)
                 canvas.coords(bar, x1, middle - height, x2, middle + height)
-            # Three seconds of listening and nothing came in: the microphone is muted, or another one is listened to.
-            if heard['since'] is not None and time_now() - heard['since'] > 3 and heard['peak'] < 0.02:
-                heard['since'] = None
+            # Three seconds of listening and nothing came in, not even a room's noise: the
+            # microphone is muted, or another one is listened to. A quiet headset that hears is
+            # not that (seen: the warning over a sentence being written).
+            if heard['since'] is not None and not heard['voice'] and time_now() - heard['since'] > 3 and heard['peak'] < 0.05:
+                heard.update(since=None, warned=True)
                 voice_set('dinliyor', 'Mikrofondan ses gelmiyor' + ((' · ' + heard['device']) if heard['device'] else ''), 'bad',
                           'Mikrofon kapalı ya da sessizde olabilir; Windows ses ayarlarından doğru mikrofonu seç')
 
@@ -2556,15 +2570,17 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             elif kind in ('dinliyor', 'uyandi'):
                 if kind == 'uyandi':
                     voice_mode['continuous'] = True  # what the wake phrase begins is a dictation
-                heard.update(peak=0.0, since=time_now(), device=event.get('mikrofon') or heard['device'])
+                heard.update(peak=0.0, since=time_now(), device=event.get('mikrofon') or heard['device'], voice=False, warned=False)
                 voice_set('dinliyor')
             elif kind == 'seviye' and voice_mode['now'] == 'dinliyor':
-                level(event.get('deger'))
+                level(event.get('deger'), bool(event.get('konusma')))
             elif kind == 'ceviriyor':
-                heard['since'] = None
+                heard.update(since=None, warned=False)
                 voice_set('ceviriyor')
             elif kind == 'metin' and not last:
                 # A sentence of a dictation that goes on: written in, the microphone still open.
+                if event.get('metin'):
+                    heard_voice()
                 write_in(event.get('metin') or '')
                 if event.get('komut') == 'sil':
                     show_hint()
@@ -2574,7 +2590,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                 elif event.get('komut') == 'resim_ekle':
                     add_picture()
             elif kind == 'metin':
-                heard['since'] = None
+                heard.update(since=None, warned=False)
                 voice_set('hazir')
                 spoken, command = event.get('metin') or '', event.get('komut')
                 write_in(spoken)
