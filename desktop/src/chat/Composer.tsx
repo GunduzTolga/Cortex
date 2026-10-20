@@ -1,8 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, ChevronDown, Settings2, ShieldQuestion, Square } from 'lucide-react';
+import { ArrowUp, Check, ChevronDown, Inbox, Settings2, ShieldQuestion, Square } from 'lucide-react';
 import type { CliAuth, CliId, CliInfo, ConfigOption, PermissionKind } from '@shared/chat';
+import { messageOf } from '@shared/ipcError';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
+import { useApp } from '../store/app';
+import { Spinner } from '../ui/ui';
 import { useEscapeLayer } from '../ui/useEscapeLayer';
 import { authDot } from './AuthDialog';
 import type { Asked } from './turns';
@@ -11,7 +14,10 @@ import type { Asked } from './turns';
  * Where the person writes to Pyn, and what they write with: the CLI, and the
  * session's own settings - the model, the mode, how hard it thinks - as the
  * CLI offers them, each a chip that opens its list. Enter sends, Shift+Enter
- * starts a line; while an answer comes, the send button stops it. How full
+ * starts a line; while an answer comes, the send button stops it. Beside it,
+ * "Gelen kutusuna at" (Ctrl+Enter) keeps what is written for later in the
+ * vault's inbox instead (`📥 000-Inbox/Yakala`), and nothing goes to the
+ * model. How full
  * the model's context is shows as a ring. A step the CLI asks leave for is a
  * card over it, answered with a click, or Enter for once.
  */
@@ -266,6 +272,23 @@ export function Composer({
     setSending(false);
   };
 
+  // Kept for later, not sent: the model is not asked, so nothing answers it. The draft goes once it is kept.
+  const [keeping, setKeeping] = useState(false);
+  const keep = async () => {
+    if (!draft.trim() || keeping) return;
+    setKeeping(true);
+    try {
+      await window.cortex.chat.toInbox(draft);
+      onDraft('');
+      useApp.getState().toast({ tone: 'success', title: t('chat.inbox.saved') });
+    } catch (err) {
+      useApp.getState().toast({ tone: 'error', title: t('chat.inbox.failed'), detail: messageOf(err), sticky: true });
+    } finally {
+      setKeeping(false);
+      field.current?.focus();
+    }
+  };
+
   const available = clis.filter((one) => one.available);
   const settings = [...options].sort((a, b) => {
     const at = (one: ConfigOption) => {
@@ -284,10 +307,10 @@ export function Composer({
           value={draft}
           onChange={(event) => onDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              void send();
-            }
+            if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            if (event.ctrlKey || event.metaKey) void keep();
+            else void send();
           }}
           rows={big ? 3 : 1}
           placeholder={t('chat.placeholder')}
@@ -310,6 +333,17 @@ export function Composer({
           ))}
           <div className="ml-auto flex items-center gap-1">
             {usage ? <ContextRing {...usage} /> : null}
+            <button
+              type="button"
+              onClick={() => void keep()}
+              disabled={!draft.trim() || keeping}
+              title={t('chat.inbox.hint')}
+              aria-label={t('chat.inbox')}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 text-zinc-600 transition-opacity hover:border-zinc-400 hover:text-darkDelegation disabled:opacity-25"
+              data-chat-inbox
+            >
+              {keeping ? <Spinner size={13} /> : <Inbox size={14} />}
+            </button>
             {running ? (
               <button type="button" onClick={onStop} title={t('chat.stop')} aria-label={t('chat.stop')} className="flex h-8 w-8 items-center justify-center rounded-full bg-darkDelegation text-white hover:bg-zinc-700" data-chat-stop>
                 <Square size={11} fill="currentColor" />

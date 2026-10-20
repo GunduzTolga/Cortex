@@ -725,8 +725,19 @@ check(
     ((await page.locator('[data-chat-chip="model"]').textContent()) ?? '').includes('qwen-e2e'),
 );
 check('and it is offered its one tool, which only saves to the inbox', JSON.stringify(lmBodies[0].tools ?? []).includes('save_to_inbox'));
-await page.locator('[data-chat-user]', { hasText: 'merhaba yerel' }).hover();
-check('a message can be kept in the inbox from under it', await shownSoon(page.locator('[data-chat-inbox="button"]').last()));
+// Kept for later from the field, beside Send: Ctrl+Enter asks the model nothing. This vault has no engine, so the inbox says why it cannot.
+const askedBefore = lmBodies.length;
+await page.locator('[data-chat-input]').fill('sonra bakılacak https://example.com/yazi');
+await page.keyboard.press('Control+Enter');
+check(
+  'Ctrl+Enter keeps what is written for the inbox instead, and the model is not asked',
+  (await page.locator('[data-chat-inbox]').count()) === 1 &&
+    (await shownSoon(page.locator('[data-toast="error"]', { hasText: 'Could not add it to the inbox' }))) &&
+    lmBodies.length === askedBefore &&
+    (await page.locator('[data-chat-input]').inputValue()) === 'sonra bakılacak https://example.com/yazi',
+);
+await page.locator('[data-toast="error"]', { hasText: 'Could not add it to the inbox' }).locator('button').last().click();
+await page.locator('[data-chat-input]').fill('');
 await shoot('13b-lmstudio.png');
 await page.locator('[data-app-view="graph"]').click();
 await page.waitForTimeout(1_500);

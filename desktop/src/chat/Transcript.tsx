@@ -1,15 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Brain, Check, ChevronRight, FileText, Globe, Inbox, ListChecks, PencilLine, Search, Terminal, Wrench, X } from 'lucide-react';
+import { AlertTriangle, Brain, Check, ChevronRight, FileText, Globe, ListChecks, PencilLine, Search, Terminal, Wrench, X } from 'lucide-react';
 // The small face: drawn for 24-32 px. While Pyn is still writing, the thinking one.
 import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz-kucuk.svg';
 import thinkingFace from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz-kucuk-dusunuyor.svg';
-import { messageOf } from '@shared/ipcError';
 import { turkishOf } from '@shared/refusalsTr';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
 import { NoteMarkdown } from '../notes/NoteMarkdown';
 import { noteFor, useNotes } from '../notes/notesStore';
-import { useApp } from '../store/app';
 import { Spinner } from '../ui/ui';
 import { captureNoteLinks, openNote } from './noteLinks';
 import type { Step, Turn } from './turns';
@@ -170,51 +168,6 @@ function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?
   );
 }
 
-/**
- * What the person wrote, kept for later in the vault's inbox with one press
- * (`📥 000-Inbox/Yakala`, as Ctrl+Alt+C and Telegram keep it): whatever the
- * model can or cannot do, the message is saved. Under the message, shown when
- * the pointer is over it or the button has the focus.
- */
-function ToInbox({ text }: { text: string }) {
-  const t = useT();
-  const [state, setState] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const [where, setWhere] = useState<string | null>(null);
-  const keep = async () => {
-    setState('saving');
-    try {
-      const saved = await window.cortex.chat.toInbox(text);
-      setWhere(saved.path);
-      setState('saved');
-    } catch (err) {
-      setState('idle');
-      useApp.getState().toast({ tone: 'error', title: t('chat.inbox.failed'), detail: messageOf(err), sticky: true });
-    }
-  };
-  if (state === 'saved') {
-    return (
-      <span className="ml-auto flex items-center gap-1.5 text-[11px] text-zinc-500" data-chat-inbox="saved">
-        <Check size={12} className="text-good" />
-        {t('chat.inbox.saved')}
-        {where ? <PathChip path={where} /> : null}
-      </span>
-    );
-  }
-  return (
-    <button
-      type="button"
-      disabled={state === 'saving'}
-      onClick={() => void keep()}
-      className="ml-auto flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] text-zinc-400 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-darkDelegation focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-100"
-      title={t('chat.inbox.hint')}
-      data-chat-inbox="button"
-    >
-      {state === 'saving' ? <Spinner size={11} /> : <Inbox size={12} />}
-      {t('chat.inbox')}
-    </button>
-  );
-}
-
 export function Transcript({ turns, running, onSignIn }: { turns: Turn[]; running: boolean; onSignIn?: () => void }) {
   const box = useRef<HTMLDivElement>(null);
   // Following the answer while the person is at the foot of the chat; left where they are when they scrolled up.
@@ -239,11 +192,8 @@ export function Transcript({ turns, running, onSignIn }: { turns: Turn[]; runnin
         {turns.map((turn, at) => (
           <div key={at} className="flex flex-col gap-4">
             {turn.user ? (
-              <div className="group ml-auto flex max-w-[85%] flex-col gap-1">
-                <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-zinc-200/80 bg-paper-2 px-4 py-2.5 text-[14px] leading-relaxed text-darkDelegation" data-chat-user>
-                  {turn.user.text}
-                </div>
-                <ToInbox text={turn.user.text} />
+              <div className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-zinc-200/80 bg-paper-2 px-4 py-2.5 text-[14px] leading-relaxed text-darkDelegation" data-chat-user>
+                {turn.user.text}
               </div>
             ) : null}
             <Answer turn={turn} live={running && at === turns.length - 1} onSignIn={onSignIn} />

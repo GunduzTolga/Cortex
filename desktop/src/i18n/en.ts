@@ -293,7 +293,7 @@ export const en = {
   'chat.error.other': 'The answer could not be completed.',
   'chat.stopped': 'Stopped.',
   'chat.inbox': 'Add to inbox',
-  'chat.inbox.hint': 'Keep this message for later in the vault’s inbox (📥 000-Inbox/Yakala)',
+  'chat.inbox.hint': 'Add to inbox (Ctrl+Enter): kept for later in the vault’s inbox (📥 000-Inbox/Yakala), not sent to the model',
   'chat.inbox.saved': 'Added to the inbox',
   'chat.inbox.failed': 'Could not add it to the inbox',
   'chat.end.length': 'The answer reached its length limit.',

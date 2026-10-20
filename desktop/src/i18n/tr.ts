@@ -287,7 +287,7 @@ export const tr: Record<keyof typeof en, string> = {
   'chat.error.other': 'Cevap tamamlanamadı.',
   'chat.stopped': 'Durduruldu.',
   'chat.inbox': 'Gelen kutusuna at',
-  'chat.inbox.hint': 'Bu mesajı sonrası için kasanın gelen kutusuna (📥 000-Inbox/Yakala) kaydet',
+  'chat.inbox.hint': 'Gelen kutusuna at (Ctrl+Enter): yazdığın modele gitmez, sonra bakmak için kasanın gelen kutusuna (📥 000-Inbox/Yakala) kaydedilir',
   'chat.inbox.saved': 'Gelen kutusuna eklendi',
   'chat.inbox.failed': 'Gelen kutusuna eklenemedi',
   'chat.end.length': 'Cevap uzunluk sınırına ulaştı.',
