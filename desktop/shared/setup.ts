@@ -24,6 +24,8 @@ export interface VoiceStatus {
   commands: VoiceCommands | null;
   /** What opens yakala while the microphone listens all the time. */
   wakePhrase: WakePhrase;
+  /** A recorded file can be written out (a Telegram voice note); false for a whisper.cpp setup from before 1.0.26, which `kur` again mends. */
+  readsFiles?: boolean;
 }
 
 /** The wake phrases there are: Pyn's name first, or last, or either of the two ('ikisi'). */

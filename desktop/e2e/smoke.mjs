@@ -256,7 +256,7 @@ const windowAlone = await page.evaluate(async () => {
   });
   return { node: typeof require + typeof process, bridge: Object.keys(window.cortex).sort(), fetched, image, opened: window.open('https://example.com/') === null };
 });
-check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,notes,office,on,settings,setup,vault');
+check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,notes,office,on,settings,setup,telegram,vault');
 check('it reaches nothing on the network: no request, no image', windowAlone.fetched === 'blocked' && windowAlone.image === 'blocked');
 check('and opens no window of its own', windowAlone.opened && app.windows().length === 1);
 
@@ -473,6 +473,7 @@ check(
   'and voice typing waits for the memory',
   process.platform !== 'win32' || (await shownSoon(page.locator('[data-settings-section="voice"] [data-setup-note="needs-engine"]'))),
 );
+check('and Telegram is not offered before there is a memory to write into', (await page.locator('[data-settings-section="telegram"]').count()) === 0);
 await page.waitForTimeout(400);
 await shoot('07b-settings.png');
 await page.locator('[data-settings-all-files]').click();

@@ -109,7 +109,11 @@ test('no circumflex: the Turkish is written the way the rest of the window write
 /* ------------------------------------------------------------------ */
 
 /** Speak the window's language themselves (`say(tr, en)`), and have their own tests. */
-const TURKISH_ALREADY = new Set([path.join('electron', 'services', 'setup.ts'), path.join('electron', 'services', 'officeTalk.ts')]);
+const TURKISH_ALREADY = new Set([
+  path.join('electron', 'services', 'setup.ts'),
+  path.join('electron', 'services', 'officeTalk.ts'),
+  path.join('electron', 'services', 'telegram.ts'),
+]);
 
 /**
  * Thrown, and never shown: each is caught where it is thrown, or answered to

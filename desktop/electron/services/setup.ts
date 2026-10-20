@@ -227,6 +227,8 @@ export function voiceOf(result: Record<string, unknown>): VoiceStatus | null {
     model: typeof result.model === 'string' ? result.model.replace(/\s*\([^)]*\)\s*$/, '') : null,
     commands: commandsOf(result),
     wakePhrase: WAKE_PHRASES.includes(result.uyandirma_sozu as WakePhrase) ? (result.uyandirma_sozu as WakePhrase) : 'pyn not al',
+    // An engine from before Telegram does not say: taken as able, so nothing is offered that it cannot use.
+    readsFiles: result.dosya_okur !== false,
   };
 }
 
@@ -291,7 +293,14 @@ function lastWords(text: string): string {
  */
 export function runPython(
   args: string[],
-  options: { cwd: string; timeout: number; onStep?: (step: string) => void; python?: { command: string; args: string[] } | null },
+  options: {
+    cwd: string;
+    timeout: number;
+    onStep?: (step: string) => void;
+    python?: { command: string; args: string[] } | null;
+    /** More of the environment, for this run only (the Telegram bot's key: services/telegram.ts). */
+    env?: Record<string, string>;
+  },
 ): Promise<Record<string, unknown>> {
   const python = options.python === undefined ? pythonOf() : options.python;
   if (!python) return Promise.reject(new Error(say('Python bulunamadı.', 'Python was not found.')));
@@ -300,7 +309,7 @@ export function runPython(
       cwd: options.cwd,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: childEnv({ PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' }),
+      env: childEnv({ PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1', ...options.env }),
     });
     let buffer = '';
     let written = '';

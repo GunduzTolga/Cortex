@@ -3,6 +3,7 @@ import type { AppLanguage } from './language';
 import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
 import type { OfficeApi } from './office';
 import type { SetupApi, SetupPush } from './setup';
+import type { TelegramApi } from './telegram';
 
 /**
  * Everything the window can ask of the main process: the object the preload
@@ -88,6 +89,8 @@ export interface CortexApi {
   setup: SetupApi;
   /** The office's live conversations, written by the model chosen in its settings (shared/office.ts). */
   office: OfficeApi;
+  /** Notes from the phone through the person's own Telegram bot (shared/telegram.ts). */
+  telegram: TelegramApi;
   on: {
     /** The vault changed on disk, or another vault was chosen: read the index again. */
     notesChanged(handler: () => void): () => void;
