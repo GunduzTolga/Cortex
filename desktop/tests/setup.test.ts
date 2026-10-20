@@ -69,7 +69,9 @@ test('the voice status is the engine’s, the model by its name only', () => {
     model: 'large-v3-turbo',
     commands: null,
     wakePhrase: 'pyn not al',
+    readsFiles: true,
   });
+  assert.equal(voiceOf({ kurulu: true, dosya_okur: false })?.readsFiles, false, 'a whisper.cpp setup that cannot open a voice note yet');
   assert.equal(voiceOf({ kurulu: true, uyandirma_sozu: 'hey pyn' })?.wakePhrase, 'hey pyn');
   assert.equal(voiceOf({ kurulu: true, uyandirma_sozu: 'ikisi' })?.wakePhrase, 'ikisi', 'both at once');
   assert.equal(voiceOf({ kurulu: true, uyandirma_sozu: 'merhaba' })?.wakePhrase, 'pyn not al', 'only a phrase there is');

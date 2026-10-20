@@ -7,6 +7,7 @@ import { useSaved } from '../store/saved';
 import { LanguageSwitch } from './LanguageSwitch';
 import { OfficeTalkSection } from './OfficeTalkSection';
 import { SetupSections } from './SetupSections';
+import { TelegramSection } from './TelegramSection';
 import { Row, SaveButton, Section } from './settingsParts';
 import { Button, Modal, Switch, inputClass } from './ui';
 
@@ -14,7 +15,8 @@ import { Button, Modal, Switch, inputClass } from './ui';
  * The app's settings, from the gear in the top bar or Ctrl+,: the language
  * and the vault, how the notes tree shows the vault, the AI tools' sign-ins,
  * and Cortex's own setup, its engine in the vault and voice typing
- * (SetupSections), so that nothing is installed from a terminal. Each change is the main process's to keep (electron/services/settings.ts)
+ * (SetupSections), so that nothing is installed from a terminal, and notes
+ * from the phone through Telegram (TelegramSection). Each change is the main process's to keep (electron/services/settings.ts)
  * and takes effect at once; there is nothing to save.
  */
 
@@ -71,6 +73,7 @@ export function SettingsDialog() {
         </Section>
         <OfficeTalkSection />
         <SetupSections open={open} />
+        <TelegramSection open={open} />
         <Section title={t('settings.onboarding')} data="onboarding">
           <div className="px-3">
             <Button

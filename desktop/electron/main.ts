@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerIpc, stopWatching, trustPagesWhere } from './ipc';
 import { readSettings } from './services/settings';
+import { startTelegram } from './services/telegram';
 import { startTray, startWithWindows, trayNotice } from './services/tray';
 
 const DEV_SERVER = process.env.VITE_DEV_SERVER_URL;
@@ -257,6 +258,8 @@ if (!app.requestSingleInstanceLock()) {
         },
       });
       startWithWindows(readSettings().background);
+      // Notes from the phone keep coming in while Cortex runs, in the notification area too.
+      startTelegram();
     }
 
     app.on('activate', () => {

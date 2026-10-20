@@ -7,6 +7,7 @@ import * as auth from './services/auth';
 import * as chat from './services/chat';
 import * as officeTalk from './services/officeTalk';
 import * as setup from './services/setup';
+import * as telegram from './services/telegram';
 import * as vaultNotes from './services/vaultNotes';
 
 /**
@@ -87,6 +88,8 @@ export function registerIpc(): void {
       vaultNotes.stopWatchingVault();
       // The CLIs were started in the vault left: ended, to start again in this one.
       chat.shutdownChats();
+      // The Telegram listener writes into the vault chosen now.
+      void telegram.restartTelegram();
       broadcast('notes:changed', null);
     }
     return status;
@@ -152,10 +155,17 @@ export function registerIpc(): void {
   handle('setup:installEngine', () => setup.installEngine());
   handle('setup:installVoice', () => setup.installVoice());
   handle('setup:voice', (patch) => setup.setVoice(patch));
+
+  // Notes from the phone through the person's own Telegram bot (services/telegram.ts): a key goes in and is never sent back.
+  handle('telegram:status', () => telegram.telegramStatus());
+  handle('telegram:connect', (key) => telegram.connectTelegram(key));
+  handle('telegram:pairAgain', () => telegram.pairTelegramAgain());
+  handle('telegram:disconnect', () => telegram.disconnectTelegram());
 }
 
 export function stopWatching(): void {
   vaultNotes.stopWatchingVault();
-  // No CLI outlives the app.
+  // No CLI outlives the app, nor the Telegram listener.
   chat.shutdownChats();
+  void telegram.stopTelegram();
 }

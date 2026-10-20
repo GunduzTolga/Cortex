@@ -78,6 +78,12 @@ const api: CortexApi = {
     models: (tool) => invoke('office:models', tool),
     talk: (request) => invoke('office:talk', request),
   },
+  telegram: {
+    status: () => invoke('telegram:status'),
+    connect: (key) => invoke('telegram:connect', key),
+    pairAgain: () => invoke('telegram:pairAgain'),
+    disconnect: () => invoke('telegram:disconnect'),
+  },
   setup: {
     status: () => invoke('setup:status'),
     installPython: () => invoke('setup:installPython'),

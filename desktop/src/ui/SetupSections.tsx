@@ -192,15 +192,16 @@ function VoiceSection({ status }: { status: SetupStatus }) {
           <Note data="phrase">{t(voice.wakePhrase === 'hey pyn' ? 'setup.voice.phrase.hey' : voice.wakePhrase === 'ikisi' ? 'setup.voice.phrase.ikisi' : 'setup.voice.phrase.notAl')}</Note>
           <Note data="engine">{t('setup.voice.engine', { engine: t(ENGINE_NAME[voice.engine]), model: voice.model ?? '' })}</Note>
           {voice.commands ? <VoiceCommandsBlock commands={voice.commands} busy={busy} /> : null}
+          {voice.readsFiles === false ? <Note data="update">{t('setup.voice.update.hint')}</Note> : null}
         </>
       ) : (
         <Note data="not-installed">{t('setup.voice.intro')}</Note>
       )}
-      {status.engine.installed && status.python && (status.job === 'voice' || (voice && !voice.installed)) ? (
+      {status.engine.installed && status.python && (status.job === 'voice' || (voice && (!voice.installed || voice.readsFiles === false))) ? (
         <div className="mt-2 px-3">
           <Button tone="ghost" disabled={busy} onClick={() => void run('voice')} data-setup-voice>
             <Mic size={13} />
-            {t('setup.voice.install')}
+            {t(voice?.installed ? 'setup.voice.update' : 'setup.voice.install')}
           </Button>
         </div>
       ) : null}

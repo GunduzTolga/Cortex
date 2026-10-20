@@ -45,6 +45,9 @@ WORKER = 'isci.py'
 ENGINES = ('cuda', 'vulkan', 'islemci')
 # Recording and the wake word, for every engine.
 BASE_PACKAGES = ('sounddevice>=0.5', 'numpy', 'vosk>=0.3.45')
+# Reading a recorded file (a Telegram voice note is Ogg Opus): faster-whisper brings PyAV itself,
+# whisper.cpp's environment needs it on its own.
+DECODE_PACKAGES = ('av',)
 # Writing on CUDA or on the processor; the Vulkan engine is whisper.cpp and needs neither.
 FASTER_PACKAGES = ('faster-whisper>=1.2',)
 # Only with an NVIDIA card: CUDA's own libraries, from pip, so no CUDA install is needed.
@@ -548,7 +551,7 @@ def ggml_model(state):
 
 def packages_for(engine):
     if engine == 'vulkan':
-        return list(BASE_PACKAGES)
+        return list(BASE_PACKAGES) + list(DECODE_PACKAGES)
     return list(FASTER_PACKAGES) + list(BASE_PACKAGES) + (list(NVIDIA_PACKAGES) if engine == 'cuda' else [])
 
 
@@ -720,6 +723,16 @@ def install(state, say=print, run=subprocess.run, download=_download, which=shut
     return {'status': 'kuruldu', 'klasor': str(folder), 'motor': plan['motor'], 'ekran_karti': plan['ekran_karti'], 'model': model[0]}
 
 
+def reads_files(state):
+    """Whether the voice environment can open a recorded file (a Telegram voice note): PyAV in it, which
+    faster-whisper brings and whisper.cpp's environment has only from 1.0.26 on (`kur` again adds it)."""
+    venv = ses_dir(state) / 'venv'
+    for site in (venv / 'Lib' / 'site-packages',) + tuple((venv / 'lib').glob('python3*/site-packages')):
+        if (site / 'av' / '__init__.py').is_file():
+            return True
+    return shutil.which('ffmpeg') is not None
+
+
 def status(state):
     marker = {}
     try:
@@ -731,7 +744,8 @@ def status(state):
             'uyandirma_sozu': config['uyandirma_sozu'], 'otomatik_dinle': bool(config['otomatik_dinle']),
             'model': marker.get('model'), 'ekran_karti': marker.get('ekran_karti'),
             'motor': engine_in_use(state, config), 'klasor': str(ses_dir(state)),
-            'komutlar': config['komutlar'], 'adla_kaydet': list(config.get('adla_kaydet') or [])}
+            'komutlar': config['komutlar'], 'adla_kaydet': list(config.get('adla_kaydet') or []),
+            'dosya_okur': installed(state) and reads_files(state)}
 
 
 def uninstall(state):
@@ -740,6 +754,38 @@ def uninstall(state):
     existed = folder.exists()
     shutil.rmtree(folder, ignore_errors=True)
     return {'status': 'kaldirildi' if existed else 'zaten-yok', 'klasor': str(folder)}
+
+
+def transcribe_file(state, path, run=subprocess.run, timeout=1800):
+    """(text, None) for a recorded file written by the helper, or (None, why it could not be).
+
+    The helper starts for this one file and loads the model the dictation uses; it runs beside the
+    listener's own helper, never through it.
+    """
+    if not installed(state):
+        return None, 'Sesle yazma kurulu değil (Ayarlar → Sesle yazma).'
+    try:
+        done = run(worker_command(state, '--dosya', str(path)), capture_output=True, text=True, encoding='utf-8',
+                   errors='replace', env=worker_env(state), timeout=timeout, creationflags=NO_WINDOW)
+    except subprocess.TimeoutExpired:
+        return None, 'Yazıya çevirmek çok uzun sürdü.'
+    except OSError as exc:
+        return None, 'Ses yardımcısı başlamadı: ' + str(exc)[:200]
+    answer = None
+    for line in reversed((done.stdout or '').strip().splitlines()):
+        try:
+            answer = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(answer, dict):
+            break
+        answer = None
+    if done.returncode or not answer:
+        lines = [line.strip() for line in (done.stderr or '').splitlines() if line.strip()]
+        return None, (lines[-1] if lines else 'Ses yardımcısı bir hatayla kapandı.')[:300]
+    if answer.get('hata'):
+        return None, str(answer['hata'])[:300]
+    return clean_spoken(str(answer.get('metin') or ''), load_config(state).get('ipucu')), None
 
 
 def restart_listener(state):
@@ -1230,6 +1276,61 @@ def transcribe(model, audio, config, lock):
         segments, _info = model.transcribe(audio, language=config['dil'] or None, vad_filter=True, beam_size=5,
                                            initial_prompt=config.get('ipucu') or None, condition_on_previous_text=False)
         return ' '.join(s.text.strip() for s in segments).strip()
+
+
+def _decode_pyav(path):
+    import av
+    import numpy as np
+    resampler = av.AudioResampler(format='s16', layout='mono', rate=RATE)
+    chunks = []
+
+    def keep(frames):
+        for frame in frames if isinstance(frames, list) else [frames] if frames is not None else []:
+            chunks.append(frame.to_ndarray().reshape(-1))
+    with av.open(str(path)) as container:
+        for frame in container.decode(audio=0):
+            keep(resampler.resample(frame))
+        keep(resampler.resample(None))
+    pcm = np.concatenate(chunks) if chunks else np.zeros(0, dtype='int16')
+    return pcm.astype('float32') / 32768.0
+
+
+def decode_file(path):
+    """A recorded file as 16 kHz mono samples: with PyAV (faster-whisper's own), else ffmpeg on the PATH."""
+    import numpy as np
+    try:
+        return _decode_pyav(path)
+    except ImportError:
+        pass
+    import shutil
+    import subprocess
+    ffmpeg = shutil.which('ffmpeg')
+    if not ffmpeg:
+        raise RuntimeError('Ses dosyasını açacak çözücü yok: Ayarlar → Sesle yazma kurulumunu yeniden çalıştır (beyin.py ses kur).')
+    done = subprocess.run([ffmpeg, '-nostdin', '-v', 'error', '-i', str(path), '-f', 's16le', '-ac', '1', '-ar', str(RATE), '-'],
+                          capture_output=True, timeout=600, creationflags=0x08000000 if os.name == 'nt' else 0)
+    if done.returncode:
+        raise RuntimeError('ffmpeg dosyayı açamadı: ' + done.stderr.decode('utf-8', 'replace').strip()[-300:])
+    return np.frombuffer(done.stdout, dtype='<i2').astype('float32') / 32768.0
+
+
+def transcribe_path(state, config, path):
+    """`--dosya`: one recorded file written out, as one JSON line."""
+    try:
+        audio = decode_file(path)
+    except Exception as exc:
+        out(hata=str(exc)[:400])
+        return 0
+    if not len(audio):
+        out(metin='', model=None)
+        return 0
+    model, what = load_model(state, config)
+    try:
+        text = transcribe(model, audio, config, threading.Lock())
+    finally:
+        release(model)
+    out(metin=text, model=what, sure_sn=round(len(audio) / RATE, 1))
+    return 0
 
 
 # The wake listener's microphone: no sound for this long and it is opened again. Nothing at all
@@ -1751,6 +1852,7 @@ def main(argv=None):
     parser.add_argument('--indir', action='store_true')
     parser.add_argument('--dene', type=float)
     parser.add_argument('--dene-uyandirma', type=float)
+    parser.add_argument('--dosya')
     args = parser.parse_args(argv)
     global ses
     sys.path.insert(0, args.scripts)
@@ -1778,6 +1880,8 @@ def main(argv=None):
         return 0
     if args.dene_uyandirma:
         return trial_wake(state, config, args.dene_uyandirma)
+    if args.dosya:
+        return transcribe_path(state, config, args.dosya)
     return serve(state, config)
 
 

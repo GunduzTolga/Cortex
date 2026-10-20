@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.25" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.25-E8B23A">
+  <img alt="Sürüm 1.0.26" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.26-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
@@ -41,6 +41,7 @@
 - [Masaüstü uygulaması](#masaüstü-uygulaması)
 - [Not al ve sesle yazma](#not-al-ve-sesle-yazma)
 - [Yakala: tek tuşla beyne at](#yakala-tek-tuşla-beyne-at)
+- [Telegram: telefondan gelen kutusuna](#telegram-telefondan-gelen-kutusuna)
 - [Desteklenen istemciler](#desteklenen-istemciler)
 - [Gizlilik ve güvenlik](#gizlilik-ve-güvenlik)
 - [Terminalden kurulum (macOS, Linux, geliştiriciler)](#terminalden-kurulum-macos-linux-geliştiriciler)
@@ -74,6 +75,7 @@ Cortex'in içinde bir düşünme ortağı da gelir: **Pyn**. Seni tanır, fikirl
 | **Masaüstü uygulaması** | Terminal gerektirmeden kurulum; Pyn'le sohbet, notlar, not grafiği ve Pyn'in ekibinin çalıştığı **Beyin** ekranı. |
 | **Not al** | Her uygulamada `Ctrl+Alt+C` ya da "Hey Pyn" deyince açılan pencere: yaz ya da konuş, "Pyn, kaydet" de. Ses bilgisayardan çıkmaz. |
 | **Yakala** | Video, makale, tweet, ekran görüntüsü ya da tarayıcıdaki sayfa tek tuşla kasaya; asistan metni çıkarıp derslerini notlara bağlar. |
+| **Telegram** | Telefondan kendi botuna gönderdiğin yazı, bağlantı, fotoğraf ya da sesli not gelen kutusuna düşer; bilgisayar kapalıyken gönderdiklerin açılınca gelir. |
 | **Gizlilik** | Notlar ve arama indeksi senin bilgisayarında. Özel notlar ve adında "Şifreler", "Özel" gibi sözcükler geçen klasörler otomatik bağlama girmez. |
 
 ## Görüntüler
@@ -154,6 +156,21 @@ Video, tweet, makale, mail ya da dosyayı gördüğün yerde yakala; asistanına
 
 [Ayrıntılar](docs/v3/YAKALA.md)
 
+## Telegram: telefondan gelen kutusuna
+
+Telefondan kendi Telegram botuna gönderdiğin her şey kasanın gelen kutusuna (`📥 000-Inbox/Yakala/`) düşer; asistanın onları diğer yakaladıkların gibi işler.
+
+1. Telegram'da [@BotFather](https://t.me/BotFather)'a `/newbot` yaz, bota bir ad ver.
+2. Verdiği anahtarı Ayarlar → **Telegram**'a yapıştır, **Bağla**'ya bas.
+3. Çıkan **Telegram'da aç** bağlantısını telefonda aç. Bot artık yalnız seni dinler.
+
+- **Yazı** not olur, **bağlantı** kaynak kartı olur, **fotoğraf** ve **dosya** kartın eki olur, **iletilen mesajın** kimden geldiği yazar.
+- **Sesli not** bu bilgisayardaki Whisper'la yazıya çevrilir; ses başka bir yere gitmez.
+- **Bilgisayar kapalıyken** gönderdiklerin açılınca gelir. Telegram mesajları 24 saat bekletir; Cortex daha eskilerini de sohbetten alır, alamadığını sana söyler.
+- Anahtar Windows'un şifreli deposunda durur, kasaya yazılmaz. Bota giden mesajlar Telegram'ın sunucularından geçer; kasandan hiçbir şey geri gönderilmez.
+
+[Ayrıntılar](docs/v3/TELEGRAM.md)
+
 ## Desteklenen istemciler
 
 Hafızayı model değil istemci taşır. Bu yüzden ücretsiz, uygun fiyatlı ya da yerel modellerin hepsi, tam hafızalı bir istemcinin içinden kullanılabilir.
@@ -192,6 +209,7 @@ Asıl akış şudur: yazdığın mesajla eşleşen notlar asistanının bağlam�
 - **Sır süzgeci:** `preferences --secret-filter on`, asistanın yazdığı notlarda, makbuzlarda ve görevlerde API anahtarı ve parola gibi sırları maskeler. Varsayılan kapalıdır.
 - **Beyin'in canlı konuşmaları:** Claude Code'la açarsan son notlarının başlıkları ve kısa parçaları ona gider; LM Studio ya da Ollama'da bilgisayardan çıkmaz. Varsayılan kapalıdır.
 - **Yakalanan içerik:** dışarıdan gelen metin veri olarak, güvenilmeyen kaynak işaretiyle tutulur; yalnız herkese açık `http(s)` adresleri getirilir, yerel ve özel ağ adresleri reddedilir. [Ayrıntılar](docs/v3/YAKALA.md#güvenlik)
+- **Telegram:** isteğe bağlıdır. Bota gönderdiğin mesajlar Telegram'ın sunucularından geçer (bot sohbetleri uçtan uca şifreli değildir); Cortex kasandan hiçbir şeyi Telegram'a göndermez, sesli notları bu bilgisayarda yazıya çevirir. [Ayrıntılar](docs/v3/TELEGRAM.md#gizlilik)
 
 Arama indeksi kasanın dışında, yalnız senin hesabının okuyabildiği bir klasörde durur (Windows: `%LOCALAPPDATA%\beyin-v3\…`, macOS: `~/Library/Application Support/beyin-v3/…`, Linux: `~/.local/state/beyin-v3/…`) ve notlarının bir kopyasını içerir. Kasayı herkese açık bir git deposuna koyacaksan `.beyin-runtime.json` dosyasını dışarıda bırak: bu makinedeki tam yolu içerir ([birden çok makine](docs/v3/MULTI-MACHINE.md)).
 
@@ -277,6 +295,7 @@ Güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Paket önce do�
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.26](docs/v3/releases/1.0.26.md) | Telegram: telefondan kendi botuna gönderdiğin yazı, bağlantı, fotoğraf ve sesli not gelen kutusuna düşer; bilgisayar kapalıyken gönderdiklerin açılınca gelir, 24 saatten eskiler de. |
 | [1.0.25](docs/v3/releases/1.0.25.md) | Öncülün 3.10 ve 3.11 motoru: BOM ve hassas klasör gizliliği, uzun Kurallar.md, daha iyi arama, Kiro, `scheduled-check`, `triage`; Yakala'da açık sayfanın bağlantısı, pano tazeliği, videonun konuşulan dili. |
 | [1.0.24](docs/v3/releases/1.0.24.md) | İlk açılışta sesli uyandırma çalışmıyordu (kulaklık hazır değilken mikrofon açılamayınca kapanıyordu): artık yeniden deniyor, sonradan bağlanan kulaklığı da buluyor. |
 | [1.0.23](docs/v3/releases/1.0.23.md) | Uyandırma sözü "İkisi de" olabilir; "panodaki resmi ekle" son kopyalanan görüntüyü nota ekler. |
@@ -306,7 +325,7 @@ Güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Paket önce do�
 
 ## Geliştiriciler
 
-[Kaynak formatı](docs/v3/MARKDOWN.md) · [Runtime](docs/v3/RUNTIME.md) · [Semantik test sözleşmesi](docs/v3/SEMANTIC-TEST-CONTRACT.md) · [Sürüm paketi ve güncelleyici](docs/v3/UPDATE.md) · [Birden çok makine](docs/v3/MULTI-MACHINE.md) · [Tercihler](docs/v3/PREFERENCES.md) · [Yakala](docs/v3/YAKALA.md) · [OpenCode](docs/v3/OPENCODE.md) · [Hermes](docs/v3/HERMES.md) · [OMP](docs/v3/OMP.md) · [Kiro](docs/v3/KIRO.md) · [Yakalama sunucusu](docs/v3/INGEST-SERVER.md) · [Masaüstü uygulaması](desktop/README.md)
+[Kaynak formatı](docs/v3/MARKDOWN.md) · [Runtime](docs/v3/RUNTIME.md) · [Semantik test sözleşmesi](docs/v3/SEMANTIC-TEST-CONTRACT.md) · [Sürüm paketi ve güncelleyici](docs/v3/UPDATE.md) · [Birden çok makine](docs/v3/MULTI-MACHINE.md) · [Tercihler](docs/v3/PREFERENCES.md) · [Yakala](docs/v3/YAKALA.md) · [Telegram](docs/v3/TELEGRAM.md) · [OpenCode](docs/v3/OPENCODE.md) · [Hermes](docs/v3/HERMES.md) · [OMP](docs/v3/OMP.md) · [Kiro](docs/v3/KIRO.md) · [Yakalama sunucusu](docs/v3/INGEST-SERVER.md) · [Masaüstü uygulaması](desktop/README.md)
 
 Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama ya da her soruda doğru hatırlama sözü vermez. Motor her sürümde Windows, macOS ve Linux'ta 1.700'ü aşkın otomatik testle ve anlamsal senaryolarla doğrulanır; gerçek istemci kontrolleri [ayrı raporlanır](docs/v3/README.md).
 
@@ -317,6 +336,7 @@ Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama ya da her s
 - **Windows desktop app:** a no-terminal setup (it brings Python and installs everything from its first-run screen), chat with your own AI tool inside your notes, a note editor and graph, and *Beyin*, a living pixel-art office inside a brain.
 - **Take a note anywhere:** `Ctrl+Alt+C` or saying "Hey Pyn" opens a small window; type or dictate, then say "Pyn, kaydet". Speech is transcribed locally by Whisper on your GPU and never leaves the computer.
 - **Capture:** save the open browser page, a screenshot, a video or an article with one key; your assistant extracts the text and links the lessons into your notes.
+- **From your phone:** send a text, a link, a photo or a voice note to your own Telegram bot and it lands in the vault's inbox; voice notes are transcribed on your computer, and what you send while it is off arrives when it is on again.
 - **Privacy:** notes marked `visibility: private` and folders named like "Private", "Secret" or "Passwords" never enter automatic context.
 
 The interface and documentation are in Turkish. Download the Windows installer from the [latest release](https://github.com/GunduzTolga/Cortex/releases/latest); on macOS and Linux, install the engine with `python3 scripts/install_v3.py --vault <folder>` from the release package. The installer is not code-signed yet, so Windows SmartScreen may ask you to confirm (**More info → Run anyway**).

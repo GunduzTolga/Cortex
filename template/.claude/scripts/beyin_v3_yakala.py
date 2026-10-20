@@ -335,8 +335,12 @@ def _unique(path):
     raise ValueError('Ayni adla cok fazla dosya var: ' + path.name)
 
 
-def capture(vault, url=None, text=None, files=(), why='', app=None, title=None, tool='masaustu'):
-    """Write one card; a repeated URL only gains the new reason. No network."""
+def capture(vault, url=None, text=None, files=(), why='', app=None, title=None, tool='masaustu', extra=None):
+    """Write one card; a repeated URL only gains the new reason. No network.
+
+    `extra`: more fields for a new card's frontmatter (Telegram's message number and when it was
+    sent); never one of the card's own.
+    """
     vault = Path(vault)
     url = (url or '').strip() or None
     text = (text or '').strip() or None
@@ -382,6 +386,8 @@ def capture(vault, url=None, text=None, files=(), why='', app=None, title=None, 
             'url': url, 'yakalandi': stamp.isoformat(timespec='seconds'), 'arac': tool, 'uygulama': app,
             # Clipboard text, a picture or a file on the card may be anything the person copied: private.
             'visibility': 'private' if kind in ('mail', 'metin', 'dosya') or (os.name == 'nt' and (text or files)) else 'internal'}
+    for key, value in (extra or {}).items():
+        meta.setdefault(key, value)
     body = ['# ' + _first_line(title, 160), '', '## Neden', '', why or '_(not yok)_']
     if url:
         body += ['', '## Kaynak', '', url]
