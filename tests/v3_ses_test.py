@@ -324,7 +324,8 @@ class SetupTest(unittest.TestCase):
         (system / 'System32' / 'vulkan-1.dll').write_bytes(b'')
         self.assertEqual(ses.engine_for(which={}.get, run=run, system=system), 'vulkan')
         plan = ses.install_plan(self.state, which={}.get, run=run, system=system)
-        self.assertEqual(plan['paketler'], list(ses.BASE_PACKAGES), 'whisper.cpp writes: no faster-whisper, no CUDA')
+        self.assertEqual(plan['paketler'], list(ses.BASE_PACKAGES) + list(ses.DECODE_PACKAGES),
+                         'whisper.cpp writes: no faster-whisper, no CUDA; PyAV only to open a recorded file')
         cards[:] = ['Intel(R) Arc(TM) A770 Graphics']
         self.assertEqual(ses.engine_for(which={}.get, run=run, system=system), 'vulkan')
         cards[:] = ['Intel(R) UHD Graphics 770', 'Intel(R) Iris(R) Xe Graphics']
