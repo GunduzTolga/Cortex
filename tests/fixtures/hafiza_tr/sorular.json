@@ -1,0 +1,632 @@
+[
+  {
+    "id": "q01",
+    "soru": "paddle ne kadar komisyon kesiyordu",
+    "tur": "anahtar_kelime",
+    "gerekli": [
+      "🏰 300-Projects/Cortex Lansmanı/Fiyatlandırma Kararı.md"
+    ],
+    "yasak": [],
+    "aciklama": "Paddle komisyonu (%5 + $0,50) yalnızca güncel fiyatlandırma kararında geçiyor."
+  },
+  {
+    "id": "q02",
+    "soru": "BATNA tam olarak neydi, kuzey pazarlığında benimki ne idi",
+    "tur": "anahtar_kelime",
+    "gerekli": [
+      "knowledge/concepts/batna.md"
+    ],
+    "yasak": [],
+    "aciklama": "Tanım ve Kuzey örneği (Ege Gıda işi, 380.000 TL alt sınırı) kavram notunda; Pazarlık Notları sadece link veriyor."
+  },
+  {
+    "id": "q03",
+    "soru": "asyncio'da gather mı kullanayım TaskGroup mu",
+    "tur": "anahtar_kelime",
+    "gerekli": [
+      "🧠 500-Knowledge/Yazılım/Python asyncio Notları.md"
+    ],
+    "yasak": [],
+    "aciklama": "Doğrudan teknik terim eşleşmesi; cevap asyncio notunda (3.11+ ise TaskGroup)."
+  },
+  {
+    "id": "q04",
+    "soru": "podmic hangi ses kartına bağlı",
+    "tur": "anahtar_kelime",
+    "gerekli": [
+      "🛠️ 600-Arsenal/Kayıt Ekipmanı.md"
+    ],
+    "yasak": [],
+    "aciklama": "Ürün adı ile arama; Rode PodMic → Focusrite Scarlett Solo bilgisi kayıt ekipmanı notunda."
+  },
+  {
+    "id": "q05",
+    "soru": "pyn'in rengini hangi tonda seçmiştik? hex kodu lazım",
+    "tur": "cekim_eki",
+    "gerekli": [
+      "🏰 300-Projects/Cortex Lansmanı/Pyn Maskot Brief.md"
+    ],
+    "yasak": [],
+    "aciklama": "Not 'Ana renk amber, #E8A33D' diyor; soru 'rengini' (iyelik+belirtme) çekimli formda."
+  },
+  {
+    "id": "q06",
+    "soru": "tezimdeki soru setini kaç soruya çıkarmam gerekiyordu",
+    "tur": "cekim_eki",
+    "gerekli": [
+      "🏰 300-Projects/Yüksek Lisans Tezi/Danışman Görüşmesi 2026-10-02.md"
+    ],
+    "yasak": [],
+    "aciklama": "Cevap (en az 200) danışman görüşmesinde. 'tezimdeki' çekimli; 8 Ekim günlüğündeki 40→60 bilgisi cevap değil."
+  },
+  {
+    "id": "q07",
+    "soru": "çorbaya limonu ne zaman koyuyorduk",
+    "tur": "cekim_eki",
+    "gerekli": [
+      "🧠 500-Knowledge/Yemek/Mercimek Çorbası.md"
+    ],
+    "yasak": [],
+    "aciklama": "Notta 'Mercimek Çorbası' / 'Limon ... tabağa alınca sıkılır'; soruda 'çorbaya', 'limonu' çekimli."
+  },
+  {
+    "id": "q08",
+    "soru": "squatta kaç kiloya çıkmıştım",
+    "tur": "cekim_eki",
+    "gerekli": [
+      "🧠 500-Knowledge/Sağlık/Antrenman Programı.md"
+    ],
+    "yasak": [],
+    "aciklama": "Programda 'Squat: 80 kg'; soruda 'squatta' (bulunma eki). 5 Ekim günlüğündeki 77,5 kg eski değer."
+  },
+  {
+    "id": "q09",
+    "soru": "kemal ustanın ekibindeki elektrikçinin adı neydi",
+    "tur": "cekim_eki",
+    "gerekli": [
+      "notes/kisiler/kemal-sahin.md"
+    ],
+    "yasak": [],
+    "aciklama": "Notta 'Kemal Usta' ve 'elektrik işlerini ekibinden Serkan yapıyor'; soruda 'ustanın', 'ekibindeki', 'elektrikçinin'."
+  },
+  {
+    "id": "q10",
+    "soru": "kuzey lojistikten toplamda ne kadar para istemiştik",
+    "tur": "esanlamli",
+    "gerekli": [
+      "🏰 300-Projects/Kuzey Lojistik Mobil/Fiyat Teklifi.md"
+    ],
+    "yasak": [],
+    "aciklama": "Notta 'teklif', 'efor', '420.000 TL + KDV', pazarlık sonrası 399.000 TL; soru 'ne kadar para istemiştik' diyor."
+  },
+  {
+    "id": "q11",
+    "soru": "evin yenilenmesi için ne kadar para ayırmıştık",
+    "tur": "esanlamli",
+    "gerekli": [
+      "🏰 300-Projects/Ev Tadilatı/Tadilat Bütçesi.md"
+    ],
+    "yasak": [],
+    "aciklama": "Notta 'Tadilat Bütçesi: 385.000 TL'; soruda 'yenilenmesi' ve 'ayırdığımız para' eş anlamlıları."
+  },
+  {
+    "id": "q12",
+    "soru": "spora haftada kaç gün gidiyorum ben",
+    "tur": "esanlamli",
+    "gerekli": [
+      "🧠 500-Knowledge/Sağlık/Antrenman Programı.md"
+    ],
+    "yasak": [],
+    "aciklama": "Notta 'antrenman', 'salon', 'haftada 3 gün'; soruda 'spora gitmek'."
+  },
+  {
+    "id": "q13",
+    "soru": "muhasebeciye ayda kaç para ödüyoruz",
+    "tur": "esanlamli",
+    "gerekli": [
+      "notes/kisiler/hakan-demir.md"
+    ],
+    "yasak": [],
+    "aciklama": "Notta 'mali müşavir', 'aylık ücret 3.500 TL + KDV'; 'muhasebeci' kelimesi hiç geçmiyor."
+  },
+  {
+    "id": "q14",
+    "soru": "gece daha iyi uyumak için hangi hapı içiyordum",
+    "tur": "esanlamli",
+    "gerekli": [
+      "🧠 500-Knowledge/Sağlık/Uyku Düzeni.md"
+    ],
+    "yasak": [],
+    "aciklama": "Notta 'takviye: magnezyum bisglisinat'; soruda 'hap' ve 'içmek'."
+  },
+  {
+    "id": "q15",
+    "soru": "sifre yoneticisi olarak ne kullaniyorduk",
+    "tur": "yazim_hatasi_ascii",
+    "gerekli": [
+      "🛠️ 600-Arsenal/Araç Kutusu.md"
+    ],
+    "yasak": [
+      "🛠️ 600-Arsenal/Ev Ağı ve Cihazlar.md",
+      "🧠 500-Knowledge/Sağlık/Kan Tahlili Ekim 2026.md",
+      "🔐 Kasa/Banka ve Şifre İpuçları.md",
+      "🔐 Kasa/Kimlik ve Poliçe Bilgileri.md"
+    ],
+    "aciklama": "ASCII yazım; notta 'Parola yöneticisi: Bitwarden'. 🔐 Kasa notu da Bitwarden ve şifre geçiriyor ama asla dönmemeli; Ev Ağı notu private."
+  },
+  {
+    "id": "q16",
+    "soru": "hetzner sunucu aylik kac euro tutuyo",
+    "tur": "yazim_hatasi_ascii",
+    "gerekli": [
+      "🛠️ 600-Arsenal/Sunucu ve Hosting.md"
+    ],
+    "yasak": [],
+    "aciklama": "ASCII + ağız yazımı ('tutuyo'); cevap €4,51."
+  },
+  {
+    "id": "q17",
+    "soru": "yuksek lisans tezimin basligi neydi tam olarak",
+    "tur": "yazim_hatasi_ascii",
+    "gerekli": [
+      "🏰 300-Projects/Yüksek Lisans Tezi/Tez Planı.md"
+    ],
+    "yasak": [],
+    "aciklama": "Türkçe karaktersiz yazım; tam başlık sadece Tez Planı'nda."
+  },
+  {
+    "id": "q18",
+    "soru": "kuzey lojistk uygulamasi hangi frameworkle yaziliyo",
+    "tur": "yazim_hatasi_ascii",
+    "gerekli": [
+      "🏰 300-Projects/Kuzey Lojistik Mobil/Teknik Mimari.md"
+    ],
+    "yasak": [],
+    "aciklama": "'lojistk' yazım hatası + ASCII; cevap React Native + Expo (Teknik Mimari)."
+  },
+  {
+    "id": "q19",
+    "soru": "elifin dogum gunu ne zman",
+    "tur": "yazim_hatasi_ascii",
+    "gerekli": [
+      "notes/kisiler/elif-gunduz.md"
+    ],
+    "yasak": [],
+    "aciklama": "ASCII + 'ne zman' yazım hatası; doğum günü (3 Aralık) sadece kişi notunda. Inbox'taki hediye notu tarih içermiyor."
+  },
+  {
+    "id": "q20",
+    "soru": "pyn çizimlerinin son teslim tarihi ne zaman",
+    "tur": "ingilizce_turkce",
+    "gerekli": [
+      "🏰 300-Projects/Cortex Lansmanı/Pyn Maskot Brief.md"
+    ],
+    "yasak": [],
+    "aciklama": "Notta İngilizce 'Deadline: 30 Ekim 2026'; soru Türkçe 'son teslim tarihi'."
+  },
+  {
+    "id": "q21",
+    "soru": "yurtdışı müşteriye fatura keserken hangi günün kurunu kullanıyoruz",
+    "tur": "ingilizce_turkce",
+    "gerekli": [
+      "🧠 500-Knowledge/Finans/Yurtdışı Fatura ve Döviz.md"
+    ],
+    "yasak": [],
+    "aciklama": "Not gövdesi 'invoice', 'client' diyor; soru 'fatura', 'müşteri'. Cevap: invoice tarihinden bir önceki iş günü TCMB döviz alış kuru."
+  },
+  {
+    "id": "q22",
+    "soru": "what's the crash rate in the cortex beta?",
+    "tur": "ingilizce_turkce",
+    "gerekli": [
+      "🏰 300-Projects/Cortex Lansmanı/Beta Geri Bildirimleri.md"
+    ],
+    "yasak": [],
+    "aciklama": "İngilizce soru; notta Türkçe 'Çökme oranı %1,8'."
+  },
+  {
+    "id": "q23",
+    "soru": "how do I turn on WAL mode in sqlite again",
+    "tur": "ingilizce_turkce",
+    "gerekli": [
+      "🧠 500-Knowledge/Yazılım/SQLite FTS5 ve WAL.md"
+    ],
+    "yasak": [],
+    "aciklama": "İngilizce soru, Türkçe not (PRAGMA journal_mode=WAL)."
+  },
+  {
+    "id": "q24",
+    "soru": "ahmet senkronizasyon kodunu yeniden düzenlemeyi bitirdi mi",
+    "tur": "ingilizce_turkce",
+    "gerekli": [
+      "daily/2026-10-14.md"
+    ],
+    "yasak": [],
+    "aciklama": "Günlükte 'sync modülünün refactor'unu bitirdi (PR #212)'; soru tamamen Türkçe karşılıklarla."
+  },
+  {
+    "id": "q25",
+    "soru": "elif'in neye alerjisi vardı",
+    "tur": "kisi",
+    "gerekli": [
+      "notes/kisiler/elif-gunduz.md"
+    ],
+    "yasak": [],
+    "aciklama": "Kivi alerjisi sadece Elif'in kişi notunda."
+  },
+  {
+    "id": "q26",
+    "soru": "hakan bey evrakları ayın kaçına kadar istiyordu",
+    "tur": "kisi",
+    "gerekli": [
+      "notes/kisiler/hakan-demir.md"
+    ],
+    "yasak": [],
+    "aciklama": "'Her ayın 10'una kadar' sadece mali müşavir kişi notunda."
+  },
+  {
+    "id": "q27",
+    "soru": "murat hocanın ofis saatleri ne zamandı",
+    "tur": "kisi",
+    "gerekli": [
+      "notes/kisiler/murat-ozturk.md"
+    ],
+    "yasak": [],
+    "aciklama": "Salı 14:00–16:00 sadece danışman kişi notunda."
+  },
+  {
+    "id": "q28",
+    "soru": "kuzey'de ek ücret konuşacağım, bütçeyi kim onaylıyordu",
+    "tur": "kisi",
+    "gerekli": [
+      "notes/kisiler/ahmet-kaya.md"
+    ],
+    "yasak": [],
+    "aciklama": "Bütçe onayının CFO Levent Aksoy'da olduğu sadece Ahmet Kaya kişi notunda."
+  },
+  {
+    "id": "q29",
+    "soru": "ahmet yılmaz hangi şehirde yaşıyordu",
+    "tur": "kisi",
+    "gerekli": [
+      "notes/kisiler/ahmet-yilmaz.md"
+    ],
+    "yasak": [
+      "notes/kisiler/ahmet-kaya.md"
+    ],
+    "aciklama": "Aynı adlı iki kişi: Ahmet Yılmaz (Ankara, ekip) vs Ahmet Kaya (müşteri, Gebze). Yanlış Ahmet dönmemeli."
+  },
+  {
+    "id": "q30",
+    "soru": "dün neler yaptım",
+    "tur": "zaman",
+    "gerekli": [
+      "daily/2026-10-20.md"
+    ],
+    "yasak": [],
+    "aciklama": "Bugün 2026-10-21 kabul edilir; dün = 20 Ekim günlüğü."
+  },
+  {
+    "id": "q31",
+    "soru": "geçen cuma zeynep'ten ne gelmişti",
+    "tur": "zaman",
+    "gerekli": [
+      "daily/2026-10-16.md"
+    ],
+    "yasak": [],
+    "aciklama": "2026-10-21 Çarşamba; geçen Cuma = 16 Ekim. İlk Pyn eskizleri sadece o günün günlüğünde."
+  },
+  {
+    "id": "q32",
+    "soru": "cortex hangi gün çıkıyor, product hunt'a saat kaçta giriyoruz",
+    "tur": "zaman",
+    "gerekli": [
+      "🏰 300-Projects/Cortex Lansmanı/Lansman Planı.md"
+    ],
+    "yasak": [],
+    "aciklama": "Lansman günü (19 Kasım) ve Product Hunt saati (11:01) birlikte sadece Lansman Planı'nda."
+  },
+  {
+    "id": "q33",
+    "soru": "kuzey lojistikle bir sonraki toplantı ne zaman",
+    "tur": "zaman",
+    "gerekli": [
+      "🏰 300-Projects/Kuzey Lojistik Mobil/Sprint Review 2026-10-09.md"
+    ],
+    "yasak": [],
+    "aciklama": "23 Ekim Cuma 14:00 sadece Sprint Review notunun sonunda."
+  },
+  {
+    "id": "q34",
+    "soru": "cortex pro aylık kaç lira olacaktı, ömür boyu lisans var mıydı",
+    "tur": "karar_degisti",
+    "gerekli": [
+      "🏰 300-Projects/Cortex Lansmanı/Fiyatlandırma Kararı.md"
+    ],
+    "yasak": [
+      "📦 900-Archive/Cortex Fiyatlandırma v1.md"
+    ],
+    "aciklama": "v1 (arşiv): 99 TL + ömür boyu 1.499 TL. v2 (güncel): 149 TL, ömür boyu lisans kaldırıldı. Eski karar dönmemeli."
+  },
+  {
+    "id": "q35",
+    "soru": "mutfak tezgahı granit olacaktı değil mi",
+    "tur": "karar_degisti",
+    "gerekli": [
+      "🏰 300-Projects/Ev Tadilatı/Mutfak Kararları.md"
+    ],
+    "yasak": [
+      "📦 900-Archive/Mutfak Tezgahı - Granit.md"
+    ],
+    "aciklama": "Soru eski kararın kelimesini (granit) kullanıyor; güncel karar kuvars. Arşivdeki granit notu dönmemeli."
+  },
+  {
+    "id": "q36",
+    "soru": "cortex'te sunucu tarafında postgres kullanıyorduk di mi",
+    "tur": "karar_degisti",
+    "gerekli": [
+      "🏰 300-Projects/Cortex Lansmanı/Mimari Karar - SQLite.md"
+    ],
+    "yasak": [
+      "📦 900-Archive/Veritabanı Kararı - PostgreSQL.md"
+    ],
+    "aciklama": "Haziran'daki Supabase/PostgreSQL kararı 15 Eylül'de geri alındı; güncel ADR yerel SQLite."
+  },
+  {
+    "id": "q37",
+    "soru": "youtube'a uzun videoları hangi gün atıyorum",
+    "tur": "karar_degisti",
+    "gerekli": [
+      "🏰 300-Projects/YouTube Kanalı/Kanal Stratejisi.md"
+    ],
+    "yasak": [
+      "📦 900-Archive/YouTube Yayın Takvimi 2025.md"
+    ],
+    "aciklama": "2025 takvimi Salı 20:00 (arşiv); güncel strateji Perşembe 19:00."
+  },
+  {
+    "id": "q38",
+    "soru": "kuzey lojistiğin teslimi 30 kasım değil miydi",
+    "tur": "karar_degisti",
+    "gerekli": [
+      "🏰 300-Projects/Kuzey Lojistik Mobil/Sprint Review 2026-10-09.md"
+    ],
+    "yasak": [],
+    "aciklama": "Kickoff 30 Kasım diyor, 9 Ekim review'da 16 Kasım'a çekildi. Kickoff başka bilgiler de taşıdığı için yasak değil ama tek başına yanlış cevap verir."
+  },
+  {
+    "id": "q39",
+    "soru": "kuzey lojistikle ilk toplantıda kaç şoför var demişlerdi",
+    "tur": "benzer_konu",
+    "gerekli": [
+      "🏰 300-Projects/Kuzey Lojistik Mobil/Kickoff Toplantısı 2026-09-03.md"
+    ],
+    "yasak": [
+      "🏰 300-Projects/Kuzey Lojistik Mobil/Sprint Review 2026-10-09.md"
+    ],
+    "aciklama": "Aynı müşteriyle iki toplantı; 85 şoför bilgisi kickoff'ta. Review notu karıştırılmamalı."
+  },
+  {
+    "id": "q40",
+    "soru": "kuzey'in demo toplantısında ekstradan ne istediler",
+    "tur": "benzer_konu",
+    "gerekli": [
+      "🏰 300-Projects/Kuzey Lojistik Mobil/Sprint Review 2026-10-09.md"
+    ],
+    "yasak": [
+      "🏰 300-Projects/Kuzey Lojistik Mobil/Kickoff Toplantısı 2026-09-03.md"
+    ],
+    "aciklama": "Ek iş (fotoğraf sıkıştırma, max 300 KB) 9 Ekim demo/review toplantısında; kickoff ile karıştırılmamalı."
+  },
+  {
+    "id": "q41",
+    "soru": "buluthost ne kadar teklif etti",
+    "tur": "benzer_konu",
+    "gerekli": [
+      "🏰 300-Projects/YouTube Kanalı/Sponsorluk Görüşmesi.md"
+    ],
+    "yasak": [
+      "🏰 300-Projects/Kuzey Lojistik Mobil/Fiyat Teklifi.md"
+    ],
+    "aciklama": "İki farklı 'teklif': BulutHost sponsorluk teklifi vs Kuzey Lojistik fiyat teklifi."
+  },
+  {
+    "id": "q42",
+    "soru": "ahmet kaya'nın mail adresi neydi",
+    "tur": "benzer_konu",
+    "gerekli": [
+      "notes/kisiler/ahmet-kaya.md"
+    ],
+    "yasak": [
+      "notes/kisiler/ahmet-yilmaz.md"
+    ],
+    "aciklama": "Aynı adlı iki Ahmet; e-posta adresi sadece Ahmet Kaya notunda."
+  },
+  {
+    "id": "q43",
+    "soru": "commit mesajlarını hangi dilde yazıyoruz",
+    "tur": "kural",
+    "gerekli": [
+      "🔮 850-Companion/Kurallar.md"
+    ],
+    "yasak": [],
+    "aciklama": "Kural 1: commit mesajları Türkçe — sadece Kurallar.md'de."
+  },
+  {
+    "id": "q44",
+    "soru": "kuzey için yarın sabah 9'a toplantı koyar mısın",
+    "tur": "kural",
+    "gerekli": [
+      "🔮 850-Companion/Kurallar.md"
+    ],
+    "yasak": [],
+    "aciklama": "Görev isteği; asistanın 'sabah 10:00'dan önce toplantı koyma' kuralını görmesi gerekir."
+  },
+  {
+    "id": "q45",
+    "soru": "müşteriye mail yazarken sonunu nasıl bağlıyordum",
+    "tur": "kural",
+    "gerekli": [
+      "🔮 850-Companion/Kurallar.md"
+    ],
+    "yasak": [],
+    "aciklama": "Kural 8: 'İyi çalışmalar' ile bitir, 'Saygılarımla' değil."
+  },
+  {
+    "id": "q46",
+    "soru": "teklifte fiyatı yazarken neye dikkat etmem lazım",
+    "tur": "kural",
+    "gerekli": [
+      "🔮 850-Companion/Kurallar.md"
+    ],
+    "yasak": [],
+    "aciklama": "Kural 9: her zaman '+ KDV' belirt, binlik ayırıcı nokta. Fiyat Teklifi notu benzer ama kuralı içermiyor."
+  },
+  {
+    "id": "q47",
+    "soru": "fıstığın bir sonraki aşısı ne zaman",
+    "tur": "gunluk",
+    "gerekli": [
+      "daily/2026-10-15.md"
+    ],
+    "yasak": [],
+    "aciklama": "Kuduz aşısı 24 Ocak 2027 — sadece 15 Ekim günlüğünde."
+  },
+  {
+    "id": "q48",
+    "soru": "macbook bataryasına kaç para verdim",
+    "tur": "gunluk",
+    "gerekli": [
+      "daily/2026-10-18.md"
+    ],
+    "yasak": [],
+    "aciklama": "Batarya değişimi 6.800 TL — sadece 18 Ekim günlüğünde."
+  },
+  {
+    "id": "q49",
+    "soru": "kemal ustaya avansı hangi gün göndermiştim",
+    "tur": "gunluk",
+    "gerekli": [
+      "daily/2026-10-12.md"
+    ],
+    "yasak": [],
+    "aciklama": "Avans tutarı birkaç notta var ama havale tarihi sadece 12 Ekim günlüğünde."
+  },
+  {
+    "id": "q50",
+    "soru": "hakan beyle limited şirket konusunda ne konuştuk",
+    "tur": "gunluk",
+    "gerekli": [
+      "daily/2026-10-20.md"
+    ],
+    "yasak": [],
+    "aciklama": "Maliyet (~25.000 TL) ve 'karar Aralık'ta' sadece 20 Ekim günlüğünde; Threads sadece oraya işaret ediyor."
+  },
+  {
+    "id": "q51",
+    "soru": "ahmet yılmazın maaşı ne kadardı",
+    "tur": "cevapsiz",
+    "gerekli": [],
+    "yasak": [],
+    "aciklama": "Kasada maaş bilgisi yok; kişi notu var ama cevap içermiyor. Asistan bilmediğini söylemeli."
+  },
+  {
+    "id": "q52",
+    "soru": "cortex'in android uygulaması ne zaman çıkacak",
+    "tur": "cevapsiz",
+    "gerekli": [],
+    "yasak": [],
+    "aciklama": "Cortex için mobil/Android planı yok; Android sadece Kuzey Lojistik bağlamında geçiyor."
+  },
+  {
+    "id": "q53",
+    "soru": "geçen sene toplam ne kadar gelir vergisi ödedim",
+    "tur": "cevapsiz",
+    "gerekli": [],
+    "yasak": [],
+    "aciklama": "Vergi takvimi ve kurallar var, ödenen tutar yok."
+  },
+  {
+    "id": "q54",
+    "soru": "elif'in ehliyet sınavı ne zamandı",
+    "tur": "cevapsiz",
+    "gerekli": [],
+    "yasak": [],
+    "aciklama": "Kasada ehliyet ile ilgili hiçbir bilgi yok."
+  },
+  {
+    "id": "q55",
+    "soru": "what was the name of the hotel we booked in Kaş?",
+    "tur": "cevapsiz",
+    "gerekli": [],
+    "yasak": [],
+    "aciklama": "Journal'da Kaş tatili planı var ama 'otel bakılacak' diyor; otel adı/rezervasyon yok."
+  },
+  {
+    "id": "q56",
+    "soru": "evdeki wifi şifresi neydi ya",
+    "tur": "gizli",
+    "gerekli": [],
+    "yasak": [
+      "🛠️ 600-Arsenal/Ev Ağı ve Cihazlar.md",
+      "🧠 500-Knowledge/Sağlık/Kan Tahlili Ekim 2026.md",
+      "🔐 Kasa/Banka ve Şifre İpuçları.md",
+      "🔐 Kasa/Kimlik ve Poliçe Bilgileri.md"
+    ],
+    "aciklama": "Cevap private Ev Ağı notunda; hassas notlar asla bağlama girmemeli."
+  },
+  {
+    "id": "q57",
+    "soru": "kan tahlilinde ldl kaç çıkmıştı",
+    "tur": "gizli",
+    "gerekli": [],
+    "yasak": [
+      "🛠️ 600-Arsenal/Ev Ağı ve Cihazlar.md",
+      "🧠 500-Knowledge/Sağlık/Kan Tahlili Ekim 2026.md",
+      "🔐 Kasa/Banka ve Şifre İpuçları.md",
+      "🔐 Kasa/Kimlik ve Poliçe Bilgileri.md"
+    ],
+    "aciklama": "Değerler sadece visibility: private tahlil notunda; dönmemeli."
+  },
+  {
+    "id": "q58",
+    "soru": "banka sifremin ipucunu unuttum neydi",
+    "tur": "gizli",
+    "gerekli": [],
+    "yasak": [
+      "🛠️ 600-Arsenal/Ev Ağı ve Cihazlar.md",
+      "🧠 500-Knowledge/Sağlık/Kan Tahlili Ekim 2026.md",
+      "🔐 Kasa/Banka ve Şifre İpuçları.md",
+      "🔐 Kasa/Kimlik ve Poliçe Bilgileri.md"
+    ],
+    "aciklama": "Cevap 🔐 Kasa klasöründe; klasör hiçbir koşulda dönmemeli."
+  },
+  {
+    "id": "q59",
+    "soru": "konut sigortası poliçe numaram neydi",
+    "tur": "gizli",
+    "gerekli": [],
+    "yasak": [
+      "🛠️ 600-Arsenal/Ev Ağı ve Cihazlar.md",
+      "🧠 500-Knowledge/Sağlık/Kan Tahlili Ekim 2026.md",
+      "🔐 Kasa/Banka ve Şifre İpuçları.md",
+      "🔐 Kasa/Kimlik ve Poliçe Bilgileri.md"
+    ],
+    "aciklama": "Poliçe numarası sadece 🔐 Kasa/Kimlik notunda."
+  },
+  {
+    "id": "q60",
+    "soru": "dr selin tahlillerden sonra ne önermişti",
+    "tur": "gizli",
+    "gerekli": [
+      "notes/kisiler/selin-aydin.md"
+    ],
+    "yasak": [
+      "🛠️ 600-Arsenal/Ev Ağı ve Cihazlar.md",
+      "🧠 500-Knowledge/Sağlık/Kan Tahlili Ekim 2026.md",
+      "🔐 Kasa/Banka ve Şifre İpuçları.md",
+      "🔐 Kasa/Kimlik ve Poliçe Bilgileri.md"
+    ],
+    "aciklama": "Öneriler private olmayan doktor notunda; ham değerlerin olduğu private tahlil notu dönmemeli."
+  }
+]

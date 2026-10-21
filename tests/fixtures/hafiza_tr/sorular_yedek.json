@@ -1,0 +1,322 @@
+[
+  {
+    "id": "y01",
+    "soru": "CORTEXERKEN kuponu kimlere veriliyodu, yüzde kaç indirim?",
+    "tur": "anahtar_kelime",
+    "gerekli": ["🏰 300-Projects/Cortex Lansmanı/Fiyatlandırma Kararı.md"],
+    "yasak": ["📦 900-Archive/Cortex Fiyatlandırma v1.md"],
+    "aciklama": "Bekleme listesindekilere ilk yıl %30 indirim (v2 fiyatlandırma). Kupon kodu sadece güncel karar notunda geçiyor; arşivdeki v1 eski fiyatlarla kafa karıştırır."
+  },
+  {
+    "id": "y02",
+    "soru": "TRmorph kimin çalışmasıydı, hangi yıl?",
+    "tur": "anahtar_kelime",
+    "gerekli": ["🏰 300-Projects/Yüksek Lisans Tezi/Literatür Notları.md"],
+    "yasak": [],
+    "aciklama": "Çöltekin 2010 — tez literatür notlarında Türkçe morfoloji başlığı altında. Terim kasada tek yerde geçiyor."
+  },
+  {
+    "id": "y03",
+    "soru": "Auphonic'te sesi kaç LUFS'a çekiyodum?",
+    "tur": "anahtar_kelime",
+    "gerekli": ["🛠️ 600-Arsenal/Kayıt Ekipmanı.md"],
+    "yasak": [],
+    "aciklama": "-14 LUFS, Auphonic ile normalize. Sadece Kayıt Ekipmanı notunda."
+  },
+  {
+    "id": "y04",
+    "soru": "banyoda yalıtımdan sonra su testini kaç saat yapacaklarmış",
+    "tur": "cekim_eki",
+    "gerekli": ["🏰 300-Projects/Ev Tadilatı/Banyo Planı.md"],
+    "yasak": [],
+    "aciklama": "48 saat su testi (2 kat sürme izolasyon + file bant sonrası). Notta 'Su yalıtımı', 'su testi yapılacak'; soruda 'yalıtımdan', 'testini', 'yapacaklarmış'. Tadilat Takvimi su testinden bahsediyor ama süre yok."
+  },
+  {
+    "id": "y05",
+    "soru": "mercimeği suyu ekledikten sonra kaç dakika kaynatıyoduk",
+    "tur": "cekim_eki",
+    "gerekli": ["🧠 500-Knowledge/Yemek/Mercimek Çorbası.md"],
+    "yasak": [],
+    "aciklama": "Kaynayınca kısık ateşte 35 dk. Notta 'Mercimek + su; kaynayınca', soruda 'mercimeği', 'kaynatıyoduk'. 5 Ekim günlüğünde çorba geçiyor ama süre yok."
+  },
+  {
+    "id": "y06",
+    "soru": "müşteri işlerinin payını 2027'de ne kadara indirmeyi planlıyordum?",
+    "tur": "cekim_eki",
+    "gerekli": ["🔮 850-Companion/Journal.md"],
+    "yasak": [],
+    "aciklama": "%40'ın altına (Journal, 28 Eylül 2026 girdisi). Notta 'Müşteri işinin payını ... indirmek istiyorum'; soruda 'işlerinin', 'indirmeyi planlıyordum'. Core'daki 'şu an ~%60' bilgisi bağlam olarak faydalı ama hedef sadece Journal'da."
+  },
+  {
+    "id": "y07",
+    "soru": "gece uyumadan önce içtiğim hap neydi, kaç miligram?",
+    "tur": "esanlamli",
+    "gerekli": ["🧠 500-Knowledge/Sağlık/Uyku Düzeni.md"],
+    "yasak": ["🧠 500-Knowledge/Sağlık/Kan Tahlili Ekim 2026.md"],
+    "aciklama": "Magnezyum bisglisinat 200 mg, yatmadan 30 dk önce. Notta 'Takviye', 'yatmadan'; soruda 'hap', 'uyumadan önce'. Kan tahlili notu visibility: private (D vitamini/B12 değerleri takviye sanılabilir), gelmemeli."
+  },
+  {
+    "id": "y08",
+    "soru": "Elif'in doğum günü için baktığım çömlek kursu kaç paraydı?",
+    "tur": "esanlamli",
+    "gerekli": ["📥 000-Inbox/Dump/elif hediye.md"],
+    "yasak": [],
+    "aciklama": "Kuzguncuk'taki çamur atölyesinde 4 haftalık çark kursu, 6.400 TL; kayıt Kasım başı, kontenjan 6 kişi. Notta 'çamur atölye', 'çark kursu' geçiyor; 'çömlek' kelimesi kasada hiç yok."
+  },
+  {
+    "id": "y09",
+    "soru": "Kuzey'le fiyat pazarlığında elimdeki yedek iş neydi, en az kaçta duracaktım?",
+    "tur": "esanlamli",
+    "gerekli": ["knowledge/concepts/batna.md"],
+    "yasak": [],
+    "aciklama": "BATNA: o ay masada olan Ege Gıda e-ticaret işi (~250.000 TL); bu yüzden 380.000 TL'nin altına inmeme kararı (rezervasyon noktası). 'Yedek iş' = BATNA, 'en az kaçta duracaktım' = walk-away point. Pazarlık Notları ve Fiyat Teklifi ilgili ama bu rakamlar sadece batna notunda."
+  },
+  {
+    "id": "y10",
+    "soru": "pyn bildirm sesi max kac ms olmaliydi, lisansi ne olcakti",
+    "tur": "yazim_hatasi_ascii",
+    "gerekli": ["📥 000-Inbox/Dump/pyn bildirim sesi.md"],
+    "yasak": [],
+    "aciklama": "En fazla 300 ms; freesound'dan, lisans CC0. Kısa ahşap bir 'tık', ksilofon değil; ses seviyesi ayarı + kapatma şart. Türkçe karakter yok, 'bildirm' yazım hatası. Beta Geri Bildirimleri'ndeki #88 şikayeti spesifikasyonu içermiyor."
+  },
+  {
+    "id": "y11",
+    "soru": "somonu kac derecede kac dk pisiriyoduk",
+    "tur": "yazim_hatasi_ascii",
+    "gerekli": ["🧠 500-Knowledge/Yemek/Fırında Somon.md"],
+    "yasak": [],
+    "aciklama": "200°C fanlı fırında 14–15 dk; deri çıtır olsun diye son 2 dk ızgara modu. ASCII yazım ('kac', 'pisiriyoduk')."
+  },
+  {
+    "id": "y12",
+    "soru": "kuzey apisinde jwt token kac dakkada doluyodu, refresh var miydi",
+    "tur": "yazim_hatasi_ascii",
+    "gerekli": ["🏰 300-Projects/Kuzey Lojistik Mobil/Teknik Mimari.md"],
+    "yasak": [],
+    "aciklama": "JWT ömrü 15 dk, refresh token yok; süre dolunca client credentials ile yeniden alınıyor. ASCII + 'dakkada' hatası. 12 Ekim günlüğünde JWT süresiyle uğraşıldığı yazıyor ama değer yok."
+  },
+  {
+    "id": "y13",
+    "soru": "Which exchange rate do I use when converting a USD invoice to TL, and from which day?",
+    "tur": "ingilizce_turkce",
+    "gerekli": ["🧠 500-Knowledge/Finans/Yurtdışı Fatura ve Döviz.md"],
+    "yasak": [],
+    "aciklama": "TCMB döviz alış kuru (efektif değil), invoice tarihinden bir önceki iş gününün kuru. İngilizce soru, Türkçe not."
+  },
+  {
+    "id": "y14",
+    "soru": "was there some issue with the free trial button on mobile? pretty sure I jotted it down somewhere",
+    "tur": "ingilizce_turkce",
+    "gerekli": ["📥 000-Inbox/Dump/dump 2026-10-17.md"],
+    "yasak": [],
+    "aciklama": "Landing page'deki 'ücretsiz dene' butonu mobilde ekranın dışına taşıyor (17 Ekim dump'ı, ASCII yazılmış: 'ucretsiz dene'). İngilizce 'free trial' ↔ Türkçe 'ücretsiz dene'."
+  },
+  {
+    "id": "y15",
+    "soru": "python'da görev grubu diye bi şey vardı, gather'dan farkı neydi? biri hata verirse ötekiler iptal oluyo mu",
+    "tur": "ingilizce_turkce",
+    "gerekli": ["🧠 500-Knowledge/Yazılım/Python asyncio Notları.md"],
+    "yasak": [],
+    "aciklama": "asyncio.TaskGroup (3.11+): bir görev patlarsa diğerlerini iptal eder, hatalar ExceptionGroup olarak gelir. gather'da diğerleri iptal edilmiyor (Cortex sidecar'da yetim görev kaldı). Türkçe 'görev grubu' ↔ notta İngilizce 'TaskGroup'."
+  },
+  {
+    "id": "y16",
+    "soru": "Ahmet Kaya'yla ek iş ücreti konuşacaksam kimi de CC'ye eklemem lazım?",
+    "tur": "kisi",
+    "gerekli": ["notes/kisiler/ahmet-kaya.md"],
+    "yasak": ["notes/kisiler/ahmet-yilmaz.md"],
+    "aciklama": "CFO Levent Aksoy — bütçe onayı onda. Bilgi sadece Ahmet Kaya kişi notunda. Ekipteki Ahmet Yılmaz notu yanlış Ahmet."
+  },
+  {
+    "id": "y17",
+    "soru": "kemal ustanın ekibinde seramiği kim döşüyor, elektriğe kim bakıyo?",
+    "tur": "kisi",
+    "gerekli": ["notes/kisiler/kemal-sahin.md"],
+    "yasak": [],
+    "aciklama": "Seramik/fayans: Rıza Usta; elektrik: Serkan; sıhhi tesisatı Kemal Usta kendisi yapıyor. Ekip bilgisi sadece kişi notunda."
+  },
+  {
+    "id": "y18",
+    "soru": "murat hocaya mail atınca gözden kaçmasın diye konuya ne yazıyodum",
+    "tur": "kisi",
+    "gerekli": ["notes/kisiler/murat-ozturk.md"],
+    "yasak": [],
+    "aciklama": "Konu satırı: \"[YL-Tez] Tolga Gündüz\" (cevap süresi 2–5 gün). Sadece Murat Öztürk kişi notunda; Danışman Görüşmesi'nde sadece haftalık e-posta isteği var."
+  },
+  {
+    "id": "y19",
+    "soru": "geçen pazar sahilde 5k kaç dakikada koştum?",
+    "tur": "zaman",
+    "gerekli": ["daily/2026-10-18.md"],
+    "yasak": [],
+    "aciklama": "Bugün 2026-10-21 Çarşamba → geçen pazar 18 Ekim. Moda sahil 5 km 28:40, en iyi derece. Antrenman Programı'ndaki '27:00 altı' bir hedef, gerçekleşen süre değil."
+  },
+  {
+    "id": "y20",
+    "soru": "önümüzdeki pazartesi tadilatla ilgili bi şey yapmam gerekiyo muydu?",
+    "tur": "zaman",
+    "gerekli": ["🏰 300-Projects/Ev Tadilatı/Tadilat Takvimi.md"],
+    "yasak": [],
+    "aciklama": "Önümüzdeki pazartesi = 26 Ekim: komşulara bilgi notu kapılara asılacak (gürültülü işler hafta içi 09:00–18:00). Tadilatın kendisi 2 Kasım'da başlıyor, sözleşme 28 Ekim."
+  },
+  {
+    "id": "y21",
+    "soru": "bu cuma kuzeyle toplantı var mıydı, saat kaçta?",
+    "tur": "zaman",
+    "gerekli": ["🏰 300-Projects/Kuzey Lojistik Mobil/Sprint Review 2026-10-09.md"],
+    "yasak": [],
+    "aciklama": "Bu cuma = 23 Ekim. Sprint Review notunda 'Sonraki toplantı: 23 Ekim Cuma 14:00, Teams'. Danışman görüşmesi (30 Ekim Cuma 11:00) başka bir cuma, karıştırılmamalı."
+  },
+  {
+    "id": "y22",
+    "soru": "cortex ödemelerini iyzico'dan alıcaktık di mi? komisyonu neydi",
+    "tur": "karar_degisti",
+    "gerekli": ["🏰 300-Projects/Cortex Lansmanı/Fiyatlandırma Kararı.md"],
+    "yasak": ["📦 900-Archive/Cortex Fiyatlandırma v1.md"],
+    "aciklama": "Hayır: v2'de Paddle (merchant of record), işlem başına %5 + $0,50; KDV/VAT'ı Paddle topluyor. iyzico yurtdışı vergi yükü yüzünden elendi. Arşivdeki v1 'iyzico ile başla' diyor; eskimiş."
+  },
+  {
+    "id": "y23",
+    "soru": "mutfak tezgahının metretülü kaçaydı, montaj ayrıca mı ödenecek?",
+    "tur": "karar_degisti",
+    "gerekli": ["🏰 300-Projects/Ev Tadilatı/Mutfak Kararları.md"],
+    "yasak": ["📦 900-Archive/Mutfak Tezgahı - Granit.md"],
+    "aciklama": "Kuvars (Kar Beyazı Mat): metretül 9.500 TL, montaj dahil; 4,2 mt ≈ 39.900 TL. Arşivdeki granit kararı 7.200 TL + ayrı montaj (~4.000 TL) diyor; 3 Ekim'de vazgeçildi."
+  },
+  {
+    "id": "y24",
+    "soru": "shorts yapmıyoduk di mi, zaman kaybı demiştim",
+    "tur": "karar_degisti",
+    "gerekli": ["🏰 300-Projects/YouTube Kanalı/Kanal Stratejisi.md"],
+    "yasak": ["📦 900-Archive/YouTube Yayın Takvimi 2025.md"],
+    "aciklama": "Eylül 2026'dan beri haftada 2 Shorts (Pazartesi ve Cumartesi öğlen). 'Shorts yok, zaman kaybı' 2025 arşiv takviminde; eskimiş."
+  },
+  {
+    "id": "y25",
+    "soru": "kuzeyle yüz yüze toplandığımız yer neresiydi, kimler vardı?",
+    "tur": "benzer_konu",
+    "gerekli": ["🏰 300-Projects/Kuzey Lojistik Mobil/Kickoff Toplantısı 2026-09-03.md"],
+    "yasak": ["🏰 300-Projects/Kuzey Lojistik Mobil/Sprint Review 2026-10-09.md"],
+    "aciklama": "Kickoff (3 Eylül): Gebze depo, 2. kat toplantı odası; Ahmet Kaya, Burcu Şen, Tolga, Ahmet Yılmaz. Aynı müşteriyle ikinci toplantı (Sprint Review) Teams'te ve katılımcı listesi farklı (Deniz de var)."
+  },
+  {
+    "id": "y26",
+    "soru": "backblaze yedeği gece kaçta alınıyo, kaç gün saklanıyo?",
+    "tur": "benzer_konu",
+    "gerekli": ["🛠️ 600-Arsenal/Sunucu ve Hosting.md"],
+    "yasak": ["🛠️ 600-Arsenal/Ev Ağı ve Cihazlar.md"],
+    "aciklama": "restic → Backblaze B2, her gece 03:00, 30 gün saklama (~$1,2/ay). Ev Ağı notundaki NAS yedeği (02:00) benzer ama farklı ve not visibility: private."
+  },
+  {
+    "id": "y27",
+    "soru": "bizim ahmet'in çocuğu kaç yaşındaydı, adı neydi",
+    "tur": "benzer_konu",
+    "gerekli": ["notes/kisiler/ahmet-yilmaz.md"],
+    "yasak": ["notes/kisiler/ahmet-kaya.md"],
+    "aciklama": "Ekipteki Ahmet Yılmaz: oğlu Can, 2 yaşında (eşi Merve). Müşteri Ahmet Kaya'nın notunda '2 kızı var' yazıyor; aynı ad, yanıltıcı '2'."
+  },
+  {
+    "id": "y28",
+    "soru": "hotfix branch'ine nasıl isim veriyoduk?",
+    "tur": "kural",
+    "gerekli": ["🔮 850-Companion/Kurallar.md"],
+    "yasak": [],
+    "aciklama": "duzeltme/<kisa-ad>, Türkçe karakter yok (diğerleri ozellik/, deneme/). Sadece Kurallar.md'de; Git Rebase vs Merge notunda branch adlandırma yok."
+  },
+  {
+    "id": "y29",
+    "soru": "cumartesi kuzey'e acil bi mail atmam lazım, direkt göndereyim mi?",
+    "tur": "kural",
+    "gerekli": ["🔮 850-Companion/Kurallar.md"],
+    "yasak": [],
+    "aciklama": "Hayır: hafta sonu müşteriye mesaj/e-posta atılmaz; acilse bile Pazartesi 09:00'a zamanlanır (Kural 7)."
+  },
+  {
+    "id": "y30",
+    "soru": "ts tarafında tek tırnak mı çift mi kullanıyoruz, noktalı virgül var mı",
+    "tur": "kural",
+    "gerekli": ["🔮 850-Companion/Kurallar.md"],
+    "yasak": [],
+    "aciklama": "Prettier, tek tırnak, noktalı virgül var (Kural 3). Başka notta geçmiyor."
+  },
+  {
+    "id": "y31",
+    "soru": "hakan bey limited'e geçişin masrafı için ne kadar demişti, karar ne zaman verilecek?",
+    "tur": "gunluk",
+    "gerekli": ["daily/2026-10-20.md"],
+    "yasak": [],
+    "aciklama": "Kuruluş + devir ~25.000 TL; vergi karşılaştırması Kasım'da, karar Aralık'ta, geçilirse 1 Ocak 2027. Sadece 20 Ekim günlüğünde; Threads sadece oraya atıf yapıyor."
+  },
+  {
+    "id": "y32",
+    "soru": "kemal ustaya avansı havale ederken açıklamaya ne yazmıştım",
+    "tur": "gunluk",
+    "gerekli": ["daily/2026-10-12.md"],
+    "yasak": [],
+    "aciklama": "\"Moda daire tadilat avans\" (95.000 TL, 12 Ekim). Avans tutarı bütçe ve kişi notunda da var ama havale açıklaması sadece günlükte."
+  },
+  {
+    "id": "y33",
+    "soru": "sync refactor'undan sonra sidecar ne kadar ram yiyo artık",
+    "tur": "gunluk",
+    "gerekli": ["daily/2026-10-14.md"],
+    "yasak": [],
+    "aciklama": "410 MB → 260 MB (PR #212; conflict test seti 34 test, hepsi yeşil). Sadece 14 Ekim günlüğünde."
+  },
+  {
+    "id": "y34",
+    "soru": "zeynep'in telefon numarasi kayitli mi bende",
+    "tur": "cevapsiz",
+    "gerekli": [],
+    "yasak": [],
+    "aciklama": "Kasada Zeynep'in telefonu yok; kişi notunda sadece Behance (zeyneparslan.art) ve Figma yorumları üzerinden iletişim var. Doğru cevap: kayıtlı değil."
+  },
+  {
+    "id": "y35",
+    "soru": "Fıstık'ı hangi tarihte sahiplenmiştik?",
+    "tur": "cevapsiz",
+    "gerekli": [],
+    "yasak": ["🛠️ 600-Arsenal/Ev Ağı ve Cihazlar.md"],
+    "aciklama": "Tarih kasada yok (Core'da sadece '4 yaşında'). Ev Ağı notu bu tarihi Wi-Fi şifre ipucu olarak anıyor; visibility: private, gelmemeli."
+  },
+  {
+    "id": "y36",
+    "soru": "Deniz geçen hafta hangi dersin sınavına girdi?",
+    "tur": "cevapsiz",
+    "gerekli": [],
+    "yasak": [],
+    "aciklama": "14 Ekim günlüğünde sadece 'Deniz'in yarın sınavı var' yazıyor; ders adı hiçbir notta yok."
+  },
+  {
+    "id": "y37",
+    "soru": "product hunt'taki hunter Emre Çelik'in maili ya da telefonu bi yerde var mı?",
+    "tur": "cevapsiz",
+    "gerekli": [],
+    "yasak": [],
+    "aciklama": "Emre Çelik sadece Lansman Planı'nda 'hunter olarak konuşuldu' diye geçiyor; iletişim bilgisi kasada yok."
+  },
+  {
+    "id": "y38",
+    "soru": "misafir geldi, wifi sifresi neydi",
+    "tur": "gizli",
+    "gerekli": [],
+    "yasak": ["🛠️ 600-Arsenal/Ev Ağı ve Cihazlar.md", "🔐 Kasa/Banka ve Şifre İpuçları.md"],
+    "aciklama": "Wi-Fi ve misafir ağı bilgisi sadece visibility: private olan Ev Ağı notunda; şifre ipuçlarının olduğu 🔐 Kasa notu da gelmemeli."
+  },
+  {
+    "id": "y39",
+    "soru": "Bitwarden'da aile planına Elif'i de eklemiş miydim? bi de 2FA için hangi app'i kullanıyodum",
+    "tur": "gizli",
+    "gerekli": ["🛠️ 600-Arsenal/Araç Kutusu.md"],
+    "yasak": ["🔐 Kasa/Banka ve Şifre İpuçları.md"],
+    "aciklama": "Evet, Bitwarden aile planı, Elif de içinde; 2FA: Aegis (Android). Bitwarden ana parola ipucu 🔐 Kasa notunda geçiyor; o not kesinlikle bağlama girmemeli."
+  },
+  {
+    "id": "y40",
+    "soru": "ekimdeki tahlilde LDL kaç çıkmıştı?",
+    "tur": "gizli",
+    "gerekli": [],
+    "yasak": ["🧠 500-Knowledge/Sağlık/Kan Tahlili Ekim 2026.md"],
+    "aciklama": "Tahlil değerleri sadece visibility: private olan Kan Tahlili notunda; bağlama girmemeli. Dr. Selin notunda öneriler var ama değer yok."
+  }
+]

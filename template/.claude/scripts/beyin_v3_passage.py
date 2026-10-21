@@ -30,7 +30,7 @@ import tempfile
 import time
 import unicodedata
 
-from beyin_v3 import HARNESSES, STOPWORDS, _allowed_statuses, _json, _name_match_score, _status_allowed, _strict_terms, _tokens, pack_context
+from beyin_v3 import HARNESSES, STOPWORDS, _allowed_statuses, _json, _name_match_score, _status_allowed, _strict_terms, _tokens, pack_context, query_words
 
 # #83 chose 0.15 on one 263-note Turkish vault without a coverage cap. With the cap, on a
 # second 1,285-note vault 0.20 is the lowest floor that keeps everyday and agent-command
@@ -233,7 +233,7 @@ def _valid(entry, text):
 
 # Derived tokens depend on the stemmer, not only on the record: a release that changes
 # _tokens must rebuild the cache instead of mixing old and new stems.
-_PROBE = "Kütüphanesindeki notlarımızı güncellediler; running tests quickly İstanbul ŞEHİR 2026"
+_PROBE = "Kütüphanesindeki notlarımızı güncellediler; running tests quickly İstanbul ŞEHİR 2026 Kaya'nın"
 _PARAMS = [BLOCK_TARGET, BLOCK_OVERLAP, hashlib.sha256(" ".join(sorted(_tokens(_PROBE))).encode()).hexdigest()[:16]]
 
 
@@ -336,21 +336,29 @@ def _weight(shared, frequency, total, size):
     return weight / idf_max / math.log(10 + size)
 
 
-def search(index, terms, limit=5, floor=FLOOR, min_shared=MIN_SHARED):
-    """Best admitted passage per source, ranked. Returns [(rank weight, passage), ...]."""
+def search(index, terms, limit=5, floor=FLOOR, min_shared=MIN_SHARED, variants=None):
+    """Best admitted passage per source, ranked. Returns [(rank weight, passage), ...].
+
+    `variants` maps a term to the vault's words that stand for it; a term without an entry
+    is matched as it is."""
     terms = _strict_terms(terms)
     if not terms:
         return []
+    variants = variants or {}
     # For a one-word query two shared terms are impossible; keep the calibrated weight floor.
     min_shared = min(min_shared, len(terms))
     passages_total = max(1, len(index.passages))
     sources_total = max(1, index.sources)
     wanted = min(len(terms), COVERAGE_CAP)
-    probes = [(term, " " + term + " ") for term in sorted(terms)]
+    probes = [(term, [" " + form + " " for form in (variants.get(term) or (term,))]) for term in sorted(terms)]
     best = {}
     for passage in index.passages:
         tokens = passage[4]
-        shared = [term for term, probe in probes if probe in tokens]
+        shared = []
+        for _term, alternatives in probes:
+            hit = next((probe for probe in alternatives if probe in tokens), None)
+            if hit is not None:
+                shared.append(hit[1:-1])
         if len(shared) < min_shared:
             continue
         size = tokens.count(" ") - 1
@@ -371,25 +379,78 @@ def search(index, terms, limit=5, floor=FLOOR, min_shared=MIN_SHARED):
     return ranked[:limit]
 
 
+# A person's day log (daily/YYYY-MM-DD.md; daily/v3 is the engine's own) can hold what
+# happened that day and nowhere else: "macbook bataryasına kaç para verdim". Logs repeat the
+# vault's words (imported chat histories land there too), so they are searched only when no
+# note answers, and at most DAY_LOGS of them come back (#hafiza).
+_DAY_LOG = re.compile(r"^daily/[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$")
+DAY_LOGS = 1
+# A log answers in place of the notes only for most of the question: a log shares two words
+# with nearly any question, being a day of everything.
+LOG_COVERAGE = 0.75
+
+
+def _covers(tokens, terms, variants=None):
+    """The share of a question's words (at most COVERAGE_CAP of them) a passage holds."""
+    variants = variants or {}
+    shared = sum(1 for term in terms if any(" " + form + " " in tokens for form in (variants.get(term) or (term,))))
+    return min(1.0, shared / max(1, min(len(terms), COVERAGE_CAP)))
+
+
 def pool(store, eligible, statuses=None, exclude=DEFAULT_EXCLUDE, superseded=None):
-    """The strict candidate set of MemoryStore._retrieve, minus configured record paths."""
+    """The strict candidate set of MemoryStore._retrieve, minus configured record paths; a
+    person's day logs stay in (DAY_LOGS)."""
     if superseded is None:
         superseded = store._superseded_ids()
     prefixes = tuple(_path_key(prefix) for prefix in exclude)
+    log_prefixes = tuple(_path_key(prefix) for prefix in exclude if prefix not in DEFAULT_EXCLUDE)
     allowed_statuses = _allowed_statuses(statuses)
     result = []
     for record in eligible:
         source = str(record.get("source", ""))
-        if (record["id"] in superseded or not _status_allowed(record, allowed_statuses) or
-                source.startswith(store.STRICT_EXCLUDE) or _path_key(source).startswith(prefixes)):
+        if record["id"] in superseded or not _status_allowed(record, allowed_statuses):
+            continue
+        if _DAY_LOG.match(source):
+            if log_prefixes and _path_key(source).startswith(log_prefixes):
+                continue
+        elif source.startswith(store.STRICT_EXCLUDE) or _path_key(source).startswith(prefixes):
             continue
         result.append(record)
     return result
 
 
+def _dated(eligible, query, terms, today=None):
+    """The logs of the days a question names (beyin_v3_tarih), each at its passage that shares
+    the most of the question's words, else its start; newest wins a tie of two logs of a day."""
+    from beyin_v3_tarih import day_of, days
+    wanted = days(query, today)
+    if not wanted:
+        return []
+    logs = {}
+    for record in eligible:
+        day = day_of(record.get("source", ""))
+        if day in wanted:
+            logs.setdefault(day, []).append(record)
+    found = []
+    for day in wanted:
+        for record in sorted(logs.get(day, ()), key=lambda one: str(one.get("source", ""))):
+            blocks = _passages(record)
+            best = max(blocks, key=lambda block: sum(1 for term in terms if " " + term + " " in " " + block[3] + " "))
+            head, start, end = best[0], best[1], best[2]
+            if end <= start:
+                start, end = 0, len(record["text"])
+            body = record["text"][start:end]
+            excerpt = head + "\n\n" + body if head else body
+            found.append(dict(record, text=excerpt, text_truncated=body != record["text"]))
+    return found
+
+
 def context_for(store, harness, query, project=None, audience="internal", statuses=None, limit=5,
-                budget_chars=8000, strict=True):
-    """Strict per-turn context from passages. Same result shape as MemoryStore.retrieve."""
+                budget_chars=8000, strict=True, today=None):
+    """Strict per-turn context from passages. Same result shape as MemoryStore.retrieve.
+
+    A question that names a day ("dün", "geçen cuma", "12 Ekim") gets that day's log first,
+    though logs are otherwise left out of the per-turn search (`today` is the day it counts from)."""
     if harness not in HARNESSES:
         raise ValueError("unsupported harness")
     if strict is not True:
@@ -408,13 +469,20 @@ def context_for(store, harness, query, project=None, audience="internal", status
                   deadline=time.monotonic() + BUILD_SECONDS)
     if candidates and not index.passages:
         raise RuntimeError("passage index is empty")  # a failure, not an answer: caller falls back
-    terms = _strict_terms(_tokens(query) - STOPWORDS - _tokens(project or ""))
+    terms = _strict_terms(query_words(query) - _tokens(project or ""))
+    records = _dated(eligible, query, terms, today)[:limit]
     if not terms:
-        return pack_context([], limit, budget_chars, stale_count)
-    records = []
-    for _rank, (record, head, start, end, _tokens_) in search(index, terms, limit, config["floor"]):
+        return pack_context(records, limit, budget_chars, stale_count)
+    from beyin_v3_esanlam import variants as synonyms
+    variants = synonyms(terms, index.block_df)
+    found = search(index, terms, limit + DAY_LOGS, config["floor"], variants=variants)
+    notes = [item for item in found if not _DAY_LOG.match(str(item[1][0].get("source", "")))][:limit]
+    logs = [] if notes else [item for item in found if _DAY_LOG.match(str(item[1][0].get("source", "")))
+                             and _covers(item[1][4], terms, variants) >= LOG_COVERAGE][:DAY_LOGS]
+    for _rank, (record, head, start, end, _tokens_) in notes + logs:
         body = record["text"][start:end]
         excerpt = head + "\n\n" + body if head else body
         # Only text and text_truncated change, so advisor signatures still match the index.
-        records.append(dict(record, text=excerpt, text_truncated=body != record["text"]))
-    return pack_context(records, limit, budget_chars, stale_count)
+        if not any(one["id"] == record["id"] for one in records):
+            records.append(dict(record, text=excerpt, text_truncated=body != record["text"]))
+    return pack_context(records[:limit], limit, budget_chars, stale_count)
