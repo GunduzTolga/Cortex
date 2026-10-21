@@ -491,9 +491,15 @@ def _stem(word):
     return word
 
 
+# A suffix after an apostrophe belongs to the name before it: "Kaya'nın", "Kuzey Lojistik'in",
+# "Elif'e". Left in, it became a word of its own ("nin") that no note shares.
+_APOSTROPHE_SUFFIX = re.compile(r"(?<=\w)['’]\w+")
+
+
 def _token_counts(text):
     """Stem -> occurrence count; the keys are exactly _tokens(text)."""
-    text = unicodedata.normalize("NFKD", str(text).casefold())
+    text = _APOSTROPHE_SUFFIX.sub("", str(text))
+    text = unicodedata.normalize("NFKD", text.casefold())
     text = "".join(c for c in text if not unicodedata.combining(c)).replace("ı", "i")
     return Counter(_stem(word) for word in re.findall(r"[a-z0-9]+", text))
 
@@ -505,7 +511,37 @@ def _tokens(text):
 # Stopwords are matched against stems, so Turkish content words had to leave the list:
 # "notlar", "kararlari", "projede", "nedenleri" and "durumu" all stem onto entries that
 # used to be here, which emptied the query instead of widening it.
-STOPWORDS = _tokens("the a an is are was were what which who when where how why of to in on at for from with and or does did do has have latest current please tell about my our this that it its project projects status decision decisions show find get ve veya bir bu su o ne kim nasil hangi nedir neydi mi mu icin ile bana benim bizim olarak olan oldu en son guncel soyle getir bul yok say ignore disregard no")
+STOPWORDS = _tokens("the a an is are was were what which who when where how why of to in on at for from with and or does did do has have latest current please tell about my our this that it its project projects status decision decisions show find get ve veya bir bu su o ne kim nasil hangi nedir neydi mi mu icin ile bana benim bizim olarak olan oldu en son guncel soyle getir bul yok say ignore disregard no"
+                    # How a Turkish question is asked, not what it is about (#hafiza): left in, they
+                    # stood for half of "elif'in neye alerjisi vardı" and no note held them.
+                    " neye neyi neyin nerede nereye neresi kac kaci var vardi vardir lazim gerek idi imis"
+                    " miydi muydu midir mudur miyiz misin musun miyim acaba peki hani tam benimki")
+
+
+# A conjugated verb in a question says what was done, rarely what about: "hangi şehirde
+# yaşıyordu", "kaç kiloya çıkmıştım", "ne kullanıyorduk". The note says it otherwise, so the
+# verb only counted against every note's share of the question (#hafiza). Only forms that are
+# never a noun: the progressive (-iyor, spoken -iyo), the reported past with a person (-mıştı,
+# -mışız), the future with more after it (-acaktı) and the optative (-ayım, -elim). The plain
+# past (-dım, -tuk) stays: "dostum", "saatim" and "quantum" end the same way. "geçmiş" and
+# "yiyecek" are nouns and stay.
+_VERB_FORM = re.compile(
+    r"^[a-z]{2,}(?:"
+    r"[iu]yor[a-z]*|[iu]yo[mz]?"
+    r"|m[iu]s(?:t[iu][a-z]*|[iu][mz]|l[ae]r[a-z]*)"
+    r"|[ae]c[ae][kg](?:t[iu][a-z]*|[iu][mz]|s[iu]n[a-z]*|l[ae]r[a-z]*)"
+    r"|[ae]y[iu]m|[ae]l[iu]m"
+    r")$")
+
+
+def query_words(text):
+    """The words of a question as the search takes them: stems, without question words or
+    the conjugated verbs that say how it is asked (_VERB_FORM)."""
+    text = _APOSTROPHE_SUFFIX.sub("", str(text))
+    text = unicodedata.normalize("NFKD", text.casefold())
+    text = "".join(c for c in text if not unicodedata.combining(c)).replace("ı", "i")
+    words = [word for word in re.findall(r"[a-z0-9]+", text) if not _VERB_FORM.match(word)]
+    return {_stem(word) for word in words} - STOPWORDS
 
 
 def _strict_terms(terms):
@@ -645,10 +681,11 @@ class MemoryStore:
         """Connections are scoped to each operation; provided for callers."""
 
     def context_for(self, harness, query, **kwargs):
+        today = kwargs.pop("today", None)  # the day "dün" counts from; the passage path reads it
         if kwargs.get("strict") is True and self.STRICT_PASSAGES:
             try:
                 from beyin_v3_passage import context_for as passage_context
-                return passage_context(self, harness, query, **kwargs)
+                return passage_context(self, harness, query, today=today, **kwargs)
             except Exception:
                 pass  # a real failure or a still-building index keeps the note-level path
         return shared_context(self, harness, query, **kwargs)
