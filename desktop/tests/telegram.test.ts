@@ -58,7 +58,9 @@ elif args[:2] == ['telegram', 'dinle']:
     open(os.path.join(here, 'dinle.pid'), 'w').write(str(os.getpid()))
     seen['eslesti'] = True
     keep()
-    time.sleep(30)
+    for beat in range(300):  # a heartbeat while it runs: stopped, it stops
+        open(os.path.join(here, 'dinle.nabiz'), 'w').write(str(beat))
+        time.sleep(0.1)
 elif args[:2] == ['telegram', 'kaldir']:
     os.remove(kept)
     print(json.dumps({'status': 'kaldirildi'}))
@@ -87,6 +89,28 @@ const alive = (pid: number) => {
     return false;
   }
 };
+
+/**
+ * Whether the stand-in listener has stopped: its heartbeat unchanged for a second. Its PID cannot
+ * say so on Windows, where a number freed is soon another process's (the test files run side by
+ * side): a listener that was ended was still "alive" now and then.
+ */
+async function stopsBeating(vault: string, ms = 10_000): Promise<void> {
+  const file = path.join(vault, 'dinle.nabiz');
+  const beat = () => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
+  const end = Date.now() + ms;
+  let last = beat();
+  let since = Date.now();
+  while (Date.now() - since < 1_000) {
+    if (Date.now() > end) throw new Error('still beating');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const now = beat();
+    if (now !== last) {
+      last = now;
+      since = Date.now();
+    }
+  }
+}
 
 async function until(check: () => boolean, ms = 10_000): Promise<void> {
   const end = Date.now() + ms;
@@ -146,7 +170,7 @@ test('the key is checked by the engine, kept encrypted, and the listener runs wi
   assert.ok(asked(vault).includes('telegram kur --yeniden-esle +anahtar'));
 
   const gone = await disconnectTelegram();
-  await until(() => !alive(pid));
+  await stopsBeating(vault);
   assert.equal(gone.key, false);
   assert.equal(gone.bot, null);
   assert.equal(fs.existsSync(path.join(app.getPath('userData'), 'telegram.json')), false);
