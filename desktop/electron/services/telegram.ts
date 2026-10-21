@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, safeStorage } from 'electron';
@@ -162,7 +162,10 @@ export async function stopTelegram(): Promise<void> {
   child = null;
   if (!going) return;
   stopped.add(going);
-  going.kill();
+  // On Windows the listener is Python under the `py` launcher: ended alone, the launcher can leave
+  // the listener running (as services/acp.ts ends a program, its whole tree is ended).
+  if (process.platform === 'win32' && going.pid) execFile('taskkill', ['/pid', String(going.pid), '/T', '/F'], { windowsHide: true }, () => undefined);
+  else going.kill();
   await Promise.race([closed, new Promise((resolve) => setTimeout(resolve, 5_000))]);
 }
 
