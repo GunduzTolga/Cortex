@@ -146,6 +146,9 @@ COMMANDS = tuple(DEFAULTS['komutlar'])
 AT_END = ('kaydet', 'resim_ekle', 'kelime_sil', 'cumle_sil')
 # A command's words as earlier versions wrote them into every settings file: the new default.
 OLD_COMMANDS = {'sil': (['sil', 'temizle'],)}
+# Commands taken loosely when Whisper writes them a letter or two off ("son kelime sil"). Not
+# the picture's: "sunuma bir resim ekle" is a note, not "resmi ekle".
+LOOSE_COMMANDS = ('sil', 'kelime_sil', 'cumle_sil')
 # What a person may set a command's words to.
 MOST_PHRASES, LONGEST_PHRASE = 8, 40
 # What a running helper takes up when the settings file changes (`ayar`); the rest needs a restart.
@@ -401,6 +404,29 @@ def _named(word):
     return (word in NAME_SPELLINGS or word == 'pyn') and word not in WAKE_NAMES
 
 
+def _said_as(heard, wanted, loose=False):
+    """Whether heard words are a command's words as Whisper wrote them: the same letters with the
+    spaces elsewhere ("kayd et", "sonkelimeyi sil"); `loose`, for a command of more than one
+    word, also its last word the same and the words before it a letter or two off ("son kelime
+    sil", "hepsi sil"). A one-word command is never loose: "kaydettim" is a word, not "kaydet"."""
+    if not heard or not wanted:
+        return False
+    if ''.join(heard) == ''.join(wanted):
+        return True
+    if not loose or len(wanted) < 2 or len(heard) != len(wanted) or heard[-1] != wanted[-1]:
+        return False
+    return difflib.SequenceMatcher(None, ' '.join(heard[:-1]), ' '.join(wanted[:-1])).ratio() >= 0.8
+
+
+def _tail(said, wanted, loose):
+    """How many of the last heard words are `wanted` (spaced otherwise, or loosely); 0 if none."""
+    sizes = (len(wanted),) if loose else (len(wanted), len(wanted) - 1, len(wanted) + 1)
+    for size in sizes:
+        if 0 < size <= len(said) and _said_as(said[-size:], wanted, loose):
+            return size
+    return 0
+
+
 def command_of(text, commands=None, after_name=None):
     """(command, text to write) for what was said.
 
@@ -410,27 +436,39 @@ def command_of(text, commands=None, after_name=None):
     and "bu satırı sil" are written as they are. Pyn's name may come before the command, as
     the wake phrase is said: "…, Pyn kaydet" saves and the name is not written. `after_name`
     ("gönder", "tamam"…) save too, but only right after the name: "Ali'ye gönder" is a note.
+
+    Whisper does not always write a command as it is set: "kayd et", "son kelime sil". Its
+    words with the spaces elsewhere count, and a longer command's with its last word right and
+    the rest a letter or two off (the deleting ones, LOOSE_COMMANDS); the exact words are looked
+    for first.
     """
     commands = commands or DEFAULTS['komutlar']
     after_name = DEFAULTS['adla_kaydet'] if after_name is None else after_name
     said = words(text)
     if not said:
         return None, ''
-    whole = ' '.join(said)
-    named_saves = {' '.join(words(p)) for p in after_name}
-    for name in COMMANDS:
-        spoken = {' '.join(words(p)) for p in commands.get(name, ())}
-        named = spoken | named_saves if name == 'kaydet' else spoken
-        if whole in spoken or (len(said) > 1 and _named(said[0]) and ' '.join(said[1:]) in named):
-            return name, ''
+    for loose in (False, True):
+        for name in COMMANDS:
+            spoken = [words(p) for p in commands.get(name, ())]
+            named = spoken + [words(p) for p in after_name] if name == 'kaydet' else spoken
+            if loose and name not in LOOSE_COMMANDS:
+                continue
+            if any(_said_as(said, one, loose) for one in spoken) or (
+                    len(said) > 1 and _named(said[0]) and any(_said_as(said[1:], one, loose) for one in named)):
+                return name, ''
     at_end = [(name, words(p)) for name in AT_END for p in commands.get(name, ())]
-    for name, wanted in sorted(at_end, key=lambda one: len(one[1]), reverse=True):
-        if wanted and len(said) >= len(wanted) and said[-len(wanted):] == wanted:
-            cut = len(wanted) + (1 if len(said) > len(wanted) and _named(said[-len(wanted) - 1]) else 0)
-            return name, _without_last_words(text, cut)
+    for loose in (False, True):
+        for name, wanted in sorted(at_end, key=lambda one: len(one[1]), reverse=True):
+            if loose and name not in LOOSE_COMMANDS:
+                continue
+            size = _tail(said, wanted, loose)
+            if size:
+                cut = size + (1 if len(said) > size and _named(said[-size - 1]) else 0)
+                return name, _without_last_words(text, cut)
     for wanted in sorted((words(p) for p in after_name), key=len, reverse=True):
-        if wanted and len(said) > len(wanted) and said[-len(wanted):] == wanted and _named(said[-len(wanted) - 1]):
-            return 'kaydet', _without_last_words(text, len(wanted) + 1)
+        size = _tail(said, wanted, False)
+        if size and len(said) > size and _named(said[-size - 1]):
+            return 'kaydet', _without_last_words(text, size + 1)
     return None, text.strip()
 
 
@@ -1216,7 +1254,7 @@ class Server:
             wav.writeframes(pcm)
         boundary = uuid.uuid4().hex
         body = b''
-        for name, value in (('response_format', 'json'), ('temperature', '0.0')):
+        for name, value in server_fields(config):
             body += ('--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (boundary, name, value)).encode()
         body += ('--%s\r\nContent-Disposition: form-data; name="file"; filename="ses.wav"\r\n'
                  'Content-Type: audio/wav\r\n\r\n' % boundary).encode() + sound.getvalue() + ('\r\n--%s--\r\n' % boundary).encode()
@@ -1271,11 +1309,26 @@ def release(model):
         model.close()
 
 
+# How Whisper writes, on either engine: the five best guesses weighed, not the first one taken.
+BEAM_SIZE = 5
+
+
+def server_fields(config):
+    """What whisper.cpp's server is asked along with the sound: as faster-whisper is (`transcribe`),
+    the five best guesses weighed, and the words to expect as the settings say now (the server
+    was started with them, `ayar` may have changed them since). Taking its first guess, the
+    server wrote Turkish noticeably worse than faster-whisper did on a CUDA card."""
+    fields = [('response_format', 'json'), ('temperature', '0.0'), ('beam_size', str(BEAM_SIZE))]
+    if config.get('ipucu'):
+        fields.append(('prompt', config['ipucu']))
+    return fields
+
+
 def transcribe(model, audio, config, lock):
     with lock:
         if isinstance(model, Server):
             return model.write(audio, config)
-        segments, _info = model.transcribe(audio, language=config['dil'] or None, vad_filter=True, beam_size=5,
+        segments, _info = model.transcribe(audio, language=config['dil'] or None, vad_filter=True, beam_size=BEAM_SIZE,
                                            initial_prompt=config.get('ipucu') or None, condition_on_previous_text=False)
         return ' '.join(s.text.strip() for s in segments).strip()
 

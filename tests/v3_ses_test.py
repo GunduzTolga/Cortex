@@ -190,6 +190,19 @@ class WordsTest(unittest.TestCase):
             self.assertEqual(ses.command_of(note), (None, note), note)
         self.assertEqual(ses.command_of('Pyn gönder', after_name=[]), (None, 'Pyn gönder'), 'the list is a setting')
 
+    def test_a_command_whisper_writes_a_little_otherwise_still_counts(self):
+        # Turkish commands were missed when Whisper spaced them otherwise or dropped a suffix.
+        self.assertEqual(ses.command_of('Toplantı notu, kayd et.'), ('kaydet', 'Toplantı notu'))
+        self.assertEqual(ses.command_of('Pyn, kay det'), ('kaydet', ''))
+        self.assertEqual(ses.command_of('Son cümle yi sil'), ('cumle_sil', ''))
+        self.assertEqual(ses.command_of('Bugün hava güzel, son kelime sil'), ('kelime_sil', 'Bugün hava güzel'))
+        self.assertEqual(ses.command_of('Pin, son kelime sil'), ('kelime_sil', ''))
+        self.assertEqual(ses.command_of('Hepsi sil.'), ('sil', ''))
+        self.assertEqual(ses.command_of('son cümleyi sil'), ('cumle_sil', ''), 'the exact words first')
+        for note in ('notu kaydettim', 'son kelimeyi sildim', 'Hepsi silindi', 'Son dakika sil', 'herkesi sil',
+                     'Sunuma bir resim ekle', 'Listeye görüntü ekle'):
+            self.assertEqual(ses.command_of(note), (None, note), note)
+
     def test_the_small_models_sound_alikes_are_turkish_words_in_a_note_not_the_name(self):
         # "bin", "pay", "bayan" stand for Pyn only to the wake listener; Whisper writes the name.
         for note in ("Ali'ye beş bin gönder", 'Fiyat on bin tamam', 'Kira bitti, pay bitti'):
@@ -993,7 +1006,9 @@ class Answer(BaseHTTPRequestHandler):
         silent = body.count(b'\x00' * 64) > 100
         with open(record, 'a', encoding='utf-8') as log:
             log.write(json.dumps({'yol': self.path, 'wav': b'RIFF' in body and b'WAVEfmt' in body,
-                                  'json': b'name="response_format"\r\n\r\njson' in body, 'sessiz': silent}) + '\n')
+                                  'json': b'name="response_format"\r\n\r\njson' in body, 'sessiz': silent,
+                                  'beam': b'name="beam_size"\r\n\r\n5\r\n' in body,
+                                  'ipucu': b'name="prompt"\r\n\r\nPyn, Cortex\r\n' in body}) + '\n')
         text = ' [BLANK_AUDIO]\n' if silent else ' Merhaba\n dünya\n'
         payload = json.dumps({'text': text}).encode()
         self.send_response(200)
@@ -1045,6 +1060,9 @@ class VulkanServerTest(unittest.TestCase):
         self.assertIn('-nt', argv)
         self.assertEqual((warm['yol'], warm['sessiz']), ('/inference', True), 'warmed up on silence before the first sentence')
         self.assertEqual((asked['wav'], asked['json'], asked['sessiz']), (True, True, False))
+        # As faster-whisper writes on a CUDA card: the five best guesses weighed, the words to expect
+        # as the settings say now. Taking its first guess, it wrote Turkish noticeably worse.
+        self.assertEqual((asked['beam'], asked['ipucu']), (True, True))
 
     def test_a_card_that_fails_is_said_and_whisper_cpp_writes_on_the_processor(self):
         from contextlib import redirect_stderr
