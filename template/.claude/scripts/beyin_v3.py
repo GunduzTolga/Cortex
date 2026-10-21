@@ -430,6 +430,13 @@ _VOICELESS = frozenset("cfhkpst")
 # The n-buffered forms carry a stem floor of 5 because their n only ever follows a
 # possessive vowel, so "cobanin" reads as coban+in while "arabanin" reads as araba+n+in.
 _SUFFIXES = (
+    # Verb endings (#430) peel only after l or n, which cover passive/reflexive forms:
+    # kurulmali, kurulmasin, kurulur, kurulmus and kuruldu all reach "kurul". This is a
+    # conservative spelling heuristic, not a voice classifier. Other stems stay alone:
+    # imperative prompts (goster, calistir) would match every note that uses the verb.
+    ("masin", 4, "ln"), ("mesin", 4, "ln"), ("mali", 5, "ln"), ("meli", 5, "ln"),
+    ("iyor", 4, "ln"), ("uyor", 4, "ln"),
+    ("acak", 4, "ln"), ("ecek", 4, "ln"), ("acag", 4, "ln"), ("eceg", 4, "ln"),
     ("imiz", 4, "consonant"), ("umuz", 4, "consonant"), ("iniz", 4, "consonant"), ("unuz", 4, "consonant"),
     ("nden", 5, "vowel"), ("ndan", 5, "vowel"),
     ("ten", 4, "voiceless"), ("tan", 4, "voiceless"), ("den", 4, "voiced"), ("dan", 4, "voiced"),
@@ -437,16 +444,46 @@ _SUFFIXES = (
     ("miz", 4, "vowel"), ("muz", 4, "vowel"), ("niz", 4, "vowel"), ("nuz", 4, "vowel"),
     ("yla", 4, "vowel"), ("yle", 4, "vowel"),
     ("ler", 3, "any"), ("lar", 3, "any"),
+    ("mak", 4, "ln"), ("mek", 4, "ln"), ("mis", 4, "ln"), ("mus", 4, "ln"),
     ("te", 4, "voiceless"), ("ta", 4, "voiceless"), ("de", 4, "voiced"), ("da", 4, "voiced"),
     ("si", 4, "vowel"), ("su", 4, "vowel"), ("ya", 4, "vowel"), ("ye", 4, "vowel"),
     ("yi", 4, "vowel"), ("yu", 4, "vowel"),
     ("in", 4, "consonant"), ("un", 4, "consonant"), ("im", 4, "consonant"), ("um", 4, "consonant"),
     ("le", 4, "consonant"), ("la", 4, "consonant"),
+    # Past tense needs i or u before the l or n as well: "buildi" and "backendi" are a
+    # loanword plus a possessive, not a passive verb.
+    ("di", 5, "passive"), ("du", 5, "passive"), ("ma", 4, "ln"), ("me", 4, "ln"),
+    # The aorist floor is 5: kurul+ur, but not the nouns sinir or kenar.
+    ("ir", 5, "ln"), ("ur", 5, "ln"), ("ar", 5, "ln"), ("er", 5, "ln"),
     ("i", 4, "consonant"), ("u", 4, "consonant"), ("e", 4, "consonant"), ("a", 4, "consonant"),
 )
+# Keep the larger suffix table off the hot path without changing rule precedence.
+_SUFFIXES_BY_LAST = {
+    last: tuple(rule for rule in _SUFFIXES if rule[0][-1] == last)
+    for last in {suffix[-1] for suffix, _, _ in _SUFFIXES}
+}
 
 
-def _attaches(previous, gate):
+# Vowel loss (#430): a few roots drop their last vowel before a vowel suffix, so peeling
+# "metni" stops at "metn" while "metin" stays whole. The peeled short form is mapped back
+# to the root, on both sides. Forms that are often another word stay out: devre and
+# devreye (circuit, activation) for devir, resmi (official) for resim, karne for karin,
+# English burn for burun, the name Emre for emir, and al-in (take) for alin.
+_VOWEL_LOSS = {
+    "sehr": "sehir", "fikr": "fikir", "beyn": "beyin", "metn": "metin", "kism": "kisim",
+    "hukm": "hukum", "nehr": "nehir", "zihn": "zihin", "vakt": "vakit", "nesl": "nesil",
+    "seyr": "seyir", "haps": "hapis", "keyf": "keyif", "kayb": "kayip", "kayd": "kayit",
+    "nakd": "nakit", "cism": "cisim", "zulm": "zulum", "kahr": "kahir", "sekl": "sekil",
+    "gonl": "gonul", "gogs": "gogus",
+    # A three-letter loss stops above the stem floor, so each surviving form is listed.
+    "ismi": "isim", "ismin": "isim", "isme": "isim", "akli": "akil", "aklin": "akil",
+    "akla": "akil", "agzi": "agiz", "agzin": "agiz", "agza": "agiz", "oglu": "ogul",
+    "oglun": "ogul", "omru": "omur", "omrun": "omur",
+}
+
+
+def _attaches(stem, gate):
+    previous = stem[-1]
     if gate == "vowel":
         return previous in _VOWELS
     if gate == "consonant":
@@ -455,11 +492,15 @@ def _attaches(previous, gate):
         return previous in _VOICELESS
     if gate == "voiced":
         return previous not in _VOICELESS
+    if gate == "ln":
+        return previous in "ln"
+    if gate == "passive":
+        return previous in "ln" and stem[-2] in "iu"
     return True
 
 
 def _harmonizes(stem, suffix):
-    """Weak vowel harmony: folding hides o/u/i fronting, so only a and e can decide."""
+    """Weak vowel harmony: only an unambiguous last vowel (a/e) can decide."""
     tone = next((c for c in suffix if c in _VOWELS), "")
     if tone not in ("a", "e"):
         return True
@@ -473,16 +514,22 @@ def _harmonizes(stem, suffix):
 def _stem(word):
     # Words under 5 characters are already stems; peeling them merges unrelated roots.
     while len(word) >= 5:
-        for suffix, floor, gate in _SUFFIXES:
+        # Claude ends in the spelling of a Turkish locative suffix. Preserve the
+        # name after peeling a real suffix, without scanning past folded vowels
+        # (tarihte, hakime and kabulde need the existing weak harmony rule).
+        if word == "claude":
+            break
+        for suffix, floor, gate in _SUFFIXES_BY_LAST.get(word[-1], ()):
             if not word.endswith(suffix):
                 continue
             stem = word[:-len(suffix)]
-            if len(stem) < floor or not _attaches(stem[-1], gate) or not _harmonizes(stem, suffix):
+            if len(stem) < floor or not _attaches(stem, gate) or not _harmonizes(stem, suffix):
                 continue
             word = stem
             break
         else:
             break
+    word = _VOWEL_LOSS.get(word, word)
     # Consonant softening: kitap/kitabi and ornek/ornegi (soft g is already folded to g).
     # A b or g after a vowel goes back to p or k on every stem, peeled or not, so both
     # sides agree. d is left alone: past tense stems like "dened" would land on "denet".

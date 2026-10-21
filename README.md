@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.30" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.30-E8B23A">
+  <img alt="Sürüm 1.0.31" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.31-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
@@ -362,6 +362,7 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.31](docs/v3/releases/1.0.31.md) | Hafıza: "dün", "geçen cuma", "12 Ekim" diye sorunca o günün günlüğü gelir; hiçbir not cevap vermezse günlüklere bakılır; para/ücret, crash/çökme gibi eşanlamlılar tutar. Öncülün 3.12 Türkçe kök bulması (kurulmalı/kuruldu, şehri/şehir) ve açılışta kişi notları. Türkçe hafıza ölçümü eklendi. |
 | [1.0.30](docs/v3/releases/1.0.30.md) | Türkçe sesli komutlar daha iyi tutuyor: AMD ve Intel kartlarda Whisper en iyi beş tahmini tartıyor (NVIDIA'daki gibi); "kayd et", "son kelime sil" gibi biraz farklı yazılan komutlar da tutuyor. |
 | [1.0.29](docs/v3/releases/1.0.29.md) | "Hey Pyn" bilgisayar açılınca ya da güncellemeden sonra kendiliğinden dinliyor: ses yardımcısı mikrofonu açarken bir komut gelmesini beklemiyor, sürekli dinlemeyi kapatıp açmak gerekmiyor. |
 | [1.0.28](docs/v3/releases/1.0.28.md) | "Hey Pyn" kurulumdan sonraki ilk açılışta da çalışıyor: Windows'un mikrofonu sonradan değişince (kablosuz kulaklık) dinleyici yeni mikrofona geçiyor. Sessiz bir kulaklık konuşurken "Mikrofondan ses gelmiyor" uyarısı vermiyor. |
