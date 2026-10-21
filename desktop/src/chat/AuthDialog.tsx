@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyRound, LogIn, RefreshCw, Trash2 } from 'lucide-react';
+import { Download, KeyRound, LogIn, RefreshCw, Trash2 } from 'lucide-react';
 import type { CliAuth, CliId } from '@shared/chat';
 import { messageOf } from '@shared/ipcError';
 import type { Key } from '../i18n';
@@ -53,13 +53,21 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
   const [key, setKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [busy, setBusy] = useState(false);
-  const [waiting, setWaiting] = useState(false);
+  const [waiting, setWaiting] = useState<'login' | 'install' | null>(null);
   const failed = (err: unknown) => toast({ tone: 'error', title: t('auth.failed'), detail: messageOf(err) });
 
   const login = async () => {
     try {
       await window.cortex.chat.login(tool.id);
-      setWaiting(true);
+      setWaiting('login');
+    } catch (err) {
+      failed(err);
+    }
+  };
+  const install = async () => {
+    try {
+      await window.cortex.chat.install(tool.id);
+      setWaiting('install');
     } catch (err) {
       failed(err);
     }
@@ -102,6 +110,14 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
       {tool.local?.shortContext ? <p className="mt-1 text-[11.5px] font-semibold text-bad" data-auth-short>{t('auth.local.short', { tokens: tool.local.shortContext })}</p> : null}
       {refused && tool.signedIn ? <p className="mt-1 text-[11.5px] font-semibold text-bad" data-auth-expired>{t('auth.expired')}</p> : null}
       <p className="mt-1.5 text-[11.5px] leading-relaxed text-zinc-400">{t(NOTES[tool.id])}</p>
+      {!tool.installed && tool.canInstall ? (
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <Button tone="primary" onClick={() => void install()} disabled={waiting === 'install'} data-auth-install>
+            <Download size={13} />
+            {t('auth.install')}
+          </Button>
+        </div>
+      ) : null}
       {tool.installed ? (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           {tool.canLogin ? (
@@ -124,7 +140,7 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
           ) : null}
         </div>
       ) : null}
-      {waiting ? <p className="mt-2 text-[11.5px] text-zinc-500">{t('auth.login.waiting')}</p> : null}
+      {waiting && !(waiting === 'install' && tool.installed) ? <p className="mt-2 text-[11.5px] text-zinc-500">{t(waiting === 'install' ? 'auth.install.waiting' : 'auth.login.waiting')}</p> : null}
       {keying ? (
         <form
           className="mt-2.5 space-y-2"

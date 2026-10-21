@@ -8,7 +8,7 @@ import { type Backend, type Card, ChatRefusal, type Turn, failureEvent, scrubber
 import { claudeBackend } from './claudeChat';
 import { codexBackend } from './codexChat';
 import { localBackend } from './localChat';
-import { LOCAL_IDS, isLocal, launchFor, listClis, protocolOf } from './clis';
+import { LOCAL_IDS, isLocal, launchFor, listClis, protocolOf, refreshPath } from './clis';
 import { findLocal } from './localModels';
 import { readSettings } from './settings';
 
@@ -258,7 +258,8 @@ async function run(chat: Live, message: string): Promise<void> {
 
 /** Every CLI, the model servers on this machine asked first: one is offered while it is up with a model. */
 export async function listChatClis(): Promise<CliInfo[]> {
-  await Promise.all(LOCAL_IDS.map((one) => findLocal(one)));
+  // A tool installed since the app started is found without opening it again.
+  await Promise.all([refreshPath(), ...LOCAL_IDS.map((one) => findLocal(one))]);
   return listClis();
 }
 

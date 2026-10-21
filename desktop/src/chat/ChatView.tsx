@@ -1,14 +1,15 @@
-import { useEffect, useMemo } from 'react';
-import { BookOpen, PencilLine, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { BookOpen, Download, PencilLine, Plus, Trash2 } from 'lucide-react';
 // Pyn's own face in the chat, where Pyn is the one talking; the seal stays the app's mark.
 import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz.svg';
 import type { ChatSummary } from '@shared/chat';
+import { messageOf } from '@shared/ipcError';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
 import { noteFor, useNotes } from '../notes/notesStore';
 import { useConfirm, usePrompt } from '../notes/NotesMenus';
 import { useApp } from '../store/app';
-import { Spinner } from '../ui/ui';
+import { Button, Spinner } from '../ui/ui';
 import { useChat } from './chatStore';
 import { Composer } from './Composer';
 import { SidePane } from './SidePane';
@@ -122,7 +123,9 @@ export function ChatView({ visible }: { visible: boolean }) {
   const t = useT();
   const toast = useApp((s) => s.toast);
   const state = useChat();
-  const { clis, active, open, cli, drafts, error } = state;
+  const { clis, active, open, cli, drafts, error, auth } = state;
+  // Claude Code being installed from the empty chat: its installer's window, then its sign-in's.
+  const [installing, setInstalling] = useState(false);
   const chat = active ? open[active] : null;
   const summary = active ? state.chats.find((one) => one.id === active) : null;
   const turns = useMemo(() => turnsOf(chat?.events ?? []), [chat?.events]);
@@ -248,6 +251,26 @@ export function ChatView({ visible }: { visible: boolean }) {
               ) : (
                 <div className="rounded-xl border border-zinc-200 bg-paper-2 px-4 py-3 text-[13px] leading-relaxed text-zinc-600" data-chat-no-cli>
                   {t('chat.noCli', { names: clis.map((one) => one.name).join(', ') })}
+                  {auth?.find((one) => one.id === 'claude')?.canInstall ? (
+                    <div className="mt-3">
+                      <Button
+                        tone="primary"
+                        disabled={installing}
+                        onClick={() => {
+                          setInstalling(true);
+                          window.cortex.chat.install('claude').catch((err: unknown) => {
+                            setInstalling(false);
+                            toast({ tone: 'error', title: t('auth.failed'), detail: messageOf(err) });
+                          });
+                        }}
+                        data-chat-install
+                      >
+                        <Download size={13} />
+                        {t('chat.noCli.install')}
+                      </Button>
+                      {installing ? <p className="mt-2 text-[12px] text-zinc-500">{t('auth.install.waiting')}</p> : null}
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>

@@ -1,4 +1,6 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { CliId, CliInfo } from '../../shared/chat';
 import { keyEnv } from './keys';
@@ -34,8 +36,28 @@ interface Known {
   args: string[];
 }
 
-/** Claude Code's structured mode, as the Claude Agent SDK starts it: a session read and written one JSON object a line, steps it would ask about asked of the host. */
-export const CLAUDE_ARGS = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
+/**
+ * Claude Code's structured mode, as the Claude Agent SDK starts it: a session read and written
+ * one JSON object a line, steps it would ask about asked of the host. The host is asked only
+ * when it is named (`--permission-prompt-tool stdio`, as the SDK does when it is given a
+ * `canUseTool`): without it every such step was refused unasked, and Pyn could not write to
+ * Core.md (21 October). The vault's notes are Pyn's to write without asking (`Edit(/**)`, the
+ * folder it starts in, for every file-editing tool); outside the vault it still asks, and
+ * Claude Code keeps asking for its own `.claude` settings and hooks whatever the rule.
+ */
+export const CLAUDE_ARGS = [
+  '-p',
+  '--input-format',
+  'stream-json',
+  '--output-format',
+  'stream-json',
+  '--verbose',
+  '--include-partial-messages',
+  '--permission-prompt-tool',
+  'stdio',
+  '--allowedTools',
+  'Edit(/**)',
+];
 
 const KNOWN: Known[] = [
   { id: 'claude', name: 'Claude Code', protocol: 'claude', bin: 'claude', args: CLAUDE_ARGS },
@@ -90,6 +112,73 @@ export function onPathFile(names: string[], env: NodeJS.ProcessEnv = process.env
     }
   }
   return null;
+}
+
+/**
+ * The PATH with those of these folders it lacks added at its end, in their order. Windows'
+ * PATH: its folders compared without case or a closing backslash.
+ */
+export function withDirs(current: string, dirs: string[], delimiter = path.delimiter): string {
+  const kept = current.split(delimiter).filter(Boolean);
+  const key = (dir: string) => dir.trim().replace(/[\\/]+$/, '').toLowerCase();
+  const seen = new Set(kept.map(key));
+  for (const dir of dirs) {
+    const one = dir.trim();
+    if (!one || seen.has(key(one))) continue;
+    seen.add(key(one));
+    kept.push(one);
+  }
+  return kept.join(delimiter);
+}
+
+/** What `refreshPath` asks PowerShell: the machine's PATH and the person's, written as UTF-8 so a folder named in Turkish letters comes back whole. */
+export const READ_PATH = "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; [Environment]::GetEnvironmentVariable('Path', 'Machine'); [Environment]::GetEnvironmentVariable('Path', 'User')";
+
+/** The folders of what READ_PATH wrote. */
+export function pathOutput(text: string): string[] {
+  return text
+    .replace(/^\uFEFF/, '')
+    .split(/\r?\n/)
+    .flatMap((line) => line.split(';'))
+    .map((dir) => dir.trim())
+    .filter(Boolean);
+}
+
+/** Where Windows' own PowerShell is, named in full rather than looked for on the PATH. */
+export function powerShellExe(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
+/** Claude Code's own installer's folder (claude.ai/install.ps1: `%USERPROFILE%\.local\bin`), looked in should it have left the PATH alone. */
+export const installedDirs = (): string[] => [path.join(os.homedir(), '.local', 'bin')];
+
+let refreshing: Promise<void> | null = null;
+let refreshedAt = 0;
+const REFRESH_EVERY = 10_000;
+
+/**
+ * The PATH as a program started now would have it. Windows hands a program the PATH of the
+ * moment it started: a tool installed while the app was open - Claude Code, whose installer
+ * adds its folder to the person's PATH - stayed missing until the app was opened again
+ * (21 October). The machine's and the person's PATH are read again, and the folders this
+ * process lacks are added to its own, so every tool found and started after sees them; the
+ * installer's folder with them. At most every ten seconds unless `now`; elsewhere a no-op.
+ */
+export function refreshPath(now = false): Promise<void> {
+  if (!WINDOWS) return Promise.resolve();
+  if (refreshing) return refreshing;
+  if (!now && Date.now() - refreshedAt < REFRESH_EVERY) return Promise.resolve();
+  refreshing = new Promise<void>((resolve) => {
+    execFile(powerShellExe(), ['-NoProfile', '-NonInteractive', '-Command', READ_PATH], { windowsHide: true, timeout: 15_000, encoding: 'utf8' }, (err, stdout) => {
+      const fresh = err ? [] : pathOutput(String(stdout));
+      const dirs = [...fresh, ...installedDirs().filter((dir) => fs.existsSync(dir))];
+      process.env.PATH = withDirs(process.env.PATH ?? '', dirs, ';');
+      refreshedAt = Date.now();
+      refreshing = null;
+      resolve();
+    });
+  });
+  return refreshing;
 }
 
 /** The first of these names in a folder of the PATH. */

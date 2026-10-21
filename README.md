@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.31" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.31-E8B23A">
+  <img alt="Sürüm 1.0.32" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.32-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
@@ -128,7 +128,7 @@ Terminal gerekmez; uygulama gerekeni kendisi kurar.
    2. **Kasa:** notlarının duracağı klasörü seçersin; mevcut bir Obsidian kasası da olabilir. Zorunlu tek adım budur.
    3. **Python:** yalnız bilgisayarında Python yoksa görünür. Uygulamayla gelen Python 3.12, yalnız senin kullanıcın için kurulur.
    4. **Pyn'in hafızası:** hafıza motoru kasaya kurulur; notlarına dokunulmaz.
-   5. **Yapay zeka aracın:** bilgisayarında kurulu araçları (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code) listeler; her birinin yanında giriş düğmesi, ayrıca API anahtarı girme düğmesi vardır.
+   5. **Yapay zeka aracın:** bilgisayarında kurulu araçları (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code) listeler; her birinin yanında giriş düğmesi, ayrıca API anahtarı girme düğmesi vardır. Claude Code kurulu değilse **Claude Code'u kur ve giriş yap** düğmesi çıkar: Anthropic'in kendi kurucusu bir pencerede çalışır, bitince giriş penceresi kendiliğinden açılır. Claude Code, Claude Pro ya da Max aboneliği ister. Uygulamayı yeniden açman gerekmez; sonradan kurduğun bir araç da pencereye döndüğünde görünür.
    6. **Sesle yazma:** isteğe bağlıdır, tek düğmeyle kurulur (yaklaşık 2 GB indirme). Kurulunca **Sürekli dinle** ve **Pencere açılınca dinle** anahtarları görünür.
 
    Her adım ne yaptığını söyler; isteğe bağlı adımlar **Atla** ile geçilir ve sonra Ayarlar'dan yapılır. İlk kurulum ekranı Ayarlar'dan yeniden açılabilir.
@@ -144,6 +144,7 @@ Terminal gerekmez; uygulama gerekeni kendisi kurar.
   - **Araçlar:** Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code; yerel modeller için LM Studio ve Ollama. Yerel modeli kendi uygulamasında yüklersin, Cortex onunla doğrudan konuşur; "bunu kaydet" dersen yerel model de gelen kutusuna ekler (7–8 milyar parametre ve üstü modeller bunu güvenilir yapar).
   - **Gelen kutusuna at** (`Ctrl+Enter`): gönder düğmesinin yanındadır; yazdığını yapay zekaya göndermeden `📥 000-Inbox/Yakala/`'ya kaydeder.
   - Model, mod ve düşünme düzeyi çiplerle seçilir; aracın izin istediği adımlar kartla sorulur; bağlamın ne kadar dolduğunu yazma kutusundaki halka gösterir.
+  - Claude Code kasadaki notlara sormadan yazar; kasanın dışındaki dosyalar ve komutlar için izin kartı çıkar. Claude Code kendi ayar ve hook dosyalarını (`.claude/`) yine sorar.
   - Sohbetin okuduğu, değiştirdiği ya da andığı notlar yan panelde açılır.
 - **Notlar:** Obsidian'a gerek kalmadan okuma ve yazma: wiki bağlantıları, canlı önizleme, geri bağlantılar, etiketler, üstüne gelince önizleme, arama (`tag:` ve `path:` ile), hızlı geçiş (`Ctrl+K`), şablonlar ve geri alınabilir çöp kutusu. Makbuzlar ve motorun ürettiği sayfalar salt okunurdur.
 - **Grafik:** notların ve aralarındaki bağlantılar; bir notun çevresini gösteren yerel grafik, makbuzları göster/gizle.
@@ -253,7 +254,7 @@ Hafızayı model değil istemci taşır. Bu yüzden ücretsiz, uygun fiyatlı ya
 
 Cortex notlarını kendi başına hiçbir yere göndermez ve telemetri toplamaz.
 
-**Ağ istekleri.** Kendiliğinden yapılan tek istek, oturum açılışında arka planda GitHub'a sorulan "yeni sürüm var mı?" sorusudur: başarılı olursa günde en çok bir kez, başarısız olursa 1 ve 6 saat sonra yeniden denenir. Not, prompt ya da hesap bilgisi taşımaz; `preferences --update-notifications off` kapatır. Bunun dışındaki her istek senin açtığın bir şeyden gelir: Yakala'nın sayfa getirmesi, sesle yazmanın kurulumu (modeller ve paketler, yaklaşık 2 GB), güncelleme, Telegram'ı açtıysan Telegram'ın sunucularına sorulan yeni mesajlar, Beyin'in canlı konuşmalarını Claude Code'la açtıysan o araç.
+**Ağ istekleri.** Kendiliğinden yapılan tek istek, oturum açılışında arka planda GitHub'a sorulan "yeni sürüm var mı?" sorusudur: başarılı olursa günde en çok bir kez, başarısız olursa 1 ve 6 saat sonra yeniden denenir. Not, prompt ya da hesap bilgisi taşımaz; `preferences --update-notifications off` kapatır. Bunun dışındaki her istek senin açtığın bir şeyden gelir: Yakala'nın sayfa getirmesi, sesle yazmanın kurulumu (modeller ve paketler, yaklaşık 2 GB), uygulamadan Claude Code kurulumu (Anthropic'in `claude.ai/install.ps1` kurucusu), güncelleme, Telegram'ı açtıysan Telegram'ın sunucularına sorulan yeni mesajlar, Beyin'in canlı konuşmalarını Claude Code'la açtıysan o araç.
 
 **Asıl akış** şudur: yazdığın mesajla eşleşen notlar asistanının bağlamına eklenir ve böylece **kullandığın yapay zeka sağlayıcısına** (Anthropic, OpenAI, Google…) gider. Sistemin amacı budur; yerel bir model kullanırsan hiçbir şey bilgisayardan çıkmaz. Neyin gitmeyeceğini sen belirlersin:
 
@@ -362,6 +363,7 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.32](docs/v3/releases/1.0.32.md) | Pyn sohbetinde Claude Code kasadaki notlara (Core.md dahil) sormadan yazar; başka adımlar izin kartıyla sorulur, artık sessizce reddedilmez. İlk kurulumda Claude Code yoksa uygulamadan kurulup giriş yapılır; sonradan kurulan araç ya da yapılan giriş, uygulamayı yeniden açmadan görünür. |
 | [1.0.31](docs/v3/releases/1.0.31.md) | Hafıza: "dün", "geçen cuma", "12 Ekim" diye sorunca o günün günlüğü gelir; hiçbir not cevap vermezse günlüklere bakılır; para/ücret, crash/çökme gibi eşanlamlılar tutar. Öncülün 3.12 Türkçe kök bulması (kurulmalı/kuruldu, şehri/şehir) ve açılışta kişi notları. Türkçe hafıza ölçümü eklendi. |
 | [1.0.30](docs/v3/releases/1.0.30.md) | Türkçe sesli komutlar daha iyi tutuyor: AMD ve Intel kartlarda Whisper en iyi beş tahmini tartıyor (NVIDIA'daki gibi); "kayd et", "son kelime sil" gibi biraz farklı yazılan komutlar da tutuyor. |
 | [1.0.29](docs/v3/releases/1.0.29.md) | "Hey Pyn" bilgisayar açılınca ya da güncellemeden sonra kendiliğinden dinliyor: ses yardımcısı mikrofonu açarken bir komut gelmesini beklemiyor, sürekli dinlemeyi kapatıp açmak gerekmiyor. |

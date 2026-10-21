@@ -61,27 +61,46 @@ export function Onboarding() {
   const [skipped, setSkipped] = useState<Set<StepId>>(new Set());
   // Python's step stays in the list once it was needed, so it can be seen done.
   const [neededPython, setNeededPython] = useState(false);
-  // The tools signed in to from here: a sign-in window opened for them closed with the tool signed in.
+  // The tools signed in to from here: a sign-in opened for them, from its button or after its install, that ended signed in.
   const [fresh, setFresh] = useState<Set<CliId>>(new Set());
   const trying = useRef<Set<CliId>>(new Set());
-  useEffect(
-    () =>
-      window.cortex.on.authChanged(() => {
-        void useChat
-          .getState()
-          .loadAuth()
-          .then(() => {
-            const now = useChat.getState().auth ?? [];
-            const signed = [...trying.current].filter((id) => now.find((tool) => tool.id === id)?.signedIn === true);
-            trying.current.clear();
-            if (signed.length) setFresh((before) => new Set([...before, ...signed]));
-          });
-      }),
-    [],
-  );
+  // Claude Code being installed from here, or its installer ended without it.
+  const [installing, setInstalling] = useState<'running' | 'failed' | null>(null);
+  const installRef = useRef(installing);
+  installRef.current = installing;
+  useEffect(() => {
+    const reread = () =>
+      useChat
+        .getState()
+        .loadAuth()
+        .then(() => {
+          const now = useChat.getState().auth ?? [];
+          const signed = [...trying.current].filter((id) => now.find((tool) => tool.id === id)?.signedIn === true);
+          // One not signed in yet stays tried: its sign-in may still be going on, or come after its install.
+          for (const id of signed) trying.current.delete(id);
+          if (signed.length) setFresh((before) => new Set([...before, ...signed]));
+          if (installRef.current === 'running') setInstalling(now.find((tool) => tool.id === 'claude')?.installed ? null : 'failed');
+        });
+    const stop = window.cortex.on.authChanged(() => void reread());
+    // Back from a terminal or the browser, where a tool was installed or signed in to: asked again.
+    const back = () => void useChat.getState().loadAuth();
+    window.addEventListener('focus', back);
+    return () => {
+      stop();
+      window.removeEventListener('focus', back);
+    };
+  }, []);
   const login = (id: CliId) => {
     trying.current.add(id);
     void window.cortex.chat.login(id).catch(() => trying.current.delete(id));
+  };
+  const install = (id: CliId) => {
+    trying.current.add(id);
+    setInstalling('running');
+    void window.cortex.chat.install(id).catch(() => {
+      trying.current.delete(id);
+      setInstalling('failed');
+    });
   };
 
   useEffect(() => {
@@ -161,7 +180,7 @@ export function Onboarding() {
           {at === 'vault' ? <VaultStep name={vault?.name ?? null} /> : null}
           {at === 'python' ? <PythonStep status={status} /> : null}
           {at === 'engine' ? <EngineStep status={status} /> : null}
-          {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} onLogin={login} /> : null}
+          {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} installing={installing} onLogin={login} onInstall={install} /> : null}
           {at === 'voice' ? <VoiceStep status={status} /> : null}
           {at === 'done' ? <DoneStep order={order} done={done} skipped={skipped} canFinish={Boolean(vault)} /> : null}
 
@@ -366,10 +385,25 @@ function EngineStep({ status }: { status: SetupStatus | null }) {
   );
 }
 
-function ToolsStep({ auth, fresh, onLogin }: { auth: CliAuth[] | null; fresh: Set<CliId>; onLogin: (id: CliId) => void }) {
+function ToolsStep({
+  auth,
+  fresh,
+  installing,
+  onLogin,
+  onInstall,
+}: {
+  auth: CliAuth[] | null;
+  fresh: Set<CliId>;
+  installing: 'running' | 'failed' | null;
+  onLogin: (id: CliId) => void;
+  onInstall: (id: CliId) => void;
+}) {
   const t = useT();
   const refused = useChat((s) => s.authFailed);
   const tools = (auth ?? []).filter((tool) => tool.installed);
+  // Claude Code missing, and installable from here (Windows): offered first, with its sign-in after.
+  const claude = auth?.find((tool) => tool.id === 'claude');
+  const offerInstall = Boolean(claude && !claude.installed && claude.canInstall);
   const state = (tool: CliAuth): [Key, string] =>
     tool.local
       ? serving(tool)
@@ -390,8 +424,21 @@ function ToolsStep({ auth, fresh, onLogin }: { auth: CliAuth[] | null; fresh: Se
         <p>{t('onboarding.tools.body')}</p>
         <p className="text-[12.5px] text-zinc-500">{t('onboarding.tools.honest')}</p>
       </Heading>
-      {auth && !tools.length ? <p className="mt-5 text-[13px] text-zinc-600">{t('onboarding.tools.none')}</p> : null}
-      <ul className="mt-5 divide-y divide-zinc-100 rounded-xl border border-darkDelegation/15 bg-white" data-onboarding-tool-list>
+      {offerInstall ? (
+        <div className="mt-5 rounded-xl border border-darkDelegation/25 bg-white px-4 py-3.5" data-onboarding-install="claude">
+          <p className="text-[13.5px] font-semibold text-darkDelegation">{t('onboarding.tools.install.title')}</p>
+          <p className="mt-1 text-[12.5px] leading-relaxed text-zinc-600">{t('onboarding.tools.install.body')}</p>
+          <Button tone="primary" className="mt-3" disabled={installing === 'running'} onClick={() => onInstall('claude')} data-onboarding-install-start>
+            <Download size={14} />
+            {t('onboarding.tools.install')}
+          </Button>
+          {installing === 'running' ? <p className="mt-2 text-[12px] text-zinc-500" data-onboarding-installing>{t('onboarding.tools.installing')}</p> : null}
+          {installing === 'failed' ? <p className="mt-2 text-[12px] font-semibold text-bad" data-onboarding-install-failed>{t('onboarding.tools.installFailed')}</p> : null}
+        </div>
+      ) : auth && !tools.length ? (
+        <p className="mt-5 text-[13px] text-zinc-600">{t('onboarding.tools.none')}</p>
+      ) : null}
+      <ul className={`mt-5 divide-y divide-zinc-100 rounded-xl border border-darkDelegation/15 bg-white${tools.length ? '' : ' hidden'}`} data-onboarding-tool-list>
         {tools.map((tool) => {
           const [words, colours] = state(tool);
           return (

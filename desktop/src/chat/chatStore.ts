@@ -171,9 +171,12 @@ export const useChat = create<ChatState>((set, get) => {
           queue.push(push);
           if (!frame) frame = requestAnimationFrame(flush);
         });
-        // A sign-in window closed: every tool asked again.
-        window.cortex.on.authChanged(() => void get().loadAuth());
-        // Back from another app - LM Studio, where a model was just loaded: the CLIs asked again.
+        // A sign-in or an install ended: every tool asked again, and the CLIs, one of which may be new.
+        window.cortex.on.authChanged(() => {
+          void get().loadAuth();
+          void get().refreshClis();
+        });
+        // Back from another app - LM Studio, where a model was just loaded, or a terminal, where a tool was installed: the CLIs asked again.
         window.addEventListener('focus', () => void get().refreshClis());
       }
       try {
@@ -192,10 +195,13 @@ export const useChat = create<ChatState>((set, get) => {
 
     async refreshClis() {
       try {
+        const had = new Set((get().clis ?? []).filter((one) => one.available).map((one) => one.id));
         const clis = await window.cortex.chat.clis();
         const chosen = get().cli;
         const available = clis.filter((one) => one.available);
         set({ clis, cli: chosen && available.some((one) => one.id === chosen) ? chosen : (available[0]?.id ?? chosen) });
+        // A tool installed since: whether it is signed in is asked too, for the tool chip.
+        if (available.some((one) => !had.has(one.id))) void get().loadAuth();
       } catch {
         /* The list as it was. */
       }

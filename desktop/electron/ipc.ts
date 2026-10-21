@@ -138,6 +138,7 @@ export function registerIpc(): void {
   auth.onAuthChanged(() => broadcast('chat:authChanged', null));
   handle('chat:auth', () => auth.authStatuses());
   handle('chat:login', (cli) => auth.startLogin(cli));
+  handle('chat:install', (cli) => auth.installTool(cli));
   handle('chat:setKey', async (cli, key, baseUrl) => {
     await auth.setToolKey(cli, key, baseUrl);
     return auth.authStatuses();

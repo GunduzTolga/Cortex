@@ -97,6 +97,9 @@ test('a message to Claude Code gets its answer streamed in pieces, its steps wit
   assert.deepEqual(opened.options.find((one) => one.id === 'model')?.choices.map((one) => one.value), ['default', 'haiku', 'opus'], 'the models Claude Code named');
   const [first] = starts(log);
   assert.deepEqual(first.argv, CLAUDE_ARGS, 'started as the SDK starts it, with nothing else on a first message');
+  // Asked of the person, not refused unasked (21 October: Pyn could not write Core.md); the vault's notes written without asking.
+  assert.deepEqual(first.argv.slice(first.argv.indexOf('--permission-prompt-tool'), first.argv.indexOf('--permission-prompt-tool') + 2), ['--permission-prompt-tool', 'stdio']);
+  assert.deepEqual(first.argv.slice(first.argv.indexOf('--allowedTools'), first.argv.indexOf('--allowedTools') + 2), ['--allowedTools', 'Edit(/**)']);
   assert.equal(first.cwd, vault, 'in the vault, where its hooks are');
   assert.deepEqual(linesIn(log).find((one) => one.in?.type === 'control_request')?.in, { type: 'control_request', request_id: (linesIn(log).find((one) => one.in?.type === 'control_request')?.in as { request_id: string }).request_id, request: { subtype: 'initialize', hooks: null } });
 });
