@@ -27,6 +27,8 @@ interface AppState {
   bootError: string | null;
   settings: WindowSettings;
   vault: VaultStatus;
+  /** Counts the vaults chosen while the window is open: what was read of the one before is read again. */
+  vaultSeq: number;
   settingsUnreadable: BootstrapPayload['settingsUnreadable'];
   version: string;
   toasts: Toast[];
@@ -56,6 +58,7 @@ export const useApp = create<AppState>((set, get) => ({
   bootError: null,
   settings: { language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false },
   vault: { vault: null, missing: false },
+  vaultSeq: 0,
   settingsUnreadable: null,
   version: '',
   toasts: [],
@@ -90,7 +93,7 @@ export const useApp = create<AppState>((set, get) => ({
   async chooseVault(failed) {
     try {
       const status = await window.cortex.vault.choose();
-      if (status) set({ vault: status });
+      if (status) set((state) => ({ vault: status, vaultSeq: state.vaultSeq + 1 }));
     } catch (err) {
       get().toast({ tone: 'error', title: failed, detail: messageOf(err) });
     }

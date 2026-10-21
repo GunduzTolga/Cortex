@@ -98,6 +98,7 @@ const api: CortexApi = {
     chat: (handler) => listen('chat:event', handler),
     authChanged: (handler) => subscribe('chat:authChanged', handler),
     setup: (handler) => listen('setup:event', handler),
+    voiceStatus: (handler) => listen('setup:voice', handler),
     openSettings: (handler) => subscribe('app:openSettings', handler),
     askWake: (handler) => subscribe('app:askWake', handler),
   },

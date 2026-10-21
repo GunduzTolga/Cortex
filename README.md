@@ -195,7 +195,11 @@ Kendin derlemek ve ayrıntılar için: [desktop/README.md](desktop/README.md).
   | Vazgeç | "iptal", "vazgeç" |
 
 - **Biraz farklı yazılan komutlar da tutar:** Whisper bir komutu boşlukları başka yerde yazarsa ("kayd et", "son cümle yi sil") ya da silme komutlarında bir eki yutarsa ("son kelime sil", "hepsi sil") komut yine çalışır. "notu kaydettim" ya da "son kelimeyi sildim" gibi cümleler komut sayılmaz, nota yazılır.
-- **Ses bilgisayardan çıkmaz ve diske yazılmaz;** yerel Whisper yazıya döker. NVIDIA kartlarda CUDA, AMD Radeon ve Intel Arc kartlarda Vulkan (whisper.cpp) ile ekran kartında, yoksa işlemcide çalışır. Kablosuz kulaklık sonradan bağlansa ya da Windows'un varsayılan mikrofonu değişse de dinleyici yeni mikrofona kendiliğinden geçer.
+- **Ses bilgisayardan çıkmaz ve diske yazılmaz;** yerel Whisper yazıya döker.
+  - NVIDIA kartlarda CUDA, AMD Radeon ve Intel Arc kartlarda Vulkan (whisper.cpp) ile ekran kartında çalışır; ikisi de yoksa işlemcide çalışır.
+  - İşlemcide hızlı `small` modeli yazar; "Hey Pyn"i küçük ayrı bir model doğrular, böylece pencere hemen açılır.
+  - Daha doğru ama işlemcide yavaş modeli Ayarlar → Sesle yazma → **Yazı modeli**'nden seçebilirsin.
+  - Ses modeli yüklenirken sağ alttaki simge "Ses hazırlanıyor…" der. Hazırlık uzun sürerse bildirim gelir; hazır olunca "Pyn hazır" der. Kablosuz kulaklık sonradan bağlansa ya da Windows'un varsayılan mikrofonu değişse de dinleyici yeni mikrofona kendiliğinden geçer.
 
 [Ayrıntılar](docs/v3/YAKALA.md#sesle-yazma-windows-isteğe-bağlı)
 
@@ -347,6 +351,7 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 | Belirti | Çözüm |
 | --- | --- |
 | Kurulumda "Windows bilgisayarınızı korudu" | Kurulum dosyası henüz imzasız. **Ek bilgi** → **Yine de çalıştır**. |
+| "Hey Pyn" pencereyi geç açıyor ya da yazı geç geliyor | Bilgisayarda NVIDIA, AMD ya da Intel Arc kartı yoksa ses işlemcide yazıya çevrilir. Ayarlar → Sesle yazma → **Yazı modeli**: **Hızlı** seçili olsun (1.0.32'den beri varsayılan). Açılıştan hemen sonra model yükleniyor olabilir: sağ alttaki simge "Ses hazırlanıyor…" diyorsa "Pyn hazır" bildirimini bekle. Süreler `state/ses/isci.log` dosyasında. |
 | "Hey Pyn" pencereyi açmıyor | Cortex çalışıyor mu? **Sürekli dinle** yalnız Cortex açıkken (sağ altta simgesi varken) dinler. Ayarlar → Sesle yazma: **Sürekli dinle** açık mı, izin verildi mi? Uyandırma sözü "Hey Pyn" ya da "İkisi de" mi (varsayılan "Pyn, not al")? Sağ alttaki simgenin menüsü mikrofonun dinleyip dinlemediğini ve hangi sözü beklediğini söyler. Ne duyduğunu görmek için: `py -3 beyin.py ses dene --uyandirma`. |
 | Not al'da "Mikrofondan ses gelmiyor" | Mikrofon kapalı ya da sessizde olabilir, ya da Windows başka bir mikrofonu dinliyor: Windows ses ayarlarından doğru mikrofonu varsayılan yap. |
 | Asistan notları hatırlamıyor | İstemcide hook güvenini onayladığını kontrol et, sonra asistana "beyin-doktor ile kontrol et" de ya da `beyin.py doctor` çalıştır. |
@@ -363,7 +368,7 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 
 | Sürüm | Öne çıkan |
 | --- | --- |
-| [1.0.32](docs/v3/releases/1.0.32.md) | Mikrofon izin ister: sesle yazma kurulmadan ve **Sürekli dinle** açılmadan önce sorulur; sürekli dinleme yalnız Cortex çalışırken olur, Çık'a basınca mikrofon kapanır. Pyn sohbetinde Claude Code kasadaki notlara (Core.md dahil) sormadan yazar; başka adımlar izin kartıyla sorulur. İlk kurulumda Claude Code yoksa uygulamadan kurulup giriş yapılır; sonradan kurulan araç ya da yapılan giriş, uygulamayı yeniden açmadan görünür. |
+| [1.0.32](docs/v3/releases/1.0.32.md) | Ekran kartı olmayan bilgisayarlarda (Intel laptop) "Hey Pyn" yarım dakika geç açılıyordu: işlemcide hızlı model ve ayrı bir uyandırma doğrulayıcısı; ses hazırlanırken ve hazır olunca bildirim; yüklenemeyen ses kendiliğinden yeniden denenir. Kasa, anahtar, giriş, motor güncellemesi, Python ve Telegram değişiklikleri uygulamayı yeniden açmadan geçerli. Mikrofon izin ister: sesle yazma kurulmadan ve **Sürekli dinle** açılmadan önce sorulur; sürekli dinleme yalnız Cortex çalışırken olur, Çık'a basınca mikrofon kapanır. Pyn sohbetinde Claude Code kasadaki notlara (Core.md dahil) sormadan yazar; başka adımlar izin kartıyla sorulur. İlk kurulumda Claude Code yoksa uygulamadan kurulup giriş yapılır; sonradan kurulan araç ya da yapılan giriş, uygulamayı yeniden açmadan görünür. |
 | [1.0.31](docs/v3/releases/1.0.31.md) | Hafıza: "dün", "geçen cuma", "12 Ekim" diye sorunca o günün günlüğü gelir; hiçbir not cevap vermezse günlüklere bakılır; para/ücret, crash/çökme gibi eşanlamlılar tutar. Öncülün 3.12 Türkçe kök bulması (kurulmalı/kuruldu, şehri/şehir) ve açılışta kişi notları. Türkçe hafıza ölçümü eklendi. |
 | [1.0.30](docs/v3/releases/1.0.30.md) | Türkçe sesli komutlar daha iyi tutuyor: AMD ve Intel kartlarda Whisper en iyi beş tahmini tartıyor (NVIDIA'daki gibi); "kayd et", "son kelime sil" gibi biraz farklı yazılan komutlar da tutuyor. |
 | [1.0.29](docs/v3/releases/1.0.29.md) | "Hey Pyn" bilgisayar açılınca ya da güncellemeden sonra kendiliğinden dinliyor: ses yardımcısı mikrofonu açarken bir komut gelmesini beklemiyor, sürekli dinlemeyi kapatıp açmak gerekmiyor. |

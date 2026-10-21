@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Download, Mic, RefreshCw, RotateCcw } from 'lucide-react';
-import { COMMAND_WORDS, VOICE_COMMANDS, WAKE_PHRASES, wakePhraseLabel } from '@shared/setup';
-import type { SetupJob, SetupStatus, VoiceCommands, WakePhrase } from '@shared/setup';
+import { COMMAND_WORDS, CPU_MODELS, VOICE_COMMANDS, WAKE_PHRASES, wakePhraseLabel } from '@shared/setup';
+import type { CpuModel, SetupJob, SetupStatus, VoiceCommands, WakePhrase } from '@shared/setup';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
 import { useApp } from '../store/app';
@@ -194,6 +194,21 @@ function VoiceSection({ status }: { status: SetupStatus }) {
           </Row>
           <Note data="phrase">{t(voice.wakePhrase === 'hey pyn' ? 'setup.voice.phrase.hey' : voice.wakePhrase === 'ikisi' ? 'setup.voice.phrase.ikisi' : 'setup.voice.phrase.notAl')}</Note>
           <Note data="engine">{t('setup.voice.engine', { engine: t(ENGINE_NAME[voice.engine]), model: voice.model ?? '' })}</Note>
+          {voice.engine === 'islemci' && voice.cpuModel ? (
+            // On the processor, the model is a choice between quick and accurate: large-v3-turbo took half a minute a sentence on a laptop.
+            <>
+              <Row label={t('setup.voice.cpuModel')}>
+                <Segments<CpuModel>
+                  label={t('setup.voice.cpuModel')}
+                  data="setup-voice-cpu-model"
+                  chosen={voice.cpuModel}
+                  onChoose={(cpuModel) => void set({ cpuModel })}
+                  options={CPU_MODELS.map((one) => ({ id: one, label: t(one === 'small' ? 'setup.voice.cpuModel.small' : 'setup.voice.cpuModel.large') }))}
+                />
+              </Row>
+              <Note data="cpu-model">{t('setup.voice.cpuModel.hint')}</Note>
+            </>
+          ) : null}
           {voice.commands ? <VoiceCommandsBlock commands={voice.commands} busy={busy} /> : null}
           {voice.readsFiles === false ? <Note data="update">{t('setup.voice.update.hint')}</Note> : null}
         </>
@@ -224,7 +239,12 @@ export function SetupSections({ open }: { open: boolean }) {
   const status = useSetup((s) => s.status);
   const refresh = useSetup((s) => s.refresh);
   useEffect(() => {
-    if (open) void refresh();
+    if (!open) return;
+    void refresh();
+    // Back from where Python or a model was installed: read again, not at the app's next start.
+    const back = () => void refresh();
+    window.addEventListener('focus', back);
+    return () => window.removeEventListener('focus', back);
   }, [open, refresh]);
   if (!status || !status.vault) return null;
   return (

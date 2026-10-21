@@ -36,6 +36,8 @@ const RESTART_LONGEST = 5 * 60_000;
 const RAN_WELL = 60_000;
 /** Another listener holds the machine's lock: looked at again after this long. */
 const OTHER_LISTENER_WAIT = 60_000;
+/** A key kept, but no vault, Python or engine yet: looked at again this often. */
+const MISSING_WAIT = 60_000;
 
 const file = () => path.join(app.getPath('userData'), 'telegram.json');
 
@@ -119,7 +121,18 @@ export function startTelegram(): boolean {
   const vault = vaultOrNull();
   const python = pythonOf();
   const key = keptKey();
-  if (!vault || !python || !key || !installedVersion(vault)) return false;
+  if (!vault || !python || !key || !installedVersion(vault)) {
+    // A key kept and the rest not there yet - Python or the engine being set up, a vault on a drive
+    // not mounted when Windows signed in: tried again in a while, not left off until a restart.
+    if (key) {
+      retry = setTimeout(() => {
+        retry = null;
+        startTelegram();
+      }, MISSING_WAIT);
+      retry.unref();
+    }
+    return false;
+  }
   const started = Date.now();
   let output = '';
   const proc = spawn(python.command, [...python.args, path.join(vault, 'beyin.py'), 'telegram', 'dinle', '--json'], {

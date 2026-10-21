@@ -123,6 +123,29 @@ class WordsTest(unittest.TestCase):
         with self.assertRaises(SystemExit), mock.patch('sys.stderr', io.StringIO()):
             ses.main(['ayar', '--uyandirma-sozu', 'merhaba', '--json'], state=state)
 
+    def test_the_processor_model_is_a_setting_of_its_own_and_starts_the_listener_again(self):
+        tmp = tempfile.TemporaryDirectory(prefix='v3-ses-model-')
+        self.addCleanup(tmp.cleanup)
+        state = Path(tmp.name) / 'state'
+        out = io.StringIO()
+        from contextlib import redirect_stdout
+        with redirect_stdout(out), mock.patch.object(ses, 'restart_listener', return_value=True) as restarted:
+            ses.main(['ayar', '--islemci-modeli', 'large-v3-turbo', '--json'], state=state)
+        said = json.loads(out.getvalue())
+        self.assertEqual((said['islemci_modeli'], said['dinleyici']), ('large-v3-turbo', True))
+        self.assertEqual(restarted.call_count, 1, 'the helper loads the model it is given when it starts')
+        config = ses.load_config(state)
+        self.assertEqual((config['cpu_model'], config['model']), ('large-v3-turbo', ses.DEFAULTS['model']), 'the card\'s model is its own')
+        with self.assertRaises(SystemExit), mock.patch('sys.stderr', io.StringIO()):
+            ses.main(['ayar', '--islemci-modeli', 'medium', '--json'], state=state)
+        # Set up on the processor with the large model before 1.0.32: the settings say the one it writes with now.
+        ses.venv_python(state).parent.mkdir(parents=True, exist_ok=True)
+        ses.venv_python(state).write_text('')
+        (ses.ses_dir(state) / ses.MARKER).write_text(json.dumps({'motor': 'islemci', 'model': 'large-v3-turbo (işlemci)'}), encoding='utf-8')
+        self.assertEqual(ses.status(state)['model'], 'large-v3-turbo (işlemci)')
+        ses.save_config(state, dict(ses.load_config(state), cpu_model='small'))
+        self.assertEqual(ses.status(state)['model'], 'small (işlemci)')
+
     def test_whisper_writing_the_phrase_joined_is_still_the_phrase(self):
         # Seen in the window: "Py notal. Şu an ne yapıyoruz?", the phrase left at the note's start.
         self.assertEqual(ses.without_wake('Py notal. Şu an ne yapıyoruz?'), 'Şu an ne yapıyoruz?')
@@ -273,6 +296,61 @@ class SetupTest(unittest.TestCase):
             self.assertFalse(ses.wake_allowed(on, word, moment=1005.0), broken)
         with mock.patch.dict(os.environ, {'LOCALAPPDATA': 'C:/Users/x/AppData/Local'}):
             self.assertEqual(ses.desktop_file(), Path('C:/Users/x/AppData/Local') / 'beyin-v3' / 'masaustu.json')
+
+    def test_the_listener_says_whether_its_voice_is_loading_ready_or_failed(self):
+        # For the desktop app to say "Pyn hazırlanıyor…" while a model loads and "Pyn hazır" after.
+        word = Path(self.tmp.name) / 'dinleyici.json'
+        ses.say_listener(word, ses='yukleniyor', model='', mesaj='', uyandirma=False)
+        said = json.loads(word.read_text(encoding='utf-8'))
+        self.assertEqual((said['ses'], said['surum'], said['pid']), ('yukleniyor', 1, os.getpid()))
+        self.assertIsInstance(said['at'], float)
+        ses.say_listener(word, ses='hazir', model='small (işlemci)', uyandirma=True)
+        self.assertEqual(json.loads(word.read_text(encoding='utf-8'))['model'], 'small (işlemci)')
+        self.assertEqual([one.name for one in word.parent.iterdir() if one.name.endswith('.tmp')], [], 'written whole')
+        with mock.patch.dict(os.environ, {'LOCALAPPDATA': 'C:/Users/x/AppData/Local'}):
+            self.assertEqual(ses.listener_file(), Path('C:/Users/x/AppData/Local') / 'beyin-v3' / 'dinleyici.json')
+
+    def test_a_voice_helper_whose_model_would_not_load_is_started_again_later_not_never(self):
+        # Before: "Ses hazırlanıyor…" for ever, until the listener started again with the computer.
+        sent, started = [], []
+        worker = types.SimpleNamespace(send=lambda command, **values: sent.append(command))
+        link = yakala.VoiceLink(worker, start=lambda: started.append(1) or worker)
+        self.assertEqual(link.word(), 'yukleniyor')
+        self.assertTrue(link.heard({'olay': 'hata', 'neden': 'model', 'mesaj': 'no network'}, 100.0))
+        self.assertEqual((link.ready, link.error, sent), (False, 'no network', ['kapat']), 'the helper without a model is ended')
+        self.assertFalse(link.heard({'olay': 'hata', 'neden': 'mikrofon'}, 100.0), 'a microphone\'s trouble is not the model\'s')
+        self.assertTrue(link.heard({'olay': 'bitti'}, 100.0))
+        self.assertEqual(link.word(), 'hata')
+        self.assertFalse(link.revive(105.0), 'not before its wait')
+        self.assertTrue(link.revive(110.0))
+        self.assertEqual((started, link.word()), ([1], 'yukleniyor'))
+        link.heard({'olay': 'bitti'}, 200.0)
+        self.assertEqual(link.retry_at, 220.0, 'twice as long the next time')
+        link.revive(220.0)
+        self.assertTrue(link.heard({'olay': 'hazir', 'aciklama': 'small (işlemci)'}, 230.0))
+        self.assertEqual((link.word(), link.what, link.error, link.wait), ('hazir', 'small (işlemci)', '', link.FIRST_WAIT))
+        for _ in range(10):
+            link.heard({'olay': 'bitti'}, 0.0)
+            link.revive(10 ** 6)
+        self.assertEqual(link.wait, link.LONGEST_WAIT, 'never longer than five minutes')
+        alone = yakala.VoiceLink(worker)
+        alone.heard({'olay': 'bitti'}, 0.0)
+        self.assertFalse(alone.revive(10 ** 6), 'a link that cannot start a helper does not try')
+
+        def gone():
+            raise FileNotFoundError('venv yok')
+        broken = yakala.VoiceLink(worker, start=gone)
+        broken.heard({'olay': 'bitti'}, 0.0)
+        self.assertTrue(broken.revive(10.0), 'tried, and the listener goes on')
+        self.assertEqual((broken.word(), broken.retry_at), ('hata', 30.0), 'tried again later')
+        self.assertIn('venv yok', broken.error)
+
+    def test_the_processor_writes_with_a_quick_model_and_says_what_it_downloads(self):
+        self.assertEqual(ses.DEFAULTS['cpu_model'], 'small', 'large-v3-turbo took half a minute a sentence on a laptop')
+        self.assertIn(ses.DEFAULTS['cpu_model'], ses.CPU_MODELS)
+        self.assertEqual(ses.download_size('islemci', ses.DEFAULTS), '0,7', 'small and the wake phrase\'s checker')
+        self.assertEqual(ses.download_size('islemci', dict(ses.DEFAULTS, cpu_model='large-v3-turbo')), '1,8')
+        self.assertEqual(ses.download_size('cuda', ses.DEFAULTS), '1,6')
 
     def test_commands_saved_as_the_old_defaults_get_the_new_words_ones_chosen_stay(self):
         ses.ses_dir(self.state).mkdir(parents=True)
@@ -1205,7 +1283,7 @@ class ServeTest(unittest.TestCase):
                             ('load_model', lambda _state, _config: ('model', 'sahte')), ('release', lambda _model: None),
                             ('transcribe', transcribe), ('_device_name', lambda _config: 'Mikrofon'),
                             ('join_audio', lambda *parts: Sound('+'.join(part.name for part in parts if part.name))),
-                            ('out', lambda **event: self.events.put(event)), ('log', self.logged.append),
+                            ('out', lambda **event: self.events.put(event)), ('log', lambda text: None if text.startswith('süre:') else self.logged.append(text)),
                             ('_refresh_audio', lambda: self.refreshed.append(1) or True),
                             ('now', lambda: self.clock.t)):
             setattr(helper, name, value)
@@ -1445,6 +1523,42 @@ class ServeTest(unittest.TestCase):
         self.pause()
         first = self.until('metin')
         self.assertEqual((first['metin'], first['son']), ('Yarın toplantı var.', False))
+
+    def test_on_the_processor_the_wake_phrase_is_checked_by_a_small_model_of_its_own(self):
+        # 21 October: on an Intel laptop's processor the dictation's model took half a minute a
+        # check, and "Hey Pyn" opened the window that late. The dictation keeps its own model.
+        opened, used = [], []
+        self.helper.load_model = lambda _state, _config: ('yazi-modeli', 'small (işlemci)')
+        self.helper._open = lambda name, device, compute: opened.append((name, device, compute)) or 'denetci'
+        inner = self.helper.transcribe
+        self.helper.transcribe = lambda model, audio, config, lock: used.append(model) or inner(model, audio, config, lock)
+        self.serve(uyandirma=True)
+        self.assertEqual(opened, [(ses.CHECK_MODEL, 'cpu', 'int8')])
+        self.written.update({'once+al': 'Payn, not al.', 'al+yarin': 'Al. Yarın toplantı var.'})
+        self.wake.verdicts = ['aday']
+        self.until_recording()
+        self.recorder.speak('al')
+        self.pause(ses.WAKE_AFTER_SN)
+        self.until('uyandi')
+        self.recorder.speak('yarin')
+        self.pause()
+        self.assertEqual(self.until('metin')['metin'], 'Yarın toplantı var.')
+        self.assertEqual(used, ['denetci', 'yazi-modeli'], 'the check by the small model, the sentence by the dictation\'s')
+
+    def test_the_wake_checker_is_only_for_the_processor_and_not_needed_by_a_quick_model(self):
+        helper = self.helper
+        helper._open = lambda name, device, compute: 'denetci'
+        self.assertEqual(helper.checker_for(dict(ses.DEFAULTS), 'small (işlemci)'), 'denetci')
+        self.assertEqual(helper.checker_for(dict(ses.DEFAULTS, cpu_model='large-v3-turbo'), 'large-v3-turbo (işlemci)'), 'denetci')
+        self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS), 'large-v3-turbo (ekran kartı, CUDA)'), 'a card is quick enough')
+        self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS), 'large-v3-turbo (işlemci, whisper.cpp)'), 'no faster-whisper there')
+        self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS, cpu_model='base'), 'base (işlemci)'), 'it checks itself')
+
+        def offline(*_args):
+            raise OSError('no network')
+        helper._open = offline
+        self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS), 'small (işlemci)'), 'not to be had: the dictation\'s model checks')
+        self.assertIn('açılamadı', self.logged[-1])
 
     def test_a_heard_not_al_whisper_does_not_confirm_says_nothing_and_listens_for_the_phrase_again(self):
         self.serve(uyandirma=True)

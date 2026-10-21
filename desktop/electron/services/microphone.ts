@@ -68,3 +68,50 @@ export function stopMicrophoneWord(): void {
   timer = null;
   write(microphoneWord(false, true));
 }
+
+/** How the listener's voice helper is, as the listener says it (beyin_v3_ses.say_listener). */
+export type HelperState = 'yok' | 'yukleniyor' | 'hazir' | 'hata' | 'kapali';
+
+export interface ListenerWord {
+  ses: HelperState;
+  /** The model it writes with, once ready ("small (işlemci)"). */
+  model: string;
+  /** Why it failed, while it is being started again. */
+  mesaj: string;
+  /** Whether it listens for the wake phrase now. */
+  uyandirma: boolean;
+}
+
+const HELPER_STATES: readonly HelperState[] = ['yok', 'yukleniyor', 'hazir', 'hata', 'kapali'];
+
+/** The listener's word, beside the app's own. */
+export function listenerFile(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(path.dirname(microphoneFile(env)), 'dinleyici.json');
+}
+
+function running(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** What the listener last said of its voice; null without a listener running (none, or one that died without a word). */
+export function readListener(file: string = listenerFile(), alive: (pid: number) => boolean = running): ListenerWord | null {
+  let said: Record<string, unknown>;
+  try {
+    said = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (!said || typeof said !== 'object' || !HELPER_STATES.includes(said.ses as HelperState)) return null;
+  if (typeof said.pid !== 'number' || !alive(said.pid)) return null;
+  return {
+    ses: said.ses as HelperState,
+    model: typeof said.model === 'string' ? said.model.slice(0, 120) : '',
+    mesaj: typeof said.mesaj === 'string' ? said.mesaj.slice(0, 200) : '',
+    uyandirma: said.uyandirma === true,
+  };
+}

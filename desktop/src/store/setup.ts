@@ -36,6 +36,7 @@ export const useSetup = create<SetupState>((set, get) => {
   const listen = () => {
     if (listening) return;
     listening = true;
+    window.cortex.on.voiceStatus((voice) => set((state) => (state.status ? { status: { ...state.status, voice } } : {})));
     window.cortex.on.setup((push: SetupPush) => {
       if ('step' in push) {
         const before = get().steps;

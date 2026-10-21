@@ -147,6 +147,14 @@ export function ChatView({ visible }: { visible: boolean }) {
     if (!useNotes.getState().index) void useNotes.getState().refresh();
   }, []);
 
+  // Another vault chosen while the window is open: its chats and its notes, not the last one's (they stayed until a restart).
+  const vaultSeq = useApp((s) => s.vaultSeq);
+  useEffect(() => {
+    if (!vaultSeq) return;
+    void useChat.getState().vaultChanged();
+    void useNotes.getState().refresh();
+  }, [vaultSeq]);
+
   // A refusal from the main process - a CLI gone, a message too long - said once.
   useEffect(() => {
     if (!error) return;

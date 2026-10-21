@@ -82,8 +82,11 @@ export function Onboarding() {
           if (installRef.current === 'running') setInstalling(now.find((tool) => tool.id === 'claude')?.installed ? null : 'failed');
         });
     const stop = window.cortex.on.authChanged(() => void reread());
-    // Back from a terminal or the browser, where a tool was installed or signed in to: asked again.
-    const back = () => void useChat.getState().loadAuth();
+    // Back from a terminal or the browser, where a tool or Python was installed or signed in to: asked again.
+    const back = () => {
+      void useChat.getState().loadAuth();
+      void useSetup.getState().refresh();
+    };
     window.addEventListener('focus', back);
     return () => {
       stop();

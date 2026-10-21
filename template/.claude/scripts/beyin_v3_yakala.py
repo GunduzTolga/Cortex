@@ -2068,12 +2068,59 @@ def with_spoken(current, spoken):
 
 
 class VoiceLink:
-    """What a window knows of the voice helper (beyin_v3_ses.Worker): it, and whether its model is loaded."""
+    """What a window knows of the voice helper (beyin_v3_ses.Worker): it, and whether its model is loaded.
 
-    def __init__(self, worker):
+    A helper whose model would not load (no network for its first download, a card not ready as
+    Windows signs in) or that stopped is started again by `start`, after 10 seconds, then twice as
+    long each time up to five minutes: before, the voice stayed dead, the window saying "Ses
+    hazırlanıyor…" for ever, until the listener was started again with the computer.
+    """
+
+    FIRST_WAIT, LONGEST_WAIT = 10.0, 300.0
+
+    def __init__(self, worker, start=None):
         self.worker = worker
+        self.start = start
         self.ready = False
         self.what = ''
+        self.error = ''
+        self.retry_at = None
+        self.wait = self.FIRST_WAIT
+
+    def heard(self, event, moment):
+        """An event from the helper, kept; True when what the link says has changed."""
+        kind = event.get('olay')
+        if kind == 'hazir':
+            self.ready, self.what, self.error, self.wait = True, event.get('aciklama') or '', '', self.FIRST_WAIT
+            return True
+        if kind == 'hata' and event.get('neden') == 'model':
+            self.ready, self.error = False, str(event.get('mesaj') or 'model açılamadı')[:200]
+            self.worker.send('kapat')  # its end ('bitti') sets the next try
+            return True
+        if kind == 'bitti':
+            self.ready = False
+            self.error = self.error or 'Ses yardımcısı kapandı'
+            if self.start is not None and self.retry_at is None:
+                self.retry_at, self.wait = moment + self.wait, min(self.LONGEST_WAIT, self.wait * 2)
+            return True
+        return False
+
+    def revive(self, moment):
+        """A stopped helper started again once its wait is over; True when that was tried. One that
+        cannot even be started (its environment gone) is tried again later: the listener goes on."""
+        if self.retry_at is None or moment < self.retry_at:
+            return False
+        self.retry_at, self.ready = None, False
+        try:
+            self.worker = self.start()
+        except Exception as exc:
+            self.error = 'Ses yardımcısı başlatılamadı: ' + str(exc)[:150]
+            self.retry_at, self.wait = moment + self.wait, min(self.LONGEST_WAIT, self.wait * 2)
+        return True
+
+    def word(self):
+        """What the listener says of its voice (beyin_v3_ses.say_listener)."""
+        return 'hazir' if self.ready else 'hata' if self.retry_at is not None else 'yukleniyor'
 
 
 def popup(vault, context=None, master=None, state=None, voice=None, listening=False, auto_listen=False):
@@ -2439,7 +2486,9 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                 canvas.itemconfigure(bar, state='normal' if listening_now else 'hidden')
             device = (' · ' + heard['device']) if heard['device'] else ''
             text = message or {
-                'yok': 'Ses hazırlanıyor… birazdan konuşabilirsin',
+                # A helper being started again after its model would not load says so, not "loading" for ever.
+                'yok': ('Ses açılamadı, yeniden deneniyor: ' + voice.error) if getattr(voice, 'error', '')
+                       else 'Ses hazırlanıyor… birazdan konuşabilirsin',
                 'bekliyor': '● Dinliyorum' + device,
                 'dinliyor': '● Dinliyorum' + device,
                 'ceviriyor': 'Söylediğini yazıya çeviriyorum…',
@@ -3165,9 +3214,21 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
     try:
         import beyin_v3_ses as ses
         if ses.usable(state):
-            link = VoiceLink(ses.Worker(state))
+            link = VoiceLink(ses.Worker(state), start=lambda: ses.Worker(state))
     except Exception:
         link = None
+
+    def say_voice():
+        """The desktop app told how the voice is (beyin_v3_ses.say_listener): loading, ready, failed."""
+        try:
+            if link is None:
+                ses.say_listener(ses='yok')
+            else:
+                ses.say_listener(ses=link.word(), model=link.what, mesaj=link.error,
+                                 uyandirma=bool(link.ready and voice_config.get('wake')))
+        except Exception:
+            pass
+    say_voice()
 
     def watch():
         import time
@@ -3209,6 +3270,10 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
     def finish(restart=False):
         if link is not None:
             link.worker.close(1.5)
+        try:
+            ses.say_listener(ses='kapali')  # the next listener says how it is when it starts
+        except Exception:
+            pass
         user32.PostThreadMessageW(ready['tid'], 0x0012, 0, 0)  # WM_QUIT ends the hotkey thread
         kernel32.CloseHandle(lock)
         kernel32.CloseHandle(stop)
@@ -3221,6 +3286,7 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
         root.destroy()
 
     def poll():
+        nonlocal link
         if kernel32.WaitForSingleObject(stop, 0) == 0:  # WAIT_OBJECT_0: kur or kaldir asked us to go
             return finish()
         if opener and kernel32.WaitForSingleObject(opener, 0) == 0:  # `yakala pencere`: as if the key were pressed
@@ -3246,6 +3312,16 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
                 windows.append(opened)
             _write_listener_state(state, son_pencere=time_now())
 
+        if link is None and ticks[0] % 400 == 0:  # about every ten seconds
+            # A voice helper that would not start with the listener, or voice set up without the
+            # listener started again: taken up now, not at the next sign-in.
+            try:
+                if ses.usable(state):
+                    link = VoiceLink(ses.Worker(state), start=lambda: ses.Worker(state))
+                    voice_config['wake'] = voice_config['mtime'] = None
+                    say_voice()
+            except Exception:
+                pass
         if link is not None:
             if ticks[0] % 80 == 0:  # the wake word or the commands changed with `ses ayar`, or the desktop app came or went
                 try:
@@ -3260,14 +3336,17 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
                     if allowed != voice_config.get('wake'):
                         voice_config['wake'] = allowed
                         link.worker.send('uyandirma', acik=allowed)
+                        say_voice()
                 except OSError:
                     pass
+                # A helper that stopped, or whose model would not load, started again in its time.
+                if not windows and link.revive(time_now()):
+                    voice_config['wake'] = voice_config['mtime'] = None  # the new helper is told both again
+                    say_voice()
             for event in link.worker.take():
                 kind = event.get('olay')
-                if kind == 'hazir':
-                    link.ready, link.what = True, event.get('aciklama') or ''
-                elif kind == 'bitti':
-                    link.ready = False
+                if link.heard(event, time_now()):
+                    say_voice()
                 if kind == 'uyandi' and not windows:
                     open_window(windows_context(read_url=False), listening=True)  # "Pyn, not al": the window opens listening
                     if windows and hasattr(windows[-1], 'voice_event'):

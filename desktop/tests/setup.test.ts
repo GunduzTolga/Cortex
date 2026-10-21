@@ -70,8 +70,13 @@ test('the voice status is the engine’s, the model by its name only', () => {
     commands: null,
     wakePhrase: 'pyn not al',
     readsFiles: true,
+    cpuModel: null,
   });
   assert.equal(voiceOf({ kurulu: true, dosya_okur: false })?.readsFiles, false, 'a whisper.cpp setup that cannot open a voice note yet');
+  // On the processor, the model it writes with is a choice: quick, or accurate and slow there.
+  assert.equal(voiceOf({ kurulu: true, motor: 'islemci', islemci_modeli: 'small' })?.cpuModel, 'small');
+  assert.equal(voiceOf({ kurulu: true, motor: 'islemci', islemci_modeli: 'large-v3-turbo' })?.cpuModel, 'large-v3-turbo');
+  assert.equal(voiceOf({ kurulu: true, motor: 'islemci', islemci_modeli: 'medium' })?.cpuModel, null, 'only a choice the app offers');
   assert.equal(voiceOf({ kurulu: true, uyandirma_sozu: 'hey pyn' })?.wakePhrase, 'hey pyn');
   assert.equal(voiceOf({ kurulu: true, uyandirma_sozu: 'ikisi' })?.wakePhrase, 'ikisi', 'both at once');
   assert.equal(voiceOf({ kurulu: true, uyandirma_sozu: 'merhaba' })?.wakePhrase, 'pyn not al', 'only a phrase there is');
@@ -281,6 +286,9 @@ test('the engine’s Turkish steps are said in English in an English window, the
   assert.equal(engineStep('  %50 (812 / 1624 MB)', 'en'), '50% (812 / 1624 MB)');
   assert.equal(engineStep('Motor: AMD/Intel ekran kartı (Vulkan, whisper.cpp)', 'en'), 'Engine: AMD / Intel graphics card (Vulkan, whisper.cpp)');
   assert.equal(engineStep('whisper.cpp modeli indiriliyor (yaklaşık 1,6 GB)…', 'en'), 'Downloading the whisper.cpp model (about 1.6 GB)…');
+  // What the processor downloads is said as it is: the quick model and its checker, or the large one.
+  assert.equal(engineStep('Whisper modeli hazırlanıyor (ilk seferde yaklaşık 0,7 GB iner)…', 'en'), 'Preparing the Whisper model (about 0.7 GB the first time)…');
+  assert.equal(engineStep('Whisper modeli hazırlanıyor (ilk seferde yaklaşık 1,6 GB iner)…', 'en'), 'Preparing the Whisper model (about 1.6 GB the first time)…');
   assert.equal(engineStep('  %50 (812 / 1624 MB)', 'tr'), '%50 (812 / 1624 MB)');
   assert.equal(engineStep('Bilinmeyen bir satır', 'en'), 'Bilinmeyen bir satır', 'an unknown line as it was');
 });

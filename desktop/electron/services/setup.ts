@@ -4,10 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { app } from 'electron';
-import { COMMAND_WORDS, VOICE_COMMANDS, WAKE_PHRASES } from '../../shared/setup';
-import type { SetupJob, SetupPush, SetupStatus, VoiceCommands, VoiceEngine, VoiceStatus, WakePhrase } from '../../shared/setup';
+import { COMMAND_WORDS, CPU_MODELS, VOICE_COMMANDS, WAKE_PHRASES } from '../../shared/setup';
+import type { CpuModel, SetupJob, SetupPush, SetupStatus, VoiceCommands, VoiceEngine, VoiceStatus, WakePhrase } from '../../shared/setup';
 import pythonPin from '../../python.json';
 import { childEnv } from './acp';
+import { refreshPath } from './clis';
 import { pythonOf } from './localChat';
 import { readSettings } from './settings';
 
@@ -75,7 +76,7 @@ const ENGINE_STEPS: Array<[RegExp, string]> = [
   [/^Sanal ortam kuruluyor…$/, 'Setting up its own environment…'],
   [/^Paketler yükleniyor \(ilk kurulumda birkaç dakika sürer\): (.+)$/, 'Installing packages (a few minutes the first time): $1'],
   [/^Uyandırma modeli indiriliyor \(yaklaşık 40 MB\)…$/, 'Downloading the wake-word model (about 40 MB)…'],
-  [/^Whisper modeli hazırlanıyor \(ilk seferde yaklaşık 1,6 GB iner\)…$/, 'Preparing the Whisper model (about 1.6 GB the first time)…'],
+  [/^Whisper modeli hazırlanıyor \(ilk seferde yaklaşık (\d+),(\d) GB iner\)…$/, 'Preparing the Whisper model (about $1.$2 GB the first time)…'],
   [/^Whisper modeli hazırlanıyor…$/, 'Preparing the Whisper model…'],
   [/^%(\d+) \((\d+) \/ (\d+) MB\)$/, '$1% ($2 / $3 MB)'],
 ];
@@ -229,6 +230,7 @@ export function voiceOf(result: Record<string, unknown>): VoiceStatus | null {
     wakePhrase: WAKE_PHRASES.includes(result.uyandirma_sozu as WakePhrase) ? (result.uyandirma_sozu as WakePhrase) : 'pyn not al',
     // An engine from before Telegram does not say: taken as able, so nothing is offered that it cannot use.
     readsFiles: result.dosya_okur !== false,
+    cpuModel: CPU_MODELS.includes(result.islemci_modeli as CpuModel) ? (result.islemci_modeli as CpuModel) : null,
   };
 }
 
@@ -378,6 +380,8 @@ function vaultOrNull(): string | null {
 }
 
 export async function setupStatus(): Promise<SetupStatus> {
+  // A Python installed while the app was open (python.org, winget) is found without opening it again.
+  await refreshPath();
   const vault = vaultOrNull();
   const python = pythonOf();
   const installed = vault ? installedVersion(vault) : null;
@@ -448,6 +452,7 @@ export function installPython(): Promise<SetupStatus> {
     }
     if (code === 1602) throw new Error(say('Python kurulumu iptal edildi.', 'The Python setup was cancelled.'));
     if (code !== 0 && code !== 3010) throw new Error(say(`Python kurulamadı (çıkış kodu ${code}).`, `Python could not be installed (exit code ${code}).`));
+    await refreshPath(true);
     if (!pythonOf()) throw new Error(say('Python kuruldu ama bulunamadı; uygulamayı yeniden aç.', 'Python was installed but not found; open the app again.'));
   });
 }
@@ -511,6 +516,8 @@ export async function setVoice(patch: unknown): Promise<SetupStatus> {
   if (typeof asked.auto === 'boolean') args.push('--otomatik', asked.auto ? 'ac' : 'kapat');
   if (asked.defaultCommands === true) args.push('--varsayilan-komutlar');
   if (WAKE_PHRASES.includes(asked.wakePhrase as WakePhrase)) args.push('--uyandirma-sozu', asked.wakePhrase as WakePhrase);
+  // The model the processor writes with: the listener starts again with it (the engine's own setting).
+  if (CPU_MODELS.includes(asked.cpuModel as CpuModel)) args.push('--islemci-modeli', asked.cpuModel as CpuModel);
   const commands = commandsPatch(asked.commands);
   if (commands) args.push('--komutlar', JSON.stringify(commands));
   const vault = vaultOrNull();

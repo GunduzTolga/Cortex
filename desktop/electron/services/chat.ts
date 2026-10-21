@@ -361,6 +361,18 @@ export function shutdownChats(): void {
   for (const backend of Object.values(BACKENDS)) backend.shutdown();
 }
 
+/**
+ * A sign-in, a key or an install changed while CLIs were kept running: they are ended between
+ * turns, and each chat's next message starts its CLI again with it, its session resumed. A CLI
+ * started before kept the key or sign-in it started with, and the chat kept failing until the app
+ * was opened again. Not while a turn is going on: that one is not cut off.
+ */
+export function restartIdleChats(): boolean {
+  if ([...live.values()].some((one) => one.running)) return false;
+  shutdownChats();
+  return true;
+}
+
 /** For tests: forget what is held in memory, as a restart would. */
 export function forgetChats(): void {
   shutdownChats();

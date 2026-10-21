@@ -80,7 +80,7 @@ DEFAULTS = {
     'gpu': 0,                       # the Vulkan device whisper.cpp writes on
     'dil': 'tr',
     'model': 'large-v3-turbo',      # on an NVIDIA card
-    'cpu_model': 'large-v3-turbo',  # on the processor; 'small' is faster and less accurate
+    'cpu_model': 'small',           # on the processor (CPU_MODELS): large-v3-turbo is more accurate and far slower there
     'uyandirma': False,             # "Pyn, not al" opens the window: the microphone stays open
     'otomatik_dinle': True,         # the window listens as it opens; typing lets the microphone go
     'uyandirma_sozu': 'pyn not al',
@@ -107,6 +107,27 @@ DEFAULTS = {
 # few seconds of sound, the rest of the phrase included: it waits this long after it for that.
 WAKE_CLIP_SN = 4.0
 WAKE_AFTER_SN = 0.6
+
+# On the processor, Whisper reads every piece of sound as a 30-second window, so a model's size is
+# what a check or a sentence costs. large-v3-turbo took 15-30 seconds a time on a laptop's processor
+# (an Intel laptop: "Hey Pyn" opened the window half a minute late, 21 October); `small` is about a
+# tenth of that, `base` a tenth again. The wake phrase is checked by CHECK_MODEL there, whatever
+# writes the dictation; a model in QUICK_MODELS checks it itself.
+CPU_MODELS = ('small', 'large-v3-turbo')
+CHECK_MODEL = 'base'
+QUICK_MODELS = ('tiny', 'tiny.en', 'base', 'base.en')
+# What each model downloads the first time, in GB (faster-whisper's CTranslate2 conversions).
+DOWNLOAD_GB = {'large-v3-turbo': 1.6, 'large-v3': 3.1, 'medium': 1.5, 'small': 0.5, 'base': 0.15, 'tiny': 0.08}
+
+
+def download_size(engine, config):
+    """About how much `kur` downloads for Whisper on this engine, as a person reads it ("0,7")."""
+    if engine == 'islemci':
+        model = config.get('cpu_model') or DEFAULTS['cpu_model']
+        gb = DOWNLOAD_GB.get(model, 1.6) + (0 if model in QUICK_MODELS else DOWNLOAD_GB[CHECK_MODEL])
+    else:
+        gb = DOWNLOAD_GB.get(config.get('model') or DEFAULTS['model'], 1.6)
+    return ('%.1f' % gb).replace('.', ',')
 
 
 def ses_dir(state):
@@ -244,6 +265,30 @@ def desktop_file():
     """The desktop app's word, one file for the user beside every vault's state (default_state)."""
     base = os.environ.get('LOCALAPPDATA') or str(Path.home() / 'AppData' / 'Local')
     return Path(base) / 'beyin-v3' / DESKTOP_FILE
+
+
+# And the listener's word back, beside it: whether its voice helper is loading, ready or failed,
+# so the desktop app can say "Pyn hazırlanıyor…" while a model loads and "Pyn hazır" when it is
+# (a processor takes a while), instead of a wake phrase that seems not to work.
+LISTENER_FILE = 'dinleyici.json'
+
+
+def listener_file():
+    return desktop_file().with_name(LISTENER_FILE)
+
+
+def say_listener(path=None, **fields):
+    """The listener's word on its voice (`ses`: yok, yukleniyor, hazir, hata, kapali), written whole."""
+    import time
+    path = Path(path) if path is not None else listener_file()
+    word = dict(fields, surum=1, pid=os.getpid(), at=time.time())
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_name(path.name + '.%d.tmp' % os.getpid())
+        temp.write_text(json.dumps(word, ensure_ascii=False) + '\n', encoding='utf-8')
+        os.replace(temp, path)
+    except OSError:
+        pass
 
 
 def wake_allowed(config, path=None, moment=None):
@@ -785,7 +830,8 @@ def install(state, say=print, run=subprocess.run, download=_download, which=shut
     except OSError:
         previous = None
     (folder / MARKER).write_text(json.dumps(marker, ensure_ascii=False) + '\n', encoding='utf-8')
-    say('Whisper modeli hazırlanıyor' + (' (ilk seferde yaklaşık 1,6 GB iner)…' if plan['motor'] != 'vulkan' else '…'))
+    say('Whisper modeli hazırlanıyor' + (' (ilk seferde yaklaşık %s GB iner)…' % download_size(plan['motor'], load_config(state))
+                                         if plan['motor'] != 'vulkan' else '…'))
     done = run(worker_command(state, '--indir'), capture_output=True, text=True, encoding='utf-8', errors='replace',
                timeout=7200, env=worker_env(state), creationflags=NO_WINDOW)
     if done.returncode:
@@ -817,10 +863,14 @@ def status(state):
     except (OSError, ValueError):
         pass
     config = load_config(state)
+    engine = engine_in_use(state, config)
+    # On the processor, the model chosen now (`--islemci-modeli`), not the one `kur` first set up.
+    model = (config.get('cpu_model') or DEFAULTS['cpu_model']) + ' (işlemci)' if engine == 'islemci' and installed(state) else marker.get('model')
     return {'kurulu': installed(state), 'acik': bool(config['acik']), 'uyandirma': bool(config['uyandirma']),
             'uyandirma_sozu': config['uyandirma_sozu'], 'otomatik_dinle': bool(config['otomatik_dinle']),
-            'model': marker.get('model'), 'ekran_karti': marker.get('ekran_karti'),
-            'motor': engine_in_use(state, config), 'klasor': str(ses_dir(state)),
+            'model': model, 'ekran_karti': marker.get('ekran_karti'),
+            'motor': engine, 'klasor': str(ses_dir(state)),
+            'islemci_modeli': config.get('cpu_model') or DEFAULTS['cpu_model'],
             'komutlar': config['komutlar'], 'adla_kaydet': list(config.get('adla_kaydet') or []),
             'dosya_okur': installed(state) and reads_files(state)}
 
@@ -1028,6 +1078,8 @@ def main(argv=None, vault=None, state=None):
     setting.add_argument('--otomatik', choices=('ac', 'kapat'), help='Pencere açılınca kendiliğinden dinlesin mi')
     setting.add_argument('--ses', choices=('ac', 'kapat'), help='Sesle yazmayı aç ya da kapat')
     setting.add_argument('--model', help='Whisper modeli, örnek: large-v3-turbo, small')
+    setting.add_argument('--islemci-modeli', choices=CPU_MODELS,
+                         help='İşlemcide yazan model: small (hızlı) ya da large-v3-turbo (daha doğru, işlemcide yavaş)')
     setting.add_argument('--motor', choices=('otomatik',) + ENGINES, help='Yazan motor: otomatik, cuda, vulkan ya da islemci')
     setting.add_argument('--uyandirma-sozu', choices=WAKE_PHRASES, help='Uyandırma sözü: "pyn not al", "hey pyn" ya da ikisi de ("ikisi")')
     setting.add_argument('--komutlar', help='Sesli komutların sözleri, JSON: {"kaydet": ["kaydet", "tamam"], "adla_kaydet": ["gönder"]}')
@@ -1071,6 +1123,8 @@ def main(argv=None, vault=None, state=None):
             config['acik'] = args.ses == 'ac'
         if args.model:
             config['model'] = config['cpu_model'] = args.model
+        if args.islemci_modeli:
+            config['cpu_model'] = args.islemci_modeli
         if args.motor:
             config['motor'] = args.motor
         if args.uyandirma_sozu:
@@ -1082,7 +1136,7 @@ def main(argv=None, vault=None, state=None):
             config['komutlar'], config['adla_kaydet'] = commands_from(args.komutlar, config)
         save_config(state, config)
         result = {'status': 'kaydedildi', **status(state),
-                  'dinleyici': restart_listener(state) if args.ses or args.model or args.motor else False}
+                  'dinleyici': restart_listener(state) if args.ses or args.model or args.islemci_modeli or args.motor else False}
         if args.motor in ENGINES and installed(state) and args.motor != installed_engine(state):
             result['kur_gerekli'] = True  # another engine's packages or whisper.cpp: `kur` sets them up
     else:
@@ -1340,6 +1394,19 @@ def load_model(state, config):
         except Exception as exc:
             print('CUDA açılamadı, işlemciye geçiliyor: ' + str(exc)[:400], file=sys.stderr, flush=True)
     return _open(config['cpu_model'], 'cpu', 'int8'), config['cpu_model'] + ' (işlemci)'
+
+
+def checker_for(config, what):
+    """On the processor, the model that checks the wake phrase (ses.CHECK_MODEL): the dictation's
+    took 15-30 seconds a check on a laptop, and the window opened that late. None on a card, for
+    a model quick enough to check it itself, or where it cannot be had (the dictation's checks)."""
+    if not what.endswith('(işlemci)') or config.get('cpu_model') in ses.QUICK_MODELS:
+        return None
+    try:
+        return _open(ses.CHECK_MODEL, 'cpu', 'int8')
+    except Exception as exc:
+        log('uyandırma: %s açılamadı, yazı modeli doğrulayacak (%s)' % (ses.CHECK_MODEL, str(exc)[:200]))
+        return None
 
 
 def release(model):
@@ -1753,9 +1820,16 @@ def serve(state, config, lines=None):
 
     def load():
         try:
+            started = now()
             loaded['model'], what = load_model(state, config)
+            checker = checker_for(config, what)
+            if checker is not None:
+                loaded['checker'] = checker
+            # How long it took, for a slow machine to be seen in isci.log (never what is said).
+            log('süre: model hazır, %s, %.1f sn%s' % (what, now() - started, '; uyandırmayı %s doğrular' % ses.CHECK_MODEL if checker is not None else ''))
             out(olay='hazir', aciklama=what)
         except Exception as exc:
+            log('model açılamadı: %s' % str(exc)[:300])
             out(olay='hata', neden='model', mesaj=str(exc)[:300])
 
     def write():
@@ -1767,7 +1841,11 @@ def serve(state, config, lines=None):
                 written.put(dict(job, metin=''))
                 continue
             try:
-                text = transcribe(loaded['model'], job['audio'], config, lock)
+                checking = job['is'] == 'dogrula'
+                model = loaded.get('checker', loaded['model']) if checking else loaded['model']
+                started = now()
+                text = transcribe(model, job['audio'], config, lock)
+                log('süre: %s, %.1f sn ses, %.1f sn' % ('uyandırma doğrulaması' if checking else 'yazı', len(job['audio']) / RATE, now() - started))
                 written.put(dict(job, metin=ses.clean_spoken(text, config.get('ipucu'))))
             except Exception as exc:
                 written.put(dict(job, hata=str(exc)[:300]))
@@ -2053,6 +2131,7 @@ def main(argv=None):
     config = ses.load_config(state)
     if args.indir:
         model, what = load_model(state, config)
+        checker_for(config, what)  # fetched now, with the model, not when the listener first starts
         release(model)
         print(what, flush=True)
         return 0

@@ -9,6 +9,10 @@
 /** What writes speech: an NVIDIA card (CUDA), an AMD or Intel Arc card (Vulkan, whisper.cpp), or the processor. */
 export type VoiceEngine = 'cuda' | 'vulkan' | 'islemci';
 
+/** What writes on the processor: `small`, quick, or `large-v3-turbo`, more accurate and far slower there (beyin_v3_ses.CPU_MODELS). */
+export type CpuModel = 'small' | 'large-v3-turbo';
+export const CPU_MODELS: readonly CpuModel[] = ['small', 'large-v3-turbo'];
+
 export interface VoiceStatus {
   installed: boolean;
   /** Voice typing on in yakala. */
@@ -26,6 +30,8 @@ export interface VoiceStatus {
   wakePhrase: WakePhrase;
   /** A recorded file can be written out (a Telegram voice note); false for a whisper.cpp setup from before 1.0.26, which `kur` again mends. */
   readsFiles?: boolean;
+  /** On the processor, which model writes (`ses ayar --islemci-modeli`); null from an engine that cannot choose. */
+  cpuModel?: CpuModel | null;
 }
 
 /** The wake phrases there are: Pyn's name first, or last, or either of the two ('ikisi'). */
@@ -70,6 +76,7 @@ export interface VoicePatch {
   /** Every command back to its first words. */
   defaultCommands?: boolean;
   wakePhrase?: WakePhrase;
+  cpuModel?: CpuModel;
 }
 
 export type SetupJob = 'python' | 'engine' | 'voice';

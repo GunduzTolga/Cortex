@@ -75,10 +75,9 @@ export function registerIpc(): void {
     if (Object.keys(change).length) updateSettings((settings) => Object.assign(settings, change));
     if (change.background !== undefined) startWithWindows(change.background);
     // The listener hears it within two seconds: allowed, the microphone listens; taken back, it lets go.
-    if (change.wakeConsent !== undefined) {
-      sayMicrophone();
-      trayChanged();
-    }
+    if (change.wakeConsent !== undefined) sayMicrophone();
+    // The icon's words follow: leave given or taken back, or another language.
+    if (change.wakeConsent !== undefined || change.language !== undefined) trayChanged();
     return windowSettings();
   });
 
@@ -143,16 +142,22 @@ export function registerIpc(): void {
   handle('chat:toInbox', (text) => captureToInbox({ text }, 'pyn'));
 
   // Signing in to those tools (services/auth.ts): a key goes in and is never sent back.
-  auth.onAuthChanged(() => broadcast('chat:authChanged', null));
+  auth.onAuthChanged(() => {
+    // A sign-in or an install ended: CLIs started before it start again with it at their next message.
+    chat.restartIdleChats();
+    broadcast('chat:authChanged', null);
+  });
   handle('chat:auth', () => auth.authStatuses());
   handle('chat:login', (cli) => auth.startLogin(cli));
   handle('chat:install', (cli) => auth.installTool(cli));
   handle('chat:setKey', async (cli, key, baseUrl) => {
     await auth.setToolKey(cli, key, baseUrl);
+    chat.restartIdleChats();
     return auth.authStatuses();
   });
   handle('chat:forgetKey', (cli) => {
     auth.forgetToolKey(cli);
+    chat.restartIdleChats();
     return auth.authStatuses();
   });
 
@@ -162,9 +167,22 @@ export function registerIpc(): void {
 
   // Cortex's engine and voice typing set up from the app (services/setup.ts): the window names a job, never a program or a file.
   setup.onSetupPush((payload) => broadcast('setup:event', payload));
+  // Switched from the notification-area icon: the settings, open or not, show the voice as it is now.
+  setup.onVoiceStatus((voice) => broadcast('setup:voice', voice));
   handle('setup:status', () => setup.setupStatus());
-  handle('setup:installPython', () => setup.installPython());
-  handle('setup:installEngine', () => setup.installEngine());
+  // What was set up is taken up now, not at the next start: the Telegram listener starts (or starts
+  // again on the new engine), and the chats' CLIs take the engine's new hooks at their next message.
+  handle('setup:installPython', async () => {
+    const status = await setup.installPython();
+    void telegram.restartTelegram();
+    return status;
+  });
+  handle('setup:installEngine', async () => {
+    const status = await setup.installEngine();
+    chat.restartIdleChats();
+    void telegram.restartTelegram();
+    return status;
+  });
   handle('setup:installVoice', () => setup.installVoice());
   handle('setup:voice', (patch) => setup.setVoice(patch));
 

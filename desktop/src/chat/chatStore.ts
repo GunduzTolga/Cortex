@@ -52,6 +52,8 @@ interface ChatState {
   boot(): Promise<void>;
   /** The CLIs asked again: a model server opened since, or closed. */
   refreshClis(): Promise<void>;
+  /** Another vault chosen: its chats listed, none of the last vault's left open. */
+  vaultChanged(): Promise<void>;
   select(id: string | null): Promise<void>;
   setCli(cli: CliId): void;
   setDraft(key: string, text: string): void;
@@ -190,6 +192,14 @@ export const useChat = create<ChatState>((set, get) => {
         void get().loadAuth();
       } catch (err) {
         set({ error: messageOf(err), clis: [] });
+      }
+    },
+
+    async vaultChanged() {
+      try {
+        set({ chats: await window.cortex.chat.list(), active: null, open: {}, error: null });
+      } catch (err) {
+        set({ error: messageOf(err) });
       }
     },
 

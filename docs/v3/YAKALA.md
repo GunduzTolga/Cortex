@@ -143,7 +143,7 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
 |---|---|---|
 | NVIDIA | faster-whisper, CUDA ile | bir saniyenin altında |
 | AMD Radeon, Intel Arc | whisper.cpp, Vulkan ile | bir saniyenin altında (RX 7800 XT'de 11 saniyelik kayıt 0,3 saniyede) |
-| Hiçbiri | faster-whisper, işlemcide | birkaç saniye |
+| Hiçbiri (Intel'in dahili grafiği de) | faster-whisper, işlemcide, `small` | birkaç saniye |
 
 - **NVIDIA:** CUDA'nın kütüphaneleri pip'ten gelir; ayrıca CUDA kurman gerekmez. Kart açılamazsa işlemciye geçilir ve nedeni `state/ses/isci.log` dosyasına yazılır.
 - **AMD ve Intel Arc:**
@@ -151,8 +151,19 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
   - Model (yaklaşık 1,6 GB) ekran kartında hazır tutulur; ilk cümle de beklemesin diye açılışta bir kez ısıtılır.
   - whisper.cpp yalnız bu bilgisayardan erişilen bir adreste (127.0.0.1) çalışır ve yakala kapanınca onunla kapanır.
   - Kart açılamazsa whisper.cpp işlemcide yazar.
+- **İşlemcide:**
+  - Whisper her sesi 30 saniyelik bir pencere olarak okur; bu yüzden modelin büyüklüğü her cümlenin süresini belirler. `large-v3-turbo` bir laptop işlemcisinde cümle başına 15-30 saniye sürdü, "Hey Pyn" de pencereyi o kadar geç açtı.
+  - Bu yüzden işlemcide varsayılan model `small`.
+  - Uyandırma sözünü ayrı, küçük bir `base` modeli doğrular: söz duyulduktan kısa süre sonra pencere açılır.
+  - Daha doğru ama işlemcide yavaş modeli seçmek için: Ayarlar → Sesle yazma → Yazı modeli → **En doğru**, ya da `beyin.py ses ayar --islemci-modeli large-v3-turbo`.
+- **Hazırlık süresi:**
+  - Model, yakala dinleyicisi başlarken yüklenir. İşlemcide bu birkaç saniyeden yarım dakikaya kadar sürebilir.
+  - Masaüstü uygulaması bu sırada sağ alttaki simgede "Ses hazırlanıyor…" der. Hazırlık uzarsa bildirim gönderir, hazır olunca "Pyn hazır" der.
+  - Dinleyici durumunu `%LOCALAPPDATA%\beyin-v3\dinleyici.json` dosyasına yazar.
+  - Model yüklenemezse (ilk inişte internet yoksa gibi) ses yardımcısı 10 saniye sonra yeniden denenir; bekleme her seferinde iki katına çıkar, en çok beş dakika olur.
+  - Yükleme ve yazma süreleri `state/ses/isci.log` dosyasına yazılır (söylenenler yazılmaz).
 - **Motoru elle seçmek:** `beyin.py ses ayar --motor islemci` (ya da `cuda`, `vulkan`, `otomatik`), ardından `beyin.py ses kur`.
-- Daha hızlı ama daha az doğru bir model için (CUDA ve işlemci): `beyin.py ses ayar --model small`.
+- Daha hızlı ama daha az doğru bir model için (CUDA): `beyin.py ses ayar --model small`.
 
 **Diğer komutlar:**
 | Komut | Ne yapar |

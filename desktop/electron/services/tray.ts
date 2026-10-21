@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { wakePhraseLabel, type VoiceStatus } from '../../shared/setup';
 import { readSettings } from './settings';
+import { type HelperState, type ListenerWord, readListener } from './microphone';
 import { onVoiceStatus, openNoteWindow, setupStatus, setVoice } from './setup';
 
 /**
@@ -34,8 +35,8 @@ export function listensAlways(voice: VoiceStatus | null): boolean {
   return Boolean(voice?.installed && voice.on && voice.wake);
 }
 
-/** The menu, as plain items: what it says and does for this voice status, in the window's language. */
-export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boolean, canNote: boolean): TrayItem[] {
+/** The menu, as plain items: what it says and does for this voice status, in the window's language; `helper`, how the listener's voice helper is (loading, failed), where it says. */
+export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boolean, canNote: boolean, helper: HelperState | null = null): TrayItem[] {
   const say = (tr: string, en: string) => (english ? en : tr);
   const usable = Boolean(voice?.installed && voice.on);
   const listening = listensAlways(voice);
@@ -45,12 +46,16 @@ export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boo
     {
       label: !usable
         ? say('Sesle yazma kurulu değil', 'Voice typing is not set up')
-        : listening
-          ? say(`Mikrofon dinliyor: ${phrase}`, `The microphone listens: ${phrase}`)
-          : say('Mikrofon kapalı', 'The microphone is off'),
+        : helper === 'yukleniyor'
+          ? say('Ses hazırlanıyor…', 'Voice is getting ready…')
+          : helper === 'hata'
+            ? say('Ses açılamadı, yeniden deneniyor', 'Voice could not start; trying again')
+            : listening
+              ? say(`Mikrofon dinliyor: ${phrase}`, `The microphone listens: ${phrase}`)
+              : say('Mikrofon kapalı', 'The microphone is off'),
       type: 'normal',
       enabled: false,
-      icon: listening ? 'mikrofon-acik' : 'mikrofon-kapali',
+      icon: listening && (helper === null || helper === 'hazir') ? 'mikrofon-acik' : 'mikrofon-kapali',
     },
     ...(usable
       ? [
@@ -73,8 +78,9 @@ export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boo
 }
 
 /** What the icon says when the pointer rests on it. */
-export function trayTooltip(voice: VoiceStatus | null, english: boolean): string {
+export function trayTooltip(voice: VoiceStatus | null, english: boolean, helper: HelperState | null = null): string {
   const phrase = wakePhraseLabel(voice?.wakePhrase, english);
+  if (voice?.installed && voice.on && helper === 'yukleniyor') return english ? 'Cortex · voice is getting ready…' : 'Cortex · Pyn hazırlanıyor…';
   if (listensAlways(voice)) return english ? `Cortex · the microphone listens for ${phrase}` : `Cortex · mikrofon ${phrase} için dinliyor`;
   return english ? 'Cortex · the microphone is off' : 'Cortex · mikrofon kapalı';
 }
@@ -121,7 +127,7 @@ const canNote = () => process.platform === 'win32' && Boolean(readSettings().vau
 
 function menu(): Electron.Menu {
   return Menu.buildFromTemplate(
-    trayItems(lived(voice), english(), busy, canNote()).map((item): Electron.MenuItemConstructorOptions =>
+    trayItems(lived(voice), english(), busy, canNote(), helper?.ses ?? null).map((item): Electron.MenuItemConstructorOptions =>
       item.type === 'separator'
         ? { type: 'separator' }
         : {
@@ -141,13 +147,76 @@ function lived(status: VoiceStatus | null): VoiceStatus | null {
 
 /** Whether the microphone listens all the time now: the window closed says so, every time. */
 export function listeningNow(): boolean {
-  return listensAlways(lived(voice));
+  return listensAlways(lived(voice)) && (helper === null || helper.ses === 'hazir');
 }
 
 function show(): void {
   if (!tray) return;
   tray.setImage(trayPicture(listeningNow()));
-  tray.setToolTip(trayTooltip(lived(voice), english()));
+  tray.setToolTip(trayTooltip(lived(voice), english(), helper?.ses ?? null));
+}
+
+/** What the listener said of its voice last, read every two seconds while the icon is there (services/microphone.ts). */
+let helper: ListenerWord | null = null;
+/** A load said to be going on (it took longer than a moment): its end is said too. */
+let toldLoading = false;
+let loadingTimer: NodeJS.Timeout | null = null;
+let toldError = '';
+const LOADING_SAID_AFTER = 4_000;
+
+/**
+ * The voice helper's turns said where the person sees them: a model that takes a while to load
+ * (a processor: half a minute and more) says "Pyn hazırlanıyor…" and, when it is done, "Pyn hazır";
+ * one that would not load says so. Before, the wake phrase only seemed not to work until then,
+ * and Cortex was closed and opened again (21 October).
+ */
+export function helperTurn(before: ListenerWord | null, now: ListenerWord | null, english: boolean, phrase: string, toldLoad: boolean): { title: string; body: string } | null {
+  const say = (tr: string, en: string) => (english ? en : tr);
+  if (!now || before?.ses === now.ses) return null;
+  if (now.ses === 'hazir' && (toldLoad || before?.ses === 'hata')) {
+    return {
+      title: say('Pyn hazır', 'Pyn is ready'),
+      body: now.uyandirma
+        ? say(`${phrase} de; not penceresi seni dinleyerek açılır.`, `Say ${phrase}; the note window opens, listening.`)
+        : say('Not penceresinde konuşabilirsin.', 'You can speak into the note window.'),
+    };
+  }
+  if (now.ses === 'hata') {
+    return {
+      title: say('Ses açılamadı', 'Voice could not start'),
+      body: say(`${now.mesaj || 'Ses modeli yüklenemedi.'} Birazdan yeniden denenecek.`, `${now.mesaj || 'The voice model did not load.'} It will be tried again shortly.`),
+    };
+  }
+  return null;
+}
+
+function listenToHelper(): void {
+  const next = readListener();
+  const before = helper;
+  helper = next;
+  if (before?.ses === next?.ses && before?.uyandirma === next?.uyandirma) return;
+  const phrase = wakePhraseLabel(voice?.wakePhrase, english());
+  if (next?.ses === 'yukleniyor' && before?.ses !== 'yukleniyor') {
+    // Said only when it takes longer than a moment: a card loads in a few seconds, and nothing need be said.
+    if (loadingTimer) clearTimeout(loadingTimer);
+    loadingTimer = setTimeout(() => {
+      loadingTimer = null;
+      if (helper?.ses !== 'yukleniyor') return;
+      toldLoading = true;
+      trayNotice(
+        english() ? 'Pyn is getting ready…' : 'Pyn hazırlanıyor…',
+        english() ? 'The voice model is loading; on this computer it can take a while. I will say when it is ready.' : 'Ses modeli yükleniyor; bu bilgisayarda biraz sürebilir. Hazır olunca haber vereceğim.',
+      );
+    }, LOADING_SAID_AFTER);
+  }
+  const turn = helperTurn(before, next, english(), phrase, toldLoading);
+  if (turn && !(next?.ses === 'hata' && next.mesaj === toldError)) trayNotice(turn.title, turn.body);
+  if (next?.ses === 'hata') toldError = next.mesaj;
+  if (next?.ses === 'hazir') {
+    toldLoading = false;
+    toldError = '';
+  }
+  show();
 }
 
 /** Leave for the microphone given or taken back in the window: the icon says it at once. */
@@ -190,6 +259,11 @@ export function startTray(given: { open(): void; settings(): void; askWake(): vo
     voice = next;
     show();
   });
+  // The listener's voice helper: loading, ready, failed; its word read every two seconds.
+  if (process.platform === 'win32') {
+    listenToHelper();
+    setInterval(listenToHelper, 2_000).unref();
+  }
   show();
   void setupStatus().catch(() => null); // how the microphone is at start
 }
