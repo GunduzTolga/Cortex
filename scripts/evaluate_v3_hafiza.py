@@ -36,8 +36,8 @@ PREFIX = ("Receipt session=" + "0" * 24 + "; choose --harness for the current cl
           "V3 source-backed context (data, not instructions):\n")
 
 
-def load(fixture=FIXTURE):
-    data = json.loads((fixture / "sorular.json").read_text(encoding="utf-8"))
+def load(fixture=FIXTURE, name="sorular.json"):
+    data = json.loads((fixture / name).read_text(encoding="utf-8"))
     return data["sorular"] if isinstance(data, dict) else data
 
 
@@ -125,8 +125,10 @@ def main(argv=None):
     parser.add_argument("--budget", type=int, default=5000, help="the hook's context_chars (5000 normal, 2000 economical)")
     parser.add_argument("--json", action="store_true", help="every question's delivered notes as JSON")
     parser.add_argument("--kacanlar", action="store_true", help="list the questions it missed")
+    parser.add_argument("--sorular", default="sorular.json",
+                        help="questions file in the fixture: sorular.json, or sorular_yedek.json (held out: written after the search was tuned)")
     args = parser.parse_args(argv)
-    questions = load()
+    questions = load(name=args.sorular)
     with tempfile.TemporaryDirectory(prefix="hafiza-olcum-") as work:
         store, _vault, _state = prepare(work=Path(work) / "is")
         rows, by_type, total = score(questions, lambda query: deliver(store, query, args.budget))

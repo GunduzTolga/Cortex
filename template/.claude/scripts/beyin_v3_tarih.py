@@ -70,9 +70,14 @@ def days(query, today=None):
     for match in _NAMED_WEEKDAY.finditer(text):
         word, name = match.group(1), match.group(2) or match.group(3)
         target = WEEKDAYS.index(name)
-        back = (today.weekday() - target) % 7
-        if word in ("gecen", "onceki") and back == 0:
-            back = 7  # "geçen cuma" said on a Friday is a week ago
+        if word == "bu":
+            back = today.weekday() - target
+            if back < 0:
+                continue  # "bu cuma" said on a Wednesday is still to come: no log yet
+        else:
+            back = (today.weekday() - target) % 7
+            if word in ("gecen", "onceki") and back == 0:
+                back = 7  # "geçen cuma" said on a Friday is a week ago
         add(today - datetime.timedelta(days=back))
     for match in _DAY_MONTH.finditer(text):
         try:

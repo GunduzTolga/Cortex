@@ -41,3 +41,13 @@ bağlama doğru notları getirip getirmediğini ölçmek için var.
 | cevapsiz | 5 | Cevabı kasada olmayan sorular |
 | gizli | 5 | Gizli / `🔐 Kasa` notlarına çarpan sorular |
 | **Toplam** | **60** | |
+
+## Yedek sorular (`sorular_yedek.json`)
+
+Arama `sorular.json` üzerinde ayarlandıktan sonra, ne arama kodunu ne eşanlamlı sözlüğünü ne de ilk soruları görmüş biri tarafından yazılmış 40 soru. Ayarın ezber mi yoksa genel bir iyileşme mi olduğunu bu set söyler; bu yüzden ona bakarak arama ayarlanmaz. Yeni bir ayar yapılırsa onu sınamak için yine görülmemiş yeni sorular yazılır.
+
+```sh
+python3 scripts/evaluate_v3_hafiza.py                                # ayarlanan 60 soru
+python3 scripts/evaluate_v3_hafiza.py --sorular sorular_yedek.json   # yedek 40 soru
+python3 scripts/evaluate_v3_hafiza.py --kacanlar                     # kaçan sorular
+```

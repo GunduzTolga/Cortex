@@ -385,6 +385,16 @@ def search(index, terms, limit=5, floor=FLOOR, min_shared=MIN_SHARED, variants=N
 # note answers, and at most DAY_LOGS of them come back (#hafiza).
 _DAY_LOG = re.compile(r"^daily/[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$")
 DAY_LOGS = 1
+# A log answers in place of the notes only for most of the question: a log shares two words
+# with nearly any question, being a day of everything.
+LOG_COVERAGE = 0.75
+
+
+def _covers(tokens, terms, variants=None):
+    """The share of a question's words (at most COVERAGE_CAP of them) a passage holds."""
+    variants = variants or {}
+    shared = sum(1 for term in terms if any(" " + form + " " in tokens for form in (variants.get(term) or (term,))))
+    return min(1.0, shared / max(1, min(len(terms), COVERAGE_CAP)))
 
 
 def pool(store, eligible, statuses=None, exclude=DEFAULT_EXCLUDE, superseded=None):
@@ -467,7 +477,8 @@ def context_for(store, harness, query, project=None, audience="internal", status
     variants = synonyms(terms, index.block_df)
     found = search(index, terms, limit + DAY_LOGS, config["floor"], variants=variants)
     notes = [item for item in found if not _DAY_LOG.match(str(item[1][0].get("source", "")))][:limit]
-    logs = [] if notes else [item for item in found if _DAY_LOG.match(str(item[1][0].get("source", "")))][:DAY_LOGS]
+    logs = [] if notes else [item for item in found if _DAY_LOG.match(str(item[1][0].get("source", "")))
+                             and _covers(item[1][4], terms, variants) >= LOG_COVERAGE][:DAY_LOGS]
     for _rank, (record, head, start, end, _tokens_) in notes + logs:
         body = record["text"][start:end]
         excerpt = head + "\n\n" + body if head else body
