@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.29" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.29-E8B23A">
+  <img alt="Sürüm 1.0.30" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.30-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
@@ -193,6 +193,7 @@ Kendin derlemek ve ayrıntılar için: [desktop/README.md](desktop/README.md).
   | Hepsini sil | "hepsini sil", "sil", "temizle" |
   | Vazgeç | "iptal", "vazgeç" |
 
+- **Biraz farklı yazılan komutlar da tutar:** Whisper bir komutu boşlukları başka yerde yazarsa ("kayd et", "son cümle yi sil") ya da silme komutlarında bir eki yutarsa ("son kelime sil", "hepsi sil") komut yine çalışır. "notu kaydettim" ya da "son kelimeyi sildim" gibi cümleler komut sayılmaz, nota yazılır.
 - **Ses bilgisayardan çıkmaz ve diske yazılmaz;** yerel Whisper yazıya döker. NVIDIA kartlarda CUDA, AMD Radeon ve Intel Arc kartlarda Vulkan (whisper.cpp) ile ekran kartında, yoksa işlemcide çalışır. Kablosuz kulaklık sonradan bağlansa ya da Windows'un varsayılan mikrofonu değişse de dinleyici yeni mikrofona kendiliğinden geçer.
 
 [Ayrıntılar](docs/v3/YAKALA.md#sesle-yazma-windows-isteğe-bağlı)
@@ -361,6 +362,7 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.30](docs/v3/releases/1.0.30.md) | Türkçe sesli komutlar daha iyi tutuyor: AMD ve Intel kartlarda Whisper en iyi beş tahmini tartıyor (NVIDIA'daki gibi); "kayd et", "son kelime sil" gibi biraz farklı yazılan komutlar da tutuyor. |
 | [1.0.29](docs/v3/releases/1.0.29.md) | "Hey Pyn" bilgisayar açılınca ya da güncellemeden sonra kendiliğinden dinliyor: ses yardımcısı mikrofonu açarken bir komut gelmesini beklemiyor, sürekli dinlemeyi kapatıp açmak gerekmiyor. |
 | [1.0.28](docs/v3/releases/1.0.28.md) | "Hey Pyn" kurulumdan sonraki ilk açılışta da çalışıyor: Windows'un mikrofonu sonradan değişince (kablosuz kulaklık) dinleyici yeni mikrofona geçiyor. Sessiz bir kulaklık konuşurken "Mikrofondan ses gelmiyor" uyarısı vermiyor. |
 | [1.0.27](docs/v3/releases/1.0.27.md) | Yazdığını yapay zekaya göndermeden gelen kutusuna at: gönderin yanındaki düğme ya da `Ctrl+Enter`. Yerel modeller (Ollama, LM Studio) "bunu kaydet" denince gelen kutusuna ekliyor, "aklımda tutarım" demiyor. Beyin ekranı da kâğıt renginde. |
