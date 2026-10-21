@@ -3247,14 +3247,19 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
             _write_listener_state(state, son_pencere=time_now())
 
         if link is not None:
-            if ticks[0] % 80 == 0:  # the wake word or the commands changed with `ses ayar`
+            if ticks[0] % 80 == 0:  # the wake word or the commands changed with `ses ayar`, or the desktop app came or went
                 try:
                     path = ses.ses_dir(state) / ses.CONFIG
                     mtime = path.stat().st_mtime if path.exists() else None
                     if mtime != voice_config['mtime']:
                         voice_config['mtime'] = mtime
-                        link.worker.send('uyandirma', acik=bool(ses.load_config(state).get('uyandirma')))
                         link.worker.send('ayar')
+                    # Listening all the time only while Cortex runs and the person allowed it there
+                    # (ses.wake_allowed): quitting the app lets the microphone go within two seconds.
+                    allowed = ses.wake_allowed(ses.load_config(state))
+                    if allowed != voice_config.get('wake'):
+                        voice_config['wake'] = allowed
+                        link.worker.send('uyandirma', acik=allowed)
                 except OSError:
                     pass
             for event in link.worker.take():

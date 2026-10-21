@@ -12,10 +12,12 @@ import { Onboarding } from './onboarding/Onboarding';
 import { NotesDialogs } from './notes/NotesMenus';
 import { useNotes } from './notes/notesStore';
 import { refusal, useApp } from './store/app';
+import { useConsent } from './store/consent';
 import { useSetup } from './store/setup';
 import { useView, type View } from './store/view';
 import { LanguageSwitch } from './ui/LanguageSwitch';
 import { SettingsDialog } from './ui/SettingsDialog';
+import { MicConsent } from './ui/MicConsent';
 import { Toasts } from './ui/Toasts';
 import { Button, Spinner } from './ui/ui';
 
@@ -42,6 +44,8 @@ export function App() {
 
   // The notification-area icon's "Ayarlar": the window comes back on its settings.
   useEffect(() => window.cortex.on.openSettings(() => useApp.getState().openSettings(true)), []);
+  // Its "listen all the time", not allowed yet: asked here, where it is explained (src/ui/MicConsent.tsx).
+  useEffect(() => window.cortex.on.askWake(() => void useSetup.getState().voice({ wake: true })), []);
 
   // The notes are named as the settings say, wherever they are shown (src/notes/notesStore.ts).
   useEffect(() => useNotes.getState().setNameIcons(nameIcons), [nameIcons]);
@@ -70,6 +74,7 @@ export function App() {
       )}
       {/* The confirmations, prompts and menus every view asks with. */}
       <NotesDialogs />
+      <MicConsent />
       <Toasts />
     </>
   );
@@ -114,6 +119,11 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
   useEffect(() => {
     void (async () => {
       await useSetup.getState().refresh();
+      // Listening all the time found on without leave given here (set up before Cortex asked): it does not listen until allowed.
+      if (useSetup.getState().status?.voice?.wake && !useApp.getState().settings.wakeConsent) {
+        if (await useConsent.getState().ask('wakeFound')) await useApp.getState().setSettings({ wakeConsent: true });
+        else await useSetup.getState().voice({ wake: false });
+      }
       const engine = useSetup.getState().status?.engine;
       if (!engine?.installed || !engine.bundled || engine.bundled.localeCompare(engine.installed, undefined, { numeric: true }) <= 0) return;
       useApp.getState().toast({

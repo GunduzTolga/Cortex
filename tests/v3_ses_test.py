@@ -252,6 +252,28 @@ class SetupTest(unittest.TestCase):
         self.assertFalse(ses.installed(self.state))
         self.assertFalse(ses.usable(self.state))
 
+    def test_listening_all_the_time_only_while_cortex_runs_and_the_person_allowed_it(self):
+        # 21 October: the app quit, and "Hey Pyn" still opened a window - the listener starts with
+        # Windows by itself. Once the desktop app has run here, its word decides.
+        word = Path(self.tmp.name) / 'masaustu.json'
+        on, off = {'uyandirma': True}, {'uyandirma': False}
+        self.assertTrue(ses.wake_allowed(on, word), 'no desktop app here: the setting alone, as from the command line')
+        self.assertFalse(ses.wake_allowed(off, word))
+        say = lambda **fields: word.write_text(json.dumps(fields), encoding='utf-8')
+        say(at=1000.0, dinle=True)
+        self.assertTrue(ses.wake_allowed(on, word, moment=1005.0), 'the app runs, and the person allowed it')
+        self.assertFalse(ses.wake_allowed(off, word, moment=1005.0), 'the setting still has to be on')
+        self.assertFalse(ses.wake_allowed(on, word, moment=1000.0 + ses.DESKTOP_FRESH_SN + 1), 'an app that stopped saying it runs (it crashed)')
+        say(at=1000.0, dinle=False)
+        self.assertFalse(ses.wake_allowed(on, word, moment=1005.0), 'running, but not allowed')
+        say(at=1000.0, dinle=True, kapali=True)
+        self.assertFalse(ses.wake_allowed(on, word, moment=1005.0), 'the app quit')
+        for broken in ('{', '[]', json.dumps({'at': 'dun', 'dinle': True}), json.dumps({'at': True, 'dinle': True}), json.dumps({'at': 1000.0, 'dinle': 'evet'})):
+            word.write_text(broken, encoding='utf-8')
+            self.assertFalse(ses.wake_allowed(on, word, moment=1005.0), broken)
+        with mock.patch.dict(os.environ, {'LOCALAPPDATA': 'C:/Users/x/AppData/Local'}):
+            self.assertEqual(ses.desktop_file(), Path('C:/Users/x/AppData/Local') / 'beyin-v3' / 'masaustu.json')
+
     def test_commands_saved_as_the_old_defaults_get_the_new_words_ones_chosen_stay(self):
         ses.ses_dir(self.state).mkdir(parents=True)
         path = ses.ses_dir(self.state) / ses.CONFIG

@@ -546,6 +546,25 @@ if (process.platform === 'win32' && (await page.evaluate(() => window.cortex.set
   );
   await page.waitForTimeout(300);
   await shoot('07e-voice-phrase.png');
+  // Listening all the time is asked for first, in the app's own words; "not now" leaves the engine unasked.
+  const wake = page.locator('[data-setup-voice-wake]');
+  await wake.scrollIntoViewIfNeeded();
+  await wake.click();
+  const asking = await shownSoon(page.locator('[data-consent="wake"]'));
+  await shoot('07f-microphone-consent.png');
+  await page.locator('[data-consent-no]').click();
+  await page.waitForTimeout(500);
+  check(
+    'the microphone listens all the time only once allowed: asked first, and "not now" turns nothing on',
+    asking && (await page.locator('[data-consent]').count()) === 0 && !fs.readFileSync(askedLog, 'utf8').includes('ses ayar --uyandirma ac'),
+  );
+  await wake.click();
+  await page.locator('[data-consent-yes]').click();
+  check(
+    'allowed, it is turned on with the engine’s own setting, and the leave is kept',
+    (await soon(() => fs.readFileSync(askedLog, 'utf8').includes('ses ayar --uyandirma ac'))) &&
+      (await page.waitForFunction(async () => (await window.cortex.bootstrap()).settings.wakeConsent === true, null, { timeout: 5_000 }).then(() => true, () => false)),
+  );
   await page.keyboard.press('Escape');
   fs.rmSync(vaultNote('beyin.py'));
   fs.rmSync(vaultNote('.beyin-version'));

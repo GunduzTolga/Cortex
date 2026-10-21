@@ -40,6 +40,10 @@ export interface Settings {
   onboarded: boolean;
   /** The window closed, Cortex stays in the notification area, and starts there with Windows; on by default. */
   background: boolean;
+  /** The person let voice typing use the microphone, asked before it is set up (src/ui/MicConsent.tsx). */
+  voiceConsent: boolean;
+  /** The person let the microphone listen all the time for the wake phrase, while Cortex runs (services/microphone.ts). */
+  wakeConsent: boolean;
 }
 
 /** The longest name kept: a way of addressing somebody, not a paragraph. */
@@ -52,7 +56,7 @@ export function tidyName(value: unknown): string | null {
   return name || null;
 }
 
-const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true };
+const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false };
 
 let cache: Settings | null = null;
 let keepOff = false;
@@ -71,6 +75,8 @@ function hydrate(raw: Record<string, unknown>): Settings {
     userName: tidyName(raw.userName),
     onboarded: raw.onboarded === true,
     background: raw.background !== false,
+    voiceConsent: raw.voiceConsent === true,
+    wakeConsent: raw.wakeConsent === true,
   };
 }
 

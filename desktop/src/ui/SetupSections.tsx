@@ -4,6 +4,7 @@ import { COMMAND_WORDS, VOICE_COMMANDS, WAKE_PHRASES, wakePhraseLabel } from '@s
 import type { SetupJob, SetupStatus, VoiceCommands, WakePhrase } from '@shared/setup';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
+import { useApp } from '../store/app';
 import { useSetup } from '../store/setup';
 import { Row, SaveButton, Section, Segments } from './settingsParts';
 import { Button, Spinner, Switch, inputClass } from './ui';
@@ -163,6 +164,8 @@ function VoiceSection({ status }: { status: SetupStatus }) {
   const set = useSetup((s) => s.voice);
   const voice = status.voice;
   const busy = status.job !== null;
+  // Listening all the time counts once it is allowed here: on in the engine without it, the microphone does not listen.
+  const wakeConsent = useApp((s) => s.settings.wakeConsent);
   return (
     <Section title={t('setup.voice')} data="voice">
       {!status.engine.installed ? (
@@ -174,7 +177,7 @@ function VoiceSection({ status }: { status: SetupStatus }) {
           <Switch checked={voice.on} onChange={(on) => void set({ on })} label={t('setup.voice.on')} hint={t('setup.voice.on.hint')} data-setup-voice-on />
           <Switch checked={voice.auto} onChange={(auto) => void set({ auto })} label={t('setup.voice.auto')} hint={t('setup.voice.auto.hint')} data-setup-voice-auto />
           <Switch
-            checked={voice.wake}
+            checked={voice.wake && wakeConsent}
             onChange={(wake) => void set({ wake })}
             label={t('setup.voice.wake', { phrase: wakePhraseLabel(voice.wakePhrase, english) })}
             hint={t('setup.voice.wake.hint', { phrase: wakePhraseLabel(voice.wakePhrase, english) })}

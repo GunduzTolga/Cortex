@@ -1,0 +1,70 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { readSettings } from './settings';
+
+/**
+ * The microphone listens all the time for the wake phrase only while Cortex
+ * runs, and only once the person allowed it here. Yakala's listener, which
+ * holds the microphone, starts with Windows on its own: with the app quit,
+ * "Hey Pyn" still opened a window (21 October).
+ *
+ * So the app says, every few seconds while it runs, that it runs and whether
+ * the person allowed it (`wakeConsent`), in one file beside every vault's
+ * state: `%LOCALAPPDATA%\beyin-v3\masaustu.json`. The listener reads it every
+ * two seconds and keeps the microphone open only while it is fresh and says
+ * yes (beyin_v3_ses.wake_allowed); quitting writes that the app is closed, and
+ * an app that crashed stops saying it runs, which the listener takes as closed.
+ * Windows only: the listener is.
+ */
+
+/** How often the app says it runs; the listener takes it as closed after 20 seconds without a word. */
+export const BEAT_EVERY = 5_000;
+
+/** Where the app says it, as the engine's default state is kept (scripts/beyin_v3.py, default_state). */
+export function microphoneFile(env: NodeJS.ProcessEnv = process.env): string {
+  const base = env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+  return path.join(base, 'beyin-v3', 'masaustu.json');
+}
+
+/** What the app says: that it runs now and whether the microphone may listen all the time, or that it has quit. */
+export function microphoneWord(allowed: boolean, closed: boolean, at: number = Date.now()): string {
+  const word = closed ? { surum: 1, pid: process.pid, at: at / 1000, kapali: true } : { surum: 1, pid: process.pid, at: at / 1000, dinle: allowed };
+  return `${JSON.stringify(word)}\n`;
+}
+
+/** Written whole or not at all: the listener never reads half a word. */
+function write(text: string, file = microphoneFile()): void {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const temp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(temp, text, 'utf8');
+    fs.renameSync(temp, file);
+  } catch {
+    // Not written this time: the next beat tries again, and a stale word lets the microphone go.
+  }
+}
+
+let timer: NodeJS.Timeout | null = null;
+
+/** Said now, with the settings as they are: at every beat, and at once when the person allows it or takes it back. */
+export function sayMicrophone(): void {
+  if (process.platform !== 'win32' || !timer) return;
+  write(microphoneWord(readSettings().wakeConsent, false));
+}
+
+/** Saying it, from the app's start until it quits. */
+export function startMicrophoneWord(): void {
+  if (process.platform !== 'win32' || timer) return;
+  timer = setInterval(sayMicrophone, BEAT_EVERY);
+  timer.unref();
+  sayMicrophone();
+}
+
+/** The app quits: the listener lets the microphone go within two seconds. */
+export function stopMicrophoneWord(): void {
+  if (!timer) return;
+  clearInterval(timer);
+  timer = null;
+  write(microphoneWord(false, true));
+}

@@ -170,6 +170,12 @@ test('voice typing is set up from the app: yakala first if it is not, then the e
     asked(vault).filter((one) => one !== 'ses durum'),
     ['yakala durum', 'yakala kur', 'ses kur'],
   );
+  // Listening all the time only once the person allowed it in the app (src/ui/MicConsent.tsx): refused before, the engine not asked.
+  await assert.rejects(setVoice({ wake: true }), /önce izin ver|first/);
+  assert.ok(!asked(vault).includes('ses ayar --uyandirma ac'));
+  updateSettings((settings) => {
+    settings.wakeConsent = true;
+  });
   // The wake phrase on, from the switch: the engine's own setting command; the icon at the bottom right hears of it.
   const heard: Array<boolean | undefined> = [];
   const stop = onVoiceStatus((voice) => heard.push(voice?.wake));

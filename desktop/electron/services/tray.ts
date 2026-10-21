@@ -82,7 +82,7 @@ export function trayTooltip(voice: VoiceStatus | null, english: boolean): string
 let tray: Tray | null = null;
 let voice: VoiceStatus | null = null;
 let busy = false;
-let handlers: { open(): void; settings(): void; quit(): void } | null = null;
+let handlers: { open(): void; settings(): void; askWake(): void; quit(): void } | null = null;
 const icons = new Map<string, Electron.NativeImage>();
 
 /** The icons' pictures (tema/ananas/marka/tepsi, from scripts/marka_uret.py tepsi), beside the bundle when packaged. */
@@ -121,7 +121,7 @@ const canNote = () => process.platform === 'win32' && Boolean(readSettings().vau
 
 function menu(): Electron.Menu {
   return Menu.buildFromTemplate(
-    trayItems(voice, english(), busy, canNote()).map((item): Electron.MenuItemConstructorOptions =>
+    trayItems(lived(voice), english(), busy, canNote()).map((item): Electron.MenuItemConstructorOptions =>
       item.type === 'separator'
         ? { type: 'separator' }
         : {
@@ -134,11 +134,24 @@ function menu(): Electron.Menu {
   );
 }
 
+/** The voice status as it is lived: the wake phrase on in the engine counts only once the person allowed it here (services/microphone.ts). */
+function lived(status: VoiceStatus | null): VoiceStatus | null {
+  return status && status.wake && !readSettings().wakeConsent ? { ...status, wake: false } : status;
+}
+
+/** Whether the microphone listens all the time now: the window closed says so, every time. */
+export function listeningNow(): boolean {
+  return listensAlways(lived(voice));
+}
+
 function show(): void {
   if (!tray) return;
-  tray.setImage(trayPicture(listensAlways(voice)));
-  tray.setToolTip(trayTooltip(voice, english()));
+  tray.setImage(trayPicture(listeningNow()));
+  tray.setToolTip(trayTooltip(lived(voice), english()));
 }
+
+/** Leave for the microphone given or taken back in the window: the icon says it at once. */
+export const trayChanged = show;
 
 async function act(action: TrayAction | undefined): Promise<void> {
   if (action === 'open') handlers?.open();
@@ -146,9 +159,14 @@ async function act(action: TrayAction | undefined): Promise<void> {
   else if (action === 'quit') handlers?.quit();
   else if (action === 'note') openNoteWindow();
   else if (action === 'wake' && voice) {
+    const on = !lived(voice)?.wake;
+    if (on && !readSettings().wakeConsent) {
+      handlers?.askWake();
+      return;
+    }
     busy = true;
     try {
-      await setVoice({ wake: !voice.wake });
+      await setVoice({ wake: on });
     } catch {
       await setupStatus().catch(() => null); // refused (another setup going on): the status says how it is
     } finally {
@@ -159,7 +177,7 @@ async function act(action: TrayAction | undefined): Promise<void> {
 }
 
 /** The icon put in the notification area, told of every voice status the app reads from then on. */
-export function startTray(given: { open(): void; settings(): void; quit(): void }): void {
+export function startTray(given: { open(): void; settings(): void; askWake(): void; quit(): void }): void {
   if (tray) return;
   handlers = given;
   tray = new Tray(trayPicture(false));

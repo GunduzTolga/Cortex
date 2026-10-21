@@ -24,6 +24,10 @@ export interface WindowSettings {
   onboarded: boolean;
   /** The window closed, Cortex stays in the notification area (the microphone switched from there), and starts there with Windows. */
   background: boolean;
+  /** The person let voice typing use the microphone. */
+  voiceConsent: boolean;
+  /** The person let the microphone listen all the time for the wake phrase while Cortex runs; until then it does not. */
+  wakeConsent: boolean;
 }
 
 /** The vault by its folder's name, and whether that folder is still there; never its path. */
@@ -102,5 +106,7 @@ export interface CortexApi {
     setup(handler: (push: SetupPush) => void): () => void;
     /** The notification-area icon's "Ayarlar": open the settings. */
     openSettings(handler: () => void): () => void;
+    /** The notification-area icon's "listen all the time", asked of a person who has not allowed it yet: the window asks. */
+    askWake(handler: () => void): () => void;
   };
 }

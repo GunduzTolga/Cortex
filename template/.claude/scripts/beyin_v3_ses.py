@@ -232,6 +232,45 @@ def usable(state):
     return installed(state) and bool(load_config(state).get('acik'))
 
 
+# Cortex's desktop app says here, every few seconds while it runs, that it runs and whether the
+# person let the microphone listen all the time (desktop/electron/services/microphone.ts); when it
+# quits it says so. The wake phrase was heard with the app closed - the listener starts with
+# Windows on its own - and a window opened on "Hey Pyn" (21 October).
+DESKTOP_FILE = 'masaustu.json'
+DESKTOP_FRESH_SN = 20
+
+
+def desktop_file():
+    """The desktop app's word, one file for the user beside every vault's state (default_state)."""
+    base = os.environ.get('LOCALAPPDATA') or str(Path.home() / 'AppData' / 'Local')
+    return Path(base) / 'beyin-v3' / DESKTOP_FILE
+
+
+def wake_allowed(config, path=None, moment=None):
+    """Whether the microphone may listen for the wake phrase now. The setting on, and, once Cortex's
+    desktop app has run on this machine, only while it runs and the person allowed it there: an
+    app that quit, or stopped saying it runs (DESKTOP_FRESH_SN), lets the microphone go. Without
+    the app - the engine from the command line - the setting alone, as before."""
+    if not config.get('uyandirma'):
+        return False
+    path = Path(path) if path is not None else desktop_file()
+    try:
+        said = json.loads(path.read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    if not isinstance(said, dict) or said.get('kapali'):
+        return False
+    import time
+    at = said.get('at')
+    if isinstance(at, bool) or not isinstance(at, (int, float)):
+        return False
+    if abs((time.time() if moment is None else moment) - at) > DESKTOP_FRESH_SN:
+        return False
+    return said.get('dinle') is True
+
+
 # --------------------------------------------------------------- words --
 _FOLD = str.maketrans('ışğüöç', 'isguoc')
 # How recognizers spell the name they hear as "pin" or "payn" (Whisper: "Payn", "Pain", "Payın").
@@ -1737,7 +1776,8 @@ def serve(state, config, lines=None):
     inputs = {'seen': _inputs_now(), 'at': 0.0}
     threading.Thread(target=load, daemon=True).start()
     threading.Thread(target=write, daemon=True).start()
-    recorder, wake, wake_on = Recorder(config), None, bool(config.get('uyandirma'))
+    # The listener says whether the microphone may listen all the time (`uyandirma`); until it does, the same rule.
+    recorder, wake, wake_on = Recorder(config), None, ses.wake_allowed(config)
     mode, last_level = 'bos', 0.0
     # Each recording is a turn. What Whisper writes back names its turn: a turn ended by what
     # was said in it ("kaydet") is gone from `turns`, and nothing it still writes is news.

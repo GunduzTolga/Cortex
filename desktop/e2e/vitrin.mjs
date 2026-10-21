@@ -254,6 +254,9 @@ try {
   await wait(page.locator('[data-onboarding-finish]'));
   await page.locator('[data-onboarding-finish]').click();
   await wait(page.locator('[data-chat-view]'));
+  // This engine listens all the time, set up before Cortex asked: the app asks first, and is allowed, as a person would.
+  const allow = page.locator('[data-consent="wakeFound"]');
+  if (await allow.waitFor({ timeout: 8_000 }).then(() => true, () => false)) await page.locator('[data-consent-yes]').click();
 
   // Pyn: a question to the model loaded in LM Studio, the notes it names as links.
   await page.locator('[data-chat-chip="cli"]').click();

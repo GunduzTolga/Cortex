@@ -3,6 +3,7 @@ import { messageOf } from '@shared/ipcError';
 import type { SetupJob, SetupPush, SetupStatus, VoicePatch } from '@shared/setup';
 import { translate } from '../i18n';
 import { useApp } from './app';
+import { useConsent } from './consent';
 import { useSaved } from './saved';
 
 /**
@@ -67,6 +68,11 @@ export const useSetup = create<SetupState>((set, get) => {
     },
 
     async run(job) {
+      // Voice typing uses the microphone: asked before it is set up.
+      if (job === 'voice' && !useApp.getState().settings.voiceConsent) {
+        if (!(await useConsent.getState().ask('voice'))) return;
+        await useApp.getState().setSettings({ voiceConsent: true });
+      }
       listen();
       const status = get().status;
       set({ error: null, steps: { job, lines: [] }, status: status && { ...status, job } });
@@ -81,6 +87,11 @@ export const useSetup = create<SetupState>((set, get) => {
     },
 
     async voice(patch) {
+      // Listening all the time: asked before it is turned on (services/microphone.ts keeps it to while Cortex runs).
+      if (patch.wake === true && !useApp.getState().settings.wakeConsent) {
+        if (!(await useConsent.getState().ask('wake'))) return;
+        await useApp.getState().setSettings({ wakeConsent: true });
+      }
       try {
         set({ status: await window.cortex.setup.voice(patch), error: null });
         useSaved.getState().flash();

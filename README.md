@@ -129,7 +129,7 @@ Terminal gerekmez; uygulama gerekeni kendisi kurar.
    3. **Python:** yalnız bilgisayarında Python yoksa görünür. Uygulamayla gelen Python 3.12, yalnız senin kullanıcın için kurulur.
    4. **Pyn'in hafızası:** hafıza motoru kasaya kurulur; notlarına dokunulmaz.
    5. **Yapay zeka aracın:** bilgisayarında kurulu araçları (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code) listeler; her birinin yanında giriş düğmesi, ayrıca API anahtarı girme düğmesi vardır. Claude Code kurulu değilse **Claude Code'u kur ve giriş yap** düğmesi çıkar: Anthropic'in kendi kurucusu bir pencerede çalışır, bitince giriş penceresi kendiliğinden açılır. Claude Code, Claude Pro ya da Max aboneliği ister. Uygulamayı yeniden açman gerekmez; sonradan kurduğun bir araç da pencereye döndüğünde görünür.
-   6. **Sesle yazma:** isteğe bağlıdır, tek düğmeyle kurulur (yaklaşık 2 GB indirme). Kurulunca **Sürekli dinle** ve **Pencere açılınca dinle** anahtarları görünür.
+   6. **Sesle yazma:** isteğe bağlıdır, tek düğmeyle kurulur (yaklaşık 2 GB indirme). Kurulumdan önce mikrofon izni sorulur. Kurulunca **Sürekli dinle** ve **Pencere açılınca dinle** anahtarları görünür; **Sürekli dinle** açılırken izin ayrıca sorulur.
 
    Her adım ne yaptığını söyler; isteğe bağlı adımlar **Atla** ile geçilir ve sonra Ayarlar'dan yapılır. İlk kurulum ekranı Ayarlar'dan yeniden açılabilir.
 
@@ -153,7 +153,7 @@ Terminal gerekmez; uygulama gerekeni kendisi kurar.
   - Sunucu odasının ışıkları araçlarının gerçek giriş durumunu, odalar kasanın sayılarını gösterir; ofisin ışığı günün saatine uyar.
   - İstersen ekip son notların hakkında konuşur: Ayarlar → Beyin'den (ya da Beyin ekranının kendi ayarlarından) bir araç (LM Studio, Ollama ya da Claude Code), model ve sıklık (10–60 dakika) seçersin. Varsayılan kapalıdır.
 
-**Sağ alttaki simge.** Pencereyi kapatınca Cortex bildirim alanında kalır ve Windows'la birlikte açılır; Telegram dinleyicisi de orada çalışmaya devam eder. Simgenin menüsü: mikrofonun durumu, **Sürekli dinle** aç/kapat (sesle yazma kuruluysa), **Not al**, **Cortex'i aç**, **Ayarlar**, **Çık**. İstemezsen Ayarlar → Genel → *Sağ altta çalışmaya devam et*. Uygulama tek kopya çalışır; ikinci kez açınca mevcut pencere öne gelir.
+**Sağ alttaki simge.** Pencereyi kapatınca Cortex bildirim alanında kalır ve Windows'la birlikte açılır; Telegram dinleyicisi de orada çalışmaya devam eder. Simgenin menüsü: mikrofonun durumu, **Sürekli dinle** aç/kapat (sesle yazma kuruluysa), **Not al**, **Cortex'i aç**, **Ayarlar**, **Çık**. **Sürekli dinle** yalnız Cortex çalışırken dinler: **Çık**'a basınca mikrofon birkaç saniye içinde kapanır. Mikrofon dinlerken pencereyi kapatırsan Cortex bunu her seferinde söyler. İstemezsen Ayarlar → Genel → *Sağ altta çalışmaya devam et*. Uygulama tek kopya çalışır; ikinci kez açınca mevcut pencere öne gelir.
 
 **Ayarlar** (üst çubuktaki dişli ya da `Ctrl+,`):
 
@@ -183,7 +183,7 @@ Kendin derlemek ve ayrıntılar için: [desktop/README.md](desktop/README.md).
 **Sesle yazma (yalnız Windows, isteğe bağlı).** İlk kurulum ekranından ya da Ayarlar → Sesle yazma'dan tek düğmeyle kurulur.
 
 - **Yaz ve kaydet.** Pencere açılınca dinlemeye başlar (Ayarlar → *Pencere açılınca dinle*). Konuş, ara verebilirsin; cümleler alana yazılır. Bitince **"kaydet"** ya da **"Pyn, kaydet"** de. Pyn'in adından sonra **"gönder"**, **"tamam"**, **"bitti"** ve **"bitir"** de kaydeder. Klavyeden yazmaya başlarsan mikrofon kapanır; `Ctrl+Alt+C`'ye yeniden basmak dinlemeyi bitirir; uzun süre kimse konuşmazsa mikrofon kendiliğinden kapanır.
-- **Sesle açma.** **Sürekli dinle** açıkken (varsayılan kapalı; sağ alttaki menüden ya da Ayarlar'dan açılır) uyandırma sözü pencereyi açar. Söz seçilebilir: **"Pyn, not al"** (varsayılan), **"Hey Pyn"** ya da **ikisi de** (Ayarlar → Sesle yazma → Uyandırma sözü). Sözü önce küçük bir yerel model (Vosk) yakalar, Pyn'in adını ardından yerel Whisper doğrular; sohbetteki bir "hey" ya da "not al" pencere açmaz.
+- **Sesle açma.** **Sürekli dinle** açıkken (varsayılan kapalı; sağ alttaki menüden ya da Ayarlar'dan açılır, açarken mikrofon izni sorulur; yalnız Cortex çalışırken dinler) uyandırma sözü pencereyi açar. Söz seçilebilir: **"Pyn, not al"** (varsayılan), **"Hey Pyn"** ya da **ikisi de** (Ayarlar → Sesle yazma → Uyandırma sözü). Sözü önce küçük bir yerel model (Vosk) yakalar, Pyn'in adını ardından yerel Whisper doğrular; sohbetteki bir "hey" ya da "not al" pencere açmaz.
 - **Sesli komutlar** (sözleri Ayarlar → Sesle yazma → Sesli komutlar'dan değişir):
 
   | Komut | Varsayılan sözler |
@@ -347,7 +347,7 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 | Belirti | Çözüm |
 | --- | --- |
 | Kurulumda "Windows bilgisayarınızı korudu" | Kurulum dosyası henüz imzasız. **Ek bilgi** → **Yine de çalıştır**. |
-| "Hey Pyn" pencereyi açmıyor | Ayarlar → Sesle yazma: **Sürekli dinle** açık mı? Uyandırma sözü "Hey Pyn" ya da "İkisi de" mi (varsayılan "Pyn, not al")? Sağ alttaki simgenin menüsü mikrofonun dinleyip dinlemediğini ve hangi sözü beklediğini söyler. Ne duyduğunu görmek için: `py -3 beyin.py ses dene --uyandirma`. |
+| "Hey Pyn" pencereyi açmıyor | Cortex çalışıyor mu? **Sürekli dinle** yalnız Cortex açıkken (sağ altta simgesi varken) dinler. Ayarlar → Sesle yazma: **Sürekli dinle** açık mı, izin verildi mi? Uyandırma sözü "Hey Pyn" ya da "İkisi de" mi (varsayılan "Pyn, not al")? Sağ alttaki simgenin menüsü mikrofonun dinleyip dinlemediğini ve hangi sözü beklediğini söyler. Ne duyduğunu görmek için: `py -3 beyin.py ses dene --uyandirma`. |
 | Not al'da "Mikrofondan ses gelmiyor" | Mikrofon kapalı ya da sessizde olabilir, ya da Windows başka bir mikrofonu dinliyor: Windows ses ayarlarından doğru mikrofonu varsayılan yap. |
 | Asistan notları hatırlamıyor | İstemcide hook güvenini onayladığını kontrol et, sonra asistana "beyin-doktor ile kontrol et" de ya da `beyin.py doctor` çalıştır. |
 | Bir not bağlama hiç girmiyor | Notta `visibility: private` var mı, klasörünün adında "Özel", "Şifreler" gibi bir sözcük geçiyor mu? `beyin.py doctor` indeks dışı tutulanları gösterir. |
@@ -363,7 +363,7 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 
 | Sürüm | Öne çıkan |
 | --- | --- |
-| [1.0.32](docs/v3/releases/1.0.32.md) | Pyn sohbetinde Claude Code kasadaki notlara (Core.md dahil) sormadan yazar; başka adımlar izin kartıyla sorulur, artık sessizce reddedilmez. İlk kurulumda Claude Code yoksa uygulamadan kurulup giriş yapılır; sonradan kurulan araç ya da yapılan giriş, uygulamayı yeniden açmadan görünür. |
+| [1.0.32](docs/v3/releases/1.0.32.md) | Mikrofon izin ister: sesle yazma kurulmadan ve **Sürekli dinle** açılmadan önce sorulur; sürekli dinleme yalnız Cortex çalışırken olur, Çık'a basınca mikrofon kapanır. Pyn sohbetinde Claude Code kasadaki notlara (Core.md dahil) sormadan yazar; başka adımlar izin kartıyla sorulur. İlk kurulumda Claude Code yoksa uygulamadan kurulup giriş yapılır; sonradan kurulan araç ya da yapılan giriş, uygulamayı yeniden açmadan görünür. |
 | [1.0.31](docs/v3/releases/1.0.31.md) | Hafıza: "dün", "geçen cuma", "12 Ekim" diye sorunca o günün günlüğü gelir; hiçbir not cevap vermezse günlüklere bakılır; para/ücret, crash/çökme gibi eşanlamlılar tutar. Öncülün 3.12 Türkçe kök bulması (kurulmalı/kuruldu, şehri/şehir) ve açılışta kişi notları. Türkçe hafıza ölçümü eklendi. |
 | [1.0.30](docs/v3/releases/1.0.30.md) | Türkçe sesli komutlar daha iyi tutuyor: AMD ve Intel kartlarda Whisper en iyi beş tahmini tartıyor (NVIDIA'daki gibi); "kayd et", "son kelime sil" gibi biraz farklı yazılan komutlar da tutuyor. |
 | [1.0.29](docs/v3/releases/1.0.29.md) | "Hey Pyn" bilgisayar açılınca ya da güncellemeden sonra kendiliğinden dinliyor: ses yardımcısı mikrofonu açarken bir komut gelmesini beklemiyor, sürekli dinlemeyi kapatıp açmak gerekmiyor. |

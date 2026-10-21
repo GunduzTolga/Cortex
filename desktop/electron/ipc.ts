@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { BootstrapPayload, WindowSettings } from '../shared/api';
 import { readSettings, settingsUnreadable, tidyName, updateSettings } from './services/settings';
-import { startWithWindows } from './services/tray';
+import { sayMicrophone } from './services/microphone';
+import { startWithWindows, trayChanged } from './services/tray';
 import { setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
@@ -47,8 +48,8 @@ function broadcast(channel: string, payload: unknown): void {
 }
 
 function windowSettings(): WindowSettings {
-  const { language, allFiles, nameIcons, userName, onboarded, background } = readSettings();
-  return { language, allFiles, nameIcons, userName, onboarded, background };
+  const { language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent } = readSettings();
+  return { language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent };
 }
 
 export function registerIpc(): void {
@@ -69,8 +70,15 @@ export function registerIpc(): void {
     if (typeof asked.userName === 'string' || asked.userName === null) change.userName = tidyName(asked.userName);
     if (typeof asked.onboarded === 'boolean') change.onboarded = asked.onboarded;
     if (typeof asked.background === 'boolean') change.background = asked.background;
+    if (typeof asked.voiceConsent === 'boolean') change.voiceConsent = asked.voiceConsent;
+    if (typeof asked.wakeConsent === 'boolean') change.wakeConsent = asked.wakeConsent;
     if (Object.keys(change).length) updateSettings((settings) => Object.assign(settings, change));
     if (change.background !== undefined) startWithWindows(change.background);
+    // The listener hears it within two seconds: allowed, the microphone listens; taken back, it lets go.
+    if (change.wakeConsent !== undefined) {
+      sayMicrophone();
+      trayChanged();
+    }
     return windowSettings();
   });
 

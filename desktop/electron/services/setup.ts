@@ -516,6 +516,10 @@ export async function setVoice(patch: unknown): Promise<SetupStatus> {
   const vault = vaultOrNull();
   if (!args.length || !vault) return setupStatus();
   if (current) throw new Error(say('Başka bir kurulum sürüyor.', 'Another setup is going on.'));
+  // The microphone listens all the time only once the person allowed it (src/ui/MicConsent.tsx, services/microphone.ts).
+  if (asked.wake === true && !readSettings().wakeConsent) {
+    throw new Error(say('Mikrofonun sürekli dinlemesine önce izin ver.', 'Allow the microphone to listen all the time first.'));
+  }
   await runPython([path.join(vault, 'beyin.py'), 'ses', 'ayar', ...args], { cwd: vault, timeout: STATUS_TIMEOUT });
   return setupStatus();
 }

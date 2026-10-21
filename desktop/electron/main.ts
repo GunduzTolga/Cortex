@@ -5,7 +5,8 @@ import { pathToFileURL } from 'node:url';
 import { registerIpc, stopWatching, trustPagesWhere } from './ipc';
 import { readSettings } from './services/settings';
 import { startTelegram } from './services/telegram';
-import { startTray, startWithWindows, trayNotice } from './services/tray';
+import { startMicrophoneWord, stopMicrophoneWord } from './services/microphone';
+import { listeningNow, startTray, startWithWindows, trayNotice } from './services/tray';
 
 const DEV_SERVER = process.env.VITE_DEV_SERVER_URL;
 const isDev = Boolean(DEV_SERVER);
@@ -164,7 +165,17 @@ function createWindow(showNow = true): void {
     if (quitting || HIDDEN || !readSettings().background) return;
     event.preventDefault();
     window?.hide();
-    if (!toldOfTray) {
+    // The microphone still listening is said every time: the window gone is not the microphone off.
+    if (listeningNow()) {
+      const english = readSettings().language === 'en';
+      trayNotice(
+        'Cortex',
+        english
+          ? 'Cortex keeps running at the bottom right, and the microphone still listens for the wake phrase. To stop it, turn listening off from the icon, or Quit.'
+          : 'Cortex sağ altta çalışıyor ve mikrofon uyandırma sözünü dinlemeye devam ediyor. Durdurmak için simgeden sürekli dinlemeyi kapat ya da Çık.',
+      );
+      toldOfTray = true;
+    } else if (!toldOfTray) {
       toldOfTray = true;
       const english = readSettings().language === 'en';
       trayNotice(
@@ -188,15 +199,17 @@ function createWindow(showNow = true): void {
   });
 }
 
-/** The window brought back on its settings (the icon's "Ayarlar"), once its page is there to be told. */
-function showSettings(): void {
+/** The window brought back and told something (the icon's "Ayarlar", its "listen all the time"), once its page is there to be told. */
+function showAndTell(channel: string): void {
   showWindow();
   const contents = window?.webContents;
   if (!contents) return;
-  const tell = () => contents.send('app:openSettings');
+  const tell = () => contents.send(channel);
   if (contents.isLoading()) contents.once('did-finish-load', tell);
   else tell();
 }
+
+const showSettings = () => showAndTell('app:openSettings');
 
 /** The window brought back: from the icon, or a second launch; made again if it was closed for good. */
 function showWindow(): void {
@@ -249,9 +262,13 @@ if (!app.requestSingleInstanceLock()) {
     readSettings();
     createWindow(!START_HIDDEN);
     if (!HIDDEN) {
+      // The microphone listens all the time only while Cortex runs: said from now until it quits.
+      startMicrophoneWord();
       startTray({
         open: showWindow,
         settings: showSettings,
+        // "Listen all the time" from the icon, not allowed yet: asked in the window, where it is explained.
+        askWake: () => showAndTell('app:askWake'),
         quit: () => {
           quitting = true;
           app.quit();
@@ -274,5 +291,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   quitting = true;
+  stopMicrophoneWord();
   stopWatching();
 });
