@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.28" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.28-E8B23A">
+  <img alt="Sürüm 1.0.29" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.29-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
@@ -295,6 +295,7 @@ Güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Paket önce do�
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.29](docs/v3/releases/1.0.29.md) | "Hey Pyn" bilgisayar açılınca ya da güncellemeden sonra kendiliğinden dinliyor: ses yardımcısı mikrofonu açarken bir komut gelmesini beklemiyor, sürekli dinlemeyi kapatıp açmak gerekmiyor. |
 | [1.0.28](docs/v3/releases/1.0.28.md) | "Hey Pyn" kurulumdan sonraki ilk açılışta da çalışıyor: Windows'un mikrofonu sonradan değişince (kablosuz kulaklık) dinleyici yeni mikrofona geçiyor. Sessiz bir kulaklık konuşurken "Mikrofondan ses gelmiyor" uyarısı vermiyor. |
 | [1.0.27](docs/v3/releases/1.0.27.md) | Yazdığını yapay zekaya göndermeden gelen kutusuna at: gönderin yanındaki düğme ya da `Ctrl+Enter`. Yerel modeller (Ollama, LM Studio) "bunu kaydet" denince gelen kutusuna ekliyor, "aklımda tutarım" demiyor. Beyin ekranı da kâğıt renginde. |
 | [1.0.26](docs/v3/releases/1.0.26.md) | Telegram: telefondan kendi botuna gönderdiğin yazı, bağlantı, fotoğraf ve sesli not gelen kutusuna düşer; bilgisayar kapalıyken gönderdiklerin açılınca gelir, 24 saatten eskiler de. |

@@ -606,6 +606,76 @@ class WorkerTest(unittest.TestCase):
         self.fail('no %s event; saw %s' % (kind, seen))
 
 
+# The helper's stdin reader on its own: what it reads is printed, and while it waits on an empty
+# pipe the main thread does what a MinGW-built library (numpy's) does as it loads, an fstat of stdin.
+STDIN_PROBE = r'''
+import ctypes, importlib.util, queue, sys, threading, time
+spec = importlib.util.spec_from_file_location('isci', sys.argv[1])
+helper = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(helper)
+read = queue.Queue()
+threading.Thread(target=lambda: ([read.put(line) for line in helper._stdin_lines()], read.put(None)), daemon=True).start()
+if sys.argv[2] == 'kutuphane':
+    time.sleep(0.5)  # the reader waits on the empty pipe
+    ctypes.CDLL('msvcrt')._fstat64(0, ctypes.create_string_buffer(64))
+    print('yuklendi', flush=True)
+while True:
+    line = read.get()
+    print('<son>' if line is None else 'satir ' + line.strip(), flush=True)
+    if line is None:
+        break
+'''
+
+
+class StdinTest(unittest.TestCase):
+    """The helper's commands come on stdin, a pipe from yakala's listener."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-stdin-')
+        self.addCleanup(self.tmp.cleanup)  # after the probe is gone: it holds files in there
+
+    def run_probe(self, mode, stdin):
+        script = Path(self.tmp.name) / 'stdin_deneme.py'
+        script.write_text(STDIN_PROBE, encoding='utf-8')
+        worker = ses.write_worker(Path(self.tmp.name) / 'state')
+        proc = subprocess.Popen([sys.executable, '-u', str(script), str(worker), mode],
+                                stdin=stdin, stdout=subprocess.PIPE, text=True, encoding='utf-8')
+        self.addCleanup(lambda: (proc.kill(), proc.wait(), proc.stdout.close()))
+        said = queue.Queue()
+        threading.Thread(target=lambda: [said.put(line.strip()) for line in proc.stdout], daemon=True).start()
+        return proc, said
+
+    def next_line(self, said, why):
+        try:
+            return said.get(timeout=10)
+        except queue.Empty:
+            self.fail('nothing in 10 s: ' + why)
+
+    @unittest.skipUnless(os.name == 'nt', 'a read left waiting holds a Windows pipe')
+    def test_a_library_loading_while_no_command_comes_is_not_held_up(self):
+        # A read left waiting on the pipe held numpy's first load (the wake listener's microphone
+        # opening) until a command came: always-listen had to be switched off and on.
+        proc, said = self.run_probe('kutuphane', subprocess.PIPE)
+        self.assertEqual(self.next_line(said, 'the library waited for a command'), 'yuklendi')
+        proc.stdin.write('{"komut": "ayar"}\n')
+        proc.stdin.flush()
+        self.assertEqual(self.next_line(said, 'a command was not read'), 'satir {"komut": "ayar"}')
+        proc.stdin.write('{"komut": "uyandirma", "acik": true}\n{"komut": "dinle"}\n')  # two at once
+        proc.stdin.flush()
+        self.assertEqual([self.next_line(said, 'two commands'), self.next_line(said, 'two commands')],
+                         ['satir {"komut": "uyandirma", "acik": true}', 'satir {"komut": "dinle"}'])
+        proc.stdin.close()
+        self.assertEqual(self.next_line(said, 'the closed pipe was not its end'), '<son>')
+
+    def test_stdin_that_is_not_a_pipe_is_read_as_it_is(self):
+        given = Path(self.tmp.name) / 'komutlar.txt'
+        given.write_text('{"komut": "dinle"}\n{"komut": "bitir"}\n', encoding='utf-8')
+        with open(given, 'rb') as stdin:
+            _proc, said = self.run_probe('dosya', stdin)
+        self.assertEqual([self.next_line(said, 'a file as stdin') for _ in range(3)],
+                         ['satir {"komut": "dinle"}', 'satir {"komut": "bitir"}', '<son>'])
+
+
 class FakeWorker:
     def __init__(self):
         self.sent, self.values = [], []

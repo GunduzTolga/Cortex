@@ -1610,13 +1610,44 @@ class Wake:
                 return verdict
 
 
+def _stdin_lines():
+    """The commands on stdin, a line at a time. On Windows the pipe is read only when it holds
+    something: a read left waiting on a pipe holds it, and a library that looks at stdin as it
+    loads waits until that read ends. numpy did, the first time the wake listener opened the
+    microphone: it stayed shut until a command came (always-listen switched off and on)."""
+    if os.name != 'nt':
+        yield from sys.stdin
+        return
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+    peek = ctypes.WinDLL('kernel32', use_last_error=True).PeekNamedPipe
+    peek.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
+                     ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+    fd = sys.stdin.fileno()
+    handle, ready = msvcrt.get_osfhandle(fd), wintypes.DWORD()
+    if not peek(handle, None, 0, None, ctypes.byref(ready), None):
+        yield from sys.stdin  # not a pipe (a console, a file): read as it always was
+        return
+    pending = b''
+    while peek(handle, None, 0, None, ctypes.byref(ready), None):  # false once the other end is gone
+        if not ready.value:
+            time.sleep(0.05)
+            continue
+        *whole, pending = (pending + os.read(fd, ready.value)).split(b'\n')
+        for line in whole:
+            yield line.rstrip(b'\r').decode('utf-8', 'replace') + '\n'
+    if pending.strip():
+        yield pending.decode('utf-8', 'replace')
+
+
 def serve(state, config, lines=None):
     """The helper's loop: commands from `lines` (stdin), events out. Whisper writes on a thread of
     its own, one piece at a time and in the order said; everything else happens on this one."""
     commands = queue.Queue()
 
     def read():
-        for line in (sys.stdin if lines is None else lines):
+        for line in (_stdin_lines() if lines is None else lines):
             try:
                 commands.put(json.loads(line))
             except ValueError:
