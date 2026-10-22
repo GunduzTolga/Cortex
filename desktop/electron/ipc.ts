@@ -225,7 +225,13 @@ export function registerIpc(): void {
   // again on the new engine), and the chats' CLIs take the engine's new hooks at their next message.
   handle('setup:installPython', async () => {
     const status = await setup.installPython();
-    void telegram.restartTelegram();
+    // The vault opened while there was no Python is bound to where it is now with this one (services/setup.ts,
+    // settleVault), its failure said once as at its opening; the Telegram listener starts in it after.
+    void setup.settleVault().then((failure) => {
+      const say = (tr: string, en: string) => (readSettings().language === 'en' ? en : tr);
+      if (failure) notice({ tone: 'error', title: say('Pyn\'in hafızası bu kasaya bağlanamadı', 'Pyn’s memory could not be tied to this vault'), detail: failure });
+      return telegram.restartTelegram();
+    });
     return status;
   });
   handle('setup:installEngine', async () => {

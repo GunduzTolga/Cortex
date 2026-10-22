@@ -98,7 +98,8 @@ function EngineSection({ status }: { status: SetupStatus }) {
         // Python offered here too, not only on the first-run screen: someone past it has nowhere else to find it (desktop-shell-1).
         <>
           <Note tone="error" data="no-python">
-            {wanting ? `${wanting} ` : null}
+            {/* Why first - one too old, a launcher with nothing behind it, or none at all - then what the app can do. */}
+            {wanting ? `${wanting} ` : status.pythonBundled ? `${t('setup.python.none')} ` : null}
             {status.pythonBundled ? (
               t('setup.python.bundled', { version: status.pythonBundled })
             ) : (

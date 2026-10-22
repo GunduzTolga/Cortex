@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { dialogAnswer, handlers, sent } from 'electron';
 import { registerIpc, trustPagesWhere } from '../electron/ipc';
-import { forgetSettings, readSettings, settingsPath } from '../electron/services/settings';
+import { forgetSettings, readSettings, settingsPath, updateSettings } from '../electron/services/settings';
 import { pythonOf } from '../electron/services/localChat';
 import { setYakalaPlatform } from '../electron/services/setup';
 
@@ -135,4 +135,41 @@ test('another vault chosen, yakala follows it from the vault that had it, and th
     if (before === undefined) delete process.env.LOCALAPPDATA;
     else process.env.LOCALAPPDATA = before;
   }
+});
+
+/** A vault's engine that could not bind it where it is now: `relocate` ends with its error line, as beyin.py does. */
+const UNBOUND = String.raw`import json, os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+args = sys.argv[1:]
+open(os.path.join(here, 'istenen.log'), 'a', encoding='utf-8').write(' '.join(args) + '\n')
+if args[:1] == ['relocate']:
+    print(json.dumps({'error': 'ValueError', 'message': 'Kasa taşınmış ama eski yerindeki durum klasörü okunamadı.', 'code': 'vault_moved'}), file=sys.stderr)
+    sys.exit(1)
+sys.exit(2)
+`;
+
+// On Windows only: the Python is the app's to install there, and one already fit is all a run can stand in for it with.
+test('a vault opened while there was no Python is bound once the setup has installed one, its failure said once', { skip: process.platform !== 'win32' || pythonOf() === null }, async () => {
+  firstRun();
+  const vault = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-')));
+  fs.writeFileSync(path.join(vault, 'beyin.py'), UNBOUND);
+  fs.writeFileSync(path.join(vault, '.beyin-version'), '1.0.33\n');
+  // Opened, and not bound: there was no Python to bind it with (services/setup.ts, settleVault).
+  updateSettings((settings) => {
+    settings.vault = vault;
+  });
+  sent.length = 0;
+  await call('setup:installPython');
+  const said = async () => {
+    for (const end = Date.now() + 20_000; Date.now() < end; await new Promise((done) => setTimeout(done, 50))) {
+      const notice = sent.find(([channel]) => channel === 'app:notice');
+      if (notice) return notice[1] as { tone: string; title: string; detail: string };
+    }
+    return null;
+  };
+  const notice = await said();
+  assert.deepEqual(notice, { tone: 'error', title: 'Pyn\'in hafızası bu kasaya bağlanamadı', detail: 'Kasa taşınmış ama eski yerindeki durum klasörü okunamadı.' });
+  const asked = fs.readFileSync(path.join(vault, 'istenen.log'), 'utf8').trim().split(/\r?\n/);
+  assert.equal(asked.filter((one) => one === 'relocate').length, 1);
+  assert.equal(sent.filter(([channel]) => channel === 'app:notice').length, 1, 'said once');
 });

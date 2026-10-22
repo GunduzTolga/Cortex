@@ -16,7 +16,8 @@
  * which carries the detail (the file, the folder). An engine from before the
  * codes says a few of these in English: those are known by their words and
  * said the same way. Anything else is the engine's sentence, or the line as
- * it came when it was not the engine's JSON - never the JSON itself.
+ * it came when it was not the engine's JSON - never the JSON itself, nor a
+ * piece of it: a line cut short is read for the sentence still in it.
  */
 
 export const ENGINE_CODES = [
@@ -152,26 +153,75 @@ function jsonError(text: string): Record<string, unknown> | null {
   return null;
 }
 
-/** What a failed command wrote (its stderr, or the sentence a call rejected with), read; null when it wrote nothing. */
+/**
+ * The engine's JSON line cut short - its start lost to a buffer that keeps only the last of what was written, its end
+ * to a program stopped mid-line - read for the fields it still has, their escapes read back as letters; null when it
+ * has none of them.
+ */
+function cutError(line: string): Record<string, unknown> | null {
+  const record: Record<string, unknown> = {};
+  for (const name of ['error', 'message', 'code', 'hint']) {
+    const found = new RegExp(`"${name}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`).exec(line);
+    if (!found) continue;
+    try {
+      // A string cut inside an escape (`\u00f`) loses that letter, not what came before it.
+      record[name] = JSON.parse(`"${found[1].replace(/\\u[0-9a-fA-F]{0,3}$/, '')}"`) as string;
+    } catch {
+      // an escape that cannot be read: the field is left out
+    }
+  }
+  return Object.keys(record).length ? record : null;
+}
+
+/**
+ * A line that is JSON, or a piece of it: whole JSON, one that starts as an object of it does, names the engine's
+ * fields, or carries its escapes with a quote of it. Not every line that begins with a bracket: `[Errno 28] No space
+ * left on device` and pip's `[notice] …` are words. Nor one with a Windows path that only looks escaped: Python says
+ * `'C:\Users\u1234\…'` in single quotes, and a piece of the engine's line always keeps a double quote (its start or its
+ * end is still there).
+ */
+function jsonish(line: string): boolean {
+  if (/^\{"|"(?:error|message|code|hint)"\s*:/.test(line)) return true;
+  if (/\\u[0-9a-fA-F]{4}/.test(line) && line.includes('"')) return true;
+  if (!/^[[{]/.test(line)) return false;
+  try {
+    JSON.parse(line);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function errorOf(found: Record<string, unknown>): EngineError {
+  const message = typeof found.message === 'string' ? found.message.trim() : '';
+  const type = typeof found.error === 'string' ? found.error : null;
+  const named = isCode(found.code);
+  return {
+    type,
+    code: named ? (found.code as EngineCode) : codeOf(message),
+    message,
+    hint: typeof found.hint === 'string' && found.hint.trim() ? found.hint.trim() : null,
+    named,
+    given: typeof found.code === 'string' && found.code ? found.code : null,
+  };
+}
+
+/** What a failed command wrote (its stderr, or the sentence a call rejected with), read; null when it wrote nothing a person can be told. */
 export function readEngineError(text: string): EngineError | null {
   const found = jsonError(text);
-  if (found) {
-    const message = typeof found.message === 'string' ? found.message.trim() : '';
-    const type = typeof found.error === 'string' ? found.error : null;
-    const named = isCode(found.code);
-    return {
-      type,
-      code: named ? (found.code as EngineCode) : codeOf(message),
-      message,
-      hint: typeof found.hint === 'string' && found.hint.trim() ? found.hint.trim() : null,
-      named,
-      given: typeof found.code === 'string' && found.code ? found.code : null,
-    };
-  }
+  if (found) return errorOf(found);
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const last = lines[lines.length - 1];
-  if (!last) return null;
-  return { type: null, code: codeOf(text), message: last, hint: null, named: false, given: null };
+  // JSON is never the sentence: the engine's own line cut short says what it still can, and any other - a result or a
+  // warning written as JSON, a piece with nothing of the engine's in it - is passed over for the words before it.
+  // What the failure was is read from the end of what was written, as far back as before setup.ts kept more of it for
+  // the engine's long line: a pip warning far above, about a connection tried again, is not why it failed.
+  for (const line of lines.reverse()) {
+    if (!jsonish(line)) return { type: null, code: codeOf(text.slice(-8000)), message: line, hint: null, named: false, given: null };
+    const cut = cutError(line);
+    const read = cut ? errorOf(cut) : null;
+    if (read && (read.message || read.type || read.code)) return read;
+  }
+  return null;
 }
 
 function codeOf(message: string): EngineCode | null {

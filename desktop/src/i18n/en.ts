@@ -185,6 +185,7 @@ export const en = {
   'settings.onboarding.open': 'Open again',
   'setup.engine': 'Cortex',
   'setup.python.missing': 'Python was not found. Cortex\'s memory and voice typing need Python 3.11 or later; install it, then come back here:',
+  'setup.python.none': 'No Python was found on this computer; Cortex\'s memory and voice typing need Python 3.11 or later.',
   'setup.python.tooOld': 'This computer has Python {version}, and Cortex needs 3.11 or later.',
   'setup.python.broken': 'The Python launcher (py) on this computer finds no Python that runs: Python may have been uninstalled.',
   'setup.python.bundled': 'The app can install Python {version} for you only, without an administrator:',

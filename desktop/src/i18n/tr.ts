@@ -179,6 +179,7 @@ export const tr: Record<keyof typeof en, string> = {
   'settings.onboarding.open': 'Yeniden aç',
   'setup.engine': 'Cortex',
   'setup.python.missing': 'Python bulunamadı. Cortex\'in hafızası ve sesle yazma Python 3.11 ya da sonrasını ister; kurup buraya dön:',
+  'setup.python.none': 'Bu bilgisayarda Python bulunamadı; Cortex\'in hafızası ve sesle yazma Python 3.11 ya da sonrasını ister.',
   'setup.python.tooOld': 'Bu bilgisayarda Python {version} var; Cortex 3.11 ya da sonrasını ister.',
   'setup.python.broken': 'Bu bilgisayardaki Python başlatıcısı (py) çalışan bir Python bulamıyor: Python kaldırılmış olabilir.',
   'setup.python.bundled': 'Uygulama Python {version} sürümünü yalnız senin kullanıcın için, yönetici izni istemeden kurabilir:',

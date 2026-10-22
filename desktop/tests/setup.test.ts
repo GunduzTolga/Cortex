@@ -370,6 +370,14 @@ test('a failure is said as the engine’s sentence: its JSON line read whole, it
     assert.equal(err.exitCode, 1);
     return true;
   });
+  // Longer than the 8000 characters of stderr kept before: the line was read from its middle, as escapes and quotes.
+  const longer = script("import json, sys\nprint(json.dumps({'error': 'RuntimeError', 'message': 'Paketler yüklenemedi: ' + 'ş' * 2000}), file=sys.stderr)\nsys.exit(1)\n");
+  await assert.rejects(runPython([longer.file], { cwd: longer.dir, timeout: 30_000 }), (err: unknown) => {
+    assert.ok(err instanceof EngineFailure);
+    assert.ok(err.message.startsWith('Paketler yüklenemedi: şşş'), err.message.slice(0, 80));
+    assert.doesNotMatch(err.message, /\\u|[{}"]/);
+    return true;
+  });
   // An engine from before the codes, busy: known by its words, said in the window's language, its code kept for the setup to act on.
   const busy = script("import json, sys\nprint(json.dumps({'error': 'ValueError', 'message': 'runtime/updater busy; retry after active work finishes'}), file=sys.stderr)\nsys.exit(1)\n");
   await assert.rejects(runPython([busy.file], { cwd: busy.dir, timeout: 30_000 }), (err: unknown) => err instanceof EngineFailure && err.code === 'updater_busy' && err.message === ENGINE_SENTENCES.updater_busy.tr);
@@ -434,6 +442,11 @@ vault = pathlib.Path(args[args.index('--vault') + 1])
 state = pathlib.Path(args[args.index('--state') + 1]) if '--state' in args else None
 with open(vault / 'kurucu.log', 'a', encoding='utf-8') as log:
     log.write(' '.join(args) + '\n')
+if (vault / 'kurucu-mesgul').exists():
+    # The runtime's lock held by a chat's hook syncing, once, as the real installer says it (updater.locked).
+    (vault / 'kurucu-mesgul').unlink()
+    print(json.dumps({'error': 'ValueError', 'message': 'runtime/updater busy; retry after active work finishes'}), file=sys.stderr)
+    raise SystemExit(1)
 if state and (state / 'update-journal.json').exists():
     (state / 'update-journal.json').unlink()
     print(json.dumps({'status': 'recovered', 'install_resumed': True}))
@@ -511,6 +524,25 @@ test('an engine of the same version with other files is refreshed by the package
     assert.deepEqual(installerRuns(vault), [`--vault ${vault} --state ${state}`], 'the vault’s own state given, not a default one');
     assert.ok(!asked(vault).some((one) => one.startsWith('update')), 'not the updater, which takes the same version for nothing to do');
   });
+});
+
+test('the package’s installer, finding the engine busy with a chat’s sync, is asked again a little later, as the update is', { skip: !hasPython }, async () => {
+  const vault = vaultWithEngine('1.0.9');
+  const state = pinState(vault, { 'beyin.py': 'a'.repeat(64), '.claude/scripts/beyin_v3_ses.py': 'b'.repeat(64) });
+  fs.writeFileSync(path.join(vault, 'kurucu-mesgul'), '');
+  const packages = packageOf('1.0.9', { 'scripts/beyin_entry.py': 'a'.repeat(64), 'template/.claude/scripts/beyin_v3_ses.py': 'c'.repeat(64) });
+  const pushes: SetupPush[] = [];
+  onSetupPush((one) => pushes.push(one));
+  setBusyWaits([10, 10, 10]);
+  try {
+    const after = await withPackages(packages, () => installEngine());
+    assert.equal(after.engine.stale, false, 'refreshed after the wait, not left with "Cortex is busy"');
+    assert.deepEqual(installerRuns(vault), [`--vault ${vault} --state ${state}`, `--vault ${vault} --state ${state}`]);
+    assert.ok(pushes.some((one) => 'step' in one && one.step === 'Cortex başka bir işi bitiriyor; birazdan yeniden deneniyor…'));
+    assert.deepEqual(pushes[pushes.length - 1], { job: 'engine', done: true, ok: true });
+  } finally {
+    setBusyWaits([3_000, 6_000, 12_000]);
+  }
 });
 
 test('the predecessor’s 3.x is moved to Cortex by the package’s installer, not taken for a newer Cortex', { skip: !hasPython }, async () => {
@@ -614,6 +646,27 @@ test('a vault opened is bound to where it is now, once; a failure is said, and t
   const predecessor = vaultWithEngine('3.9.0');
   assert.equal(await settleVault(), null);
   assert.ok(!fs.existsSync(path.join(predecessor, 'istenen.log')), 'its engine not asked');
+});
+
+test('a vault opened before there is a Python is not kept as bound: the Python installed after binds it', { skip: !hasPython || process.platform === 'win32' }, async () => {
+  // A copy of a vault opened on a computer without Python: there is nothing to run its engine with yet.
+  const vault = vaultWithEngine('1.0.9');
+  const saved = { PATH: process.env.PATH, BEYIN_PYTHON: process.env.BEYIN_PYTHON };
+  process.env.PATH = fs.mkdtempSync(path.join(os.tmpdir(), 'python-yok-'));
+  delete process.env.BEYIN_PYTHON;
+  try {
+    assert.equal(await settleVault(), null, 'nothing said: the setup offers the Python first');
+    await vaultSettled();
+  } finally {
+    process.env.PATH = saved.PATH;
+    if (saved.BEYIN_PYTHON !== undefined) process.env.BEYIN_PYTHON = saved.BEYIN_PYTHON;
+  }
+  assert.ok(!fs.existsSync(path.join(vault, 'istenen.log')), 'its engine not asked');
+  // A Python there now (electron/ipc.ts asks again once the setup has installed one): the vault is bound, and kept so.
+  assert.equal(await settleVault(), null);
+  assert.deepEqual(asked(vault), ['relocate']);
+  assert.equal(await settleVault(), null);
+  assert.deepEqual(asked(vault), ['relocate'], 'bound once');
 });
 
 test('a job going on is known, and its end can be waited for: the app asked to quit when it is done quits then', { skip: !hasPython }, async () => {

@@ -502,8 +502,10 @@ export function runPython(
       }
     });
     child.stderr.setEncoding('utf8');
+    // As much kept as of the result: the engine's last word is one JSON line, every letter past ASCII six characters
+    // long, and one cut at its start is no longer JSON (shared/engineError.ts reads what it can of it even so).
     child.stderr.on('data', (chunk: string) => {
-      errors = (errors + chunk).slice(-8000);
+      errors = (errors + chunk).slice(-64000);
     });
     child.on('error', (err) => {
       clearTimeout(timer);
@@ -666,20 +668,39 @@ export function setBusyWaits(waits: number[]): void {
 const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
 /**
+ * A run of the engine's, asked again a little later while the engine says it is busy with other work, as it asks:
+ * `beyin.py update` and the package's own installer both take the runtime's lock, which a chat's hook holds while it
+ * syncs. Still busy after the waits, the busy failure is the one said.
+ */
+async function whileBusy<T>(work: () => Promise<T>, step: (text: string) => void): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await work();
+    } catch (err) {
+      if (codeOf(err) !== 'updater_busy' || attempt >= busyWaits.length) throw err;
+      step(say('Cortex başka bir işi bitiriyor; birazdan yeniden deneniyor…', 'Cortex is finishing other work; trying again in a moment…'));
+      await pause(busyWaits[attempt]);
+    }
+  }
+}
+
+/**
  * The package's own installer run on the vault, from a copy of the package taken apart in a folder of its own: for a
  * vault without an engine, a predecessor's, or one stale against the package (install-update-1, install-update-4).
  * The state the vault is pinned to is given to it: without `--state` it pins this machine's default one, and a vault
- * set up with another would be parted from its index, its receipts and its voice setup.
+ * set up with another would be parted from its index, its receipts and its voice setup. Busy, it is asked again: a
+ * refresh is asked for in a vault in use, whose chat's hook may be syncing (`whileBusy`).
  */
-async function runPackageInstaller(vault: string, bundled: { file: string; version: string }): Promise<Record<string, unknown>> {
+async function runPackageInstaller(vault: string, bundled: { file: string; version: string }, step: (text: string) => void): Promise<Record<string, unknown>> {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-kurulum-'));
   try {
     await runPython(['-I', '-c', UNPACK, bundled.file, folder], { cwd: folder, timeout: STATUS_TIMEOUT });
     const state = pinnedState(vault);
     const args = ['-I', path.join(folder, 'scripts', 'install_v3.py'), '--vault', vault, ...(state ? ['--state', state] : [])];
-    let result = await runPython(args, { cwd: vault, timeout: JOB_TIMEOUT });
+    const install = () => whileBusy(() => runPython(args, { cwd: vault, timeout: JOB_TIMEOUT }), step);
+    let result = await install();
     // An update left half done is finished first, and that is all such a run does: the install is the next one.
-    if (result.install_resumed === true) result = await runPython(args, { cwd: vault, timeout: JOB_TIMEOUT });
+    if (result.install_resumed === true) result = await install();
     return result;
   } finally {
     fs.rmSync(folder, { recursive: true, force: true });
@@ -693,25 +714,17 @@ async function runPackageInstaller(vault: string, bundled: { file: string; versi
  * finishes what its journal began, is run instead (install-update-5).
  */
 async function updateEngine(vault: string, bundled: { file: string; version: string }, step: (text: string) => void): Promise<void> {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      await runPython([path.join(vault, 'beyin.py'), 'update', '--package', bundled.file], { cwd: vault, timeout: JOB_TIMEOUT });
+  try {
+    await whileBusy(() => runPython([path.join(vault, 'beyin.py'), 'update', '--package', bundled.file], { cwd: vault, timeout: JOB_TIMEOUT }), step);
+  } catch (err) {
+    const code = codeOf(err);
+    // Still busy after the waits: another update holds the engine, its journal is its own, not one left half done.
+    if (code !== 'updater_busy' && (code === 'pending_journal' || journalPending(vault))) {
+      step(say('Yarım kalan güncelleme tamamlanıyor…', 'Finishing the update left half done…'));
+      await runPackageInstaller(vault, bundled, step);
       return;
-    } catch (err) {
-      const code = codeOf(err);
-      if (code === 'updater_busy' && attempt < busyWaits.length) {
-        step(say('Cortex başka bir işi bitiriyor; birazdan yeniden deneniyor…', 'Cortex is finishing other work; trying again in a moment…'));
-        await pause(busyWaits[attempt]);
-        continue;
-      }
-      // Still busy after the waits: another update holds the engine, its journal is its own, not one left half done.
-      if (code !== 'updater_busy' && (code === 'pending_journal' || journalPending(vault))) {
-        step(say('Yarım kalan güncelleme tamamlanıyor…', 'Finishing the update left half done…'));
-        await runPackageInstaller(vault, bundled);
-        return;
-      }
-      throw err;
     }
+    throw err;
   }
 }
 
@@ -729,7 +742,7 @@ export function installEngine(): Promise<SetupStatus> {
       } else if (order === 0 && engineStale(vault, bundled.file)) {
         // The same version, other files: `update` takes it for nothing to do, the installer writes what differs.
         step(say(`Cortex ${installed}, uygulamayla gelen dosyalarla yenileniyor…`, `Refreshing Cortex ${installed} with the files that came with the app…`));
-        await runPackageInstaller(vault, bundled);
+        await runPackageInstaller(vault, bundled, step);
       } else {
         return;
       }
@@ -739,7 +752,7 @@ export function installEngine(): Promise<SetupStatus> {
           ? say(`Kasadaki önceki kurulum (${installed}) Cortex ${bundled.version} sürümüne geçiriliyor…`, `Moving the vault’s earlier engine (${installed}) to Cortex ${bundled.version}…`)
           : say(`Cortex ${bundled.version} kasaya kuruluyor…`, `Setting Cortex ${bundled.version} up in the vault…`),
       );
-      await runPackageInstaller(vault, bundled);
+      await runPackageInstaller(vault, bundled, step);
       const now = installedVersion(vault);
       if (!now || isPredecessor(now)) throw new Error(say('Kurulum bitti ama kasada Cortex görünmüyor.', 'The setup ended but Cortex is not in the vault.'));
     }
@@ -786,19 +799,28 @@ let settling: { vault: string; done: Promise<string | null> } | null = null;
 /**
  * The vault just opened bound to where it is now: at the app's start with the vault kept, and after one is chosen,
  * in the background, before the Telegram listener starts in it and before a chat's CLI does (`vaultSettled`). Once
- * per vault: asked again, the same answer, unless it failed - then the next opening tries again. Resolves to the
- * failure's sentence (the window says it once, and goes on), or null.
+ * per vault: asked again, the same answer, unless it failed - then the next opening tries again - or there was no
+ * Python yet to run the engine with: then the one the setup installs binds it (electron/ipc.ts). Kept as bound, a
+ * copied vault opened on a computer without Python stayed tied to the other computer's folder until the app was
+ * opened again. Resolves to the failure's sentence (the window says it once, and goes on), or null.
  */
 export function settleVault(): Promise<string | null> {
   const vault = vaultOrNull();
   if (!vault) return Promise.resolve(null);
   if (settling?.vault === vault) return settling.done;
-  const entry = { vault, done: relocateVault(vault).catch((err: unknown) => (err instanceof Error ? err.message : String(err))) };
+  let noPython = false;
+  const done = usablePython()
+    .then((python) => {
+      noPython = python === null;
+      return noPython ? null : relocateVault(vault);
+    })
+    .catch((err: unknown) => (err instanceof Error ? err.message : String(err)));
+  const entry = { vault, done };
   settling = entry;
-  void entry.done.then((failure) => {
-    if (failure && settling === entry) settling = null;
+  void done.then((failure) => {
+    if ((failure || noPython) && settling === entry) settling = null;
   });
-  return entry.done;
+  return done;
 }
 
 /** Resolves once the vault opened last is bound, or could not be: its hooks then point where the vault is. */

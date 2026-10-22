@@ -66,6 +66,36 @@ test('anything else is the engine’s sentence with its hint, or the line as it 
   assert.equal(engineFailureText(once, 'en'), once);
 });
 
+test('no JSON is ever the sentence: a line cut short is read for what it still says, and JSON that is not an error is passed over', () => {
+  const line = asPython({ error: 'SetupError', message: 'Sesle yazma kurulamadı: indirirken bağlantı koptu.', code: 'voice_network' });
+  // Its end lost (a program stopped mid-line), cut inside an escape: the sentence up to there, its letters whole.
+  const ended = line.slice(0, line.indexOf('\\u0131') + 4);
+  assert.equal(readEngineError(ended)?.message, 'Sesle yazma kurulamad');
+  assert.equal(readEngineError(ended)?.type, 'SetupError');
+  // Its start lost (a buffer that keeps the last of what was written): the code it names still says it.
+  const started = line.slice(line.indexOf('kopt'));
+  assert.equal(readEngineError(started)?.code, 'voice_network');
+  assert.equal(engineFailureText(started, 'tr'), ENGINE_SENTENCES.voice_network.tr);
+  assert.equal(engineFailureText(started, 'en'), ENGINE_SENTENCES.voice_network.en);
+  // A result or a warning written as JSON is no sentence: the words before it are, or nothing is.
+  assert.equal(engineFailureText('Islem tamamlanamadi.\n{"source_sync": {"status": "degraded"}}', 'tr'), 'Islem tamamlanamadi.');
+  assert.equal(readEngineError('{"source_sync": {"status": "degraded"}}'), null);
+  assert.equal(readEngineError('y\\u00fckle\\u015fmedi"}'), null, 'a piece with nothing of the engine’s left in it');
+  for (const text of [ended, started, '{"source_sync": {}}', 'kurulama\\u0131"}']) {
+    assert.doesNotMatch(engineFailureText(text, 'tr') ?? '', /[{}"]|\\u/, text);
+  }
+});
+
+test('a line that only looks escaped is words: a Windows path is said as it came, and what failed is read near the end', () => {
+  // A user folder named like an escape (u1234…, as some workplaces name them), in Python's single quotes: not JSON.
+  const path = "PermissionError: [WinError 5] Access is denied: 'C:\\Users\\u1234567\\AppData\\Local\\beyin-v3'";
+  assert.equal(engineFailureText(`Traceback (most recent call last):\n  ...\n${path}`, 'en'), path);
+  // A connection tried again long before is not why a command failed at its end.
+  const retried = `WARNING: Retrying after connection broken by NewConnectionError: Failed to establish a new connection\n${'x'.repeat(9000)}\nKurulum durdu: CUDA bulunamadı.`;
+  assert.equal(readEngineError(retried)?.code, null);
+  assert.equal(engineFailureText(retried, 'tr'), 'Kurulum durdu: CUDA bulunamadı.');
+});
+
 test('every failure the engine names is said in Turkish and in English', () => {
   for (const code of ENGINE_CODES) {
     const said = ENGINE_SENTENCES[code];

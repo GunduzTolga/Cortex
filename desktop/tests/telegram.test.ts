@@ -43,7 +43,20 @@ with open(os.path.join(here, 'istenen.log'), 'a', encoding='utf-8') as log:
 with open(os.path.join(here, 'klasor.log'), 'a', encoding='utf-8') as log:
     log.write(os.environ.get('BEYIN_TELEGRAM_DIR', '-') + '\n')
 kept = os.path.join(folder, 'tg.json')
-seen = json.load(open(kept, encoding='utf-8')) if os.path.exists(kept) else {'bot': None, 'eslesti': False}
+def load():
+    # The listener writes this file while a command reads it (emptied, then written): read again while it is half
+    # written, which the real engine's whole writes never show. Read empty, "durum" failed and the status said unpaired.
+    for attempt in range(200):
+        try:
+            with open(kept, encoding='utf-8') as one:
+                return json.load(one)
+        except FileNotFoundError:
+            return {'bot': None, 'eslesti': False}
+        except ValueError:
+            if attempt == 199:
+                raise
+            time.sleep(0.01)
+seen = load()
 def keep():
     json.dump(seen, open(kept, 'w', encoding='utf-8'))
 def status():
