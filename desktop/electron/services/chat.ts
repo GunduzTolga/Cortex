@@ -271,7 +271,8 @@ async function run(chat: Live, message: string): Promise<void> {
   try {
     // The vault just opened is bound to where it is first, so its hooks point there (services/setup.ts); Stop ends the wait.
     await Promise.race([vaultSettled(), new Promise((done) => stop.signal.addEventListener('abort', done, { once: true }))]);
-    const reason = await backendOf(chat.stored.cli).run(turnOf(chat, stop.signal), message);
+    // Stopped while it waited: the CLI is not started for a turn already ended.
+    const reason = stop.signal.aborted ? 'cancelled' : await backendOf(chat.stored.cli).run(turnOf(chat, stop.signal), message);
     emit(chat, { type: 'done', reason });
   } catch (err) {
     emit(chat, failureEvent(err, scrubberFor(chat.stored.vault)));

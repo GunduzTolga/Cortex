@@ -618,7 +618,7 @@ check(
   (await onDiskSoon(() => Boolean(binned()) && !fs.existsSync(draft('E2E Binned.md')))) &&
     fs.readFileSync(vaultNote(`.trash/${binned()}`), 'utf8') === '# Binned\n\nbase last' &&
     (await shownSoon(page.locator('[data-toast="success"]', { hasText: 'in the trash' }))) &&
-    (await page.locator('[data-toast]', { hasText: /could not be tied to this vault|bu kasaya bağlanamadı/ }).count()) === 0,
+    (await page.locator('[data-toast="error"]').count()) === 0,
 );
 // Taken back, so the bin is as the checks further on expect it: empty but for what they put in it.
 await page.locator('[data-toast="success"]', { hasText: 'in the trash' }).locator('[data-toast-action]').click();

@@ -423,14 +423,17 @@ export const codeOf = (err: unknown): EngineCode | null => (err instanceof Engin
 /** The failure a run ended with, read whole and only then cut short: an escaped pip error is longer than a toast. */
 function failureOf(errors: string, exitCode: number | null, timedOut: boolean): EngineFailure {
   const language = readSettings().language === 'en' ? 'en' : 'tr';
-  const read = readEngineError(errors);
-  const sentence = read
-    ? engineSentence(read, language)
-    : timedOut
-      ? say('İşlem çok uzun sürdü ve durduruldu.', 'It took too long and was stopped.')
+  // Stopped for taking too long, it never reached its last word: what it wrote last (a pip warning, a step) is not why.
+  const read = timedOut ? null : readEngineError(errors);
+  const sentence = timedOut
+    ? say('İşlem çok uzun sürdü ve durduruldu.', 'It took too long and was stopped.')
+    : read
+      ? engineSentence(read, language)
       : exitCode === 0
         ? say('Beklenen cevap gelmedi.', 'The answer that was expected did not come.')
-        : say(`İşlem tamamlanamadı (çıkış kodu ${exitCode}).`, `It did not finish (exit code ${exitCode}).`);
+        : exitCode === null
+          ? say('İşlem bitmeden kesildi.', 'It was cut off before it finished.')
+          : say(`İşlem tamamlanamadı (çıkış kodu ${exitCode}).`, `It did not finish (exit code ${exitCode}).`);
   return new EngineFailure(sentence, read?.code ?? null, exitCode, errors.slice(-2000));
 }
 
@@ -686,7 +689,8 @@ async function updateEngine(vault: string, bundled: { file: string; version: str
         await pause(busyWaits[attempt]);
         continue;
       }
-      if (code === 'pending_journal' || journalPending(vault)) {
+      // Still busy after the waits: another update holds the engine, its journal is its own, not one left half done.
+      if (code !== 'updater_busy' && (code === 'pending_journal' || journalPending(vault))) {
         step(say('Yarım kalan güncelleme tamamlanıyor…', 'Finishing the update left half done…'));
         await runPackageInstaller(vault, bundled);
         return;

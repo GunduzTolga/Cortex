@@ -360,8 +360,19 @@ test('a failure is said as the engine’s sentence: its JSON line read whole, it
     // Its own sentences too, in an English window: a run that ended without an answer, and one stopped for taking too long.
     const silent = script('pass\n');
     await assert.rejects(runPython([silent.file], { cwd: silent.dir, timeout: 30_000 }), { message: 'The answer that was expected did not come.' });
-    const slow = script('import time\ntime.sleep(30)\n');
-    await assert.rejects(runPython([slow.file], { cwd: slow.dir, timeout: 300 }), { message: 'It took too long and was stopped.' });
+    // What it wrote before it was stopped (a pip warning) is not why it failed: it took too long.
+    const slow = script("import sys, time\nprint('WARNING: Retrying after connection broken by NewConnectionError: Failed to establish a new connection', file=sys.stderr, flush=True)\ntime.sleep(30)\n");
+    await assert.rejects(runPython([slow.file], { cwd: slow.dir, timeout: 2_000 }), (err: unknown) => {
+      assert.ok(err instanceof EngineFailure);
+      assert.equal(err.message, 'It took too long and was stopped.');
+      assert.equal(err.code, null, 'not taken for a network failure by the words it left');
+      return true;
+    });
+    // Ended from outside, with no exit code and nothing said: not "exit code null".
+    if (process.platform !== 'win32') {
+      const killed = script('import os, signal\nos.kill(os.getpid(), signal.SIGKILL)\n');
+      await assert.rejects(runPython([killed.file], { cwd: killed.dir, timeout: 30_000 }), { message: 'It was cut off before it finished.' });
+    }
   } finally {
     language(null);
   }
@@ -531,6 +542,28 @@ test('an update left half done is finished by the package’s own installer, the
   assert.equal(after.engine.installed, '1.0.9');
   assert.equal(fs.existsSync(path.join(state, 'update-journal.json')), false, 'the journal finished');
   assert.deepEqual(installerRuns(vault), [`--vault ${vault} --state ${state}`, `--vault ${vault} --state ${state}`], 'the journal finished first, then the install');
+});
+
+test('an engine still busy after the waits is not taken for one left half done: its journal is the running update’s, and is left to it', { skip: !hasPython }, async () => {
+  const vault = vaultWithEngine('1.0.8');
+  const state = pinState(vault);
+  fs.writeFileSync(path.join(state, 'update-journal.json'), '{}');
+  // Busy every time it is asked: another update holds the engine, and writes that journal as it goes.
+  fs.writeFileSync(path.join(vault, 'guncelleme-hatasi.json'), JSON.stringify({ error: 'ValueError', message: 'runtime/updater busy; retry after active work finishes' }));
+  const packages = packageOf('1.0.9');
+  setBusyWaits([5, 5, 5]);
+  try {
+    await assert.rejects(
+      withPackages(packages, () => installEngine()),
+      { message: ENGINE_SENTENCES.updater_busy.tr },
+    );
+  } finally {
+    setBusyWaits([3_000, 6_000, 12_000]);
+  }
+  assert.equal(asked(vault).filter((one) => one.startsWith('update')).length, 4, 'asked once and again after each wait');
+  assert.deepEqual(installerRuns(vault), [], 'the package’s installer not run over an update going on');
+  assert.ok(fs.existsSync(path.join(state, 'update-journal.json')));
+  assert.equal(installedVersion(vault), '1.0.8');
 });
 
 test('a vault opened is bound to where it is now, once; a failure is said, and tried again at the next opening', { skip: !hasPython }, async () => {

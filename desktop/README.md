@@ -100,7 +100,7 @@ npm run dev          # Vite + Electron, değişiklikte yeniden başlar
 | Komut | Ne yapar |
 | --- | --- |
 | `npm run typecheck` | Üç TypeScript projesi: pencere, ana süreç, çekirdek tek başına |
-| `npm test` | `node:test`; testler esbuild ile gerçek kaynaktan paketlenir (280 test; bazıları yalnız Windows'ta çalışır, başka yerde atlanır) |
+| `npm test` | `node:test`; testler esbuild ile gerçek kaynaktan paketlenir (282 test; bazıları yalnız Windows'ta çalışır, başka yerde atlanır) |
 | `npm run e2e` | Derler ve gerçek Electron uygulamasını Playwright ile sürer. Pencere hiç gösterilmez: ekran dışında çizilir, `capturePage` ile fotoğraflanır (`e2e/screenshots/`). Linux'ta Xvfb altında çalışır. `CORTEX_SHOW=1` pencereyi gösterir. |
 | `npm run vitrin` | README'nin görüntüleri (`docs/gorseller/`): uygulama Türkçe arayüzle, örnek bir lansman kasasıyla, aynı gizli pencerede ekran dışında çizilir; sohbetin ve Beyin'in cevaplarını LM Studio'nun yerine geçen bir test sunucusu yazar. |
 | `npm run package` | Windows NSIS kurulum dosyası (`release/Cortex Setup X.Y.Z.exe`). Önce bu checkout'un motor paketini (`npm run cortex-paket`: `cortex-paket/beyin-v3-<VERSION>.zip` ve dosya özetleri) derler, sabitlenmiş Python kurucusunu (`npm run python-paket`) indirir ya da SHA-256'sı doğruysa olanı kullanır. electron-builder paketlemeden önce `scripts/check-resources.cjs` ile denetler: motor paketi `VERSION`'daki sürümde değilse, Python kurucusu yoksa ya da özeti tutmuyorsa, `package.json` sürümü `VERSION`'la aynı değilse kurulum dosyası yapılmaz (CI'da da). Windows'ta çalıştır; Linux'ta son adım wine ister. |

@@ -24,7 +24,9 @@ import {
 } from '../electron/services/chat';
 import { STOP_GRACE, cardTextFor } from '../electron/services/chatKit';
 import { renameRetrying, writeWhole } from '../electron/services/fileWrite';
+import { pythonOf } from '../electron/services/localChat';
 import { updateSettings } from '../electron/services/settings';
+import { settleVault } from '../electron/services/setup';
 
 /**
  * The chat with the person's own AI CLIs (electron/services/chat.ts): found
@@ -315,6 +317,29 @@ test('Stop ends a turn whose CLI never finishes starting', async () => {
     assert.equal(openChat(id).running, false);
   } finally {
     delete process.env.FAKE_ACP_HANG_INIT;
+    shutdownChats();
+  }
+});
+
+test('Stop while the vault just opened is still being bound ends the turn without starting its CLI', { skip: pythonOf() === null }, async () => {
+  const { vault, log } = useVault();
+  shutdownChats();
+  // The vault's engine, its `relocate` held until the test lets it go (services/setup.ts, settleVault).
+  fs.writeFileSync(path.join(vault, '.beyin-version'), '1.0.9\n');
+  fs.writeFileSync(
+    path.join(vault, 'beyin.py'),
+    "import json, os, time\nhere = os.path.dirname(os.path.abspath(__file__))\nwhile not os.path.exists(os.path.join(here, 'devam')): time.sleep(0.02)\nprint(json.dumps({'status': 'unchanged'}))\n",
+  );
+  const settled = settleVault();
+  try {
+    const { id } = sendChat(null, 'test', 'merhaba');
+    cancelChat(id);
+    assert.deepEqual(await doneOf(id), { type: 'done', reason: 'cancelled' });
+    assert.equal(openChat(id).running, false);
+    assert.deepEqual(methodsIn(log), [], 'no CLI started for a turn already stopped');
+  } finally {
+    fs.writeFileSync(path.join(vault, 'devam'), '');
+    assert.equal(await settled, null);
     shutdownChats();
   }
 });
