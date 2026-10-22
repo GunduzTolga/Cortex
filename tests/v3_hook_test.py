@@ -1181,7 +1181,7 @@ runpy.run_path({str(HOOK)!r}, run_name='__main__')
         # The hook bounds its own wait to HOOK_BUDGET; the margin covers a slow runner's interpreter start.
         self.assertLess(time.monotonic() - started, 8)
         self.assertIn('V3 source sync is pending', context)
-        self.assertNotIn('failed or conflicted', context)
+        self.assertNotIn(self.hook.HOOK_FAILED_NOTICE, context)
         self.assertFalse((self.state / 'hook-error.json').exists())
 
     def wrapped_hook(self, name, worker_source):
@@ -1288,25 +1288,28 @@ class Worker:
     def test_the_ledger_lookup_never_costs_the_turn_under_a_sync_lock(self):
         # Claude Code sends no event_id, so its events cannot have been acknowledged: no lookup.
         self.seed()
-        with sqlite3.connect(self.state / 'memory.sqlite3', isolation_level=None) as writer:
-            writer.execute('BEGIN EXCLUSIVE')  # a first sync spilling its cache
-            try:
-                payload = {'hook_event_name': 'PostToolUse', 'session_id': 'locked-ledger', 'cwd': str(self.vault),
-                           'tool_name': 'Edit'}
-                started = time.monotonic()
-                self.assertEqual(self.invoke(payload, 'claude'), {})
-                # Interpreter start on a slow runner; the lookup alone used to wait its full second and fail.
-                self.assertLess(time.monotonic() - started, 5)
-                self.assertEqual(len(list((self.state / 'hook-queue').glob('*.json'))), 1)
-                digest = hashlib.sha256(b'locked-ledger').hexdigest()
-                self.assertTrue((self.state / 'receipt-reminders' / (digest + '.edited')).exists())
-                self.assertFalse((self.state / 'hook-error.json').exists())
-                # A client's own event id is still looked up; a locked ledger queues it anyway.
-                self.hook.enqueue_event(self.vault, self.state, {'hook_event_name': 'Stop', 'session_id': 'locked-ledger',
-                                                                 'event_id': 'locked-ledger-stop'}, 'codex')
-                self.assertEqual(len(list((self.state / 'hook-queue').glob('*.json'))), 2)
-            finally:
-                writer.execute('ROLLBACK')
+        # Closed explicitly: sqlite3's context manager only ends the transaction, and an open
+        # handle keeps the database locked against the temporary folder's removal on Windows.
+        writer = sqlite3.connect(self.state / 'memory.sqlite3', isolation_level=None)
+        self.addCleanup(writer.close)
+        writer.execute('BEGIN EXCLUSIVE')  # a first sync spilling its cache
+        try:
+            payload = {'hook_event_name': 'PostToolUse', 'session_id': 'locked-ledger', 'cwd': str(self.vault),
+                       'tool_name': 'Edit'}
+            started = time.monotonic()
+            self.assertEqual(self.invoke(payload, 'claude'), {})
+            # Interpreter start on a slow runner; the lookup alone used to wait its full second and fail.
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertEqual(len(list((self.state / 'hook-queue').glob('*.json'))), 1)
+            digest = hashlib.sha256(b'locked-ledger').hexdigest()
+            self.assertTrue((self.state / 'receipt-reminders' / (digest + '.edited')).exists())
+            self.assertFalse((self.state / 'hook-error.json').exists())
+            # A client's own event id is still looked up; a locked ledger queues it anyway.
+            self.hook.enqueue_event(self.vault, self.state, {'hook_event_name': 'Stop', 'session_id': 'locked-ledger',
+                                                             'event_id': 'locked-ledger-stop'}, 'codex')
+            self.assertEqual(len(list((self.state / 'hook-queue').glob('*.json'))), 2)
+        finally:
+            writer.execute('ROLLBACK')
 
     def test_the_stop_reminder_names_the_windows_launcher(self):
         # The desktop installs Python on Windows with the py launcher only; python3 is the Store stub there.
@@ -1333,6 +1336,9 @@ class Worker:
                                  prompt='Nebula calibration owner')['hookSpecificOutput']['additionalContext']
         self.assertIn('Synthetic Reviewer', context)
         self.assertIn('.beyin-preferences.json is unreadable', context)
+        # beyin.py preferences refuses to overwrite a file it cannot read, so it is not offered as the fix.
+        self.assertIn('fixed or deleted', context)
+        self.assertNotIn('beyin.py preferences', context)
         self.assertFalse((self.state / 'hook-error.json').exists())
 
     def test_user_prompt_submit_without_index_keeps_pending_notice(self):

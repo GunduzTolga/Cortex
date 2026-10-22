@@ -26,11 +26,10 @@ import math
 import os
 from pathlib import Path
 import re
+import sqlite3
 import tempfile
 import time
 import unicodedata
-
-import sqlite3
 
 from beyin_v3 import (HARNESSES, STOPWORDS, _allowed_statuses, _json, _name_match_score, _status_allowed, _strict_terms,
                       _tokens, pack_context, query_words, records_generation)
@@ -52,6 +51,8 @@ CONFIG_NAME = "retrieval.json"
 CACHE_NAME = "passages.json"
 # What the sync worker last warmed the cache for (warm); a prompt never reads it.
 WARM_NAME = "passages-warm.json"
+# A pool the cache file could not take is built again after this long, not after every change.
+WARM_RETRY_SECONDS = 86400
 CACHE_VERSION = 1
 CACHE_MAX_BYTES = 64 * 1024 * 1024
 MAX_EXCLUDES = 64
@@ -479,8 +480,10 @@ def warm(store):
     prompt that reads the previous index (its sync still running) never saves what it built: a
     large vault, or every vault after a release that changes the stemmer, stayed cold turn after
     turn. Here the same pool the hook reads (internal, no project, the configured exclusions) is
-    built with no deadline. Nothing is done while the index is unchanged since the last warm; a
-    pool too large for the cache file is noted the same way instead of being rebuilt every drain.
+    built with no deadline. Nothing is done while the index is unchanged since the last warm. A
+    pool the cache file could not take (over CACHE_MAX_BYTES) is not built again for
+    WARM_RETRY_SECONDS whatever changes: each change would otherwise cost a slow laptop the whole
+    build for nothing after every agent turn.
     """
     config, stamp = _warm_stamp(store)
     if not _warm_due(store, stamp):
@@ -490,7 +493,7 @@ def warm(store):
     candidates = pool(store, eligible, None, config["exclude"], superseded=store.superseded_ids())
     index = build(store.state_dir, candidates, write=True)
     if stamp["generation"] is not None:
-        _write_cache(Path(store.state_dir) / WARM_NAME, dict(stamp, saved=index.saved))
+        _write_cache(Path(store.state_dir) / WARM_NAME, dict(stamp, saved=index.saved, at=time.time()))
     return True
 
 
@@ -508,8 +511,12 @@ def _warm_due(store, stamp):
         noted = json.loads((Path(store.state_dir) / WARM_NAME).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return True
-    return not (isinstance(noted, dict) and {key: noted.get(key) for key in stamp} == stamp
-                and (noted.get("saved") is False or (Path(store.state_dir) / CACHE_NAME).is_file()))
+    if not isinstance(noted, dict) or (noted.get("params"), noted.get("exclude")) != (stamp["params"], stamp["exclude"]):
+        return True
+    if noted.get("saved") is False:
+        at = noted.get("at")
+        return not (isinstance(at, (int, float)) and 0 <= time.time() - at < WARM_RETRY_SECONDS)
+    return not (noted.get("generation") == stamp["generation"] and (Path(store.state_dir) / CACHE_NAME).is_file())
 
 
 def _dated(eligible, query, terms, today=None):

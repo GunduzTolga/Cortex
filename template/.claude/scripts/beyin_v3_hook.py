@@ -538,8 +538,9 @@ def main():
         try:
             return read(vault), ''
         except ValueError as exc:
+            # beyin.py preferences refuses to overwrite a file it cannot read, so it is not the fix.
             return dict(PROFILES['normal']), (f'V3 preferences file .beyin-preferences.json is unreadable ({exc}); '
-                                              'defaults apply until it is fixed with beyin.py preferences.\n')
+                                              'defaults apply until the file is fixed or deleted.\n')
 
     if args.worker or args.drain_queue:
         if args.worker and not preferences()[0]['auto_sync']:

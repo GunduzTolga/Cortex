@@ -132,7 +132,7 @@ class ContinuityTest(unittest.TestCase):
                 self.assertEqual([r['id'] for r in expected], expected_ids)
                 self.assertEqual(continuity._current(self.store, saved), expected)
 
-    def test_continuation_reads_only_saved_sources_and_loads_records_once(self):
+    def test_continuation_reads_only_saved_sources_and_their_records(self):
         refs = [self.note('ref-' + str(i)) for i in range(continuity.MAX_REFS)]
         for i in range(20):
             self.note('unrelated-' + str(i))
@@ -146,7 +146,8 @@ class ContinuityTest(unittest.TestCase):
         with patch.object(Path, 'read_bytes', counted), \
                 patch.object(self.store, '_records', wraps=self.store._records) as records:
             self.assertEqual(continuity._current(self.store, saved), expected)
-            records.assert_called_once_with()
+            # Only the saved refs' payloads are read; the whole index is never decoded.
+            records.assert_not_called()
         self.assertCountEqual(reads, [self.vault / row['source'] for row in refs])
         self.assertEqual(len(reads), continuity.MAX_REFS)
 

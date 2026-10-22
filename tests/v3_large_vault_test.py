@@ -103,6 +103,27 @@ class TurnTest(Vault):
         self.assertFalse({s for s in loaded if s.startswith('daily/import-')})
         self.assertEqual(engine.sync()['status'], 'succeeded')
 
+    def test_a_continuation_prompt_reads_only_its_saved_topic(self):
+        # "bunu kontrol et" re-checks the topic the previous turn delivered: at most three records,
+        # never the whole index with its imports.
+        import beyin_v3_continuity as continuity
+        self.seed()
+        store = runtime.MemoryStore(self.state, self.vault)
+        by_id = {record['id']: record for record in store._records()}
+        delivered = store.context_for('claude', 'kira ne kadar', strict=True)
+        self.assertIn('notes/kira.md', [r['source'] for r in delivered['records']])
+        continuity.remember(store, 'claude', 'oturum', 'kira ne kadar', delivered)
+        # A retired note in the saved topic still ends it: supersession is resolved over every record.
+        continuity.remember(store, 'claude', 'eski', 'eski kira bedeli', {'records': [by_id['eski-kira']]})
+        empty = runtime.pack_context([], budget_chars=4000)
+        with patch.object(runtime.MemoryStore, '_records', side_effect=AssertionError('decoded every payload')):
+            context, inherited = continuity.resolve(store, 'claude', 'oturum', 'bunu kontrol et', empty,
+                                                    budget_chars=4000)
+            self.assertTrue(inherited)
+            self.assertIn('notes/kira.md', [r['source'] for r in context['records']])
+            self.assertEqual(continuity.resolve(store, 'claude', 'eski', 'bunu kontrol et', empty, budget_chars=4000),
+                             (empty, False))
+
     def test_retired_ids_match_a_full_resolution_with_or_without_the_last_syncs_result(self):
         self.seed()
         store = runtime.MemoryStore(self.state, self.vault)
@@ -147,6 +168,30 @@ class WarmIndexTest(Vault):
         # Unchanged since: nothing is built again.
         with patch.object(passage, 'build', side_effect=AssertionError('rebuilt')):
             self.assertFalse(passage.warm(runtime.MemoryStore(self.state, self.vault)))
+
+    def test_a_pool_the_cache_cannot_take_is_not_rebuilt_after_every_change(self):
+        # Over CACHE_MAX_BYTES the cache file is never written: rebuilding after every change of
+        # the index would cost a slow laptop the whole build after each agent turn, for nothing.
+        for index in range(5):
+            note(self.vault, f'notes/n{index}.md', f'Zirkon kovası {index}.')
+        engine = SyncEngine(self.vault, self.state)
+        engine.sync()
+        real_write = passage._write_cache
+
+        def too_large(path, blob):
+            return False if Path(path).name == passage.CACHE_NAME else real_write(path, blob)
+        with patch.object(passage, '_write_cache', side_effect=too_large):
+            self.assertTrue(passage.warm(engine.store))
+        self.assertIs(json.loads((self.state / passage.WARM_NAME).read_text(encoding='utf-8'))['saved'], False)
+        note(self.vault, 'notes/n9.md', 'Yeni zirkon notu.')
+        engine.sync()
+        with patch.object(passage, 'build', side_effect=AssertionError('rebuilt after a change')):
+            self.assertFalse(passage.warm(engine.store))
+        # A day later it is tried again (the vault may have shrunk).
+        later = time.time() + passage.WARM_RETRY_SECONDS + 60
+        with patch.object(passage.time, 'time', return_value=later):
+            self.assertTrue(passage.warm(engine.store))
+        self.assertTrue((self.state / passage.CACHE_NAME).is_file())
 
     def test_a_prompt_worker_leaves_housekeeping_to_the_next_stop(self):
         note(self.vault, 'notes/a.md', 'Zirkon.')

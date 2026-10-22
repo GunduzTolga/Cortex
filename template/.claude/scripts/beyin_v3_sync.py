@@ -295,8 +295,9 @@ def render(metadata, body):
 
 # A key that narrows what context may show, or takes the note out of the index, anywhere in a
 # header: quoted or not, nested or inline, in any letter case. GATE_KEYS plus status (untrusted,
-# retired), kind (receipt, task, untrusted) and generated.
-_GATE_LIKE = re.compile(r'''(?<![\w-])["']?(?:visibility|trust|trusted|remote_allowed|status|kind|generated)["']?[ \t]*:''',
+# retired), kind (receipt, task, untrusted), generated and project: with shared_unscoped
+# project scopes a note without its project field joins every other project's scope.
+_GATE_LIKE = re.compile(r'''(?<![\w-])["']?(?:visibility|trust|trusted|remote_allowed|status|kind|generated|project)["']?[ \t]*:''',
                         re.IGNORECASE)
 
 
@@ -306,9 +307,10 @@ def body_without_metadata(text):
     Templates, plugins and other tools write YAML that parse() does not read (block scalars,
     lists of maps, digit-leading names). Such a note is indexed by its text alone, as if it had
     no frontmatter: a path-derived id, kind note, internal. No partly read key is kept, since a
-    misread supersedes, id or project could retire or misattribute other notes. A header that
-    names a gate-like key stays out of the index as before, because ignoring it could show what
-    it hides.
+    misread supersedes or id could retire or misattribute other notes. A header that names a
+    gate-like key stays out of the index as before, because ignoring it could show what it
+    hides; a project field is one, since a project-scoped query shows unscoped notes when the
+    scope file shares them (shared_unscoped).
     """
     try:
         split = _frontmatter(text)
@@ -876,8 +878,6 @@ class SyncEngine:
                 # The walk/projection still reports an unsafe or unreadable path.
                 pass
         self.copy_candidates = []
-        # Sources read this time whose header was set aside (body_without_metadata).
-        self.metadata_ignored = []
         # Read once per sync, not per directory: the config cannot change mid-walk.
         excluded, self.index_exclusions = index_exclusions(self.state, self.root)
         # A listed name the walk skips anyway is a no-op. One set prunes below and is stored by
@@ -949,7 +949,6 @@ class SyncEngine:
                     if ignored:
                         # Kept in the record, so a warm sync that does not reread the source still lists it.
                         record['metadata_ignored'] = True
-                        self.metadata_ignored.append(relative)
                     record = self.store._validate(record, _resolved_source=resolved)
                     if record['source_sha256'] != _hash(raw):
                         raise ValueError('source changed while scanning')

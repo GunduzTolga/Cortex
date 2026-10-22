@@ -779,17 +779,34 @@ class SourceSyncTest(unittest.TestCase):
                 self.assertEqual(self.records(), [])
             with self.subTest(header=header, gate=False):
                 # Without one the note is indexed by its text alone: no partly read key is kept.
-                source.write_text('---\nid: unsupported\nproject: nebula\n' + header + '\n---\n' + body,
+                source.write_text('---\nid: unsupported\ntitle: Nebula\n' + header + '\n---\n' + body,
                                   encoding='utf-8')
                 report = self.engine.sync()
                 self.assertEqual(report['status'], 'succeeded', report)
                 self.assertEqual(report['warnings'], [])
                 self.assertEqual(report['metadata_ignored'], ['unsupported.md'])
-                self.assertEqual(self.records(), [], 'the project key was not read')
                 with self.engine.store._connect() as db:
                     stored = [json.loads(row[0]) for row in db.execute('SELECT payload FROM records')]
-                self.assertEqual([(r['id'], r['kind'], r['text'], r.get('project'), r['metadata_ignored'])
+                self.assertEqual([(r['id'], r['kind'], r['text'], r.get('title'), r['metadata_ignored'])
                                   for r in stored], [(body_only_id, 'note', body, None, True)])
+
+    def test_a_project_field_in_an_unread_header_keeps_the_note_out(self):
+        # With shared_unscoped project scopes a note that lost its project field would join every
+        # other project's scope, so project is a gate-like key like visibility.
+        (self.vault / '.beyin-projects.json').write_text(
+            json.dumps({'folders': {}, 'shared_unscoped': True}), encoding='utf-8')
+        (self.vault / 'shared.md').write_text('Nebula calibration shared fixture.\n', encoding='utf-8')
+        source = self.vault / 'client.md'
+        for header in ('project: client-a\nfield: |\n  multiline', 'Project: client-a\nfield: [a, [b]]',
+                       'meta:\n  project: client-a\n  nested:\n    deeper: value', '"project": client-a\nfield: *alias'):
+            with self.subTest(header=header):
+                source.write_text('---\n' + header + '\n---\nNebula calibration client fixture.\n', encoding='utf-8')
+                report = self.engine.sync()
+                self.assertEqual(report['status'], 'degraded', report)
+                self.assertEqual([w['source'] for w in report['warnings']], ['client.md'])
+                self.assertNotIn('metadata_ignored', report)
+                found = self.engine.store.retrieve('Nebula calibration fixture', project='client-b')['records']
+                self.assertEqual([r['source'] for r in found], ['shared.md'])
 
     def test_yaml_null_and_list_values_respect_record_validation(self):
         source = self.vault / 'invalid.md'
