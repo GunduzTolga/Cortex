@@ -36,9 +36,10 @@ const check = (label, condition) => {
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-'));
 const vaultDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-vault-')));
 const vaultNote = (relative) => path.join(vaultDir, ...relative.split('/'));
-// The engine package the app came with, stood in for: the settings offer it, the run never installs it.
+// The engine package the app came with, stood in for: the settings offer it, the run never installs it. A Cortex
+// version (1.x): a stamp of 2.x or more is the predecessor project's, whose vault is moved to Cortex, not used (install-update-4).
 const enginePackages = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-paket-'));
-fs.writeFileSync(path.join(enginePackages, 'beyin-v3-9.9.9.zip'), '');
+fs.writeFileSync(path.join(enginePackages, 'beyin-v3-1.99.0.zip'), '');
 // Where the chat's stand-in waits before it asks leave, for a message with "kapı" (tests/fixtures/fake-acp-agent.mjs): the run opens it from another view.
 const agentGateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-gate-'));
 const agentGate = path.join(agentGateDir, 'open');
@@ -757,7 +758,7 @@ check('and the emoji go again', await page.waitForFunction(() => document.queryS
 if (process.platform === 'win32' && (await page.evaluate(() => window.cortex.setup.status())).python) {
   const askedLog = path.join(enginePackages, 'istenen.log');
   fs.writeFileSync(vaultNote('beyin.py'), voiceStandIn(enginePackages));
-  fs.writeFileSync(vaultNote('.beyin-version'), '9.9.9\n');
+  fs.writeFileSync(vaultNote('.beyin-version'), '1.99.0\n');
   await page.keyboard.press('Control+,');
   const saveWords = page.locator('[data-setup-voice-command="kaydet"]');
   check(
