@@ -80,7 +80,7 @@ python3 beyin.py rollback
 Kurtarma, kesintiden önceki ön koşulları olduğu gibi tekrar oynatmaz, bugünkü vault'a göre yeniden değerlendirir:
 
 - V2 geçişinin kanıtı (notların ve eski V2 durumunun parmak izi) kurtarma başında, V2 yazıcı kilitleri tutulurken yeniden alınır. Kurulum sırasında ya da kesintiden sonra değişen bir not artık her denemeyi aynı hatayla durdurmaz. Kurulum sürerken bir not değişirse ilk deneme `migration_changed` koduyla durur; ikinci deneme tamamlar.
-- Henüz yazılmamış bir dosyayı kesintiden sonra değiştirdiysen: ayar dosyalarında (`.claude/settings.local.json`, `.codex/hooks.json`, `.gemini/settings.json` ve benzerleri) eklediğin anahtar (ör. bir sohbette "Her zaman izin ver") yeni sürümün girdileriyle birleştirilir; `AGENTS.md` ve `CLAUDE.md` içinde yönetilen bloğun dışına yazdığın metin korunur, yalnız blok yenilenir. Kurulum kaydı birleşmiş içeriği yazar. Motor dosyalarındaki bir değişiklik ve yönetilen bölümün içindeki bir düzenleme hâlâ çakışmadır.
+- Kesintiden sonra yönetilen bir dosyayı değiştirdiysen (güncelleme onu kesintiden önce yazmış olsun ya da olmasın): ayar dosyalarında (`.claude/settings.local.json`, `.codex/hooks.json`, `.gemini/settings.json` ve benzerleri) eklediğin anahtar (ör. bir sohbette "Her zaman izin ver"; istemcinin, kurulum onu yazmadan önce oluşturduğu bir ayar dosyası da) yeni sürümün girdileriyle birleştirilir; `AGENTS.md` ve `CLAUDE.md` içinde yönetilen bloğun dışına yazdığın metin korunur, yalnız blok yenilenir; kurulum yazmadan önce kendin oluşturduğun bir `AGENTS.md`'ye blok eklenir. Sonradan `rollback` yalnız yönetilen bölümü eski haline döndürür, senin değişikliğin kalır; ilk kurulumun oluşturduğu bir dosyada geriye yalnız senin eklediğin kalır. Motor dosyalarındaki bir değişiklik ve yönetilen bölümün içindeki bir düzenleme hâlâ çakışmadır.
 
 Giriş (`beyin.py`) her zaman motorun komut satırı modülünden (`beyin_v3_cli.py`) sonra yazılır. Yine de iki dosya farklı sürümlerden kalırsa `update`, `recover` ve `rollback` komut satırı modülü olmadan da çalışır.
 
@@ -120,6 +120,8 @@ python3 beyin.py relocate
 - Zaten bu klasöre bağlıysa hiçbir şey yazılmaz: `unchanged`.
 
 Masaüstü uygulaması bunu bir vault'u her açışında kendisi yapar. State'te kurulum kaydı yoksa (vault başka bir bilgisayardan geldiyse) `relocate` `vault_moved` koduyla durur ve yeniden kurmanı söyler; o zaman paketin `install_v3.py` komutu bu makine için yeni bir state sabitler ve diğer bilgisayarın yollarını taşıyan kurulum dosyalarını (başlatıcı, eklentiler, Kiro hook dosyası) bu makinenin sürümüyle değiştirir; bulduğu kopyalar kurulum kaydında `original` olarak kalır.
+
+Hook dosyaları iki bilgisayar arasında eşitleniyorsa (her ikisinde kurulu, OneDrive'daki bir vault) `relocate` onları açıldığı bilgisayarın yollarına göre yeniden yazar; öbür bilgisayar da açınca kendi yollarına çevirir. Aynı içerikteki bir yedek zaten varsa yeni `.bak` dosyası açılmaz, her geçişte yedek birikmez.
 
 Hook komutları hiçbir zaman 2 çıkış koduyla bitmez: Claude Code, Codex ve Qwen 2'yi "engelle" diye okur ve taşınmış bir vault'ta her istem reddedilirdi. Python'un betiği bulamaması ya da bir argüman hatası 1 olarak döner; hata görünür, hiçbir şeyi engellemez.
 

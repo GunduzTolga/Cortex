@@ -48,8 +48,11 @@ class RelocateTest(unittest.TestCase):
         return report
 
     def binding(self, state):
-        with sqlite3.connect(state / 'memory.sqlite3') as db:
+        db = sqlite3.connect(state / 'memory.sqlite3')
+        try:
             return db.execute("SELECT value FROM metadata WHERE key='vault_root'").fetchone()[0]
+        finally:
+            db.close()
 
     def hook(self, vault, event='UserPromptSubmit'):
         settings = json.loads((vault / '.claude/settings.local.json').read_text(encoding='utf-8'))
@@ -103,6 +106,43 @@ class RelocateTest(unittest.TestCase):
             self.assertEqual(context.returncode, 0, context.stderr)
             self.assertNotIn('sync failed', context.stdout)
 
+    def test_a_binding_the_first_read_missed_is_moved_all_the_same(self):
+        # The read before the lock may meet a busy or unreadable index and see no binding; the
+        # hooks still name the old folder, and "relocated" must not leave the memory bound there.
+        moved = self.base / 'Yeni Yer' / 'Beynim'
+        moved.parent.mkdir(parents=True)
+        shutil.move(str(self.vault), str(moved))
+        code = ('import importlib.util, json, sys\n'
+                'from pathlib import Path\n'
+                "spec = importlib.util.spec_from_file_location('relocate_cli', sys.argv[1])\n"
+                'cli = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli)\n'
+                'cli._vault_binding = lambda state: None\n'
+                'print(json.dumps(cli.relocate(Path(sys.argv[2]), Path(sys.argv[3]))))\n')
+        result = subprocess.run([sys.executable, '-c', code, str(moved / '.claude/scripts/beyin_v3_cli.py'), str(moved),
+                                 str(self.state)], cwd=moved, env=self.env, capture_output=True, text=True,
+                                encoding='utf-8', timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['status'], 'relocated')
+        self.assertEqual(self.binding(self.state), str(moved.resolve()))
+        self.assertEqual(self.relocate(moved)['status'], 'unchanged')
+
+    def test_hook_files_bound_back_and_forth_keep_one_backup_per_content(self):
+        # Hook files synced between two computers are bound again on each the app opens them on:
+        # every switch added a backup of every hook file, the same two contents over and over.
+        moved = self.base / 'Tasindi' / 'Beynim'
+        moved.parent.mkdir(parents=True)
+        shutil.move(str(self.vault), str(moved))
+        settings = moved / '.claude/settings.local.json'
+        here_before = settings.read_bytes()
+        self.assertEqual(self.relocate(moved)['status'], 'relocated')
+        here = settings.read_bytes()
+        for _ in range(2):
+            settings.write_bytes(here_before)  # the other computer's edition synced back
+            self.assertEqual(self.relocate(moved)['status'], 'relocated')
+            self.assertEqual(settings.read_bytes(), here)
+        backups = sorted(path.name for path in settings.parent.glob('settings.local.json.bak*'))
+        self.assertEqual(backups, ['settings.local.json.bak'])
+
     def test_a_copy_gets_a_state_of_its_own_and_the_original_keeps_its_own(self):
         copy = self.base / 'Yedek' / 'Beynim'
         shutil.copytree(self.vault, copy, symlinks=True)
@@ -129,6 +169,20 @@ class RelocateTest(unittest.TestCase):
         # The copy updates from its own install record, as the original does.
         doctor = self.beyin(copy, 'doctor')
         self.assertEqual(json.loads(doctor.stdout)['hook_paths']['status'], 'ok')
+
+    def test_a_folder_left_at_the_old_place_on_no_state_of_ours_is_no_original(self):
+        # Something stands at the old path again (a sync client's leftover, a new folder of that
+        # name) with a pin to a state that is not there: it shares nothing, and the vault moved.
+        moved = self.base / 'Yeni' / 'Beynim'
+        moved.parent.mkdir(parents=True)
+        shutil.move(str(self.vault), str(moved))
+        self.vault.mkdir()
+        (self.vault / '.beyin-runtime.json').write_text(
+            json.dumps({'state': str(self.base / 'olmayan-state'), 'schema': 1}), encoding='utf-8')
+        report = self.relocate(moved)
+        self.assertEqual(report['status'], 'relocated')
+        self.assertEqual(report['state'], str(self.state.resolve()))
+        self.assertEqual(self.binding(self.state), str(moved.resolve()))
 
     def test_without_the_install_record_it_says_to_install_again(self):
         moved = self.base / 'Tasindi'

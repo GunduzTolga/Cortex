@@ -455,7 +455,10 @@ def _local_hook_file(root, path):
 
 
 def _backup_hook_file(path, raw):
-    # Existing backups are user data too. Exclusive creation preserves all prior copies.
+    # Existing backups are user data too. Exclusive creation preserves all prior copies. A copy
+    # that already holds these very bytes is the backup: hook files synced between two computers
+    # are bound again on each one the app opens them on (relocate), and every switch added a
+    # backup of every hook file, the same two contents over and over.
     index = 0
     while True:
         backup = path.with_name(path.name + '.bak' + ('.' + str(index) if index else ''))
@@ -464,6 +467,11 @@ def _backup_hook_file(path, raw):
                 out.write(raw); out.flush(); os.fsync(out.fileno())
             return backup
         except FileExistsError:
+            try:
+                if not backup.is_symlink() and backup.read_bytes() == raw:
+                    return backup
+            except OSError:
+                pass
             index += 1
 
 
@@ -485,7 +493,8 @@ def hook_reconcile(vault: Path, state: Path, force: bool = False) -> dict:
 
     Creates a .bak backup of each modified hook file before changing it.
     Replaces stale Python and vault paths with current local interpreter and vault paths.
-    Never runs automatically or silently.
+    Runs only when asked: this command, or `relocate` for a vault that moved or was copied (the
+    desktop app runs relocate when it opens a vault); its result names every file it rewrote.
     """
     vault = vault.resolve()
     state = state.resolve()
@@ -811,11 +820,16 @@ def _relocate_hooks(vault: Path, state: Path) -> dict:
 def _shares_state(original: Path, state: Path) -> bool:
     """Whether the installed vault at `original` is pinned to this same runtime state."""
     try:
-        pinned = json.loads((original / ".beyin-runtime.json").read_text(encoding="utf-8")).get("state")
-        return Path(pinned).expanduser().resolve() == state or os.path.samefile(pinned, state)
-    except (OSError, ValueError, AttributeError, TypeError):
+        pinned = Path(json.loads((original / ".beyin-runtime.json").read_text(encoding="utf-8")).get("state")).expanduser()
+    except (OSError, ValueError, AttributeError, TypeError, RuntimeError):
         # A pin that cannot be read still marks an installed vault: keeping the two apart is the safe side.
         return (original / ".beyin-runtime.json").is_file()
+    try:
+        # A pin naming a state that is not there is no share of this one (it exists): the old
+        # folder is something else now, and the vault moved.
+        return pinned.resolve() == state or (pinned.exists() and os.path.samefile(pinned, state))
+    except (OSError, RuntimeError):
+        return True
 
 
 def relocate(vault: Path, state: Path) -> dict:
@@ -864,18 +878,22 @@ def relocate(vault: Path, state: Path) -> dict:
         return _separate(vault, state, moved_from)
     journals = []
     with _updater_lock(state):
-        if bound is not None and bound != str(vault):
+        # Bound to the old folder, whether the read above saw it or met a busy index: a binding
+        # to any other root is never touched, and an index not created yet is not created here.
+        if bound != str(vault) and (state / "memory.sqlite3").is_file():
             import sqlite3
             try:
                 db = sqlite3.connect(state / "memory.sqlite3", timeout=5)
                 try:
                     with db:
-                        db.execute("UPDATE metadata SET value=? WHERE key='vault_root' AND value=?", (str(vault), bound))
+                        db.execute("UPDATE metadata SET value=? WHERE key='vault_root' AND value=?",
+                                   (str(vault), moved_from))
                 finally:
                     db.close()
             except sqlite3.OperationalError as exc:
-                raise _busy("Cortex'in hafızası şu an başka bir iş için kullanılıyor; birkaç saniye sonra yeniden "
-                            "dene.", exc) from exc
+                if "no such table" not in str(exc):
+                    raise _busy("Cortex'in hafızası şu an başka bir iş için kullanılıyor; birkaç saniye sonra yeniden "
+                                "dene.", exc) from exc
         for name in ("update-journal.json", "last-update.json"):
             path = state / name
             try:

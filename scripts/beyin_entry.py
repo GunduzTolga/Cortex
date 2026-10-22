@@ -762,7 +762,6 @@ def main(argv=None):
         elif isinstance(exc, OSError) and (exc.errno == errno.ENOSPC or getattr(exc, 'winerror', None) in (39, 112)):
             error['code'] = 'disk_full'
             error['message'] = 'Diskte yer kalmadı (' + str(exc.strerror or exc) + '); biraz yer açıp yeniden dene.'
-
         print(human_result(error, command, installed_version) if human else json.dumps(error, ensure_ascii=True), file=sys.stderr)
         return 1
 

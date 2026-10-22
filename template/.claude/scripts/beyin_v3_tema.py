@@ -94,8 +94,12 @@ def refresh(vault):
     if snippet.read_text(encoding='utf-8') == text:
         return {'status': 'guncel', 'snippet': str(snippet)}
     temporary = snippet.with_name('.' + snippet.name + '.yeni')
-    temporary.write_text(text, encoding='utf-8', newline='\n')
-    os.replace(temporary, snippet)
+    try:
+        temporary.write_text(text, encoding='utf-8', newline='\n')
+        os.replace(temporary, snippet)
+    finally:
+        # A replace refused (a scanner holding the snippet on Windows) leaves no half copy beside it.
+        temporary.unlink(missing_ok=True)
     return {'status': 'yenilendi', 'snippet': str(snippet)}
 
 

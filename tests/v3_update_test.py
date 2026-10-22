@@ -702,12 +702,61 @@ class OfflineUpdateTest(unittest.TestCase):
         self.assertIn('Bash(git status:*)', json.loads(config.read_text(encoding='utf-8'))['permissions']['allow'])
         self.assertIn('Kesintiden sonra eklenen satır.', agents.read_text(encoding='utf-8'))
 
-    def interrupted_first_install(self, vault, state, during=None):
-        """A first install whose write of beyin.py fails (a file held by a scanner, a power cut)."""
+    def test_recover_keeps_edits_to_files_the_update_had_already_written(self):
+        # Cut short after AGENTS.md, the settings and the install record were written; the person
+        # then added a line and granted a permission. The new block in AGENTS.md is no edit of
+        # theirs, a record rewritten under a file already written stopped every retry, and the
+        # journal's "before" must still hold the old managed part, or rollback keeps the new one.
+        def changed_managed_parts(files):
+            name = 'scripts/install_v3.py'
+            files[name] = files[name].replace(b'Use Markdown source files as truth;',
+                                              b'Use the Markdown source files as truth;')
+            files[name] = files[name].replace(b'else posix, "timeout": timeout}', b'else posix, "timeout": timeout + 1}')
+            metadata = json.loads(files['manifest.json'])
+            metadata['files'][name] = hashlib.sha256(files[name]).hexdigest()
+            files['manifest.json'] = json.dumps(metadata).encode()
+        package = rewrite_zip(self.package, self.base / 'changed-managed-parts.zip', changed_managed_parts)
+        agents = self.vault / 'AGENTS.md'
+        config = self.vault / '.claude/settings.local.json'
+        def timeouts():
+            hooks = json.loads(config.read_text(encoding='utf-8'))['hooks']
+            return sorted({handler['timeout'] for groups in hooks.values() for group in groups for handler in group['hooks']})
+        before = timeouts()
+        def crash(phase, index=None):
+            journal = json.loads((self.state / 'update-journal.json').read_text(encoding='utf-8'))
+            if phase == 'after_replace' and journal['operations'][index]['name'] == 'v3-install.json':
+                raise OSError('Synthetic interruption after the install record')
+        with patch.object(self.module, 'transaction_hook', side_effect=crash):
+            with self.assertRaises(OSError):
+                self.module.update(self.vault, self.state, package)
+        self.assertEqual(self.version(), '0.0.0')
+        self.assertIn('Use the Markdown source files as truth;', agents.read_text(encoding='utf-8'))
+        self.assertEqual(timeouts(), [value + 1 for value in before])
+        agents.write_text(agents.read_text(encoding='utf-8') + '\nKesintiden sonra eklenen satır.\n', encoding='utf-8')
+        data = json.loads(config.read_text(encoding='utf-8'))
+        data.setdefault('permissions', {}).setdefault('allow', []).append('Bash(git status:*)')
+        config.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        self.assertEqual(self.module.recover(self.vault, self.state)['status'], 'recovered')
+        self.assertEqual(self.version(), '3.0.1')
+        text = agents.read_text(encoding='utf-8')
+        self.assertIn('Kesintiden sonra eklenen satır.', text)
+        self.assertIn('Use the Markdown source files as truth;', text)
+        self.assertIn('Bash(git status:*)', json.loads(config.read_text(encoding='utf-8'))['permissions']['allow'])
+        self.assertEqual(timeouts(), [value + 1 for value in before])
+        self.assertEqual(self.module.rollback(self.vault, self.state)['status'], 'rolled_back')
+        text = agents.read_text(encoding='utf-8')
+        self.assertIn('Kesintiden sonra eklenen satır.', text)
+        self.assertIn('Use Markdown source files as truth;', text)
+        self.assertNotIn('Use the Markdown source files as truth;', text)
+        self.assertIn('Bash(git status:*)', json.loads(config.read_text(encoding='utf-8'))['permissions']['allow'])
+        self.assertEqual(timeouts(), before)
+
+    def interrupted_first_install(self, vault, state, during=None, at='beyin.py'):
+        """A first install whose write of `at` fails (a file held by a scanner, a power cut)."""
         installer = load_installer()
         real = os.replace
         def replace(source, destination, *args, **kwargs):
-            if Path(destination).name == 'beyin.py':
+            if Path(destination).name == at:
                 if during is None:
                     raise OSError('Synthetic interruption')
                 during()
@@ -733,6 +782,57 @@ class OfflineUpdateTest(unittest.TestCase):
         self.assertTrue((vault / '.beyin-version').exists())
         receipt = json.loads((state / 'v2-migration.json').read_text(encoding='utf-8'))
         self.assertEqual(receipt['sources']['eski-not.md'], hashlib.sha256(note.read_bytes()).hexdigest())
+
+    def test_an_interrupted_first_install_completes_after_its_client_wrote_the_settings_file(self):
+        # Claude Code creates .claude/settings.local.json for a permission granted in a chat. The
+        # install had not written that file yet, and every retry stopped on it as "changed".
+        vault, state = self.base / 'Izinli Kurulum', self.base / 'izinli-state'
+        vault.mkdir()
+        self.assertIsNone(self.interrupted_first_install(vault, state))
+        config = vault / '.claude/settings.local.json'
+        self.assertFalse(config.exists())
+        granted = {'permissions': {'allow': ['Bash(git status:*)']}}
+        config.write_text(json.dumps(granted, indent=2), encoding='utf-8')
+        # The person's own AGENTS.md, written before the install reached it, gets the block appended.
+        agents = vault / 'AGENTS.md'
+        self.assertFalse(agents.exists())
+        agents.write_text('# Kendi talimatlarım\n', encoding='utf-8')
+        result = load_installer().install(vault, state)
+        self.assertEqual(result['status'], 'recovered')
+        data = json.loads(config.read_text(encoding='utf-8'))
+        self.assertEqual(data['permissions'], granted['permissions'])
+        self.assertIn('beyin_v3_hook.py', json.dumps(data['hooks']))
+        text = agents.read_text(encoding='utf-8')
+        self.assertTrue(text.startswith('# Kendi talimatlarım\n\n<!-- beyin-v3:start -->'), text[:80])
+        # Taking the install back leaves both files as their writers left them.
+        self.assertEqual(self.module.rollback(vault, state)['status'], 'uninstalled')
+        self.assertEqual(json.loads(config.read_text(encoding='utf-8')), granted)
+        self.assertEqual(agents.read_text(encoding='utf-8'), '# Kendi talimatlarım\n')
+
+    def test_rollback_of_a_first_install_recovered_over_edits_takes_out_only_its_own_part(self):
+        # Cut short after every file and the install record were written, before the version
+        # stamp; the person then added a line to the AGENTS.md the install created and granted a
+        # permission in the settings it created. Rollback (here: uninstall) must take out the block
+        # and the hooks, not put them back as "the file before the update".
+        vault, state = self.base / 'Neredeyse Kurulu', self.base / 'neredeyse-state'
+        vault.mkdir()
+        self.assertIsNone(self.interrupted_first_install(vault, state, at='.beyin-version'))
+        self.assertTrue((state / 'v3-install.json').exists())
+        self.assertFalse((vault / '.beyin-version').exists())
+        agents = vault / 'AGENTS.md'
+        agents.write_text(agents.read_text(encoding='utf-8') + '\nKendi satırım.\n', encoding='utf-8')
+        config = vault / '.claude/settings.local.json'
+        data = json.loads(config.read_text(encoding='utf-8'))
+        data['permissions'] = {'allow': ['Bash(git status:*)']}
+        config.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        result = load_installer().install(vault, state)
+        self.assertEqual(result['status'], 'recovered')
+        self.assertIn('Kendi satırım.', agents.read_text(encoding='utf-8'))
+        self.assertIn('Bash(git status:*)', config.read_text(encoding='utf-8'))
+        self.assertEqual(self.module.rollback(vault, state)['status'], 'uninstalled')
+        self.assertEqual(agents.read_text(encoding='utf-8').strip(), 'Kendi satırım.')
+        self.assertEqual(json.loads(config.read_text(encoding='utf-8')), {'permissions': {'allow': ['Bash(git status:*)']}})
+        self.assertFalse((vault / 'CLAUDE.md').exists())
 
     def test_a_note_edited_during_the_first_install_stops_it_once_and_the_retry_completes(self):
         vault, state = self.base / 'Yarisan Kurulum', self.base / 'yarisan-state'

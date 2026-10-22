@@ -405,23 +405,52 @@ def _user_region_merge(name, base, current, target):
 
 
 def _rebase(state, journal, index, actual):
-    """An update operation not applied yet whose file the person changed after it was planned.
+    """An update operation whose file the person changed after it was planned.
 
     Recovery used to demand the bytes the journal saw before the interruption, so a permission
     granted in a chat (`.claude/settings.local.json`) or a line added to AGENTS.md in between made
     `recover` and `update` fail forever (install-update-6). For the user-region files the change is
-    merged into the planned content instead, and the journal, with the installer's record that will
-    describe the file, is rewritten before the file is: a recovery after this one finds the merged
-    bytes already planned. Returns the merged bytes, or None where the change still conflicts."""
+    merged into the planned content instead - whether the update had written the file before it
+    was cut short or not - and the journal is rewritten before the file is: a recovery after this
+    one finds the merged bytes already planned. Its "before" becomes what rollback is to put back:
+    the person's change on the managed part as it was before the update (on a file the update
+    creates, the person's part alone, or no file where nothing of theirs is left). The installer's
+    record that will describe the file follows the merge while it is not written yet; one written
+    already stays as it is, since rewriting it under the file made every later retry stop on the
+    record, and a later update reads these files through their managed part alone. Returns the
+    merged bytes, or None where the change still conflicts."""
     operation = journal['operations'][index]
     if journal.get('direction') != 'update' or operation['scope'] != 'vault':
         return None
-    merged = _user_region_merge(operation['name'], decode(operation['old']), actual, decode(operation['new']))
+    name, old, new = operation['name'], decode(operation['old']), decode(operation['new'])
+    # A file the install creates may have been created meanwhile: a settings file by its client
+    # for a permission granted in a chat before the hooks were there, an AGENTS.md by the person.
+    # It is planned from as from an empty one, which is how the installer plans it.
+    base = (b'{}' if name in JSON_REGION_FILES else b'') if old is None else old
+    merged = _user_region_merge(name, base, actual, new)
+    if merged is None and name not in JSON_REGION_FILES:
+        # Written before the interruption and edited since, outside the managed part: the new
+        # block (or the import line, or `hooks = true`) is in place already, and the file stays
+        # as the person left it. Settings have no such test: merged onto its own planned bytes,
+        # a settings file not written yet would stay as it was.
+        merged = _user_region_merge(name, new, actual, new)
     if merged is None:
         return None
-    operation['old'], operation['new'] = encode(actual), encode(merged)
+    restore = _user_region_merge(name, new, actual, base)
+    if restore is None or (name in JSON_REGION_FILES and json.loads(restore) == json.loads(actual)):
+        # Not written yet: the file as it is now holds the old managed part already.
+        restore = actual
+    elif old is None and (not restore.strip() or (name in JSON_REGION_FILES and json.loads(restore) == {})):
+        # Created by this install, and nothing of the person's is left once its part is out.
+        restore = None
+    operation['old'], operation['new'] = encode(restore), encode(merged)
+    # The file holds an edit made after the update was planned: rollback keeps its own mtime.
+    operation['old_mtime'] = None
     for record in journal['operations'][index + 1:]:
         if record['scope'] == 'state' and record['name'] == 'v3-install.json' and record['new'] is not None:
+            written = state / 'v3-install.json'
+            if written.is_file() and written.read_bytes() == decode(record['new']):
+                break
             manifest = json.loads(decode(record['new']))
             entry = manifest.get('files', {}).get(operation['name'])
             if isinstance(entry, dict):
