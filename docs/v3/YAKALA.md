@@ -108,7 +108,7 @@ Pencereye konuşarak yazarsın; ses bilgisayardan çıkmaz, çeviriyi yerelde Wh
 - Kurulum sürerken yakala dinleyicisi durur (bir model aynı anda iki kez yüklenmesin, pip'in değiştireceği dosyalar kullanımda olmasın), kurulum bitince ya da yarım kalınca yeniden başlar. `ses kur` sonucu dinleyicinin sonra gerçekten çalışıp çalışmadığını söyler (`"dinleyici": true|false`); çalışmıyorsa `beyin.py yakala kur`.
 - Paketler inerken her paket adım olarak görünür ("İniyor: … (679.1 MB)"); NVIDIA kütüphaneleri yaklaşık 1,1 GB.
 - Yarım kalmış ya da bozuk bir sanal ortam (pip'i yok, ana Python'u kaldırılmış) yeniden kullanılmaz, baştan kurulur.
-- 1,6 GB'lık whisper.cpp modelinin inişi bağlantı koparsa kaldığı yerden sürer; birkaç kez yeniden denenir, sonraki `ses kur` da yarım kalan parçadan devam eder.
+- 1,6 GB'lık whisper.cpp modelinin inişi bağlantı koparsa kaldığı yerden sürer; birkaç kez yeniden denenir, sonraki `ses kur` da yarım kalan parçadan devam eder. Yarım inmiş bir Whisper modeli (`model.bin`'i yok) diskte sayılmaz: sonraki `ses kur` ya da yardımcının açılışı onu tamamlar.
 - **Kurulum olmazsa** hata tek bir Türkçe cümleyle söylenir ve masaüstü uygulaması onu tanır: internet yok ya da bağlantı koptu (`voice_network`), diskte yer kalmadı (`voice_disk_full`), başka bir sorun (`voice_failed`). Ayrıntının tamamı ses klasöründeki `kurulum.log` dosyasındadır.
 - Kullanıcı adında Türkçe harf olan bir hesapta da kurulur (`C:\Users\Şule\…`): Python'un yolu UTF-8 okunur, modeller ses klasörüne göre açılır.
 

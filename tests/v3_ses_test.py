@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -120,8 +121,9 @@ class WordsTest(unittest.TestCase):
         # "aynen" is said all day: "Hey, aynen öyle" opened the window and recorded for 24 seconds.
         for said in ('Hey aynen', 'Hey Aynur', 'Hey Ayten', 'Hey ayna', 'Hey plan', 'Hey panik', 'Hey kayın', 'Hey payını'):
             self.assertFalse(ses.wake_heard(said, 'hey pyn'), said)
-        for said in ('Hey Py', 'Hey Pyne.', 'Hey Payne', 'Hey Pain!', 'hey pin'):
+        for said in ('Hey Py', 'Hey Pyne.', 'Hey Payne', 'Hey Pain!', 'hey pin', 'Hey Paine.', 'Hey Bayn'):
             self.assertTrue(ses.wake_heard(said, 'hey pyn'), said)
+        self.assertTrue(ses.wake_heard('Paine, not al.', 'pyn not al'))
 
     def test_the_picture_on_the_clipboard_is_added_by_voice(self):
         self.assertEqual(ses.command_of('Panodaki resmi ekle.'), ('resim_ekle', ''))
@@ -692,8 +694,10 @@ class SetupTest(unittest.TestCase):
 
         out = io.StringIO()
         from contextlib import redirect_stdout
+        # The listener stand-ins too: on a Windows machine with Cortex set up, the real stop would
+        # end the person's own listener (its stop event is the whole session's).
         with mock.patch.object(ses, 'install', install), mock.patch.object(ses, 'restart_listener', lambda _state, wait=0: True), \
-                redirect_stdout(out):
+                mock.patch.object(ses, 'stop_listener', lambda: True), redirect_stdout(out):
             ses.main(['kur', '--json'], state=self.state)
         lines = [json.loads(line) for line in out.getvalue().splitlines()]
         self.assertEqual(lines[:2], [{'adim': 'Motor: işlemci'}, {'adim': '%50 (800 / 1600 MB)'}])
@@ -1177,6 +1181,36 @@ class VoiceHomeTest(unittest.TestCase):
             self.assertEqual(ses.ses_dir(self.second), own)
         self.assertEqual(len(tried), 1, 'once in this process')
         self.assertTrue(ses.installed(self.second), 'used where it is, never downloaded again')
+
+    def test_an_install_another_process_moved_meanwhile_is_used_and_never_set_aside(self):
+        # The listener and the desktop app's `ses durum` look at once after the update: one moves
+        # the install, the other must not take the person's folder for a failed install's leftovers.
+        own, home = self.first / ses.SES_DIR, self.base / ses.SES_DIR
+        self.put_install(home)
+        self.put_install(own)
+        self.assertTrue(ses._adopt(own, home), 'there already')
+        self.assertTrue(own.exists() and ses.installed(self.first))
+        self.assertFalse(self.base.joinpath('ses.onceki').exists())
+        shutil.rmtree(home)
+
+        def moved_by_another(earlier, target):
+            os.replace(earlier, target)  # the other process got there first: this one's move fails
+            return False
+        with mock.patch.object(ses, '_adopt', moved_by_another):
+            self.assertEqual(ses.ses_dir(self.first), home, 'not the folder that is gone')
+        self.assertTrue(ses.installed(self.first))
+
+    def test_the_helper_is_told_the_folder_it_was_started_from(self):
+        # Started from an install used where it is, the helper did not try to move the folder it
+        # runs out of (macOS and Linux allow it; its packages were then gone from under it).
+        own = self.second / ses.SES_DIR
+        self.put_install(own)
+        with mock.patch.object(ses.os, 'replace', mock.Mock(side_effect=OSError(18, 'Invalid cross-device link'))):
+            env = ses.worker_env(self.second)
+        self.assertEqual((env[ses.SES_ENV], env['HF_HOME']), (str(own), str(own / 'hf')))
+        with mock.patch.dict(os.environ, {ses.SES_ENV: env[ses.SES_ENV]}), mock.patch.object(ses, '_adopt') as adopt:
+            self.assertEqual(ses.ses_dir(self.second), own)
+        adopt.assert_not_called()
 
     def test_a_state_of_its_own_keeps_its_voice_and_the_variable_names_another_folder(self):
         elsewhere = Path(self.tmp.name) / 'baska' / 'state'
@@ -1787,13 +1821,43 @@ class VulkanServerTest(unittest.TestCase):
                 asked.append((path, options['compute_type']))
                 raise ValueError('Requested float16 compute type, but the target device or backend do not support efficient '
                                  'float16 computation.')
-        utils = types.SimpleNamespace(download_model=lambda _name, local_files_only=False: str(self.folder / 'snapshot'), _MODELS={})
+        snapshot = self.folder / 'snapshot'
+        snapshot.mkdir()
+        for name in ('config.json', 'model.bin', 'tokenizer.json'):
+            (snapshot / name).write_text('x')
+        utils = types.SimpleNamespace(download_model=lambda _name, local_files_only=False: str(snapshot), _MODELS={})
         faster = types.SimpleNamespace(WhisperModel=WhisperModel, utils=utils)
         self.helper._fetch = lambda name, _report: fetched.append(name)
         with mock.patch.dict(sys.modules, {'faster_whisper': faster, 'faster_whisper.utils': utils}):
             with self.assertRaises(ValueError):
                 self.helper._open('large-v3-turbo', 'cuda', 'float16', lambda _done, _total: None)
-        self.assertEqual((fetched, asked), ([], [(str(self.folder / 'snapshot'), 'float16')]))
+        self.assertEqual((fetched, asked), ([], [(str(snapshot), 'float16')]))
+
+    def test_a_download_cut_off_is_fetched_to_its_end_not_taken_for_the_model(self):
+        # The network gone during `kur`: the snapshot's folder has its small files, not model.bin,
+        # and an older huggingface_hub gives it as the model on disk. Taken for it, it failed to
+        # load at every start and every `kur`, and nothing fetched the rest.
+        snapshot = self.folder / 'snapshot'
+        snapshot.mkdir()
+        (snapshot / 'config.json').write_text('{}')
+        fetched, asked = [], []
+
+        class WhisperModel:
+            def __init__(self, path, **_options):
+                asked.append(path)
+        utils = types.SimpleNamespace(download_model=lambda _name, local_files_only=False: str(snapshot), _MODELS={})
+        faster = types.SimpleNamespace(WhisperModel=WhisperModel, utils=utils)
+
+        def fetch(name, _report):
+            fetched.append(name)
+            (snapshot / 'model.bin').write_text('x')
+            return str(snapshot)
+        self.helper._fetch = fetch
+        with mock.patch.dict(sys.modules, {'faster_whisper': faster, 'faster_whisper.utils': utils}):
+            self.assertIsNone(self.helper._on_disk('small'))
+            self.helper._open('small', 'cpu', 'int8', lambda _done, _total: None)
+            self.assertEqual(self.helper._on_disk('small'), str(snapshot), 'whole now: on disk')
+        self.assertEqual((fetched, asked), (['small'], [str(snapshot)]))
 
     def test_a_chosen_model_that_cannot_be_had_leaves_one_on_disk_writing(self):
         def opened(name, device, compute, report=None):

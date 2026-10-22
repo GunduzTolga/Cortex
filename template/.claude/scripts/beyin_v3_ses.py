@@ -164,7 +164,7 @@ def _shared_home(state):
     pinned one elsewhere, a test's): that one keeps its voice beside it, as every state did."""
     chosen = os.environ.get(SES_ENV)
     if chosen:
-        return Path(chosen)
+        return Path(os.path.abspath(chosen))  # the helper works in it (chdir): never relative
     return user_base() / SES_DIR if _beside_others(state) else None
 
 
@@ -195,6 +195,8 @@ def _adopt(own, home):
     """A state's own install made the person's, in one rename on the same disk; False where it
     cannot be (another disk, a helper running from it). What the person's folder held without an
     install (a settings file, a failed install's leftovers) is set aside and removed."""
+    if _installed_in(home):
+        return True  # another process (the listener, the desktop app's `ses durum`) moved one there just now
     aside = None
     try:
         home.parent.mkdir(parents=True, exist_ok=True)
@@ -233,7 +235,8 @@ def ses_dir(state):
             if _adopt(earlier, home):
                 return home
             _KEPT.add(key)  # tried once in this process: not again and again while it runs
-        return earlier
+        # Not moved by this process, perhaps by another one meanwhile: then it is gone from here.
+        return home if _installed_in(home) else earlier
     return home
 
 
@@ -450,8 +453,9 @@ def wake_allowed(config, path=None, moment=None):
 # --------------------------------------------------------------- words --
 _FOLD = str.maketrans('ışğüöç', 'isguoc')
 # How recognizers spell the name they hear as "pin" or "payn" (Whisper: "Payn", "Pain", "Payın").
+# "Paine" and "Bayn" by name: a letter further off than the loose match (_name_like) now allows.
 NAME_SPELLINGS = {'pyn', 'pin', 'pinn', 'pen', 'pine', 'bin', 'fin', 'pay', 'bayan', 'payn', 'pain', 'payin', 'bayin', 'pyne',
-                  'payne'}
+                  'payne', 'paine', 'bayn'}
 # How the name is said: a heard word close to it is the name, as one close to how it is written is.
 NAME_SAID = 'payn'
 # Words of the small Turkish model's own vocabulary that sound like "Pyn" said as "payn" or "pin".
@@ -956,9 +960,12 @@ def _unpack(archive, folder):
 
 
 def worker_env(state):
-    """The helper's environment: Hugging Face's cache in the voice folder, UTF-8 pipes."""
+    """The helper's environment: Hugging Face's cache in the voice folder, UTF-8 pipes, and the
+    voice folder itself (SES_ENV): the helper uses the one it was started from, and never tries
+    to move an install from before (ses_dir) while it runs out of it."""
+    folder = ses_dir(state)
     env = dict(os.environ)
-    env.update(HF_HOME=str(ses_dir(state) / 'hf'), PYTHONIOENCODING='utf-8', PYTHONUTF8='1',
+    env.update({SES_ENV: str(folder)}, HF_HOME=str(folder / 'hf'), PYTHONIOENCODING='utf-8', PYTHONUTF8='1',
                HF_HUB_DISABLE_TELEMETRY='1', PYTHONDONTWRITEBYTECODE='1')
     return env
 
@@ -1762,8 +1769,10 @@ def _here(path):
     if path.isascii():
         return path
     try:
-        relative = os.path.relpath(path)
-    except ValueError:  # another drive
+        # Both as the disk spells them: a folder reached through a link (macOS's /var, which is
+        # /private/var) is still the working folder's own.
+        relative = os.path.relpath(os.path.realpath(path), os.path.realpath(os.getcwd()))
+    except (ValueError, OSError):  # another drive
         return path
     return relative if relative.isascii() and not relative.startswith('..') else path
 
@@ -1825,14 +1834,18 @@ def _fetch(name, report):
 
 
 def _on_disk(name):
-    """A model's folder when it is on disk already (no network asked); None when it is not."""
+    """A model's folder when it is on disk already (no network asked); None when it is not. A
+    download cut off (the network gone, `kur` closed) leaves the snapshot's folder with its small
+    files and without model.bin, and an older huggingface_hub gives that folder all the same: taken
+    for the model, it failed to load at every start and was never fetched to its end."""
     if os.path.isdir(name):
         return name
     try:
         from faster_whisper.utils import download_model
-        return download_model(name, local_files_only=True)
+        path = download_model(name, local_files_only=True)
     except Exception:
         return None
+    return path if all(os.path.isfile(os.path.join(path, one)) for one in ('model.bin', 'config.json')) else None
 
 
 def _open(name, device, compute, report=None):
