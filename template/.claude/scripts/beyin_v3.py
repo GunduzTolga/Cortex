@@ -753,6 +753,19 @@ def _path_redirected(path):
     return stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_reparse_tag", 0))
 
 
+def bound_elsewhere(bound):
+    """The error for a runtime bound to another vault root: the vault was moved or copied (C2).
+
+    Said as what to do about it - `beyin.py relocate` binds the runtime where the vault is now, or
+    gives a copy a runtime of its own - and named (`code`) for the desktop app, which runs relocate
+    itself when it opens a vault. Before, a bare "runtime belongs to another vault" had no fix."""
+    error = ValueError('Bu kasanın hafızası başka bir klasördeki kasaya bağlı (' + str(bound) + '); kasa taşındıysa '
+                       'ya da kopyalandıysa bu kasada beyin.py relocate çalıştır (Cortex uygulaması kasayı açınca '
+                       'bunu kendisi yapar).')
+    error.code = 'vault_moved'
+    return error
+
+
 class MemoryStore:
     def __init__(self, state_dir, vault_root, read_only=False, busy_timeout=10):
         self.read_only = bool(read_only)
@@ -779,7 +792,7 @@ class MemoryStore:
             if not binding:
                 raise ValueError("read-only runtime is not bound to a vault")
             if binding[0] != str(self.vault_root):
-                raise ValueError("runtime belongs to another vault")
+                raise bound_elsewhere(binding[0])
             return
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.state_dir.chmod(0o700)
@@ -807,7 +820,7 @@ class MemoryStore:
             """)
             binding = db.execute("SELECT value FROM metadata WHERE key='vault_root'").fetchone()
             if binding and binding[0] != root:
-                raise ValueError("runtime belongs to another vault")
+                raise bound_elsewhere(binding[0])
             if not binding and db.execute("SELECT COUNT(*) FROM records").fetchone()[0]:
                 raise ValueError("unbound existing runtime requires explicit migration")
             db.execute("INSERT OR IGNORE INTO metadata VALUES ('vault_root',?)", (root,))
@@ -833,7 +846,7 @@ class MemoryStore:
         except sqlite3.DatabaseError:
             return False
         if binding and binding[0] != root:
-            raise ValueError("runtime belongs to another vault")
+            raise bound_elsewhere(binding[0])
         return bool(binding)
 
     @contextmanager

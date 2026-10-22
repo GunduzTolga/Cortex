@@ -2,13 +2,15 @@ name: Verified V3 release package
 
 on:
   pull_request:
+    # Whatever the package or the suite reads: the V2 runners and hooks the installer recognises,
+    # the template files and theme the tests compare, the generators under scripts/ (tests-ci-6).
     paths:
       - 'VERSION'
-      - 'scripts/*v3*.py'
-      - 'scripts/beyin_entry.py'
-      - 'template/.claude/scripts/beyin_v3*.py'
-      - 'template/.agents/skills/**'
+      - 'scripts/**'
+      - 'template/**'
+      - 'tema/**'
       - 'tests/v3_*.py'
+      - 'tests/fixtures/v3/**'
       - '.github/workflows/release.yml'
   workflow_dispatch:
     inputs:
@@ -33,6 +35,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          # Every tag, to hold VERSION against the releases already out (below).
+          fetch-depth: 0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.11'
@@ -40,11 +44,27 @@ jobs:
         name: Validate release version
         run: |
           python - <<'PY'
-          import os, re
+          import json, os, re, subprocess
           from pathlib import Path
           version = Path('VERSION').read_text().strip()
           assert re.fullmatch(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', version)
           assert Path('docs/v3/releases/' + version + '.md').is_file()
+          # The app and the engine it carries are one version: the installer is named after the
+          # first, the vault's engine is told apart by the second.
+          desktop = json.loads(Path('desktop/package.json').read_text(encoding='utf-8'))['version']
+          assert desktop == version, 'desktop/package.json is ' + desktop + ', VERSION is ' + version
+          # A build given out under a version already released, with other engine bytes, never
+          # reaches a vault: the updater and the app take it for that release (install-update-1).
+          number = lambda tag: tuple(map(int, tag[1:].split('.')))
+          tags = [tag for tag in subprocess.run(['git', 'tag', '--list', 'v*'], capture_output=True, text=True,
+                                                check=True).stdout.split() if re.fullmatch(r'v\d+\.\d+\.\d+', tag)]
+          engine = ['scripts/install_v3.py', 'scripts/beyin_v3.py', 'scripts/beyin_entry.py',
+                    'template/.claude/scripts', 'template/.agents/skills']
+          for tag in sorted(tags, key=number, reverse=True)[:1]:
+              changed = subprocess.run(['git', 'diff', '--quiet', tag, 'HEAD', '--'] + engine).returncode != 0
+              assert number(tag) < number('v' + version) or (number(tag) == number('v' + version) and not changed), (
+                  'VERSION ' + version + ' must be above the latest release ' + tag +
+                  (' because the engine changed since' if changed else ''))
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('value=' + version + '\n')
           PY
@@ -107,7 +127,16 @@ jobs:
           set -euo pipefail
           python scripts/verify_v3_release.py --package "dist/beyin-v3-$VERSION.zip" --baseline baseline/beyin-v3-0.9.0.zip
 
-  publish:
+  # Publishing is three jobs, so the release is never "latest" before both of its assets are on
+  # it: the README sends people to the latest release for the Windows installer, and the vault's
+  # updater, its launcher and the agents' skill for the engine package (install-update-2).
+  #  1. draft: a draft release with the verified engine package. A run that failed after this
+  #     finds its draft again and fills it; a release already published is never touched.
+  #  2. installer: the Windows installer built around those same verified bytes (not a second
+  #     build of the engine), uploaded to the draft.
+  #  3. publish: both assets checked on the draft, then the draft made the latest release, then
+  #     everything downloaded again and verified as a vault's updater will.
+  draft:
     if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
     needs: [build, verify]
     runs-on: ubuntu-latest
@@ -115,6 +144,97 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: v3-release-bundle
+      - name: Draft the release with the verified engine package
+        run: |
+          set -euo pipefail
+          draft=$(gh release view "v$VERSION" --json isDraft --jq .isDraft 2>/dev/null || echo none)
+          if [ "$draft" = "false" ]; then
+            echo 'Release already published; refusing to overwrite it.' >&2
+            exit 1
+          fi
+          if [ "$draft" = "true" ]; then
+            # A run cut short after the draft: the same verified bytes are put on it again.
+            gh release upload "v$VERSION" "dist/beyin-v3-$VERSION.zip" "dist/beyin-v3-$VERSION.zip.sha256" --clobber
+          else
+            gh release create "v$VERSION" "dist/beyin-v3-$VERSION.zip" "dist/beyin-v3-$VERSION.zip.sha256" --target "$GITHUB_SHA" --title "Cortex v$VERSION" --notes-file "docs/v3/releases/$VERSION.md" --draft
+          fi
+
+  installer:
+    needs: [build, draft]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: v3-release-bundle
+      - name: Dependencies and the app
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build
+      - name: Python for a machine without one
+        working-directory: desktop
+        run: npm run python-paket
+      - name: The verified engine package, as it is published
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The app carries the package this run verified and publishes, byte for byte; a second
+          # build would differ in its ZIP timestamps from what vaults download as this release.
+          rm -rf desktop/cortex-paket
+          mkdir -p desktop/cortex-paket
+          cp "dist/beyin-v3-$VERSION.zip" desktop/cortex-paket/
+          python -c "import sys, zipfile; sys.stdout.write(zipfile.ZipFile(sys.argv[1]).read('manifest.json').decode('utf-8'))" "desktop/cortex-paket/beyin-v3-$VERSION.zip" > "desktop/cortex-paket/beyin-v3-$VERSION.manifest.json"
+      - name: The Windows installer
+        working-directory: desktop
+        # Signed when the repository keeps a code-signing certificate (desktop/README.md, "İmza");
+        # unsigned otherwise, as desktop.yml builds it.
+        run: npx electron-builder --win nsis --publish never
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Put the installer on the draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          # One name without spaces: GitHub turns a space in an asset name into a dot.
+          cp "desktop/release/Cortex Setup $VERSION.exe" "Cortex-Setup-$VERSION.exe"
+          gh release upload "v$VERSION" "Cortex-Setup-$VERSION.exe" --clobber
+
+  publish:
+    needs: [build, installer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
       VERSION: ${{ needs.build.outputs.version }}
       PYTHONDONTWRITEBYTECODE: '1'
       BEYIN_V3_NO_SPAWN: '1'
@@ -128,19 +248,23 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: v3-release-bundle
-      - name: Publish the verified bytes without replacing a release
+      - name: Make the draft the latest release once both assets are on it
         run: |
           set -euo pipefail
-          if gh release view "v$VERSION" >/dev/null 2>&1; then
-            echo 'Release already exists; refusing to overwrite it.' >&2
-            exit 1
-          fi
-          gh release create "v$VERSION" "dist/beyin-v3-$VERSION.zip" "dist/beyin-v3-$VERSION.zip.sha256" --target "$GITHUB_SHA" --title "Cortex v$VERSION" --notes-file "docs/v3/releases/$VERSION.md" --draft
+          assets=$(gh release view "v$VERSION" --json assets --jq '.assets[].name')
+          for name in "beyin-v3-$VERSION.zip" "beyin-v3-$VERSION.zip.sha256" "Cortex-Setup-$VERSION.exe"; do
+            if ! printf '%s\n' "$assets" | grep -Fxq "$name"; then
+              echo "The draft has no $name; not publishing." >&2
+              exit 1
+            fi
+          done
           gh release edit "v$VERSION" --draft=false --latest
       - name: Download published assets and verify again
         run: |
           set -euo pipefail
           gh release download "v$VERSION" --pattern 'beyin-v3-*.zip*' --dir published
+          gh release download "v$VERSION" --pattern 'Cortex-Setup-*.exe' --dir published
+          test -s "published/Cortex-Setup-$VERSION.exe"
           cmp "dist/beyin-v3-$VERSION.zip" "published/beyin-v3-$VERSION.zip"
           python scripts/verify_v3_release.py --package "published/beyin-v3-$VERSION.zip" --baseline baseline/beyin-v3-0.9.0.zip
           python - <<'PY'

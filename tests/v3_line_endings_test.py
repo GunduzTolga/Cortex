@@ -126,18 +126,25 @@ class LineEndingGateTest(unittest.TestCase):
                             self.restore()
 
     def test_conflict_message_names_the_case(self):
+        # Install and rollback say it in Turkish, named for the desktop app (C1); uninstall is a
+        # terminal command and keeps its English.
         target = '.claude/scripts/beyin_v3_hook.py'
-        for case, expected in (('edited', 'content differs'), ('deleted', 'deleted')):
-            for gate, run, prefix in (('install', self.reinstall, 'Reinstall conflict: managed file changed '),
-                                      ('uninstall', self.uninstall, 'Uninstall conflict: managed file changed; preserve and reconcile '),
-                                      ('rollback', self.rollback, 'rollback conflict: changed managed file ')):
+        gates = (('install', self.reinstall, "Cortex'in yönettiği " + target + ' dosyası ', 'update_conflict',
+                  {'edited': 'elle değiştirilmiş', 'deleted': 'silinmiş'}),
+                 ('uninstall', self.uninstall, 'Uninstall conflict: managed file changed; preserve and reconcile ' + target,
+                  None, {'edited': 'content differs', 'deleted': 'deleted'}),
+                 ('rollback', self.rollback, "Cortex'in yönettiği " + target + ' dosyası güncellemeden sonra ',
+                  'rollback_conflict', {'edited': 'değiştirilmiş', 'deleted': 'silinmiş'}))
+        for case in ('edited', 'deleted'):
+            for gate, run, prefix, code, expected in gates:
                 with self.subTest(case=case, gate=gate):
                     self.restore()
                     self.mutate(target, case)
                     with self.assertRaises(ValueError) as raised:
                         run()
-                    self.assertIn(prefix + target, str(raised.exception))
-                    self.assertIn(expected, str(raised.exception))
+                    self.assertIn(prefix, str(raised.exception))
+                    self.assertIn(expected[case], str(raised.exception))
+                    self.assertEqual(getattr(raised.exception, 'code', None), code)
 
     def test_accepted_crlf_file_is_rewritten_to_the_hashed_stock_bytes(self):
         stock = {name: (self.vault / name).read_bytes() for name in self.managed}

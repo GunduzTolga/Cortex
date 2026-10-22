@@ -22,10 +22,31 @@ MAX_PACKAGE = 32 * 1024 * 1024
 # install_v3.MANAGED_SKILL_PATHS.
 MANAGED_SKILL_PATHS = frozenset(root + '/skills/' + name + '/SKILL.md' for root in ('.agents', '.claude', '.kiro')
                                 for name in ('beyin', 'beyin-doktor', 'beyin-guncelle'))
+# The managed block inside AGENTS.md and CLAUDE.md; mirrors install_v3.START and END, which this
+# vault-side module cannot import (tests/v3_update_test.py holds the two together).
+START, END = '<!-- beyin-v3:start -->', '<!-- beyin-v3:end -->'
+BLOCK_FILES = ('AGENTS.md', 'CLAUDE.md')
+# Settings files whose managed part is the engine's entries among the person's own keys (the JSON
+# half of install_v3.USER_REGION_FILES): a key added beside them is no conflict.
+JSON_REGION_FILES = ('.claude/settings.local.json', '.claude/settings.json', '.codex/hooks.json',
+                     '.agents/hooks.json', '.gemini/settings.json', '.qwen/settings.json')
+# All of install_v3.USER_REGION_FILES.
+USER_REGION_FILES = BLOCK_FILES + JSON_REGION_FILES + ('.codex/config.toml',)
 
 
 def transaction_hook(phase, index=None):
     """Fault-injection seam; no behavior in normal use."""
+
+
+def failure(message, code=None, kind=ValueError):
+    """A failure said to the person: one Turkish sentence with the detail they need, and, where the
+    desktop app knows it, its name (`code`: updater_busy, update_conflict...). beyin.py and the
+    installer print both in their error JSON; the app says a named one in the window's language
+    and offers what it can do about it (a retry, a recovery) instead of showing English JSON."""
+    error = kind(message)
+    if code:
+        error.code = code
+    return error
 
 
 def digest(data):
@@ -153,7 +174,8 @@ def validate_package(package):
             raise ValueError('invalid legacy skill hashes')
         minimum = manifest.get('min_python', '3.11')
         if not isinstance(minimum, str) or not re.fullmatch(r'\d+\.\d+', minimum) or tuple(map(int, minimum.split('.'))) > sys.version_info[:2]:
-            raise ValueError('unsupported Python runtime')
+            raise failure('Bu Python (' + '.'.join(map(str, sys.version_info[:3])) + ') Cortex için çok eski; ' +
+                          (minimum if isinstance(minimum, str) else '3.11') + ' ya da sonrası gerekir.', 'python_too_old')
         if set(names) != set(manifest['files']) | {'manifest.json'}:
             raise ValueError('manifest/archive file mismatch')
         files = {}
@@ -168,11 +190,37 @@ def validate_package(package):
         return manifest, files
 
 
-def _download(directory, with_metadata=False):
+def _release_failure(exc):
+    """A release lookup or download that failed, said as a sentence: its short code (`http_404`,
+    `network_unavailable`) came out alone as the whole message before, and as a `code` the
+    desktop app does not know."""
+    reason = str(getattr(exc, 'code', '') or exc)
+    if reason in ('network_unavailable', 'response_too_large', 'http_403', 'http_429') or reason.startswith('http_5'):
+        return failure("GitHub'daki Cortex sürümlerine ulaşılamadı (" + reason + '); internet bağlantını denetleyip '
+                       'biraz sonra yeniden dene.', 'network')
+    return failure("GitHub'da kurulabilecek bir Cortex sürümü bulunamadı (" + reason + '); güncelleme şimdilik '
+                   'yapılamıyor, biraz sonra yeniden dene.')
+
+
+def _release():
+    """The latest stable release's metadata and ETag, read before any package is downloaded."""
     import beyin_v3_releases as releases
-    metadata, tag = releases.fetch_metadata()
-    if metadata is None: raise ValueError('release metadata missing')
-    data, _ = releases.request_bytes(metadata['asset_url'], MAX_PACKAGE)
+    try:
+        metadata, tag = releases.fetch_metadata()
+    except releases.ReleaseError as exc:
+        raise _release_failure(exc) from None
+    if metadata is None: raise failure("GitHub'dan Cortex sürüm bilgisi alınamadı; biraz sonra yeniden dene.", 'network')
+    return metadata, tag
+
+
+def _download(directory, with_metadata=False, metadata=None, tag=None):
+    import beyin_v3_releases as releases
+    if metadata is None:
+        metadata, tag = _release()
+    try:
+        data, _ = releases.request_bytes(metadata['asset_url'], MAX_PACKAGE)
+    except releases.ReleaseError as exc:
+        raise _release_failure(exc) from None
     if data is None or len(data) != metadata['asset_size']:
         raise ValueError('release asset size mismatch')
     actual = digest(data)
@@ -180,7 +228,10 @@ def _download(directory, with_metadata=False):
     if expected and actual != expected:
         raise ValueError('release asset checksum mismatch')
     if metadata['checksum_url']:
-        checksum, _ = releases.request_bytes(metadata['checksum_url'], 1024)
+        try:
+            checksum, _ = releases.request_bytes(metadata['checksum_url'], 1024)
+        except releases.ReleaseError as exc:
+            raise _release_failure(exc) from None
         try:
             line = checksum.decode('ascii').strip()
         except (AttributeError, UnicodeError):
@@ -218,7 +269,8 @@ def locked(vault, state):
             connection.execute('BEGIN IMMEDIATE')
         yield
     except sqlite3.OperationalError as exc:
-        raise ValueError('runtime/updater busy; retry after active work finishes') from exc
+        raise failure("Cortex şu an başka bir işi bitiriyor (bir sohbetin hafızası yazılıyor olabilir); "
+                      'birkaç saniye sonra yeniden dene.', 'updater_busy') from exc
     finally:
         for connection in reversed(connections): connection.close()
 
@@ -287,6 +339,105 @@ def _runtime_health(state):
         connection.close()
 
 
+def _blocks(text):
+    return re.findall(re.escape(START) + r'.*?' + re.escape(END), text, re.S)
+
+
+def _splice_block(base, current, target):
+    """`current` with `base`'s managed block turned into `target`'s; None when that is no splice.
+
+    The text outside the block is the person's. When only that text changed since `base`, the step
+    the installer took from `base` to `target` - its block replaced in place, or appended after the
+    text, or that append taken back - is taken again on the text as it is now (with LF line endings,
+    as the installer writes them). A block edited by hand, or any other step, is not spliced."""
+    try:
+        b, c, t = (value.decode('utf-8').replace('\r\n', '\n') for value in (base, current, target))
+    except (AttributeError, UnicodeError):
+        return None
+    ours, theirs, wanted = _blocks(b), _blocks(c), _blocks(t)
+    if theirs != ours or len(ours) > 1 or len(wanted) > 1:
+        return None
+    if ours and wanted:
+        start = c.index(ours[0])
+        return (c[:start] + wanted[0] + c[start + len(ours[0]):]).encode('utf-8')
+    if wanted and t == b.rstrip() + '\n\n' + wanted[0] + '\n':
+        return (c.rstrip() + '\n\n' + wanted[0] + '\n').encode('utf-8')
+    if ours and b == t.rstrip() + '\n\n' + ours[0] + '\n':
+        start = c.index(ours[0])
+        before, after = c[:start], c[start + len(ours[0]):]
+        if before.endswith('\n\n') and after.startswith('\n'):
+            return (before[:-2] + t[len(t.rstrip()):] + after[1:]).encode('utf-8')
+    return None
+
+
+def _managed_part_kept(name, data):
+    """Whether a file whose managed part is one line still has it: CLAUDE.md's import of AGENTS.md
+    (the file install creates holds nothing else), .codex/config.toml's `hooks = true`."""
+    try:
+        text = data.decode('utf-8')
+    except UnicodeError:
+        return False
+    if name == 'CLAUDE.md':
+        return bool(re.search(r'(?m)^@(?:\./)?AGENTS\.md\s*$', text))
+    return name == '.codex/config.toml' and bool(re.search(r'(?m)^hooks\s*=\s*true\s*$', text))
+
+
+def _user_region_merge(name, base, current, target):
+    """`target` with what the person changed in `current` since `base`, for a file whose managed part
+    sits among their own text or keys; None for any other file, or for an edit to the managed part."""
+    if base is None or current is None or target is None:
+        return None
+    if name in BLOCK_FILES:
+        spliced = _splice_block(base, current, target)
+        if spliced is None and base == target and _managed_part_kept(name, current):
+            # Left as it was by the update, with the import still in place: theirs as it is now.
+            return current
+        return spliced
+    if name in JSON_REGION_FILES:
+        try:
+            return _merge_json(base, current, target)
+        except (ValueError, TypeError, UnicodeError):
+            return None
+    if name == '.codex/config.toml' and base == target and _managed_part_kept(name, current):
+        # Only `hooks = true` is the engine's here, and the update did not change the file.
+        return current
+    return None
+
+
+def _rebase(state, journal, index, actual):
+    """An update operation not applied yet whose file the person changed after it was planned.
+
+    Recovery used to demand the bytes the journal saw before the interruption, so a permission
+    granted in a chat (`.claude/settings.local.json`) or a line added to AGENTS.md in between made
+    `recover` and `update` fail forever (install-update-6). For the user-region files the change is
+    merged into the planned content instead, and the journal, with the installer's record that will
+    describe the file, is rewritten before the file is: a recovery after this one finds the merged
+    bytes already planned. Returns the merged bytes, or None where the change still conflicts."""
+    operation = journal['operations'][index]
+    if journal.get('direction') != 'update' or operation['scope'] != 'vault':
+        return None
+    merged = _user_region_merge(operation['name'], decode(operation['old']), actual, decode(operation['new']))
+    if merged is None:
+        return None
+    operation['old'], operation['new'] = encode(actual), encode(merged)
+    for record in journal['operations'][index + 1:]:
+        if record['scope'] == 'state' and record['name'] == 'v3-install.json' and record['new'] is not None:
+            manifest = json.loads(decode(record['new']))
+            entry = manifest.get('files', {}).get(operation['name'])
+            if isinstance(entry, dict):
+                entry['installed_hash'] = digest(merged)
+                entry['installed_content'] = encode(merged)
+                record['new'] = encode(jbytes(manifest))
+    atomic(state / 'update-journal.json', jbytes(journal))
+    return merged
+
+
+def _conflict(name, actual):
+    return failure("Güncelleme durdu: Cortex'in yönettiği " + name + ' dosyası güncelleme sırasında ' +
+                   ('silindi' if actual is None else 'değişti') + '; üzerine yazılmadı. O değişikliği geri alıp '
+                   'yeniden dene ya da beyin.py rollback ile önceki sürüme dön.', 'update_conflict')
+
+
 def _apply(vault, state, journal, migration=None):
     for index, operation in enumerate(journal['operations']):
         path = _destination(vault, state, operation)
@@ -296,7 +447,7 @@ def _apply(vault, state, journal, migration=None):
                 target = _destination(vault, state, prior)
                 actual_prior = target.read_bytes() if target.exists() else None
                 if actual_prior != decode(prior['new']):
-                    raise ValueError('managed file changed before version verification')
+                    raise _conflict(prior['name'], actual_prior)
             if migration is not None and journal['direction'] == 'update':
                 migration[0].finalize_migration(vault, state, migration[1])
                 marker = state / 'v2-migration.json'
@@ -306,7 +457,10 @@ def _apply(vault, state, journal, migration=None):
         actual = path.read_bytes() if path.exists() else None
         if actual != after:
             if actual != before:
-                raise ValueError('update conflict: managed target changed ' + operation['name'])
+                merged = _rebase(state, journal, index, actual)
+                if merged is None:
+                    raise _conflict(operation['name'], actual)
+                before, after = actual, merged
             # Windows refuses to replace or delete a read-only file (WinError 5); POSIX does not.
             # Lift the flag for the replacement only and put it back below: a user who locked a
             # managed file keeps the lock, and rollback restores the recorded old mode anyway.
@@ -336,7 +490,15 @@ def _apply(vault, state, journal, migration=None):
 
 
 @contextmanager
-def _migration_guard(vault, state, directory, original=None):
+def _migration_guard(vault, state, directory, carried=None):
+    """The cutover guard of the package's own migration module, its plan taken now.
+
+    A recovery passes the plan its journal recorded (`carried`). Only what that install decided is
+    kept from it - the runners the person chose to keep, and what it reported as left behind by
+    V2; the proof itself is taken again from the vault as it is now, under the V2 writer locks this
+    guard holds for the whole recovery. Replaying the old inventory made a note edited during the
+    install, or after an interruption, fail every retry with "source or legacy state changed"
+    (install-update-6)."""
     module_path = directory / 'beyin_v3_migrate.py'
     if not module_path.exists():
         yield None
@@ -346,7 +508,16 @@ def _migration_guard(vault, state, directory, original=None):
         spec = importlib.util.spec_from_file_location('beyin_update_migration', module_path)
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         with module.migration_guard(vault, state) as current:
-            yield module, original or current
+            if isinstance(carried, dict):
+                if 'kept_legacy' in carried:
+                    current['kept_legacy'] = carried['kept_legacy']
+                else:
+                    current.pop('kept_legacy', None)
+                for key in ('orphaned_legacy_state', 'stale_legacy_locks'):
+                    found = set(carried.get(key) or []) | set(current.get(key) or [])
+                    if found:
+                        current[key] = sorted(found)
+            yield module, current
     finally:
         sys.path.remove(str(directory))
 
@@ -355,7 +526,9 @@ def _recover_locked(vault, state):
     path = state / 'update-journal.json'
     if not path.exists(): return {'status': 'noop', 'version': current_version(vault)}
     journal = json.loads(path.read_text(encoding='utf-8'))
-    if journal.get('vault') != str(vault): raise ValueError('journal belongs to another vault')
+    if journal.get('vault') != str(vault):
+        raise failure('Yarım kalan güncellemenin kaydı başka bir klasördeki kasaya ait (' + str(journal.get('vault')) +
+                      '); kasa taşındıysa önce bu kasada beyin.py relocate çalıştır.', 'vault_moved')
     with tempfile.TemporaryDirectory(prefix='beyin-recover-') as temporary:
         directory = Path(temporary)
         for operation in journal['operations']:
@@ -402,26 +575,107 @@ def _preflight(stage, files):
             raise ValueError('release preflight did not succeed')
 
 
+def _installed_name(packaged):
+    """Where the installer writes a package file in the vault (install_v3 `add`); None for its own files."""
+    if packaged == 'scripts/beyin_entry.py':
+        return 'beyin.py'
+    if packaged == 'scripts/beyin_v3.py':
+        return '.claude/scripts/beyin_v3_cli.py'
+    if re.fullmatch(r'template/\.claude/scripts/beyin_v3[a-z_]*\.py', packaged):
+        return '.claude/scripts/' + packaged.rsplit('/', 1)[1]
+    if re.fullmatch(r'template/\.agents/skills/[a-z-]+/SKILL\.md', packaged):
+        return packaged[len('template/'):]
+    return None
+
+
+def _refresh_needed(state, files):
+    """Whether a package of the installed version carries other code than the installer last wrote.
+
+    Builds of one version that differ (several 1.0.32s went to testers) were a 'noop' here, so a
+    fix shipped under an unchanged VERSION never reached a vault (install-update-1). The package's
+    files are held to the installer's own record of what it wrote (`installed_hash`), not to the
+    files as they are now: a script edited by hand is no reason to refresh, and an update over it
+    would only stop at its conflict. A file the record does not list (an excluded skill) is skipped."""
+    try:
+        installed = json.loads((state / 'v3-install.json').read_text(encoding='utf-8')).get('files', {})
+    except (OSError, ValueError, AttributeError):
+        return False
+    for name, data in files.items():
+        there = _installed_name(name)
+        entry = installed.get(there) if there and isinstance(installed, dict) else None
+        if isinstance(entry, dict) and entry.get('installed_hash') != digest(data):
+            return True
+    return False
+
+
+def _refresh_theme(vault):
+    """The Ananas snippet brought to the release just written, where the person installed it
+    (misc-scripts-5). The vault's own theme module is loaded - the one this update wrote - and only
+    when a snippet is there, so most updates never read its 580 KB of data. A failure here is never
+    the update's: the theme stays as it was and `beyin.py tema yenile` can be run by hand."""
+    directory = vault / '.claude/scripts'
+    if not (vault / '.obsidian/snippets/ananas.css').is_file() or not (directory / 'beyin_v3_tema.py').is_file():
+        return None
+    sys.path.insert(0, str(directory))
+    # The data module the theme imports is this release's, not one an earlier import left behind.
+    sys.modules.pop('beyin_v3_tema_veri', None)
+    try:
+        spec = importlib.util.spec_from_file_location('beyin_update_tema', directory / 'beyin_v3_tema.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        refresh = getattr(module, 'refresh', None)
+        return refresh(vault).get('status') if refresh else None
+    except Exception:
+        return None
+    finally:
+        sys.path.remove(str(directory))
+        sys.modules.pop('beyin_v3_tema_veri', None)
+
+
+def _older(old, new):
+    return failure('Bu paket (' + new + ') kurulu Cortex sürümünden (' + old + ') eski; kurulu sürüm korundu. '
+                   'Önceki sürüme dönmek istiyorsan beyin.py rollback kullanılır.')
+
+
 def update(vault, state, package=None, check=False):
     vault, state = roots(vault, state)
     with tempfile.TemporaryDirectory(prefix='beyin-release-') as temporary:
         expected = None
         release_meta = None
         release_tag = None
-        if package is None: package, expected, release_meta, release_tag = _download(temporary, with_metadata=True)
+        if package is None:
+            release_meta, release_tag = _release()
+            # An engine ahead of the latest stable release (one the desktop app brought before its
+            # release was published) is as it should be: nothing is downloaded, and no error reads
+            # like advice to roll back the newer engine (install-update-9).
+            installed = current_version(vault)
+            if version(release_meta['version']) < version(installed):
+                return {'status': 'ahead', 'current_version': installed, 'version': release_meta['version']}
+            package, expected = _download(temporary, metadata=release_meta, tag=release_tag)
         manifest, files = validate_package(package)
         if expected and manifest['version'] != expected: raise ValueError('release tag/package mismatch')
+        old, new = current_version(vault), manifest['version']
+        if version(new) < version(old):
+            if check: return {'status': 'ahead', 'current_version': old, 'version': new}
+            raise _older(old, new)
         stage = Path(temporary) / 'package'
         _preflight(stage, files)
-        old, new = current_version(vault), manifest['version']
-        if version(new) < version(old): raise ValueError('downgrade requires rollback')
-        if check: return {'status': 'noop' if new == old else 'available', 'current_version': old, 'version': new}
+        if check:
+            if new != old:
+                return {'status': 'available', 'current_version': old, 'version': new}
+            if _refresh_needed(state, files):
+                return {'status': 'available', 'current_version': old, 'version': new, 'refresh': True}
+            return {'status': 'noop', 'current_version': old, 'version': new}
         with locked(vault, state):
             _recover_locked(vault, state)
             old = current_version(vault)
-            if version(new) <= version(old):
-                if new == old: return {'status': 'noop', 'version': old}
-                raise ValueError('downgrade requires rollback')
+            if version(new) < version(old):
+                raise _older(old, new)
+            # The same version with other code is written like an update: the plan rewrites only the
+            # files that differ, under the same journal, and rollback can take it back.
+            refresh = new == old
+            if refresh and not _refresh_needed(state, files):
+                return {'status': 'noop', 'version': old}
             with _migration_guard(vault, state, stage / 'template/.claude/scripts') as migration:
                 spec = importlib.util.spec_from_file_location('beyin_release_installer', stage / 'scripts/install_v3.py')
                 installer = importlib.util.module_from_spec(spec)
@@ -469,7 +723,11 @@ def update(vault, state, package=None, check=False):
                         (state / 'release-cache.json').unlink(missing_ok=True)
                 except Exception:
                     pass
-        result = {'status': 'updated', 'from_version': old, 'version': new, 'trust_review_required': trust_review}
+        result = {'status': 'refreshed' if refresh else 'updated', 'from_version': old, 'version': new,
+                  'trust_review_required': trust_review}
+        if _refresh_theme(vault) == 'yenilendi':
+            result['theme'] = 'yenilendi'
+
         if plan.get('removed'):
             result['removed'] = plan['removed']
         if plan.get('preserved_excluded'):
@@ -512,9 +770,13 @@ def rollback(vault, state):
     with locked(vault, state):
         pending = state / 'update-journal.json'
         backup = pending if pending.exists() else state / 'last-update.json'
-        if not backup.exists(): raise ValueError('no update backup available')
+        if not backup.exists():
+            raise failure('Geri alınacak bir güncelleme yedeği yok: Cortex bu kasada henüz güncellenmedi ya da son '
+                          'güncelleme zaten geri alındı.')
         original = json.loads(backup.read_text(encoding='utf-8'))
-        if original.get('vault') != str(vault): raise ValueError('backup belongs to another vault')
+        if original.get('vault') != str(vault):
+            raise failure('Güncelleme yedeği başka bir klasördeki kasaya ait (' + str(original.get('vault')) +
+                          '); kasa taşındıysa önce bu kasada beyin.py relocate çalıştır.', 'vault_moved')
         # A pending rollback already contains the intended restore direction.
         # Reversing it again would restore the upgrade instead of finishing rollback.
         if pending.exists() and original.get('direction') == 'rollback':
@@ -530,11 +792,15 @@ def rollback(vault, state):
             if item.get('scope') == 'vault' and item['name'] == '📋 Templates/Kisi.md':
                 restore = actual
             if not unchanged(actual, decode(item['new']), restore):
-                if actual is not None and restore is not None and item['name'] in ('.claude/settings.local.json', '.claude/settings.json', '.codex/hooks.json', '.agents/hooks.json'):
-                    restore = _merge_json(decode(item['new']), actual, restore)
-                else:
-                    raise ValueError('rollback conflict: changed managed file ' + item['name'] +
-                                     (' (deleted)' if actual is None else ' (content differs)'))
+                # What the person added since the update outside the managed part (a line in
+                # CLAUDE.md, a Gemini setting) stays: only that part goes back (install-update-7).
+                merged = (_user_region_merge(item['name'], decode(item['new']), actual, restore)
+                          if item.get('scope') == 'vault' else None)
+                if merged is None:
+                    raise failure('Geri alma durdu: Cortex\'in yönettiği ' + item['name'] + ' dosyası güncellemeden sonra ' +
+                                  ('silinmiş' if actual is None else 'değiştirilmiş') + '; üzerine yazılmadı.',
+                                  'rollback_conflict')
+                restore = merged
             operations.append(dict(item, old=encode(actual), new=encode(restore), old_mode=item.get('new_mode'), new_mode=item.get('old_mode'),
                                    # A merged settings file holds edits made after the update: keep its new mtime.
                                    new_mtime=item.get('old_mtime') if restore == decode(item['old']) else None))
@@ -542,7 +808,8 @@ def rollback(vault, state):
             marker = state / 'v2-migration.json'
             actual = marker.read_bytes() if marker.exists() else None
             if actual != decode(original['migration_result']):
-                raise ValueError('migration marker changed; rollback conflict')
+                raise failure('Geri alma durdu: V2 geçiş kaydı (v2-migration.json) güncellemeden sonra değişmiş; '
+                              'üzerine yazılmadı.', 'rollback_conflict')
             operations.append({'scope':'state','name':'v2-migration.json','old':encode(actual),'new':original.get('migration_backup')})
         operations.sort(key=lambda item: item['name'] == '.beyin-version')
         journal = {'schema': 1, 'vault': str(vault), 'direction': 'rollback', 'operations': operations}

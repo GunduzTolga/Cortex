@@ -585,7 +585,10 @@ def shell_block(vault, python=None, windows=None):
     windows = os.name == 'nt' if windows is None else windows
     entry = Path(vault) / 'beyin.py'
     if windows:
-        body = 'function pyn { & "' + str(python) + '" "' + str(entry) + '" pyn @args }'
+        # Single-quoted literals (beyin_v3_powershell): inside double quotes PowerShell expands `$`,
+        # a backtick and the typographic double quotes of a path (security-5).
+        from beyin_v3_powershell import call
+        body = 'function pyn { ' + call([python, entry]) + ' pyn @args }'
     else:
         body = 'pyn() { "' + str(python) + '" "' + str(entry) + '" pyn "$@"; }'
     return BEGIN + '\n# Cortex: Pyn\'i istediğin istemciyle aç. Kaldırmak için: pyn kaldir\n' + body + '\n' + END + '\n'
@@ -709,7 +712,8 @@ def _powershell(argv):
     """The installer's hook form: Claude Code runs Windows commands through Git Bash or cmd, and
     an encoded PowerShell call is the one spelling that survives both with any path."""
     import base64
-    script = '& ' + ' '.join("'" + str(value).replace("'", "''") + "'" for value in argv) + '; exit $LASTEXITCODE'
+    from beyin_v3_powershell import hook_script
+    script = hook_script(argv)
     root = os.environ.get('SYSTEMROOT') or os.environ.get('WINDIR') or 'C:\\Windows'
     launcher = str(Path(root) / 'System32/WindowsPowerShell/v1.0/powershell.exe').replace('\\', '/')
     return (subprocess.list2cmdline([launcher]) + ' -NoProfile -NonInteractive -EncodedCommand '

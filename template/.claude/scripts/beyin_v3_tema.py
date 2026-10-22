@@ -5,12 +5,13 @@ snippets/ananas.css and adds "ananas" to enabledCssSnippets in appearance.json,
 keeping every other key there. It never overwrites a snippet it did not write and
 never rewrites an appearance.json it cannot parse. No network, no index, no state.
 
-    beyin.py tema kur | kaldir | durum
+    beyin.py tema kur | kaldir | durum | yenile
 """
 import argparse
 import base64
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -79,6 +80,25 @@ def install(vault):
     return {'status': 'kuruldu' if changed else 'guncel', 'snippet': str(snippet)}
 
 
+def refresh(vault):
+    """The installed snippet written again from this release, when it is ours and older.
+
+    Only `kur` wrote it, so an engine update left Obsidian showing the old Pyn face, icons and
+    folder labels until someone ran `tema kur` by hand (misc-scripts-5); the updater calls this
+    after every update. appearance.json is never read or written: a theme switched off in Obsidian
+    stays off. A snippet that is not ours, or none, is left as it is."""
+    snippet, _ = _paths(vault)
+    if not snippet.is_file() or not _is_ours(snippet):
+        return {'status': 'kurulu_degil', 'snippet': str(snippet)}
+    text = css()
+    if snippet.read_text(encoding='utf-8') == text:
+        return {'status': 'guncel', 'snippet': str(snippet)}
+    temporary = snippet.with_name('.' + snippet.name + '.yeni')
+    temporary.write_text(text, encoding='utf-8', newline='\n')
+    os.replace(temporary, snippet)
+    return {'status': 'yenilendi', 'snippet': str(snippet)}
+
+
 def uninstall(vault):
     snippet, appearance = _paths(vault)
     removed = False
@@ -111,17 +131,18 @@ MESSAGES = {
     'guncel': 'Ananas teması zaten kurulu ve güncel.',
     'kaldirildi': 'Ananas teması kaldırıldı.',
     'kurulu_degil': 'Ananas teması kurulu değil.',
-    'eski': 'Ananas temasının eski bir sürümü kurulu; güncellemek için: beyin.py tema kur',
+    'eski': 'Ananas temasının eski bir sürümü kurulu; güncellemek için: beyin.py tema yenile',
+    'yenilendi': 'Ananas teması bu sürüme yenilendi. Obsidian açıksa: Ayarlar > Görünüm > CSS parçacıkları > yenile.',
 }
 
 
 def main(argv, vault):
     parser = argparse.ArgumentParser(prog='beyin.py tema', description='Ananas Obsidian teması')
-    parser.add_argument('islem', choices=('kur', 'kaldir', 'durum'))
+    parser.add_argument('islem', choices=('kur', 'kaldir', 'durum', 'yenile'))
     parser.add_argument('--json', action='store_true', help='makine okunur çıktı')
     args = parser.parse_args(argv)
     try:
-        result = {'kur': install, 'kaldir': uninstall, 'durum': status}[args.islem](vault)
+        result = {'kur': install, 'kaldir': uninstall, 'durum': status, 'yenile': refresh}[args.islem](vault)
     except ValueError as exc:
         print(json.dumps({'status': 'hata', 'message': str(exc)}, ensure_ascii=True) if args.json else str(exc),
               file=sys.stderr)

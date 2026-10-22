@@ -17,7 +17,7 @@ makineye özeldir ve eşitlenmez; her makine onu vault'taki Markdown'dan kendisi
 | `receipts/` | evet | Receipt dosyası yazıldıktan sonra değişmez ve adı `event_id` özetidir (`beyin_v3_sync.py` `receipt()`). Öbür makine yeni receipt'i bir sonraki `sync`'te kendi veritabanına alır (`_scan_receipts()`). |
 | `daily/v3/`, `knowledge/v3/` | hayır | Bu görünümler yerel veritabanındaki receipt'lerden üretilir (`beyin_v3_projections.py` `project_receipts()`). Receipt'ler eşitlendiyse aynı saat dilimindeki iki makinede aynı çıkar; dosya adı makinenin yerel günüdür, farklı saat dilimindeki makineler aynı receipt'i farklı güne koyabilir. Git'e alınırlarsa öbür makineden gelen dosya elle düzenlenmiş sayılır (`manual receipt view edit preserved`) ve o görünüm artık güncellenmez. |
 | `AGENTS.md`, `CLAUDE.md` | evet | Kullanıcının kendi talimatları da bu dosyalardadır. Beyin bloğu makine yolu taşımaz (`python3 beyin.py sync`), aynı sürümü kuran her makinede aynıdır. Önce güncelleyen makinenin bloğu git'le öbürüne gelirse öbür makinenin güncellemesi onu kendi bloğu sayar ve çakışma vermez. |
-| Kurulum dosyaları | hayır | Bir kısmı bu makinenin yollarını taşır (`.beyin-runtime.json`, hook dosyaları, Hermes ve OMP eklentileri); geri kalanı bu makinede kurulu sürüme aittir. Güncellemeyi önce yapan makinenin dosyaları git'le öbürüne geçerse o makinenin kurulum kaydıyla uyuşmaz; yeniden kurulum `Reinstall conflict: managed file changed` hatasıyla durur. |
+| Kurulum dosyaları | hayır | Bir kısmı bu makinenin yollarını taşır (`.beyin-runtime.json`, hook dosyaları, Hermes ve OMP eklentileri); geri kalanı bu makinede kurulu sürüme aittir. Güncellemeyi önce yapan makinenin dosyaları git'le öbürüne geçerse o makinenin kurulum kaydıyla uyuşmaz; yeniden kurulum `Cortex'in yönettiği <dosya> dosyası elle değiştirilmiş` hatasıyla (`update_conflict`) durur. |
 
 ## Önerilen `.gitignore`
 
@@ -171,8 +171,16 @@ dosyaları yeniden üretir:
 py -3 scripts/install_v3.py --vault "C:\Users\<yeni>\Beynim" --state "<eski state klasörünün kopyası>"
 ```
 
-Eski state yoksa kurucu kayıtsız bulduğu kurulum dosyalarını (`.beyin-runtime.json` gibi)
-`Unmanaged file conflict` ile korur ve durur. Hook dosyaları başka makineden git'le geldiyse
+Aynı makinede vault yalnız başka bir klasöre taşındıysa kurucuya gerek yoktur: vault klasöründe
+`beyin.py relocate` çalıştır ([UPDATE](UPDATE.md#vaultu-taşımak-ya-da-kopyalamak)); masaüstü
+uygulaması bunu vault'u açınca kendisi yapar.
+
+Eski state yoksa (vault başka bir bilgisayardan geldiyse) `relocate` `vault_moved` koduyla durur
+ve yeniden kurmanı söyler. Kurucu o zaman `.beyin-runtime.json` başka bir bilgisayarın, bu makinede
+kurulum kaydı olmayan state'ini gösteriyorsa onu bu makinenin state'iyle değiştirir; başlatıcı,
+Hermes/OMP/OpenCode eklentileri ve Kiro hook dosyası gibi kurucunun bütünüyle ürettiği dosyaları
+üreticisinin işaretinden tanıyıp bu makinenin sürümüyle yazar; bulduğu kopyalar kurulum kaydında
+`original` olarak kalır. Kayıtsız bulduğu başka bir dosyayı ise (`update_conflict`) korur ve durur. Hook dosyaları başka makineden git'le geldiyse
 içlerindeki eski Beyin girdileri, Windows'un PowerShell `-EncodedCommand` biçiminde olsalar da
 kurulumda Beyin'in kendi girdisi olarak tanınır ve yenileriyle değiştirilir; yanlarında
 çalışmayan bir kopya kalmaz.
@@ -185,7 +193,7 @@ depo ve iki vault; Beyin her birine ayrı `--state` ile kuruldu.
 - Yukarıdaki `.gitignore` ile ikinci makinede kurulumdan sonra `git status` boş kaldı
   (`AGENTS.md` geçici nottaki gibi `.gitignore`'daydı; `CLAUDE.md` git'teydi ve değişmedi).
 - Yönetilen bir betik başka sürümden gelmiş gibi değiştirilince o makinede yeniden kurulum
-  `Reinstall conflict: managed file changed` hatası verdi.
+  yönetilen dosya çakışmasıyla (o sürümde `Reinstall conflict: managed file changed`) durdu.
 - A'nın receipt'i B'de `sync` sonrası veritabanına ve günlük görünüme girdi. B'nin receipt'i
   A'ya geçti. `daily/v3/<gün>.md` ve `knowledge/v3/outcomes.md` iki makinede bayt bayt aynı çıktı.
 - `receipts/** -text` kaldırılınca: B'deki receipt CRLF'ye döndü, görünümler farklılaştı,

@@ -58,6 +58,38 @@ class TemaDataTest(unittest.TestCase):
             self.assertIn('--ananas-ikon-' + used + ':', text)
 
 
+class FontLicenceTest(unittest.TestCase):
+    """OFL 1.1 condition 2: the notice and the licence go with every copy of the faces (misc-scripts-6)."""
+
+    def test_the_css_and_the_ttf_module_carry_the_licence(self):
+        import beyin_v3_yazitipi as yazitipi
+        text = tema.css()
+        head = text.split('@font-face', 1)[0]
+        for owner in ('The Fraunces Project Authors', 'The JetBrains Mono Project Authors',
+                      'The Schibsted-Grotesk Project Authors'):
+            self.assertIn('Copyright', head.split(owner, 1)[0][-60:])
+            self.assertIn(owner, yazitipi.LICENSE)
+        for clause in ('SIL OPEN FONT LICENSE Version 1.1', 'PERMISSION & CONDITIONS', 'DISCLAIMER'):
+            self.assertIn(clause, head)
+            self.assertIn(clause, yazitipi.LICENSE)
+        self.assertTrue(text.startswith(tema.OURS))
+        self.assertEqual(head.count('*/'), 2)  # the marker's comment and the licence's, nothing cut short
+
+    def test_yakala_writes_the_licence_beside_the_fonts_it_copies(self):
+        import types
+        from unittest import mock
+        import beyin_v3_yakala as yakala
+        import beyin_v3_yazitipi as yazitipi
+        with tempfile.TemporaryDirectory(prefix='v3-yazitipi-') as state:
+            # Windows only: GDI is not here, so the faces are written and their loading fails quietly.
+            with mock.patch.object(yakala, 'os', types.SimpleNamespace(name='nt')), \
+                    mock.patch.object(yakala, '_fonts_loaded', False):
+                yakala._load_fonts(state)
+            folder = Path(state) / yakala.FONT_DIR
+            self.assertEqual((folder / 'OFL.txt').read_text(encoding='utf-8'), yazitipi.LICENSE)
+            self.assertTrue(list(folder.glob('*.ttf')))
+
+
 class TemaInstallTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-tema-')
@@ -120,6 +152,24 @@ class TemaInstallTest(unittest.TestCase):
         self.assertEqual(tema.status(self.vault)['status'], 'guncel')
 
 
+    def test_refresh_rewrites_only_an_older_snippet_of_ours_and_never_the_switch(self):
+        # After an engine update the theme followed only a hand-run `tema kur` (misc-scripts-5).
+        self.write_appearance({'enabledCssSnippets': ['benim']})  # Ananas switched off in Obsidian
+        before = self.appearance.read_bytes()
+        self.assertEqual(tema.refresh(self.vault)['status'], 'kurulu_degil')
+        self.assertFalse(self.snippet.exists())
+        self.snippet.parent.mkdir()
+        self.snippet.write_text(tema.OURS + ' eski surum */\n', encoding='utf-8')
+        self.assertEqual(tema.refresh(self.vault)['status'], 'yenilendi')
+        self.assertEqual(self.snippet.read_text(encoding='utf-8'), tema.css())
+        self.assertEqual(tema.refresh(self.vault)['status'], 'guncel')
+        self.assertEqual(self.appearance.read_bytes(), before)
+        self.snippet.write_text('/* benim kendi temam */', encoding='utf-8')
+        self.assertEqual(tema.refresh(self.vault)['status'], 'kurulu_degil')
+        self.assertEqual(self.snippet.read_text(encoding='utf-8'), '/* benim kendi temam */')
+        self.assertEqual(self.appearance.read_bytes(), before)
+
+
 class TemaInstalledEntryTest(unittest.TestCase):
     def test_installed_entry_installs_and_removes_the_theme(self):
         with tempfile.TemporaryDirectory(prefix='v3-tema-installed-') as tmp:
@@ -144,6 +194,7 @@ class TemaInstalledEntryTest(unittest.TestCase):
             self.assertEqual(entry('kur')['status'], 'kuruldu')
             self.assertTrue((vault / '.obsidian/snippets/ananas.css').read_text(encoding='utf-8').startswith(tema.OURS))
             self.assertEqual(entry('durum')['status'], 'guncel')
+            self.assertEqual(entry('yenile')['status'], 'guncel')
             self.assertEqual(entry('kaldir')['status'], 'kaldirildi')
             self.assertFalse((vault / '.obsidian/snippets/ananas.css').exists())
 

@@ -1657,6 +1657,7 @@ def _logo(root):
 
 
 FONT_DIR = 'yazitipleri'
+FONT_LICENSE = 'OFL.txt'
 _fonts_loaded = False
 
 
@@ -1675,12 +1676,16 @@ def _load_fonts(state):
         folder = Path(state) / FONT_DIR
         missing = [name for name, size in marka.FONT_SIZES.items()
                    if not (folder / name).is_file() or (folder / name).stat().st_size != size]
-        if missing:
+        # The faces' licence goes with them (OFL condition 2): written once beside the TTFs.
+        if missing or not (folder / FONT_LICENSE).is_file():
             import base64
             import beyin_v3_yazitipi as yazitipi
             folder.mkdir(parents=True, exist_ok=True)
             for name in missing:
                 (folder / name).write_bytes(base64.b64decode(''.join(yazitipi.FONTS[name])))
+            licence = getattr(yazitipi, 'LICENSE', None)
+            if licence:
+                (folder / FONT_LICENSE).write_text(licence, encoding='utf-8', newline='\n')
         add = ctypes.windll.gdi32.AddFontResourceExW
         add.argtypes = [ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_void_p]
         loaded = [name for name in marka.FONT_SIZES if add(str(folder / name), 0x10, None)]  # 0x10: FR_PRIVATE

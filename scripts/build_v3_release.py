@@ -28,8 +28,9 @@ def build(output, version=CURRENT):
     paths += [ROOT / 'template/.agents/skills' / name / 'SKILL.md' for name in ('beyin', 'beyin-doktor', 'beyin-guncelle')]
     files = {p.relative_to(ROOT).as_posix(): p.read_bytes() for p in paths}
     manifest = {'schema': 1, 'version': version, 'min_python': '3.11', 'runtime_schema': 1, 'migrations': [], 'files': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}
-    legacy = [ROOT/'template/.claude/scripts'/name for name in ('flush.py','compile.py')] + [ROOT/'template/.claude/hooks'/(name+suffix) for name in ('session-start','session-end','pre-compact','prompt-counter') for suffix in ('.sh','.ps1')]
-    manifest['legacy_hashes'] = {p.relative_to(ROOT/'template').as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in legacy if p.exists()}
+    # The pinned V2 fingerprint (install_v3.LEGACY_RUNNER_HASHES), one digest per path on the wire as
+    # before; never the template files, whose edit would stop every stock V2 vault's migration.
+    manifest['legacy_hashes'] = {name: hashes[0] for name, hashes in installer().LEGACY_RUNNER_HASHES.items()}
     # cad7953-era updaters reject every other key before they can load the new
     # installer. Keep this schema-1 wire field compatible; the checksum-listed
     # installer also knows the released starter hashes for all six skill paths.

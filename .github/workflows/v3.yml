@@ -1,22 +1,24 @@
 name: V3 offline platform contracts
 
 on:
+  # Whatever the suite reads (tests-ci-6): the engine, the template it installs and compares (the V2
+  # runners and hooks the installer recognises among them), the theme, the generators, VERSION.
   pull_request:
     paths:
-      - 'template/.claude/scripts/beyin_v3*.py'
-      - 'scripts/*v3*.py'
-      - 'scripts/beyin_entry.py'
-      - 'template/.agents/skills/**'
+      - 'VERSION'
+      - 'scripts/**'
+      - 'template/**'
+      - 'tema/**'
       - 'tests/v3_*.py'
       - 'tests/fixtures/v3/**'
       - '.github/workflows/v3.yml'
   push:
     branches: [main, 'codex/v3-foundation']
     paths:
-      - 'template/.claude/scripts/beyin_v3*.py'
-      - 'scripts/*v3*.py'
-      - 'scripts/beyin_entry.py'
-      - 'template/.agents/skills/**'
+      - 'VERSION'
+      - 'scripts/**'
+      - 'template/**'
+      - 'tema/**'
       - 'tests/v3_*.py'
       - 'tests/fixtures/v3/**'
       - '.github/workflows/v3.yml'

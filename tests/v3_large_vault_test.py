@@ -223,8 +223,9 @@ class StoreOpenTest(Vault):
             self.assertEqual(store._records(), [])
             other = self.root / 'other vault'
             other.mkdir()
-            with self.assertRaisesRegex(ValueError, 'runtime belongs to another vault'):
+            with self.assertRaisesRegex(ValueError, 'başka bir klasördeki kasaya bağlı.*beyin.py relocate') as raised:
                 runtime.MemoryStore(self.state, other, busy_timeout=2)
+            self.assertEqual(raised.exception.code, 'vault_moved')
             writer.execute('ROLLBACK')
 
     def test_a_store_missing_part_of_its_schema_is_completed(self):

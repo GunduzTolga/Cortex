@@ -302,7 +302,9 @@ class PynShellTest(unittest.TestCase):
         text = profile.read_text(encoding='utf-8-sig')
         self.assertEqual(text.count(pyn.BEGIN), 1)
         self.assertTrue(text.startswith('Set-Alias ll Get-ChildItem'))
-        self.assertIn('function pyn { & "C:/Python/python.exe" "' + str(vault / 'beyin.py') + '" pyn @args }', text)
+        # Single-quoted literals: inside double quotes PowerShell would expand `$`, a backtick and a
+        # typographic quote of the path (security-5).
+        self.assertIn("function pyn { & 'C:/Python/python.exe' '" + str(vault / 'beyin.py') + "' pyn @args }", text)
         self.assertEqual(profile.read_bytes()[:3], b'\xef\xbb\xbf')  # BOM: PowerShell 5.1 reads UTF-8
         self.assertEqual(pyn.uninstall_shell([profile])['status'], 'kaldirildi')
         self.assertEqual(profile.read_text(encoding='utf-8-sig'), 'Set-Alias ll Get-ChildItem\n')

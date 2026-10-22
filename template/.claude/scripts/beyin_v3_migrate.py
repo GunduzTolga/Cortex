@@ -226,7 +226,12 @@ def finalize_migration(vault_root, state_dir, plan):
         return plan['previous']
     sources, states = _inventory(vault)
     if any(sources.get(name) != digest for name, digest in plan['sources'].items()) or states != plan['legacy_state']:
-        raise RuntimeError('source or legacy state changed during migration; no success receipt')
+        # Named for the desktop app (`code`, C1), which tries once more: a retry resumes the
+        # journal and proves the cutover again from the notes as they are then.
+        error = RuntimeError('Kurulum durdu: kasadaki notlar kurulum sürerken değişti, bu yüzden geçiş kaydı '
+                             'yazılmadı. Yeniden dene; yarım kalan kurulum notların son haliyle tamamlanır.')
+        error.code = 'migration_changed'
+        raise error
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     written = []
     try:

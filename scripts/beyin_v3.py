@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import hashlib
 import importlib.util
 import json
 import os
 import re
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import time
@@ -324,28 +326,31 @@ HOOK_FILES = (".claude/settings.local.json", ".codex/hooks.json", ".agents/hooks
               ".kiro/hooks/beyin-v3.json", ".gemini/settings.json", ".qwen/settings.json")
 
 
+def _powershell():
+    """The shared command spelling (beyin_v3_powershell): quoting and the hook exit-code rule."""
+    _ensure_scripts_path()
+    import beyin_v3_powershell
+    return beyin_v3_powershell
+
+
 def _hook_arguments(command: str) -> list:
     """Arguments of one installed hook command: POSIX shell text or the Windows EncodedCommand."""
     import base64
     import re
-    import shlex
     match = re.search(r"-EncodedCommand\s+([A-Za-z0-9+/=]+)", command, re.I)
     if match:
         try:
             script = base64.b64decode(match.group(1), validate=True).decode("utf-16le")
         except (ValueError, UnicodeError):
             return []
-        return [item.replace("''", "'") for item in re.findall(r"'((?:[^']|'')*)'", script)]
+        return _powershell().literals(script)
     if command.lstrip().startswith("& '"):
         # Gemini CLI runs Windows hooks in PowerShell itself: the same quoted call, unencoded.
-        return [item.replace("''", "'") for item in re.findall(r"'((?:[^']|'')*)'", command)]
-    try:
-        return shlex.split(command)
-    except ValueError:
-        return []
+        return _powershell().literals(command)
+    return _powershell().posix_arguments(command)
 
 
-def hook_paths(vault: Path) -> dict:
+def hook_paths(vault: Path, limit=20) -> dict:
     """Read-only (#204): hook commands that still name another install location.
 
     A vault moved to another account or machine together with its hook files keeps commands
@@ -409,7 +414,9 @@ def hook_paths(vault: Path) -> dict:
         return {"status": "not_installed", "checked": 0}
     result = {"status": "stale" if stale else "ok", "checked": checked}
     if stale:
-        result["stale"] = stale[:20]
+        # doctor shows the first twenty; hook-reconcile and relocate read them all (limit=None):
+        # cut at twenty, a moved vault's last hook files were never rewritten.
+        result["stale"] = stale[:limit] if limit is not None else stale
         result["hint"] = ("Hook commands point to another install location (vault moved, or hook files synced "
                           "from another machine). Run the installer again on this machine with this vault; if the "
                           "vault moved from another account or folder, pass the old state folder (or a copy) with "
@@ -420,13 +427,12 @@ def hook_paths(vault: Path) -> dict:
 def _hook_commands(argv):
     """Build POSIX and Windows command strings for hook invocations."""
     import base64
-    import shlex
     if any(any(c in str(value) for c in "\n\r\x00") for value in argv):
         raise ValueError("Newlines or NUL in command paths are unsupported")
     portable_argv = [str(value).replace("\\", "/") if os.name == "nt" else str(value) for value in argv]
-    posix = shlex.join(portable_argv)
-    script = "& " + " ".join("'" + str(value).replace("'", "''") + "'" for value in argv)
-    script += "; exit $LASTEXITCODE"
+    # The installer's spelling (install_v3.commands), so a reconciled hook is one it would write.
+    posix = _powershell().posix_hook(portable_argv)
+    script = _powershell().hook_script(argv)
     encoded = base64.b64encode(script.encode("utf-16le")).decode()
     launcher = "powershell.exe"
     if os.name == "nt":
@@ -496,7 +502,7 @@ def hook_reconcile(vault: Path, state: Path, force: bool = False) -> dict:
     for name in HOOK_FILES:
         _local_hook_file(vault, vault / name)
     _local_hook_file(state, state / "v3-install.json")
-    paths_report = hook_paths(vault)
+    paths_report = hook_paths(vault, limit=None)
     if paths_report.get("status") == "not_installed":
         return {
             "status": "not_installed",
@@ -602,7 +608,7 @@ def hook_reconcile(vault: Path, state: Path, force: bool = False) -> dict:
                 if harness == "gemini" and os.name == "nt":
                     # Gemini CLI runs Windows hooks in PowerShell itself: the call operator, unencoded,
                     # as install_v3.powershell_call writes it.
-                    target_cmd = "& " + " ".join("'" + str(value).replace("'", "''") + "'" for value in argv)
+                    target_cmd = _powershell().hook_script(argv)
                     all_new_commands.append(target_cmd)
 
                 for event, groups in hooks_map.items():
@@ -689,6 +695,244 @@ def hook_reconcile(vault: Path, state: Path, force: bool = False) -> dict:
     }
 
 
+def _relocate_failure(message: str) -> ValueError:
+    error = ValueError(message)
+    error.code = "vault_moved"
+    return error
+
+
+def _busy(message: str, cause: Exception) -> ValueError:
+    error = ValueError(message)
+    error.code = "updater_busy"
+    error.__cause__ = cause
+    return error
+
+
+def _vault_binding(state: Path):
+    """The vault root the runtime index is bound to (metadata.vault_root); None before its first sync."""
+    import sqlite3
+    database = state / "memory.sqlite3"
+    if not database.is_file():
+        return None
+    try:
+        db = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
+        try:
+            row = db.execute("SELECT value FROM metadata WHERE key='vault_root'").fetchone()
+        finally:
+            db.close()
+    except sqlite3.Error:
+        return None
+    return row[0] if row else None
+
+
+@contextlib.contextmanager
+def _updater_lock(state: Path):
+    """The updater's own lock (update-lock.sqlite3): no update runs while the binding moves."""
+    import sqlite3
+    state.mkdir(parents=True, exist_ok=True, mode=0o700)
+    connection = sqlite3.connect(state / "update-lock.sqlite3", timeout=5)
+    try:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as exc:
+            raise _busy("Cortex şu an başka bir işi bitiriyor (bir güncelleme sürüyor olabilir); birkaç saniye sonra "
+                        "yeniden dene.", exc) from exc
+        yield
+    finally:
+        connection.close()
+
+
+def _atomic_bytes(path: Path, data: bytes, mode=None) -> None:
+    import tempfile
+    fd, temporary = tempfile.mkstemp(prefix=".beyin-relocate-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as out:
+            out.write(data); out.flush(); os.fsync(out.fileno())
+        if mode is not None:
+            os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _refresh_vault_paths(vault: Path, state: Path) -> list:
+    """Launchers and plugins that carry the vault's path, written again for where it is now.
+
+    Only a file the install record lists and that still holds what the installer wrote (line
+    endings aside) is rewritten, and the record follows it; one the person changed stays theirs."""
+    manifest_path = state / "v3-install.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    files = manifest.get("files") if isinstance(manifest, dict) else None
+    if not isinstance(files, dict):
+        return []
+    _ensure_scripts_path()
+    planned = {}
+    for module_name, planner in (("beyin_v3_launchers", "plan_launchers"), ("beyin_v3_hermes", "plan_plugin"),
+                                 ("beyin_v3_opencode", "plan_plugin"), ("beyin_v3_omp", "plan_plugin")):
+        try:
+            module = importlib.import_module(module_name)
+            planned.update(getattr(module, planner)(vault, state))
+        except (ImportError, AttributeError, ValueError):
+            continue
+    written = []
+    for name, content in planned.items():
+        entry = files.get(name)
+        path = vault / name
+        if not isinstance(entry, dict) or not path.is_file() or path.is_symlink():
+            continue
+        current = path.read_bytes()
+        baseline = base64.b64decode(entry.get("installed_content") or "")
+        if current == content or current.replace(b"\r\n", b"\n") != baseline.replace(b"\r\n", b"\n"):
+            continue
+        _atomic_bytes(path, content, mode=stat.S_IMODE(path.stat().st_mode))
+        entry["installed_hash"] = hashlib.sha256(content).hexdigest()
+        entry["installed_content"] = base64.b64encode(content).decode("ascii")
+        written.append(name)
+    if written:
+        _write_hook_json(manifest_path, manifest)
+    return written
+
+
+def _relocate_hooks(vault: Path, state: Path) -> dict:
+    """The hook commands written again for this vault and state (hook_reconcile, with .bak copies)."""
+    try:
+        result = hook_reconcile(vault, state)
+    except RuntimeError as exc:
+        raise _relocate_failure("Kasa yeni yerine bağlanamadı, hook dosyaları yeniden yazılamadı (" + str(exc) +
+                                "); Cortex'i bu kasaya yeniden kur.") from None
+    return {"status": result.get("status"), "reconciled": result.get("reconciled_count", 0),
+            "files": [entry["file"] for entry in result.get("files", [])]}
+
+
+def _shares_state(original: Path, state: Path) -> bool:
+    """Whether the installed vault at `original` is pinned to this same runtime state."""
+    try:
+        pinned = json.loads((original / ".beyin-runtime.json").read_text(encoding="utf-8")).get("state")
+        return Path(pinned).expanduser().resolve() == state or os.path.samefile(pinned, state)
+    except (OSError, ValueError, AttributeError, TypeError):
+        # A pin that cannot be read still marks an installed vault: keeping the two apart is the safe side.
+        return (original / ".beyin-runtime.json").is_file()
+
+
+def relocate(vault: Path, state: Path) -> dict:
+    """Bind the engine to where the vault is now (C2): a vault moved, renamed or copied.
+
+    The hook commands, the runtime index (metadata.vault_root), the update journals and the update
+    launcher all name the folder the vault was installed in. Moved - OneDrive taking Documents
+    over, a rename - every hook failed (and exit 2 blocked the client) while the index said
+    "runtime belongs to another vault", with no command to mend it (hooks-clients-2, hooks-clients-M1).
+
+    - The old folder is gone, or holds no vault pinned to this state any more: the vault moved.
+      The runtime is bound here, the hook commands are written again (with .bak copies, as
+      hook-reconcile does), and so are the launchers and plugins that carry the path: `relocated`.
+    - The old folder is still an installed vault on this same state: this one is a copy, and two
+      vaults must never share one runtime. The copy gets this machine's default state for its own
+      path, carrying the install record over (the index is rebuilt from the notes, settings kept
+      in the state start fresh), a new pin and its own hooks: `separated`. The original keeps its
+      state untouched.
+    - Bound here already: `unchanged`, from a few small reads and no sync.
+
+    The desktop app runs this whenever it opens a vault that has the engine. A state with no
+    install record cannot be bound or separated from here: that is the vault_moved error."""
+    vault = vault.resolve()
+    state = state.resolve()
+    bound = _vault_binding(state)
+    if bound is not None and bound != str(vault):
+        moved_from = bound
+    else:
+        # Not bound yet (no sync since the install), or bound here with hooks that still name
+        # another folder (hook files copied or synced from it).
+        others = sorted({entry["path"] for entry in hook_paths(vault, limit=None).get("stale", [])
+                         if entry.get("reason") == "other_vault"})
+        moved_from = others[0] if others else None
+    if moved_from is None:
+        return {"status": "unchanged", "vault": str(vault), "state": str(state)}
+    if not (state / "v3-install.json").is_file():
+        raise _relocate_failure("Bu kasanın Cortex kurulum kaydı bu bilgisayarda bulunamadı (" + str(state) + "); kasa "
+                                "başka bir bilgisayardan ya da kurulum kaydı olmadan geldi. Cortex'i bu kasaya bu "
+                                "bilgisayarda yeniden kur.")
+    original = Path(moved_from)
+    try:
+        same = original.exists() and os.path.samefile(original, vault)
+    except OSError:
+        same = False
+    if not same and original.is_dir() and _shares_state(original, state):
+        return _separate(vault, state, moved_from)
+    journals = []
+    with _updater_lock(state):
+        if bound is not None and bound != str(vault):
+            import sqlite3
+            try:
+                db = sqlite3.connect(state / "memory.sqlite3", timeout=5)
+                try:
+                    with db:
+                        db.execute("UPDATE metadata SET value=? WHERE key='vault_root' AND value=?", (str(vault), bound))
+                finally:
+                    db.close()
+            except sqlite3.OperationalError as exc:
+                raise _busy("Cortex'in hafızası şu an başka bir iş için kullanılıyor; birkaç saniye sonra yeniden "
+                            "dene.", exc) from exc
+        for name in ("update-journal.json", "last-update.json"):
+            path = state / name
+            try:
+                data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+            except (OSError, ValueError):
+                data = None
+            if isinstance(data, dict) and data.get("vault") == moved_from:
+                # A journal's operations are vault-relative: only the root it names moves.
+                data["vault"] = str(vault)
+                _write_hook_json(path, data)
+                journals.append(name)
+        hooks = _relocate_hooks(vault, state)
+        files = _refresh_vault_paths(vault, state)
+    return {"status": "relocated", "vault": str(vault), "state": str(state), "previous_vault": moved_from,
+            "hooks": hooks, "files": files, "journals": journals}
+
+
+def _separate(vault: Path, state: Path, original: str) -> dict:
+    """A copy of an installed vault gets a runtime state of its own (see relocate)."""
+    import shutil
+    own = default_state(vault).resolve()
+    if own == state:
+        raise _relocate_failure("Bu kasa ile özgün kasa (" + original + ") aynı Cortex hafızasını paylaşıyor ve ayrı "
+                                "bir hafıza klasörü açılamadı; Cortex'i bu kasaya yeniden kur.")
+    taken = _vault_binding(own)
+    if taken is not None and taken != str(vault):
+        raise _relocate_failure("Bu kasa için açılacak hafıza klasörü (" + str(own) + ") başka bir kasaya bağlı (" +
+                                taken + "); Cortex'i bu kasaya yeniden kur.")
+    pin = vault / ".beyin-runtime.json"
+    try:
+        pinned = json.loads(pin.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pinned = None
+    if not isinstance(pinned, dict) or not isinstance(pinned.get("state"), str):
+        raise _relocate_failure("Bu kasanın .beyin-runtime.json dosyası okunamadı; Cortex'i bu kasaya yeniden kur.")
+    with _updater_lock(own):
+        # The install record (an update plans from it), the V2 cutover receipt and the companion
+        # bootstrap belong to this vault's files too; a run cut short may have carried them already.
+        for name in ("v3-install.json", "v2-migration.json", "companion-bootstrap.json"):
+            if (state / name).is_file() and not (own / name).exists():
+                shutil.copyfile(state / name, own / name)
+                os.chmod(own / name, 0o600)
+        content = (json.dumps(dict(pinned, state=str(own)), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        _atomic_bytes(pin, content, mode=stat.S_IMODE(pin.stat().st_mode))
+        manifest_path = own / "v3-install.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entry = manifest.get("files", {}).get(".beyin-runtime.json")
+        if isinstance(entry, dict):
+            entry["installed_hash"] = hashlib.sha256(content).hexdigest()
+            entry["installed_content"] = base64.b64encode(content).decode("ascii")
+            _write_hook_json(manifest_path, manifest)
+        hooks = _relocate_hooks(vault, own)
+        files = _refresh_vault_paths(vault, own)
+    return {"status": "separated", "vault": str(vault), "state": str(own), "previous_vault": original,
+            "previous_state": str(state), "hooks": hooks, "files": files}
+
+
 def read_json(filename: str):
     if filename == "-":
         if hasattr(sys.stdin, "reconfigure"):
@@ -766,6 +1010,7 @@ def parser():
     scheduled = sub.add_parser("scheduled-check", help="Sync then doctor for an OS scheduler you set up; no model call, no service")
     scheduled.add_argument("--notify", action="store_true",
                            help="Opt-in OS notification when the result changes; issue kinds and counts only")
+    sub.add_parser("relocate", help="Bind the engine to where the vault is now (moved, renamed or copied)")
     hook_rec = sub.add_parser("hook-reconcile", help="Reconcile stale hook paths with backup")
     hook_rec.add_argument("--force", action="store_true", help="Reconcile hook paths even if not reported stale")
     recap = sub.add_parser("recap", help="Read recent source-linked outcomes without a model call")
@@ -937,7 +1182,8 @@ def main(argv=None, return_result=False):
         if read_only_context and args.jev:
             raise ValueError("context --no-sync cannot be combined with --jev")
         # The advisor switch reads and writes one small file; it needs no index or sync engine.
-        engine = load_engine() if args.command not in ("jev", "project-scope", "ingest-server") else None
+        # relocate mends the binding the store would refuse to open with ("runtime belongs to another vault").
+        engine = load_engine() if args.command not in ("jev", "project-scope", "ingest-server", "relocate") else None
         store = engine.MemoryStore(state, vault, read_only=read_only_context) if engine else None
         sync = load_sync()(vault, state) if args.command in ("sync", "recover-views", "recap", "receipt", "task-update", "note-create", "task-create", "context", "jev-review", "jev-answer", "jev-memory", "history") and not read_only_context else None
         if args.command == "ingest-server":
@@ -945,6 +1191,8 @@ def main(argv=None, return_result=False):
             import beyin_v3_ingest_server
             beyin_v3_ingest_server.run_server(vault, host=args.host, port=args.port, token=args.token)
             return 0
+        elif args.command == "relocate":
+            result = relocate(vault, state)
         elif args.command == "init":
             result = {"initialized": True, "state": str(state), "network": False,
                       "hooks_installed": False, "optional_provider": None}
@@ -1496,6 +1744,9 @@ def main(argv=None, return_result=False):
     except Exception as exc:
         # No traceback or raw input dump: callers retain their local source files.
         error = {"error": type(exc).__name__, "message": str(exc)}
+        # A failure that names itself (vault_moved, updater_busy...): beyin.py passes it on (C1).
+        if isinstance(getattr(exc, "code", None), str):
+            error["code"] = exc.code
         if isinstance(exc, ValueError) and str(exc) in ERROR_HINTS:
             error["hint"] = ERROR_HINTS[str(exc)]
         if return_result:

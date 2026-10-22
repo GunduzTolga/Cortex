@@ -375,8 +375,10 @@ class MigrationTest(unittest.TestCase):
         p = self.source('Companion/Core.md', 'old')
         with self.m.migration_guard(self.root, self.state) as plan:
             p.write_text('new', encoding='utf-8')
-            with self.assertRaisesRegex(RuntimeError, 'changed'):
+            with self.assertRaisesRegex(RuntimeError, 'notlar kurulum sürerken değişti') as raised:
                 self.m.finalize_migration(self.root, self.state, plan)
+            # Named for the desktop app, which tries once more: the retry proves it again (install-update-6).
+            self.assertEqual(raised.exception.code, 'migration_changed')
         self.assertEqual(p.read_text(), 'new')
 
     def test_finalize_with_an_earlier_success_receipt_ignores_later_source_edits(self):

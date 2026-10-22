@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Vault-local entry point; configuration contains no credentials."""
+import errno
 import importlib.util
 import json
 from pathlib import Path
@@ -545,8 +546,23 @@ def human_result(result, command, installed_version=None):
         if result.get('stale_legacy_locks'):
             message += ('\nSahipsiz kalmis ' + str(len(result['stale_legacy_locks'])) + ' eski surumden kalma kilit klasoru var (prompt_count.*.lock,'
                         ' sekiz gunden eski); engel sayilmadi, dokunulmadi.')
+    elif status == 'refreshed':
+        message = ('Beyin yenilendi: ' + str(result.get('version', '?')) + ' surumunun bu pakette farkli olan '
+                   'dosyalari yazildi.')
+    elif status == 'available' and result.get('refresh'):
+        message = ('Ayni surumun (' + str(result.get('version', '?')) + ') farkli dosyalari var.\nYenilemek icin: ' +
+                   ('py -3' if sys.platform == 'win32' else 'python3') + ' beyin.py update')
     elif status == 'available':
         message = 'Yeni surum var: ' + str(result.get('current_version', '?')) + ' -> ' + str(result['version']) + '\nGuncellemek icin: python beyin.py update'
+    elif status == 'ahead':
+        message = ('Kurulu surum (' + str(result.get('current_version', '?')) + ') yayimlanmis son surumden (' +
+                   str(result.get('version', '?')) + ') ileride; guncellenecek bir sey yok.')
+    elif command == 'relocate':
+        texts = {'unchanged': 'Kasa zaten bu klasore bagli; bir sey degismedi.',
+                 'relocated': 'Kasa yeni yerine baglandi: hafiza, hook komutlari ve guncelleme kisayolu bu klasoru gosteriyor.',
+                 'separated': ('Bu kasa bir kopya: kendi hafiza klasoru acildi (' + plain_text(result.get('state')) +
+                               '); ozgun kasaya dokunulmadi. Indeks notlardan yeniden kurulacak.')}
+        message = texts.get(status, 'Islem sonucu: ' + str(status))
     elif status == 'noop':
         message = 'Beyin guncel: ' + str(result.get('version', installed_version or '?'))
     elif status == 'dismissed':
@@ -595,6 +611,8 @@ def human_result(result, command, installed_version=None):
                 message = '\n'.join([message] + recovered_lines)
             message = '\n'.join([message] + index_exclusion_lines(result.get('index_exclusions'), pruned=True) +
                                 (sync_copy_lines(result) if command == 'sync' else []))
+    if result.get('theme') == 'yenilendi':
+        message += '\nAnanas temasi da bu surume yenilendi.'
     if result.get('trust_review_required'):
         message += '\nHook tanimi degisti: Codex /hooks guven incelemesini tamamla ve yeni oturum ac.'
     if result.get('view_conflicts'):
@@ -637,8 +655,16 @@ def main(argv=None):
         cli = None
         raw_state = config.get('state') if isinstance(config, dict) else None
         if isinstance(raw_state, str) and raw_state and Path(raw_state).expanduser().is_absolute():
-            cli = load_cli(directory)
-            state = cli.resolve_state(vault, Path(raw_state))
+            try:
+                cli = load_cli(directory)
+                state = cli.resolve_state(vault, Path(raw_state))
+            except Exception:
+                # An update cut short between this entry and the CLI leaves the two of different
+                # releases (a CLI without resolve_state), and every command failed here, recover
+                # and rollback too (install-update-5). Those three need no CLI: they take the pin.
+                if command not in ('update', 'rollback', 'recover'):
+                    raise
+                cli, state = None, Path(raw_state).expanduser().resolve()
             if state != Path(raw_state).expanduser().resolve():
                 print('Uyari: yabanci varsayilan state yolu bu makinenin yerel state klasorune cozumlendi: ' +
                       plain_text(state) + '. Kalici duzeltme: bu makinede install_v3.py ile kur.', file=sys.stderr)
@@ -733,6 +759,10 @@ def main(argv=None):
         # the person's language and, where it can, offers what to do.
         if isinstance(getattr(exc, 'code', None), str):
             error['code'] = exc.code
+        elif isinstance(exc, OSError) and (exc.errno == errno.ENOSPC or getattr(exc, 'winerror', None) in (39, 112)):
+            error['code'] = 'disk_full'
+            error['message'] = 'Diskte yer kalmadı (' + str(exc.strerror or exc) + '); biraz yer açıp yeniden dene.'
+
         print(human_result(error, command, installed_version) if human else json.dumps(error, ensure_ascii=True), file=sys.stderr)
         return 1
 

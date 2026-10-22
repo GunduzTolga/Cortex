@@ -120,7 +120,7 @@ Kasadaki klasörler:
 
 Terminal gerekmez; uygulama gerekeni kendisi kurar.
 
-1. **İndir.** [Son sürüm sayfasından](https://github.com/GunduzTolga/Cortex/releases/latest) `Cortex Setup X.Y.Z.exe` dosyasını indir.
+1. **İndir.** [Son sürüm sayfasından](https://github.com/GunduzTolga/Cortex/releases/latest) `Cortex-Setup-X.Y.Z.exe` dosyasını indir.
 2. **Kur.** Kurulum yönetici izni istemez; yalnız senin kullanıcın için, Windows'un standart uygulama klasörüne kurulur. Kurulum sihirbazı Türkçedir.
    > **Kurulum dosyası henüz imzasız.** Windows bu yüzden mavi bir **"Windows bilgisayarınızı korudu"** ekranı gösterebilir. **Ek bilgi**'ye, ardından **Yine de çalıştır**'a bas. Kod imzalama sertifikası gelince bu ekran kalkacak.
 3. **İlk kurulum ekranını izle.** Pyn sırayla şunları yapar:
@@ -308,7 +308,7 @@ Kurucu istemci bağlantılarını, ortak motoru, üç başlangıç skill'ini (**
 - **`pyn` komutu:** `python3 beyin.py pyn kur` sonrası her terminalde `pyn` yazınca Pyn'in mühürlü karşılama kutusu ve bu makinede kurulu istemcilerin menüsü açılır (yeşil hazır, kırmızı kapalı; yerel modeller dahil). `pyn claude`, `pyn codex` menüsüz açar; `pyn kontrol` eski istemcileri, `pyn guncelle` Cortex'i günceller; `pyn kaldir` her şeyi geri alır.
 - **Yakala:** `python3 beyin.py yakala kur` (kısayol `Ctrl+Alt+C` / `Control+Option+C`; değiştirmek için `yakala kisayol`). Sesle yazma (Windows): `py -3 beyin.py ses kur`.
 - **Telegram:** `python3 beyin.py telegram kur --token <anahtar>`, sonra `telegram dinle`. Durum: `telegram durum`; kaldırmak: `telegram kaldir`.
-- **Ananas teması:** `python3 beyin.py tema kur`. Obsidian için fildişi kâğıt, mürekkep kontur, sert gölgeli kartlar, Fraunces başlıklar; yazı tipleri temanın içinde gelir. `.obsidian/snippets/ananas.css` dosyasını yazar ve Obsidian'ın görünüm ayarında etkinleştirir; kenar çubuğunda klasörler sade Türkçe etiketlerle görünür, diskteki adlar değişmez. `tema kaldir` geri alır.
+- **Ananas teması:** `python3 beyin.py tema kur`. Obsidian için fildişi kâğıt, mürekkep kontur, sert gölgeli kartlar, Fraunces başlıklar; yazı tipleri temanın içinde gelir. `.obsidian/snippets/ananas.css` dosyasını yazar ve Obsidian'ın görünüm ayarında etkinleştirir; kenar çubuğunda klasörler sade Türkçe etiketlerle görünür, diskteki adlar değişmez. Her güncellemeden sonra kendiliğinden yeni sürüme yenilenir (elle: `tema yenile`); Obsidian'da kapattıysan kapalı kalır. `tema kaldir` geri alır. Yazı tiplerinin lisansı (SIL Open Font License 1.1) CSS'in başında yazılıdır.
 
 ## Günlük kullanım ve komutlar
 
@@ -345,7 +345,7 @@ Kasa klasöründe (Windows'ta `python3` yerine `py -3`):
 - **Masaüstü uygulamasıyla:** yeni sürümün kurulum dosyasını indirip kur, aç; ana ekrandaki **"Cortex güncellemesi hazır"** bildiriminde **Güncelle** (ya da Ayarlar → Cortex). Sesle yazmanın paketleri değiştiyse Ayarlar → Sesle yazma → **Sesle yazmayı güncelle** de görünür.
 - **Terminalden:** `pyn guncelle`, ya da kasada `python3 beyin.py update` (yalnız bakmak için `update --check`). Asistanına "beynimi güncelle" demek ya da kasadaki güncelleme kısayolu da aynı işi yapar.
 
-Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Paket önce doğrulanır (checksum, manifest, dosya hash'leri), notlarına dokunmadan ayrı bir deneme kasasında çalıştırılır ve ancak bundan sonra uygulanır. Bir kesintiden sonra `recover`, geri dönmek için `rollback`. İnternetsiz güncelleme: `update --package "/indirilen/beyin-v3-X.Y.Z.zip"`. Güncellemeden sonra Ctrl+Alt+C dinleyicisi kendiliğinden yeniden başlar. [Güncelleme rehberi](docs/v3/UPDATE.md)
+Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Paket önce doğrulanır (checksum, manifest, dosya hash'leri), notlarına dokunmadan ayrı bir deneme kasasında çalıştırılır ve ancak bundan sonra uygulanır. Bir kesintiden sonra `recover`, geri dönmek için `rollback`; kesintiden sonra bir notu ya da bir izin ayarını değiştirmiş olman kurtarmayı durdurmaz. Kurulu sürüm yayımlanmış son sürümden ileride olabilir (uygulamayla gelen sürüm henüz yayımlanmamışsa); `update` bunu `ahead` diye söyler, geri almak gerekmez. İnternetsiz güncelleme: `update --package "/indirilen/beyin-v3-X.Y.Z.zip"`. Güncellemeden sonra Ctrl+Alt+C dinleyicisi kendiliğinden yeniden başlar. [Güncelleme rehberi](docs/v3/UPDATE.md)
 
 ## Sorun giderme
 
@@ -362,8 +362,9 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 | YouTube kartında döküm yok | `yt-dlp` kurulu mu? `beyin.py yakala durum` eksik araçları söyler. |
 | Gemini CLI `IneligibleTierError` veriyor | Google bireysel hesapla girişi kapattı; API anahtarıyla giriş yap. |
 | cmd'de `pyn` çalışmıyor | `pyn kur`u yeniden çalıştır, sonra **yeni** bir terminal aç. |
+| Kasayı taşıdım ya da kopyaladım (OneDrive Belgeler'i devraldı, klasörü yeniden adlandırdım), hafıza çalışmıyor | Masaüstü uygulaması kasayı açınca bunu kendisi düzeltir. Terminalden: kasada `python3 beyin.py relocate`. Taşınan kasa yeni yerine bağlanır; kopyaya kendi hafıza klasörü açılır, özgün kasaya dokunulmaz. |
 
-**Eski bir kurulumdan geliyorsan** (Cortex'in doğduğu açık kaynak projenin eski sürümleri): aynı kurucuyu mevcut kasa üzerinde bir kez çalıştır. Notlar, companion dosyaları, `daily/` ve `knowledge/` içerikleri korunur; tanınan eski yazıcılar geri alınabilir biçimde devreden çıkarılır. [Geçiş ayrıntıları](docs/v3/MIGRATION.md)
+**Eski bir kurulumdan geliyorsan** (Cortex'in doğduğu açık kaynak projenin eski sürümleri, `.beyin-version` 2.x ya da 3.x): masaüstü uygulaması kasayı açınca bunu "Cortex'e geçiş" olarak kendisi yapar; terminalde aynı kurucuyu mevcut kasa üzerinde bir kez çalıştır (eski kurulumun `update` komutu Cortex paketini eski sürüm sanar). Notlar, companion dosyaları, `daily/` ve `knowledge/` içerikleri korunur; tanınan eski yazıcılar geri alınabilir biçimde devreden çıkarılır. [Geçiş ayrıntıları](docs/v3/MIGRATION.md)
 
 ## Sürüm geçmişi
 
