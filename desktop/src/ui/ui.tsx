@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { useRef } from 'react';
 import { X } from 'lucide-react';
+import { useT } from '../i18n/useT';
 import { useDialogLayer } from './useEscapeLayer';
 
 /**
@@ -56,6 +57,7 @@ export function Modal({
   // Escape, focus and the page behind come from the layer stack: a dialog over a dialog closes one at a time.
   const sheet = useRef<HTMLDivElement>(null);
   useDialogLayer(open, onClose, sheet);
+  const t = useT();
 
   if (!open) return null;
   return (
@@ -74,7 +76,8 @@ export function Modal({
             <h2 className="text-xl leading-none text-darkDelegation">{title}</h2>
             {status}
           </div>
-          <button type="button" onClick={onClose} className="rounded-xl p-2 text-zinc-300 transition-colors hover:bg-zinc-100 hover:text-darkDelegation">
+          {/* Named, as an icon alone is not: a screen reader said only "button" for it (desktop-ui-13). */}
+          <button type="button" onClick={onClose} aria-label={t('common.close')} title={t('common.close')} className="rounded-xl p-2 text-zinc-300 transition-colors hover:bg-zinc-100 hover:text-darkDelegation">
             <X size={16} />
           </button>
         </header>

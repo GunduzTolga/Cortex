@@ -12,6 +12,7 @@ import { OfficeView } from './office/OfficeView';
 import { Onboarding } from './onboarding/Onboarding';
 import { NotesDialogs } from './notes/NotesMenus';
 import { useNotes } from './notes/notesStore';
+import { leaveOpenNotes } from './notes/openNotes';
 import { refusal, useApp } from './store/app';
 import { useConsent } from './store/consent';
 import { useSetup } from './store/setup';
@@ -47,6 +48,8 @@ export function App() {
   useEffect(() => window.cortex.on.openSettings(() => useApp.getState().openSettings(true)), []);
   // Its "listen all the time", not allowed yet: asked here, where it is explained (src/ui/MicConsent.tsx).
   useEffect(() => window.cortex.on.askWake(() => void useSetup.getState().voice({ wake: true })), []);
+  // The window going for good: the note open saves what it holds first, or keeps it aside (src/notes/openNotes.ts).
+  useEffect(() => window.cortex.on.flush(() => leaveOpenNotes()), []);
 
   // The notes are named as the settings say, wherever they are shown (src/notes/notesStore.ts).
   useEffect(() => useNotes.getState().setNameIcons(nameIcons), [nameIcons]);

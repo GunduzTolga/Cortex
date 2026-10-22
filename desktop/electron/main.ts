@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, session, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -45,6 +45,37 @@ let window: BrowserWindow | null = null;
 const START_HIDDEN = process.argv.includes('--gizli');
 let quitting = false;
 let toldOfTray = false;
+
+/*
+  The page saves what it holds before its window goes for good. A note is
+  saved a second after its last key, and a window closed within that second
+  (background off, Quit from the icon, Windows shutting down) took the last
+  words with it (desktop-ui-8). The close is held once, the page asked
+  (src/notes/openNotes.ts, through the preload), and made again when it
+  answers, or after FLUSH_MS when it cannot.
+*/
+const FLUSH_MS = 1500;
+let flushed: 'no' | 'asking' | 'done' = 'no';
+
+function flushPage(contents: Electron.WebContents): Promise<void> {
+  return new Promise((done) => {
+    const finish = () => {
+      clearTimeout(timer);
+      ipcMain.removeListener('app:flushed', heard);
+      done();
+    };
+    const heard = (event: Electron.IpcMainEvent) => {
+      if (event.sender === contents) finish();
+    };
+    const timer = setTimeout(finish, FLUSH_MS);
+    ipcMain.on('app:flushed', heard);
+    try {
+      contents.send('app:flush');
+    } catch {
+      finish();
+    }
+  });
+}
 
 function sameOrigin(a: string, b: string): boolean {
   try {
@@ -128,6 +159,7 @@ function holdSession(): void {
 }
 
 function createWindow(showNow = true): void {
+  flushed = 'no';
   window = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -162,7 +194,20 @@ function createWindow(showNow = true): void {
     quitting = true;
   });
   window.on('close', (event) => {
-    if (quitting || HIDDEN || !readSettings().background) return;
+    if (quitting || HIDDEN || !readSettings().background) {
+      // Closed for good: the page is asked to save what it holds first (`flushPage`).
+      const closing = window;
+      if (flushed === 'done' || !closing || closing.webContents.isDestroyed() || closing.webContents.isCrashed()) return;
+      event.preventDefault();
+      if (flushed === 'asking') return;
+      flushed = 'asking';
+      void flushPage(closing.webContents).then(() => {
+        flushed = 'done';
+        if (quitting) app.quit();
+        else if (!closing.isDestroyed()) closing.close();
+      });
+      return;
+    }
     event.preventDefault();
     window?.hide();
     // The microphone still listening is said every time: the window gone is not the microphone off.
@@ -230,9 +275,8 @@ function buildMenu(): void {
     {
       role: 'viewMenu',
       submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
-        { type: 'separator' },
+        // Reloading the page drops what a note holds unsaved, with no question: only while developing (desktop-ui-8).
+        ...(isDev ? [{ role: 'reload' as const }, { role: 'forceReload' as const }, { type: 'separator' as const }] : []),
         { role: 'resetZoom' },
         { role: 'zoomIn' },
         { role: 'zoomOut' },

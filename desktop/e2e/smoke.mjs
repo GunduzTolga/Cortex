@@ -85,6 +85,17 @@ const receipt = `receipts/${createHash('sha256').update('cortex-ad-karari-202610
 write(receipt, '---\n{\n  "kind": "receipt",\n  "event_id": "cortex-ad-karari-20261013"\n}\n---\nAd kararı verildi.\n');
 write('daily/v3/2026-10-13.md', `---\n{"generated": true, "kind": "receipt-index"}\n---\n# Recorded outcomes\n\nSource: [[${receipt}]]\n`);
 write('Notes/settings.json', '{\n  "theme": "ananas",\n  "count": 3\n}\n');
+// Notes for the writing checks below (src/notes/NotePane.tsx, NoteEditor.tsx): typed while the disk is slow, left while in conflict, a Windows note's line endings.
+write('Drafts/E2E Race.md', '# Race\n\nStart');
+write('Drafts/E2E Slow.md', '# Slow\n\nStart');
+write('Drafts/E2E Kept.md', '# Kept\n\nbase');
+write('Drafts/E2E Gone.md', '# Gone\n\nbase');
+write('Drafts/E2E Binned.md', '# Binned\n\nbase');
+write('Drafts/E2E Windows.md', '# Windows\r\n\r\n- [ ] task\r\nline');
+write('Drafts/E2E Mixed.md', 'one\r\ntwo\nthree\n');
+write('Drafts/İstanbul Gezisi.md', '# İstanbul Gezisi\n\n## Işık\nGün ışığı.\n');
+write('Drafts/E2E Embeds.md', '# Embeds\n\n![[İstanbul Gezisi#ışık]]\n');
+write('Drafts/E2E Closing.md', '# Closing\n\nStart');
 const receiptBefore = fs.readFileSync(vaultNote(receipt), 'utf8');
 
 /*
@@ -447,6 +458,227 @@ check(
     fs.readFileSync(vaultNote(receipt), 'utf8') === receiptBefore,
 );
 await shoot('07-receipt.png');
+
+/*
+  Nothing typed is lost (src/notes/NotePane.tsx). The main process's handlers
+  are slowed or counted for these checks through Electron's own table of them
+  (`ipcMain._invokeHandlers`, an internal: a check that cannot reach it fails,
+  it does not pass by not running).
+*/
+const holdChannel = (channel, delay = 0) =>
+  app.evaluate(
+    ({ ipcMain }, { channel, delay }) => {
+      const table = ipcMain._invokeHandlers;
+      if (!(table instanceof Map) || !table.has(channel)) return false;
+      globalThis.cortexHeld ??= {};
+      globalThis.cortexCalls ??= {};
+      const original = globalThis.cortexHeld[channel] ?? table.get(channel);
+      globalThis.cortexHeld[channel] = original;
+      globalThis.cortexCalls[channel] = 0;
+      table.set(channel, async (...args) => {
+        globalThis.cortexCalls[channel] += 1;
+        if (delay) await new Promise((done) => setTimeout(done, delay));
+        return original(...args);
+      });
+      return true;
+    },
+    { channel, delay },
+  );
+const releaseChannel = (channel) =>
+  app.evaluate(({ ipcMain }, channel) => {
+    const original = globalThis.cortexHeld?.[channel];
+    if (original) ipcMain._invokeHandlers.set(channel, original);
+    delete globalThis.cortexHeld?.[channel];
+  }, channel);
+const callsOf = (channel) => app.evaluate((_electron, channel) => globalThis.cortexCalls?.[channel] ?? 0, channel);
+/** A note opened by its name with Ctrl+O, as the person would. */
+const openNote = async (name, at) => {
+  await page.keyboard.press('Control+o');
+  await notesView.locator('[data-notes-switcher-input]').fill(name);
+  await page.keyboard.press('Enter');
+  return shownSoon(notesView.locator(`[data-note-pane="${at}"]`));
+};
+/** The note in front, written in at its end. */
+const writeAtEnd = async (text, delay = 0) => {
+  if ((await notesView.locator('[data-note-mode="edit"]').getAttribute('aria-pressed')) !== 'true') await notesView.locator('[data-note-mode="edit"]').click();
+  await notesView.locator('.cm-content').click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(text, { delay });
+};
+const savingIs = (state, timeout = 10_000) =>
+  page.waitForFunction((state) => document.querySelector('[data-note-saving]')?.getAttribute('data-note-saving') === state, state, { timeout }).then(() => true, () => false);
+const clearToasts = async () => {
+  for (let left = await page.locator('[data-toast-close]').count(); left > 0; left = await page.locator('[data-toast-close]').count()) await page.locator('[data-toast-close]').first().click();
+};
+const draft = (name) => vaultNote(`Drafts/${name}`);
+const keptAside = (title) => fs.readdirSync(vaultNote('Drafts')).find((name) => new RegExp(`^${title} \\((conflict|çakışma) \\d{4}-\\d\\d-\\d\\d \\d\\d\\.\\d\\d\\)\\.md$`).test(name));
+
+// Typed just after a save, while the index is still built again with the time before it (desktop-ui-1).
+await openNote('E2E Race', 'Drafts/E2E Race.md');
+const held = (await holdChannel('notes:index', 900)) && (await holdChannel('notes:read'));
+check('the main process’s handlers can be slowed and counted for the checks below', held);
+await writeAtEnd(' one');
+await onDiskSoon(() => fs.readFileSync(draft('E2E Race.md'), 'utf8') === '# Race\n\nStart one');
+const readsBefore = await callsOf('notes:read');
+await page.keyboard.type(' two three', { delay: 30 });
+const raced = await onDiskSoon(() => fs.readFileSync(draft('E2E Race.md'), 'utf8') === '# Race\n\nStart one two three', 8_000);
+await savingIs('saved');
+check(
+  'what is typed right after a save, while the vault is read again, all reaches the disk: the note is not read again over it, and nothing says it changed',
+  raced &&
+    (await callsOf('notes:read')) - readsBefore <= 1 &&
+    (await notesView.locator('[data-note-banner]').count()) === 0 &&
+    ((await notesView.locator('.cm-content').textContent()) ?? '').endsWith('Start one two three'),
+);
+await releaseChannel('notes:index');
+await releaseChannel('notes:read');
+fs.writeFileSync(draft('E2E Race.md'), '# Race\n\nFrom outside.');
+await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+check(
+  'and a note written elsewhere, with nothing unsaved here, is still read again',
+  await page.waitForFunction(() => document.querySelector('.cm-content')?.textContent?.includes('From outside.'), null, { timeout: 8_000 }).then(() => true, () => false),
+);
+
+// Typed while a slow save is running: saved once it ends (desktop-ui-5).
+await openNote('E2E Slow', 'Drafts/E2E Slow.md');
+await holdChannel('notes:save', 1_500);
+await writeAtEnd(' a');
+const wasSaving = await savingIs('saving', 5_000);
+await page.keyboard.type(' b');
+const slowSaved = await onDiskSoon(() => fs.readFileSync(draft('E2E Slow.md'), 'utf8') === '# Slow\n\nStart a b', 12_000);
+check(
+  'what is typed while a slow save runs is saved after it, with nothing more typed',
+  wasSaving && slowSaved && (await savingIs('saved')) && (await notesView.locator('[data-note-banner]').count()) === 0,
+);
+await releaseChannel('notes:save');
+
+// The window left: saved at once, not a second after the last key (desktop-ui-8).
+await writeAtEnd(' c');
+const blurred = await page.evaluate(() => {
+  const label = document.querySelector('[data-note-saving]');
+  const typed = performance.now();
+  return new Promise((done) => {
+    const seen = new MutationObserver(() => {
+      if (label?.getAttribute('data-note-saving') !== 'saving') return;
+      seen.disconnect();
+      done(performance.now() - typed);
+    });
+    if (label) seen.observe(label, { attributes: true });
+    window.dispatchEvent(new Event('blur'));
+    setTimeout(() => done(Infinity), 3_000);
+  });
+});
+check(
+  'the window left saves the note at once',
+  blurred < 500 && (await onDiskSoon(() => fs.readFileSync(draft('E2E Slow.md'), 'utf8') === '# Slow\n\nStart a b c')),
+);
+
+// Left while it says it changed on disk: what was typed is kept beside it, and said (desktop-ui-3).
+await openNote('E2E Kept', 'Drafts/E2E Kept.md');
+await writeAtEnd(' mine');
+fs.writeFileSync(draft('E2E Kept.md'), '# Kept\n\nfrom outside');
+const inConflict = await shownSoon(notesView.locator('[data-note-banner="conflict"]'));
+await openNote('E2E Race', 'Drafts/E2E Race.md');
+const keptToast = page.locator('[data-toast="info"]', { hasText: 'kept in a note of its own' });
+check(
+  'a note left while it is in conflict keeps what was typed in a note beside it, and says which',
+  inConflict &&
+    (await onDiskSoon(() => Boolean(keptAside('E2E Kept')))) &&
+    fs.readFileSync(draft(keptAside('E2E Kept')), 'utf8') === '# Kept\n\nbase mine' &&
+    fs.readFileSync(draft('E2E Kept.md'), 'utf8') === '# Kept\n\nfrom outside' &&
+    (await shownSoon(keptToast)),
+);
+check('a toast’s close button is named, for a screen reader', await shownSoon(keptToast.locator('[data-toast-close][aria-label="Close"]'), 3_000));
+await shoot('04b-kept-aside.png');
+await clearToasts();
+
+// Gone from where it was while something was unsaved in it: kept beside where it was.
+await openNote('E2E Gone', 'Drafts/E2E Gone.md');
+await writeAtEnd(' kept');
+fs.rmSync(draft('E2E Gone.md'));
+await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+check(
+  'a note taken away while something in it is unsaved keeps that in a note where it was',
+  (await onDiskSoon(() => Boolean(keptAside('E2E Gone')))) && fs.readFileSync(draft(keptAside('E2E Gone')), 'utf8') === '# Gone\n\nbase kept',
+);
+await shownSoon(page.locator('[data-toast="info"]', { hasText: 'kept in a note of its own' }));
+await clearToasts();
+
+// Deleted a moment after the last key: the bin has what was typed, and nothing fails after.
+await openNote('E2E Binned', 'Drafts/E2E Binned.md');
+await writeAtEnd(' last');
+await notesView.locator('[data-note-pane="Drafts/E2E Binned.md"] button[aria-label="More"]').click();
+await page.getByRole('menuitem', { name: 'Move to trash' }).click();
+const binned = () => (fs.existsSync(vaultNote('.trash')) ? fs.readdirSync(vaultNote('.trash')).find((name) => name.startsWith('E2E Binned')) : undefined);
+check(
+  'a note deleted a moment after the last key goes to the bin with what was typed, and nothing says a save failed',
+  (await onDiskSoon(() => Boolean(binned()) && !fs.existsSync(draft('E2E Binned.md')))) &&
+    fs.readFileSync(vaultNote(`.trash/${binned()}`), 'utf8') === '# Binned\n\nbase last' &&
+    (await shownSoon(page.locator('[data-toast="success"]', { hasText: 'in the trash' }))) &&
+    (await page.locator('[data-toast="error"]').count()) === 0,
+);
+// Taken back, so the bin is as the checks further on expect it: empty but for what they put in it.
+await page.locator('[data-toast="success"]', { hasText: 'in the trash' }).locator('[data-toast-action]').click();
+await onDiskSoon(() => fs.existsSync(draft('E2E Binned.md')));
+await clearToasts();
+
+// A note written on Windows, with \r\n: opened to write in, it is not saved; written in, it keeps them (desktop-ui-6).
+await holdChannel('notes:save');
+await openNote('E2E Windows', 'Drafts/E2E Windows.md');
+await notesView.locator('.cm-content').waitFor();
+const openedQuiet = await page.evaluate(
+  () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(document.querySelector('[data-note-saving]')?.getAttribute('data-note-saving'))))),
+);
+check(
+  'a Windows note opened to write in is not saved, nor said unsaved',
+  openedQuiet === 'saved' && (await callsOf('notes:save')) === 0 && fs.readFileSync(draft('E2E Windows.md'), 'utf8') === '# Windows\r\n\r\n- [ ] task\r\nline',
+);
+check('its task box is named in the window’s language', await shownSoon(notesView.locator('.cm-lp-task[aria-label="To do"]'), 3_000));
+await writeAtEnd('!');
+check(
+  'and written in, it is saved with \\r\\n on every line still',
+  await onDiskSoon(() => fs.readFileSync(draft('E2E Windows.md'), 'utf8') === '# Windows\r\n\r\n- [ ] task\r\nline!'),
+);
+const savesBefore = await callsOf('notes:save');
+await openNote('E2E Mixed', 'Drafts/E2E Mixed.md');
+await notesView.locator('.cm-content').waitFor();
+const mixedQuiet = await page.evaluate(
+  () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(document.querySelector('[data-note-saving]')?.getAttribute('data-note-saving'))))),
+);
+check(
+  'a note with both kinds of line break is left as it is until written in',
+  mixedQuiet === 'saved' && (await callsOf('notes:save')) === savesBefore && fs.readFileSync(draft('E2E Mixed.md'), 'utf8') === 'one\r\ntwo\nthree\n',
+);
+await releaseChannel('notes:save');
+
+// A name with a dotted or dotless I is the same name in the switcher and in an embed (desktop-ui-12).
+await page.keyboard.press('Control+o');
+await notesView.locator('[data-notes-switcher-input]').fill('istanbul gezisi');
+check(
+  'Ctrl+O does not offer to make a note the vault has under a dotted İ',
+  (await shownSoon(notesView.locator('[data-switch-at="0"]', { hasText: 'İstanbul Gezisi' }))) && (await notesView.locator('[data-switch-make]').count()) === 0,
+);
+await page.keyboard.press('Escape');
+await openNote('E2E Embeds', 'Drafts/E2E Embeds.md');
+await notesView.locator('[data-note-mode="read"]').click();
+check(
+  'and an embed finds the heading a link finds, Işık by ışık',
+  await shownSoon(notesView.locator('[data-note-embed="Drafts/İstanbul Gezisi.md"]', { hasText: 'Gün ışığı.' })),
+);
+const menuRoles = await app.evaluate(({ Menu }) => {
+  const roles = [];
+  const walk = (items) => {
+    for (const item of items) {
+      roles.push(String(item.role ?? '').toLowerCase());
+      if (item.submenu) walk(item.submenu.items);
+    }
+  };
+  walk(Menu.getApplicationMenu()?.items ?? []);
+  return roles;
+});
+check('the page cannot be reloaded from the menu, where a reload drops what a note holds unsaved', menuRoles.includes('zoomin') && !menuRoles.includes('reload') && !menuRoles.includes('forcereload'));
+// The folder these notes are in closed again, as the tree was: the drag further on reaches its folder without scrolling.
+if ((await notesView.locator('[data-tree-path="Drafts"]').getAttribute('aria-expanded')) === 'true') await notesView.locator('[data-tree-path="Drafts"]').click();
 /*
   The settings (src/ui/SettingsDialog.tsx): what is not a note or what a note
   shows is out of the tree until every kind is asked for, and a name's leading
@@ -459,6 +691,7 @@ check(
 );
 await page.locator('[data-settings-open]').click();
 check('the gear in the top bar opens the settings', await shownSoon(page.locator('[data-settings]')));
+check('its close button is named, for a screen reader', (await page.locator('[role="dialog"] header button[aria-label="Close"]').count()) === 1);
 check(
   'Cortex stays at the bottom right when the window is closed, unless told otherwise',
   (await page.locator('[data-settings-background]').getAttribute('aria-checked')) === 'true',
@@ -964,7 +1197,23 @@ const unexpected = consoleErrors.filter((text) => !text.includes('https://exampl
 check('the window logged no errors but the refusals asked for', unexpected.length === 0 && consoleErrors.length >= 2);
 if (unexpected.length) console.log(unexpected.map((e) => `       ${e}`).join('\n'));
 
+// Quit a moment after the last key: what was typed is saved before the window goes (electron/main.ts, desktop-ui-8).
+await page.locator('[data-app-view="notes"]').click();
+const notesAgain = page.locator('[data-notes-view]');
+await notesAgain.waitFor();
+await page.keyboard.press('Control+o');
+await notesAgain.locator('[data-notes-switcher-input]').fill('E2E Closing');
+await page.keyboard.press('Enter');
+const closingOpen = await shownSoon(notesAgain.locator('[data-note-pane="Drafts/E2E Closing.md"]'));
+if ((await notesAgain.locator('[data-note-mode="edit"]').getAttribute('aria-pressed')) !== 'true') await notesAgain.locator('[data-note-mode="edit"]').click();
+await notesAgain.locator('.cm-content').click();
+await page.keyboard.press('Control+End');
+await page.keyboard.type(' closed');
 await app.close();
+check(
+  'a note written a moment before Cortex quits is saved before the window goes',
+  closingOpen && fs.readFileSync(vaultNote('Drafts/E2E Closing.md'), 'utf8') === '# Closing\n\nStart closed',
+);
 fs.rmSync(userData, { recursive: true, force: true });
 fs.rmSync(vaultDir, { recursive: true, force: true });
 fs.rmSync(agentGateDir, { recursive: true, force: true });

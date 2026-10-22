@@ -29,6 +29,8 @@ export interface LiveHooks {
   open(link: { target: string; subpath: string | null; kind: 'wiki' | 'markdown' }, newTab: boolean): void;
   /** The pointer stopped on a drawn link, or left it: the note it finds is shown over the page (peek.tsx). */
   peek(link: { target: string; subpath: string | null; kind: 'wiki' | 'markdown' } | null, box?: DOMRect): void;
+  /** What a screen reader says of a task's box, in the window's language. */
+  taskLabel(done: boolean): string;
 }
 
 const IMAGE = /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i;
@@ -83,18 +85,22 @@ class Rule extends WidgetType {
 
 /** A task's box. A click ticks it in the text, at the marker it stands for, found again at the moment of the click. */
 class TaskBox extends WidgetType {
-  constructor(readonly checked: boolean) {
+  constructor(
+    readonly checked: boolean,
+    readonly label: string,
+  ) {
     super();
   }
   eq(other: TaskBox) {
-    return other.checked === this.checked;
+    return other.checked === this.checked && other.label === this.label;
   }
   toDOM(view: EditorView) {
     const box = document.createElement('input');
     box.type = 'checkbox';
     box.className = 'cm-lp-task';
     box.checked = this.checked;
-    box.setAttribute('aria-label', this.checked ? 'done' : 'to do');
+    // In the window's language: it was English in a Turkish window too (desktop-ui-13).
+    box.setAttribute('aria-label', this.label);
     box.addEventListener('mousedown', (event) => {
       event.preventDefault();
       const at = view.posAtDOM(box);
@@ -254,7 +260,7 @@ function build(view: EditorView, hooks: LiveHooks): DecorationSet {
             const touched = state.selection.ranges.some((range) => range.to >= node.from && range.from <= node.to);
             if (touched) return;
             const checked = /x/i.test(state.sliceDoc(node.from, node.to));
-            replace(node.from, node.to, new TaskBox(checked));
+            replace(node.from, node.to, new TaskBox(checked, hooks.taskLabel(checked)));
             return;
           }
           case 'Link':

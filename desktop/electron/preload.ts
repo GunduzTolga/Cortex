@@ -103,6 +103,12 @@ const api: CortexApi = {
     voiceHelper: (handler) => listen('setup:helper', handler),
     openSettings: (handler) => subscribe('app:openSettings', handler),
     askWake: (handler) => subscribe('app:askWake', handler),
+    flush: (handler) => {
+      // Answered whatever the save came to: the window waits for the answer, not for the save to succeed.
+      const listener = () => void handler().catch(() => undefined).finally(() => ipcRenderer.send('app:flushed'));
+      ipcRenderer.on('app:flush', listener);
+      return () => ipcRenderer.removeListener('app:flush', listener);
+    },
   },
 };
 

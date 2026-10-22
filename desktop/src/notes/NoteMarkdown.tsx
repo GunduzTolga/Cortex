@@ -18,7 +18,7 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
-import { baseName, noteTitle, parseNote, splitProperties, type NoteProperty } from '../../core/vaultNotes';
+import { baseName, noteTitle, parseNote, pathKey, splitProperties, type NoteProperty } from '../../core/vaultNotes';
 import { useT } from '../i18n/useT';
 import type { Key } from '../i18n';
 import { useApp } from '../store/app';
@@ -160,8 +160,9 @@ export function sectionOf(text: string, subpath: string | null): { source: strin
     while (from > facts.bodyLine && lines[from - 1].trim() !== '' && !/^\s*([-*+]|\d+\.)\s/.test(lines[from])) from -= 1;
     return { source: lines.slice(from, block.line + 1).join('\n').replace(/\s\^[A-Za-z0-9-]+\s*$/, ''), offset: from };
   }
-  const wanted = subpath.split('#').pop()!.trim().toLowerCase();
-  const at = facts.headings.findIndex((one) => one.text.toLowerCase() === wanted);
+  // Folded as a link's click finds the heading (NotePane.tsx, `lineOfSubpath`): `Işık` is `ışık` in any locale (core/titles.ts).
+  const wanted = pathKey(subpath.split('#').pop()!);
+  const at = facts.headings.findIndex((one) => pathKey(one.text) === wanted);
   if (at < 0) return null;
   const heading = facts.headings[at];
   const next = facts.headings.slice(at + 1).find((one) => one.level <= heading.level);

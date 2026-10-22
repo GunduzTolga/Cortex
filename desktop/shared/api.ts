@@ -112,5 +112,7 @@ export interface CortexApi {
     openSettings(handler: () => void): () => void;
     /** The notification-area icon's "listen all the time", asked of a person who has not allowed it yet: the window asks. */
     askWake(handler: () => void): () => void;
+    /** The window is going for good: what the page holds unsaved is saved, and the main process told once it is (electron/main.ts). */
+    flush(handler: () => Promise<void>): () => void;
   };
 }

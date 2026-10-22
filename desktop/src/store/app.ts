@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { BootstrapPayload, VaultStatus, WindowSettings } from '@shared/api';
 import { messageOf } from '@shared/ipcError';
 import { turkishOf } from '@shared/refusalsTr';
+import { leaveOpenNotes } from '../notes/openNotes';
 import { useSaved } from './saved';
 
 /**
@@ -92,6 +93,12 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   async chooseVault(failed) {
+    /*
+      The note open on screen is saved first, in the vault it was read from:
+      once another is chosen, a note's path is read in that one, and a save
+      still to come would go there (src/notes/openNotes.ts).
+    */
+    await leaveOpenNotes();
     try {
       const status = await window.cortex.vault.choose();
       if (status) set((state) => ({ vault: status, vaultSeq: state.vaultSeq + 1 }));

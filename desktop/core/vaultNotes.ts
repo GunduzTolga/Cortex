@@ -607,6 +607,27 @@ export function freeName(base: string, taken: Iterable<string>): string {
   for (let n = 1; ; n += 1) if (!keys.has(pathKey(`${base} ${n}`))) return `${base} ${n}`;
 }
 
+/**
+ * The name a note's text is kept under when it could not be saved over the
+ * note (src/notes/NotePane.tsx): `Plan (çakışma 2026-10-22 14.32)`, as sync
+ * tools name a conflicted copy. Always a name a note can have (`nameProblem`):
+ * the time is written with a dot, as Windows takes no `:` in a name, and what
+ * the note's own name holds that a new one may not - a `#` an older tool let
+ * through, say - is left out, the whole cut to fit.
+ */
+export function conflictName(title: string, word: string, at: Date): string {
+  const two = (n: number) => String(n).padStart(2, '0');
+  const tail = ` (${word} ${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} ${two(at.getHours())}.${two(at.getMinutes())})`;
+  const head = title
+    .replace(/[\\/:*?"<>|#^[\]\u0000-\u001f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s.]+/, '')
+    // Room left for the ` 2` a name already taken is given (`freeName`).
+    .slice(0, 180 - tail.length - 4)
+    .trim();
+  return `${head || word}${tail}`;
+}
+
 /* ------------------------------------------------------------------ */
 /* Search and the quick switcher                                       */
 /* ------------------------------------------------------------------ */
