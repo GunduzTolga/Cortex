@@ -354,10 +354,21 @@ class SetupTest(unittest.TestCase):
     def test_a_model_being_fetched_is_said_as_it_comes_not_one_line_for_minutes(self):
         progress = Path(self.tmp.name) / ses.PROGRESS_FILE
         said = []
-        with ses.relayed_progress(progress, said.append, every=0.02):
-            for done in (0, 120, 242, 242, 484):
+
+        def heard(line, wait=5.0):
+            # Each value is waited for, not a fixed sleep: a slow machine's watcher reads late.
+            deadline = time.monotonic() + wait
+            while line not in said and time.monotonic() < deadline:
+                time.sleep(0.01)
+            return line in said
+        with ses.relayed_progress(progress, said.append, every=0.01):
+            for done, line in ((0, '  %0 (0 / 484 MB)'), (120, '  %24 (120 / 484 MB)'), (242, '  %50 (242 / 484 MB)')):
                 progress.write_text(json.dumps({'mb': done, 'toplam': 484}), encoding='utf-8')
-                time.sleep(0.08)
+                self.assertTrue(heard(line), line)
+            progress.write_text(json.dumps({'mb': 243, 'toplam': 484}), encoding='utf-8')  # still 50%
+            time.sleep(0.1)
+            progress.write_text(json.dumps({'mb': 484, 'toplam': 484}), encoding='utf-8')
+            self.assertTrue(heard('  %100 (484 / 484 MB)'))
         self.assertEqual(said, ['  %0 (0 / 484 MB)', '  %24 (120 / 484 MB)', '  %50 (242 / 484 MB)', '  %100 (484 / 484 MB)'], 'each new percent once')
         progress.write_text('{', encoding='utf-8')
         with ses.relayed_progress(progress, said.append, every=0.02):
@@ -1570,15 +1581,22 @@ class ServeTest(unittest.TestCase):
         blobs = hub / 'hub' / 'models--Systran--faster-whisper-small' / 'blobs'
         reported = []
 
+        def counted(seen, wait=5.0):
+            # Waited for, not slept: a slow machine's watcher counts late.
+            deadline = time.monotonic() + wait
+            while seen not in reported and time.monotonic() < deadline:
+                time.sleep(0.01)
+
         def download_model(name):
             blobs.mkdir(parents=True, exist_ok=True)
             (blobs / 'a.incomplete').write_bytes(b'x' * 300)
-            time.sleep(1.3)
+            counted((300, 500))
             (blobs / 'a.incomplete').write_bytes(b'x' * 600)
-            time.sleep(1.2)
+            counted((500, 500))
             return str(hub / 'snapshot')
         utils = types.SimpleNamespace(_MODELS={'small': 'Systran/faster-whisper-small'}, download_model=download_model)
         self.helper._model_size = lambda repo, name: 500
+        self.helper.FETCH_EVERY = 0.01
         with mock.patch.dict(sys.modules, {'faster_whisper': types.SimpleNamespace(utils=utils), 'faster_whisper.utils': utils}), \
                 mock.patch.dict(os.environ, {'HF_HOME': str(hub)}):
             path = self.helper._fetch('small', lambda done, total: reported.append((done, total)))

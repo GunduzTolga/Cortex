@@ -1281,6 +1281,9 @@ def _model_size(repo, name):
     return int(ses.DOWNLOAD_GB.get(name, 1.0) * 1e9)
 
 
+FETCH_EVERY = 1.0
+
+
 def _fetch(name, report):
     """A model fetched once, with how far it has come said every second (`report(done, total)`, bytes):
     a first download is hundreds of megabytes, and the person sees it come, not a silence."""
@@ -1291,7 +1294,7 @@ def _fetch(name, report):
     done = threading.Event()
 
     def watch():
-        while not done.wait(1.0):
+        while not done.wait(FETCH_EVERY):
             try:
                 size = sum(one.stat().st_size for one in folder.rglob('*') if one.is_file() and not one.is_symlink())
             except OSError:
