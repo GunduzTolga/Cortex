@@ -206,11 +206,11 @@ Kendin derlemek ve ayrıntılar için: [desktop/README.md](desktop/README.md).
 
 ## Yakala: tek tuşla beyne at
 
-Gördüğün sayfayı, videoyu, tweet'i, makaleyi ya da dosyayı aynı `Ctrl+Alt+C` penceresiyle yakala. Kart `📥 000-Inbox/Yakala/`'ya düşer. Sonra asistanına **"yakalananları işle"** de: motor metni çıkarır, asistan derslerini `knowledge/` notlarına bağlar ve kartı kapatır. Aynı sayfayı ya da videoyu yeniden yakalarsan yeni kart açılmaz, eskisine eklenir.
+Gördüğün sayfayı, videoyu, tweet'i, makaleyi ya da dosyayı aynı `Ctrl+Alt+C` penceresiyle yakala. Kart `📥 000-Inbox/Yakala/`'ya düşer. Sonra asistanına **"yakalananları işle"** de: motor metni çıkarır, asistan derslerini `knowledge/` notlarına bağlar ve kartı kapatır. Aynı sayfayı ya da videoyu yeniden yakalarsan yeni kart açılmaz, eskisine eklenir; kart daha önce işlendiyse yeni isteğin için yeniden sıraya girer.
 
 - **Tarayıcıdaki sayfa:** Windows'ta Chrome, Edge, Brave, Vivaldi, Opera ya da Chromium; macOS'ta Chrome, Arc, Brave, Edge ya da Safari öndeyken kısayola basarsan açık sayfanın bağlantısı gelir. Pencerede **Bu sayfayı nota bağla** işaretlidir; `Alt+S` ile kaldırırsan not düz not olarak kaydedilir. Firefox'un adresi okunamaz.
 - **Ekran görüntüsü (Windows):** `Win+Shift+S` ile alan seç, sonra kısayola bas; görüntü küçük resmiyle nota eklenir. Son 10 dakikada alınmışsa işaretli gelir, daha eskiyse `Tab` ile eklenir.
-- **Pano:** yalnız son kayıttan sonra kopyaladığın metin nota işaretli gelir. Daha önce kopyalanmış metin (saatler önceki bir parola gibi) **Panodaki metni de ekle** seçeneği olarak durur, `Tab` ile eklenir.
+- **Pano (Windows):** son beş dakikada kopyaladığın ve henüz kaydetmediğin metin ya da bağlantı nota işaretli gelir. Daha eski bir kopya (saatler önceki bir parola gibi) pencerede görünür ama `Tab` ile eklemeden nota girmez. "Pyn, not al" ile açılan pencere panodan hiçbir şeyi kendiliğinden almaz.
 - **YouTube:** döküm videoda konuşulan dilde alınır. Bunun için bilgisayarda `yt-dlp` olmalıdır; altyazı yoksa ses yalnız yerelde bir Whisper komutuyla yazıya dökülür. Bu araçlar yoksa kart başlık ve açıklamayla kalır. Hangi araçların kurulu olduğunu `beyin.py yakala durum` söyler.
 - **Dosyalar:** Windows'ta dosyaya sağ tık → Gönder → **Beyne At**; macOS'ta Finder'da dosyayı seçip kısayola bas.
 - **Tarayıcı eklentisi:** Obsidian Web Clipper'ın **"Beyne at"** şablonu; giriş isteyen sayfalar da yakalanır.
