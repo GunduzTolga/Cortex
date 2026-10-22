@@ -39,6 +39,9 @@ const vaultNote = (relative) => path.join(vaultDir, ...relative.split('/'));
 // The engine package the app came with, stood in for: the settings offer it, the run never installs it.
 const enginePackages = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-paket-'));
 fs.writeFileSync(path.join(enginePackages, 'beyin-v3-9.9.9.zip'), '');
+// Where the chat's stand-in waits before it asks leave, for a message with "kapı" (tests/fixtures/fake-acp-agent.mjs): the run opens it from another view.
+const agentGateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-gate-'));
+const agentGate = path.join(agentGateDir, 'open');
 /*
   Claude Code as installed, stood in for on the app's PATH: it says only that its sign-in is kept
   (`claude auth status --json`). The first-run screen lists the tools installed; without it the
@@ -142,6 +145,7 @@ const launch = () =>
       CORTEX_TEST_AGENT: path.resolve('tests/fixtures/fake-acp-agent.mjs'),
       CORTEX_TEST_CLAUDE: path.resolve('tests/fixtures/fake-claude.mjs'),
       CORTEX_TEST_CODEX: path.resolve('tests/fixtures/fake-codex.mjs'),
+      FAKE_AGENT_GATE: agentGate,
       // The model servers: LM Studio's stand-in, and Ollama where nothing answers; never the machine's own.
       CORTEX_TEST_LMSTUDIO: lmStudioBase,
       CORTEX_TEST_OLLAMA: 'http://127.0.0.1:9',
@@ -676,6 +680,61 @@ await shoot('11-permission.png');
 await page.locator('[data-chat-answer-option="allow_once"]').click();
 check('and the answer reaches the CLI', await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: once' })));
 await page.locator('[data-chat-send]').waitFor();
+/*
+  The card and the keyboard (src/chat/permissionKey.ts). Asked while the person
+  is in the notes - the stand-in holds its question until the gate opens - the
+  card is said by a notice and a mark on Pyn's tab; Enter typed in a note writes
+  a line and answers nothing; the notice leads back; Enter on "Reject" rejects.
+  Had the note's Enter answered, the stand-in would have said "once".
+*/
+const waitingNotice = page.locator('[data-toast="info"]', { hasText: 'Pyn is waiting for you' });
+await page.locator('[data-chat-input]').fill('izin iste, kapıda bekle');
+await page.keyboard.press('Enter');
+await page.locator('[data-chat-stop]').waitFor();
+await page.locator('[data-app-view="notes"]').click();
+fs.writeFileSync(agentGate, '');
+check(
+  'a step asked while the chat is not in front is said by a notice and a mark on Pyn’s tab',
+  (await shownSoon(waitingNotice)) && (await shownSoon(page.locator('[data-app-view="pyn"] [data-app-view-waiting]'))),
+);
+await shoot('11b-waiting.png');
+await notesView.locator('[data-tree-path="Untitled.md"]').click();
+await notesView.locator('[data-note-mode="edit"]').click();
+await notesView.locator('.cm-content').click();
+await page.keyboard.press('Control+End');
+const enterInNote = await page.evaluate(() => Boolean(document.activeElement?.closest('.cm-content')));
+await page.keyboard.press('Enter');
+await notesView.locator('[data-note-mode="read"]').click();
+// An Enter that had answered would have taken the notice and the card with it: then the run goes on to say so, not stop.
+await waitingNotice
+  .locator('[data-toast-action]')
+  .click({ timeout: 5_000 })
+  .catch(() => page.locator('[data-app-view="pyn"]').click());
+check(
+  'and the notice leads back to the chat and its card, and goes; the chat is marked in the list',
+  (await page.locator('[data-app-view="pyn"]').getAttribute('aria-pressed')) === 'true' &&
+    (await shownSoon(page.locator('[data-chat-permission]'), 3_000)) &&
+    (await waitingNotice.count()) === 0 &&
+    (await page.locator('[data-chat-item] [data-chat-waiting]').count()) === 1,
+);
+if (await page.locator('[data-chat-permission]').count()) {
+  await page.locator('[data-chat-answer-option="reject_once"]').focus();
+  await page.keyboard.press('Enter');
+}
+check(
+  'Enter in a note answered nothing, and Enter on “Reject” rejects',
+  enterInNote && (await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: reject' }))) && (await page.locator('[data-chat-text]', { hasText: 'izin: once' }).count()) === 1,
+);
+check('the mark on Pyn’s tab goes with the card', await page.locator('[data-app-view-waiting]').waitFor({ state: 'detached', timeout: 5_000 }).then(() => true, () => false));
+await page.locator('[data-chat-send]').waitFor();
+// With the chat in front and nothing focused, Enter is "once", as the card says.
+await page.locator('[data-chat-input]').fill('izin iste');
+await page.keyboard.press('Enter');
+await page.locator('[data-chat-permission]').waitFor();
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press('Enter');
+check('with the chat in front and nothing focused, Enter allows once', await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: once' }).nth(1)));
+await page.locator('[data-chat-send]').waitFor();
 await page.locator('[data-chat-input]').fill('yavaş olsun');
 await page.keyboard.press('Enter');
 await page.locator('[data-chat-stop]').click();
@@ -718,6 +777,12 @@ await page.locator('[data-chat-text] .kg-wikilink', { hasText: 'Ideas' }).first(
 check(
   'a note an answer links to opens beside the chat, and the chat stays',
   (await shownSoon(page.locator('[data-chat-side-note="Personal/Ideas.md"]'))) && (await page.locator('[data-app-view="pyn"]').getAttribute('aria-pressed')) === 'true',
+);
+// Changed on disk with the chat in front, as the AI writes a note: read again beside the chat, the notes never opened.
+fs.appendFileSync(vaultNote('Personal/Ideas.md'), '\nPyn added this line.\n');
+check(
+  'a note changed on disk is read again beside the chat, with the notes not in front',
+  await shownSoon(page.locator('[data-chat-side-note="Personal/Ideas.md"]', { hasText: 'Pyn added this line.' })),
 );
 await page.locator('[data-chat-side-back]').click();
 check('the panel lists the notes the chat touched', await shownSoon(page.locator('[data-chat-side-item="Personal/Ideas.md"]')));
@@ -885,6 +950,7 @@ if (unexpected.length) console.log(unexpected.map((e) => `       ${e}`).join('\n
 await app.close();
 fs.rmSync(userData, { recursive: true, force: true });
 fs.rmSync(vaultDir, { recursive: true, force: true });
+fs.rmSync(agentGateDir, { recursive: true, force: true });
 
 console.log(`\n${failures.length ? `${failures.length} check(s) failed` : 'All smoke checks passed'}`);
 process.exit(failures.length ? 1 : 0);

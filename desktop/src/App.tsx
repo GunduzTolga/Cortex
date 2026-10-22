@@ -5,6 +5,7 @@ import type { Key } from './i18n';
 import { useT } from './i18n/useT';
 import { AuthDialog } from './chat/AuthDialog';
 import { ChatView } from './chat/ChatView';
+import { useChat, waitingChats } from './chat/chatStore';
 import { NotesView } from './notes/NotesView';
 import { GraphView } from './notes/GraphView';
 import { OfficeView } from './office/OfficeView';
@@ -145,6 +146,34 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
     return () => window.removeEventListener('focus', back);
   }, []);
 
+  /*
+    The vault's notes are read again here, whichever view is in front: when they
+    change on disk, when the window comes back (where the platform cannot watch
+    the vault), and when a turn of Pyn's ends (it may have written some). Only
+    the notes screen did, and only while it was in front, so the chat's panel,
+    the links in its answers, the graph and the office showed the vault as it
+    was until the notes were opened (desktop-ui-7). The index is built again
+    only for what changed (electron/services/vaultNotes.ts), so this is cheap.
+  */
+  useEffect(() => {
+    if (missing) return;
+    const again = () => void useNotes.getState().refresh();
+    const stop = window.cortex.on.notesChanged(again);
+    window.addEventListener('focus', again);
+    return () => {
+      stop();
+      window.removeEventListener('focus', again);
+    };
+  }, [missing]);
+  const turnsEnded = useChat((s) => s.turnsEnded);
+  useEffect(() => {
+    if (turnsEnded && !missing) void useNotes.getState().refresh();
+    // A turn ended, not the vault found again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turnsEnded]);
+  // Pyn waiting on the person for a step, seen from any view: a mark on its tab (src/chat/ChatView.tsx says it once more).
+  const waiting = useChat((s) => Object.keys(waitingChats(s.open)).length > 0);
+
   // Ctrl+, opens the settings, as in most desktop apps.
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -181,6 +210,9 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
           >
             {icon}
             {t(words)}
+            {one === 'pyn' && waiting ? (
+              <span className="h-2 w-2 shrink-0 rounded-full border border-darkDelegation bg-gold" title={t('chat.waiting.badge')} aria-label={t('chat.waiting.badge')} role="img" data-app-view-waiting />
+            ) : null}
           </button>
         ))}
         <div className="ml-auto flex min-w-0 items-center gap-3">

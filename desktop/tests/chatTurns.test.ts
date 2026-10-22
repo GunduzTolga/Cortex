@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import test from 'node:test';
 import type { ChatEvent } from '../shared/chat';
-import { notesOf, optionOf, turnsOf, usageOf, waitingOn } from '../src/chat/turns';
+import { linksOf, notesOf, optionOf, turnsOf, usageOf, waitingIn, waitingOn } from '../src/chat/turns';
 
 /**
  * A chat's events as the screen reads them (src/chat/turns.ts): a turn per
@@ -95,4 +95,43 @@ test('the notes a chat touched: read and changed by its steps, named in its answ
     { path: 'Other.md', read: false, edited: false, mentioned: true },
     { path: 'Notes/Plan.md', read: true, edited: false, mentioned: true },
   ]);
+});
+
+test('the card a chat waits on is found from its last turn alone, the same card the turns find', () => {
+  const asked = (id: string): ChatEvent => ({ type: 'permission', id, title: `edit ${id}`, kind: 'edit', paths: [], options: [{ id: 'once', name: 'Once', kind: 'allow_once' }] });
+  const runs: ChatEvent[][] = [
+    events,
+    [...events, { type: 'answered', id: 'p1', option: 'once' }],
+    [...events, { type: 'answered', id: 'p1', option: null }],
+    // Two cards in one turn, the first answered: the second waits.
+    [{ type: 'user', text: 'iki', at: 1 }, asked('a'), { type: 'answered', id: 'a', option: 'once' }, asked('b')],
+    // Two waiting at once: the first, as the card shows it.
+    [{ type: 'user', text: 'iki', at: 1 }, asked('a'), asked('b')],
+    // A card of an earlier turn left unanswered does not wait now.
+    [{ type: 'user', text: 'bir', at: 1 }, asked('old'), { type: 'done', reason: 'cancelled' }, { type: 'user', text: 'yeni', at: 2 }, { type: 'text', id: 'm', text: 'tamam' }],
+    // Before the person wrote anything: the chat's first turn.
+    [asked('first')],
+    [],
+  ];
+  for (const run of runs) assert.equal(waitingIn(run)?.id ?? null, waitingOn(turnsOf(run))?.id ?? null, JSON.stringify(run.map((one) => one.type)));
+  assert.equal(waitingIn(runs[3])?.id, 'b');
+  assert.equal(waitingIn(runs[4])?.id, 'a');
+  assert.equal(waitingIn(runs[5]), null);
+});
+
+test('an ended answer’s links are read once and kept by its words; the answer still coming is read anew each time', () => {
+  const ended = turnsOf([
+    { type: 'user', text: 'bak', at: 1 },
+    { type: 'text', id: 'm', text: 'Şuna bak: [[Plan]] ve [öteki](Other.md).' },
+    { type: 'done', reason: 'end_turn' },
+  ])[0];
+  const first = linksOf(ended);
+  assert.deepEqual(first.map((one) => one.target), ['Plan', 'Other.md']);
+  assert.equal(linksOf(ended), first, 'kept: the same list, not parsed again');
+  // Another reading of the same chat - every frame makes new turns - finds it by the words.
+  assert.equal(linksOf({ ...ended }), first);
+  const coming = { ...ended, end: null, text: 'Yazıyorum: [[Pl' };
+  assert.deepEqual(linksOf(coming), []);
+  assert.notEqual(linksOf(coming), linksOf(coming), 'not kept while it is still being written');
+  assert.deepEqual(linksOf({ ...coming, text: 'Yazıyorum: [[Plan]]' }).map((one) => one.target), ['Plan'], 'and read as it grows');
 });

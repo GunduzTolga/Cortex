@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Brain, Check, ChevronRight, FileText, Globe, Info, ListChecks, PencilLine, Search, Terminal, Wrench, X } from 'lucide-react';
 // The small face: drawn for 24-32 px. While Pyn is still writing, the thinking one.
 import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz-kucuk.svg';
@@ -96,6 +96,19 @@ const ERRORS: Record<string, Key> = {
   'local-off': 'chat.error.localOff',
 };
 
+/*
+  An answer's words, drawn again only when they change. Each streamed piece
+  reads the chat into new turns, and every answer of it was parsed and drawn
+  again from its Markdown: about 180 ms a frame at forty answers, so typing,
+  scrolling and switching views stuttered while Pyn wrote (desktop-ui-4). The
+  words are a string, compared by value, so an answer that did not change is
+  left as it is; only the one still coming is drawn again. Its links still
+  follow the notes' index (NoteMarkdown.tsx reads it itself).
+*/
+const AnswerText = memo(function AnswerText({ text }: { text: string }) {
+  return <NoteMarkdown path="" source={text} offset={0} />;
+});
+
 function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?: () => void }) {
   const t = useT();
   const language = useLanguage();
@@ -142,7 +155,7 @@ function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?
         ) : null}
         {turn.text ? (
           <div className="kg-chat text-[14px]" data-chat-text>
-            <NoteMarkdown path="" source={turn.text} offset={0} />
+            <AnswerText text={turn.text} />
           </div>
         ) : working && !turn.thought && !turn.steps.length ? (
           <p className="flex items-center gap-2 text-[12.5px] text-zinc-400" data-chat-working>

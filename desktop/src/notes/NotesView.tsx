@@ -65,17 +65,9 @@ export function NotesView({ visible, onGraph }: { visible: boolean; onGraph: () 
   const [switching, setSwitching] = useState(false);
   const makers = useMakers();
 
-  // Read when first shown, whenever the vault changes on disk, and when the window comes back (where the platform cannot watch the vault).
+  // Read whenever shown. A change on disk and the window coming back are read again by the vault's screen, in every view (App.tsx).
   useEffect(() => {
-    if (!visible) return;
-    void useNotes.getState().refresh();
-    const changed = window.cortex.on.notesChanged(() => void useNotes.getState().refresh());
-    const back = () => void useNotes.getState().refresh();
-    window.addEventListener('focus', back);
-    return () => {
-      changed();
-      window.removeEventListener('focus', back);
-    };
+    if (visible) void useNotes.getState().refresh();
   }, [visible]);
 
   useEffect(() => {

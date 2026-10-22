@@ -42,7 +42,8 @@ interface AppState {
   /** The system's dialog; the vault chosen, or the reason it could not be, said in a toast. */
   chooseVault(failed: string): Promise<void>;
   refreshVault(): Promise<void>;
-  toast(toast: Omit<Toast, 'id'>): void;
+  /** Returns the toast's id, for one that goes when what it says is over (dismissToast). */
+  toast(toast: Omit<Toast, 'id'>): string;
   dismissToast(id: string): void;
 }
 
@@ -114,6 +115,7 @@ export const useApp = create<AppState>((set, get) => ({
     const detail = toast.detail && get().settings.language !== 'en' ? turkishOf(toast.detail) : toast.detail;
     set((state) => ({ toasts: [...state.toasts, { ...toast, detail, id }] }));
     if (!toast.sticky) setTimeout(() => get().dismissToast(id), toast.tone === 'error' ? 9000 : 4500);
+    return id;
   },
 
   dismissToast(id) {

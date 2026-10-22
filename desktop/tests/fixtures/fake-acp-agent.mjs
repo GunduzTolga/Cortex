@@ -6,7 +6,9 @@
 // does, "yetkisiz" as an agent not signed in does by the protocol's code
 // alone, "çök" dies. With FAKE_ACP_HANG_INIT set it never answers
 // `initialize`, with FAKE_ACP_FAIL_INIT it refuses it. Every method it is sent
-// is written to FAKE_AGENT_LOG, when set, as one JSON line.
+// is written to FAKE_AGENT_LOG, when set, as one JSON line. With FAKE_AGENT_GATE
+// set, "kapı" holds the leave it asks until a file is at that path (and takes
+// it away): the end-to-end run asks while the person is in another view.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -58,6 +60,11 @@ async function prompt(id, params) {
   update(sessionId, { sessionUpdate: 'tool_call', toolCallId: 'call-1', name: 'read', title: 'read', kind: 'read', status: 'pending', locations: [], rawInput: {} });
   update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: 'call-1', status: 'completed', locations: [{ path: note }, { path: outside }], content: [{ type: 'content', content: { type: 'text', text: `Read file ${note}` } }] });
   if (text.includes('izin')) {
+    const gate = process.env.FAKE_AGENT_GATE;
+    if (gate && text.includes('kapı')) {
+      while (!fs.existsSync(gate)) await sleep(20);
+      fs.rmSync(gate, { force: true });
+    }
     const answer = await ask('session/request_permission', {
       sessionId,
       toolCall: { toolCallId: 'call-2', title: `edit ${note}`, kind: 'edit', locations: [{ path: note }] },
