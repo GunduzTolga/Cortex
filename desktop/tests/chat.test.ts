@@ -114,7 +114,7 @@ test('what a CLI says is made safe to show: the vault taken off every path, home
   assert.equal(shownPath(vault, path.join(home, 'secret.txt')), '…/secret.txt');
   assert.equal(shownPath(vault, path.join(vault, '..', 'Other', 'x.md')), '…/x.md', 'climbing out is outside');
   // A folder beside the vault whose name begins as its does is not the vault; the vault at a sentence's end is.
-  assert.equal(scrub(`${vault}2${path.sep}x.md`), `~${path.sep}Pyn2${path.sep}x.md`);
+  assert.equal(scrub(`${vault}2${path.sep}x.md`), process.platform === 'win32' ? '~\\Documents\\Pyn2\\x.md' : '~/Pyn2/x.md');
   assert.equal(scrub(`Working in ${vault}.`), 'Working in .');
   // A vault at a drive's root - a USB stick, D:\ - is a place that ends with its separator: what follows it is in it.
   const drive = scrubberFor('D:\\', home);
