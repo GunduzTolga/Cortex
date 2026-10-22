@@ -44,6 +44,28 @@ test('a key is kept encrypted, never as written; it becomes its tool’s environ
   assert.equal(hasKey('gemini', { GEMINI_API_KEY: 'theirs' }), true, 'a key already in the person’s environment counts');
 });
 
+test('a keys file Windows says is busy is not written over: a new key never takes the other tools’ keys with it', () => {
+  const file = path.join(app.getPath('userData'), 'keys.json');
+  saveKey('qwen', 'sk-qwen', undefined);
+  const before = fs.readFileSync(file, 'utf8');
+  const read = fs.readFileSync;
+  // A scanner holding the file just written: the read fails, as Windows fails it.
+  (fs as { readFileSync: typeof fs.readFileSync }).readFileSync = ((target: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    if (target === file) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    return (read as (...args: unknown[]) => unknown)(target, ...rest);
+  }) as typeof fs.readFileSync;
+  try {
+    assert.throws(() => saveKey('gemini', 'AIza-new', undefined), /could not be read just now/);
+    assert.throws(() => forgetKey('qwen'), /could not be read just now/);
+    assert.deepEqual(keyEnv('qwen'), {}, 'a reader takes it as none for now, and starts the tool without');
+  } finally {
+    (fs as { readFileSync: typeof fs.readFileSync }).readFileSync = read;
+  }
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'the file as it was');
+  assert.deepEqual(keyEnv('qwen'), { OPENAI_API_KEY: 'sk-qwen' });
+  forgetKey('qwen');
+});
+
 test('with no tool installed, each is said to be missing and nothing is offered; a sign-in or a key for one is refused', async () => {
   const before = process.env.PATH;
   process.env.PATH = '';

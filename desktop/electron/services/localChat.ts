@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -6,7 +6,7 @@ import { app } from 'electron';
 import type { ConfigOption } from '../../shared/chat';
 import { childEnv } from './acp';
 import { type Backend, Stopped, type Turn, TurnFailure, scrubberFor, unlessStopped } from './chatKit';
-import { onPathFile } from './clis';
+import { onPathFile, onPathFiles } from './clis';
 import { writeWhole } from './fileWrite';
 import { captureToInbox } from './inbox';
 import { LOCAL, type LocalId, type LocalModels, baseOf, findLocal, localModel } from './localModels';
@@ -125,26 +125,167 @@ function saveSession(session: Session): void {
   }
 }
 
+/** How a Python is started: its program, and what comes before the script (`py -3`). */
+export interface PythonLaunch {
+  command: string;
+  args: string[];
+}
+
+/** The oldest Python the vault's engine runs on: its package's `min_python` (scripts/build_v3_release.py). */
+export const PYTHON_MIN = [3, 11] as const;
+/** How long a Python is given to say its version: a first start under a virus scan takes seconds, and a slow answer is not a wrong one. */
+const PROBE_TIMEOUT = 15_000;
+/** A Python found wanting is asked again after this long: one installed meanwhile (python.org, winget, the app's own) is then seen. */
+const RECHECK_AFTER = 30_000;
+
+/** What a Python said when asked its version: fit for the engine, or not - too old, or not running at all - and when. */
+type Verdict = { fit: true; version: string } | { fit: false; version: string | null; at: number };
+const verdicts = new Map<string, Verdict>();
+const asking = new Map<string, Promise<string | null | undefined>>();
+const keyOf = (one: PythonLaunch) => [one.command, ...one.args].join('\0');
+
 /**
- * Python as the vault's engine is run: BEYIN_PYTHON where it is set, else Windows' `py -3`, else a `python3` on the PATH.
- * Never the Store's stand-in, which opens the Store. On Windows, where python.org's installer puts a Python for this user
- * too: the one the first-run screen installs is found at once, without the PATH this process started with knowing it.
+ * Every Python the vault's engine could be run by on this machine, the one preferred first: Windows' `py -3` (the newest
+ * Python it knows), a `python.exe` on the PATH, then where python.org's installer puts one for this user - the one the
+ * first-run screen installs is found at once, without the PATH this process started with knowing it; elsewhere `python3`.
+ * Never the Store's stand-in, which opens the Store. Found by name only: whether one runs, and is new enough, is
+ * `usablePython`'s to ask.
  */
-export function pythonOf(env: NodeJS.ProcessEnv = process.env): { command: string; args: string[] } | null {
-  if (env.BEYIN_PYTHON) return { command: env.BEYIN_PYTHON, args: [] };
+export function pythonCandidates(env: NodeJS.ProcessEnv = process.env): PythonLaunch[] {
+  const found: PythonLaunch[] = [];
+  const add = (command: string, args: string[] = []) => {
+    if (!found.some((one) => keyOf(one) === keyOf({ command, args }))) found.push({ command, args });
+  };
   if (process.platform === 'win32') {
     const launcher = onPathFile(['py.exe'], env);
-    if (launcher) return { command: launcher, args: ['-3'] };
-    const python = onPathFile(['python.exe'], env, (file) => !/\\WindowsApps\\/i.test(file));
-    if (python) return { command: python, args: [] };
+    if (launcher) add(launcher, ['-3']);
+    for (const python of onPathFiles(['python.exe'], env, (file) => !/\\WindowsApps\\/i.test(file))) add(python);
     const own = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'Programs', 'Python') : null;
-    if (!own) return null;
-    if (fs.existsSync(path.join(own, 'Launcher', 'py.exe'))) return { command: path.join(own, 'Launcher', 'py.exe'), args: ['-3'] };
-    const installed = ['Python313', 'Python312', 'Python311'].map((name) => path.join(own, name, 'python.exe')).find((file) => fs.existsSync(file));
-    return installed ? { command: installed, args: [] } : null;
+    if (own) {
+      if (fs.existsSync(path.join(own, 'Launcher', 'py.exe'))) add(path.join(own, 'Launcher', 'py.exe'), ['-3']);
+      for (const name of ['Python313', 'Python312', 'Python311']) {
+        const file = path.join(own, name, 'python.exe');
+        if (fs.existsSync(file)) add(file);
+      }
+    }
+    return found;
   }
-  const python = onPathFile(['python3', 'python'], env);
-  return python ? { command: python, args: [] } : null;
+  // A Mac's own python3 is 3.9: a newer one later on the PATH, or under its versioned name, is the one.
+  for (const python of onPathFiles(['python3', 'python', 'python3.13', 'python3.12', 'python3.11'], env)) add(python);
+  return found;
+}
+
+/**
+ * Python as the vault's engine is run: BEYIN_PYTHON where it is set, else the first of this machine's Pythons not found
+ * wanting. Found by name, the way it was before it is asked (`usablePython`): the status at the app's start asks, and from
+ * then on a `py` launcher left behind with no Python, or a Python 3.10, is passed over here too - Telegram, the inbox and
+ * the chat's memory run on the one the setup found fit.
+ */
+export function pythonOf(env: NodeJS.ProcessEnv = process.env): PythonLaunch | null {
+  if (env.BEYIN_PYTHON) return { command: env.BEYIN_PYTHON, args: [] };
+  return pythonCandidates(env).find((one) => verdicts.get(keyOf(one))?.fit !== false) ?? null;
+}
+
+/**
+ * What a Python says it is ("3.12"): null when it does not start, fails (a `py` launcher with no Python behind it says
+ * "No suitable Python runtime found" and exits) or says something else; undefined when it did not answer in time. Its
+ * input is closed, so a launcher that would ask to install a Python is told no rather than waited on.
+ */
+export function pythonVersion(one: PythonLaunch, timeout = PROBE_TIMEOUT): Promise<string | null | undefined> {
+  return new Promise((resolve) => {
+    let said = '';
+    let late = false;
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(one.command, [...one.args, '-c', "import sys; print('%d.%d' % sys.version_info[:2])"], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: childEnv({ PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' }),
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    // Answered at the timeout, not when the output closes: a launcher's Python, left running, may hold it open.
+    const timer = setTimeout(() => {
+      late = true;
+      child.kill();
+      resolve(undefined);
+    }, timeout);
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      said = (said + chunk).slice(-200);
+    });
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (late) return;
+      const version = /^(\d+)\.(\d+)\s*$/.exec(said.trim().split(/\r?\n/).pop() ?? '');
+      resolve(code === 0 && version ? `${version[1]}.${version[2]}` : null);
+    });
+  });
+}
+
+/** A version the engine runs on: 3.11 or newer. */
+export function fitVersion(version: string): boolean {
+  const [major, minor] = version.split('.').map(Number);
+  return major > PYTHON_MIN[0] || (major === PYTHON_MIN[0] && minor >= PYTHON_MIN[1]);
+}
+
+/**
+ * The Python the vault's engine is run by, each of this machine's asked its version until one is 3.11 or newer; null
+ * when none is (the first-run screen and the settings then offer the Python the app came with). Its answer is kept: a
+ * fit one is not asked again, one found wanting is after a while. One that does not answer in time is not taken for
+ * wanting - a slow first start is not a wrong Python - and is used, and asked again the next time.
+ */
+export async function usablePython(env: NodeJS.ProcessEnv = process.env, timeout = PROBE_TIMEOUT): Promise<PythonLaunch | null> {
+  if (env.BEYIN_PYTHON) return { command: env.BEYIN_PYTHON, args: [] };
+  for (const one of pythonCandidates(env)) {
+    const key = keyOf(one);
+    const known = verdicts.get(key);
+    if (known?.fit) return one;
+    if (known && Date.now() - known.at < RECHECK_AFTER) continue;
+    // Two asking at once (the status at start, the notification-area icon) start it once.
+    let answer = asking.get(key);
+    if (!answer) {
+      answer = pythonVersion(one, timeout);
+      asking.set(key, answer);
+      void answer.finally(() => asking.delete(key));
+    }
+    const version = await answer;
+    if (version === undefined) return one;
+    if (version !== null && fitVersion(version)) {
+      verdicts.set(key, { fit: true, version });
+      return one;
+    }
+    verdicts.set(key, { fit: false, version, at: Date.now() });
+  }
+  return null;
+}
+
+/**
+ * Why no Python of this machine is used, as the setup says it: the newest one found too old ("3.10"), 'broken' when
+ * those found do not run (a `py` launcher left behind when Python was uninstalled), null when none was found at all.
+ */
+export function pythonWanting(env: NodeJS.ProcessEnv = process.env): string | null {
+  let broken = false;
+  let newest: string | null = null;
+  const rank = (version: string) => version.split('.').reduce((sum, part) => sum * 1000 + Number(part), 0);
+  for (const one of pythonCandidates(env)) {
+    const known = verdicts.get(keyOf(one));
+    if (!known || known.fit) continue;
+    if (known.version === null) broken = true;
+    else if (!newest || rank(known.version) > rank(newest)) newest = known.version;
+  }
+  return newest ?? (broken ? 'broken' : null);
+}
+
+/** What each Python said, forgotten: one was just installed, and the launcher that had nothing behind it may have now. */
+export function forgetPythonVerdicts(): void {
+  verdicts.clear();
 }
 
 /** The context the vault's hook gives for this moment of the chat; empty where there is none to give, or when the turn is stopped (the hook ended with it). */

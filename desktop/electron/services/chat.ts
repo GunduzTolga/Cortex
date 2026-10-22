@@ -12,6 +12,7 @@ import { localBackend } from './localChat';
 import { LOCAL_IDS, isLocal, launchFor, listClis, protocolOf, refreshPath } from './clis';
 import { findLocal } from './localModels';
 import { readSettings } from './settings';
+import { vaultSettled } from './setup';
 
 export { ChatRefusal } from './chatKit';
 export { scrubberFor, shownPath } from './chatKit';
@@ -268,6 +269,8 @@ async function run(chat: Live, message: string): Promise<void> {
   const stop = new AbortController();
   chat.stop = stop;
   try {
+    // The vault just opened is bound to where it is first, so its hooks point there (services/setup.ts); Stop ends the wait.
+    await Promise.race([vaultSettled(), new Promise((done) => stop.signal.addEventListener('abort', done, { once: true }))]);
     const reason = await backendOf(chat.stored.cli).run(turnOf(chat, stop.signal), message);
     emit(chat, { type: 'done', reason });
   } catch (err) {

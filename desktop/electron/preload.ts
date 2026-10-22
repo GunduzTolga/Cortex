@@ -88,6 +88,7 @@ const api: CortexApi = {
   },
   setup: {
     status: () => invoke('setup:status'),
+    settle: () => invoke('setup:settle'),
     installPython: () => invoke('setup:installPython'),
     installEngine: () => invoke('setup:installEngine'),
     installVoice: () => invoke('setup:installVoice'),

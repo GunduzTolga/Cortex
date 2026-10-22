@@ -8,7 +8,7 @@ import test from 'node:test';
 import { app } from 'electron';
 import type { ChatEvent, ConfigOption } from '../shared/chat';
 import type { Turn } from '../electron/services/chatKit';
-import { fitted, localBackend, localOptions, pythonOf, splitter } from '../electron/services/localChat';
+import { fitVersion, fitted, forgetPythonVerdicts, localBackend, localOptions, pythonOf, pythonWanting, splitter, usablePython } from '../electron/services/localChat';
 
 /**
  * The chat with a model on this machine's own server, talked to directly
@@ -83,6 +83,53 @@ test('Python is the one the engine runs: BEYIN_PYTHON, else Windows’ py -3, ne
   fs.mkdirSync(path.join(local, 'Programs', 'Python', 'Launcher'));
   fs.writeFileSync(path.join(local, 'Programs', 'Python', 'Launcher', 'py.exe'), '');
   assert.deepEqual(pythonOf({ PATH: store, LOCALAPPDATA: local }), { command: path.join(local, 'Programs', 'Python', 'Launcher', 'py.exe'), args: ['-3'] });
+});
+
+/** A stand-in Python in a folder of its own, found on the PATH by its name: a shell script that does what it is given. */
+function fakePython(name: string, body: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'python-'));
+  fs.writeFileSync(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  return dir;
+}
+
+test('a Python is asked its version before the engine is run by it: one too old, or a launcher with nothing behind it, is passed over', { skip: process.platform === 'win32' }, async () => {
+  const old = fakePython('python3', 'echo 3.10');
+  // A `py` left behind when Python was uninstalled says this, and exits.
+  const broken = fakePython('python3', 'echo "No suitable Python runtime found" >&2; exit 103');
+  const fit = fakePython('python3', 'echo 3.12');
+  const env = { PATH: [old, broken, fit].join(path.delimiter) };
+  assert.equal(pythonOf(env)?.command, path.join(old, 'python3'), 'found by name, before it is asked');
+  assert.equal((await usablePython(env, 10_000))?.command, path.join(fit, 'python3'));
+  assert.equal(pythonOf(env)?.command, path.join(fit, 'python3'), 'and from then on the ones found wanting are passed over by every caller');
+  const wanting = { PATH: [old, broken].join(path.delimiter) };
+  assert.equal(await usablePython(wanting, 10_000), null, 'none fit: the setup offers the Python that came with the app');
+  assert.equal(pythonOf(wanting), null);
+  assert.equal(pythonWanting(wanting), '3.10', 'the one too old is named');
+  assert.equal(pythonWanting({ PATH: broken }), 'broken', 'a launcher with nothing behind it is said as such');
+  assert.equal(pythonWanting({ PATH: fakePython('python3', 'echo 3.12') }), null, 'nothing said against one not asked yet');
+  assert.ok(fitVersion('3.11') && fitVersion('3.13') && fitVersion('4.0') && !fitVersion('3.10') && !fitVersion('2.7'));
+  assert.deepEqual(await usablePython({ PATH: old, BEYIN_PYTHON: '/opt/python/bin/python3' }), { command: '/opt/python/bin/python3', args: [] }, 'BEYIN_PYTHON is the person’s own choice, taken as it is');
+});
+
+test('a Python slow to answer is not taken for a wrong one: it is used, the wait bounded', { skip: process.platform === 'win32' }, async () => {
+  const slow = fakePython('python3', 'exec sleep 30');
+  const env = { PATH: slow };
+  const started = Date.now();
+  assert.equal((await usablePython(env, 300))?.command, path.join(slow, 'python3'));
+  assert.ok(Date.now() - started < 10_000, 'not the thirty seconds it would take');
+  assert.equal(pythonOf(env)?.command, path.join(slow, 'python3'), 'still the one the engine is run by');
+  assert.equal(pythonWanting(env), null);
+});
+
+test('a Python installed meanwhile is found: what each one said is forgotten after an install', { skip: process.platform === 'win32' }, async () => {
+  const dir = fakePython('python3', 'echo 3.9');
+  const env = { PATH: dir };
+  assert.equal(await usablePython(env, 10_000), null);
+  // The same name now leads to a newer Python, as a `py` does once a Python is installed behind it.
+  fs.writeFileSync(path.join(dir, 'python3'), '#!/bin/sh\necho 3.12\n', { mode: 0o755 });
+  assert.equal(await usablePython(env, 10_000), null, 'asked again only after a while, not at every status');
+  forgetPythonVerdicts();
+  assert.equal((await usablePython(env, 10_000))?.command, path.join(dir, 'python3'));
 });
 
 /** A stand-in LM Studio: its model list, and an answer streamed in pieces with its thinking and its count. */

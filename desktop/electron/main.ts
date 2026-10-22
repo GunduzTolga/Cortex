@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, Menu, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerIpc, stopWatching, trustPagesWhere } from './ipc';
 import { readSettings } from './services/settings';
+import { settleVault, setupBusy, whenSetupIdle } from './services/setup';
 import { startTelegram } from './services/telegram';
 import { startMicrophoneWord, stopMicrophoneWord } from './services/microphone';
 import { listeningNow, startTray, startWithWindows, trayNotice } from './services/tray';
@@ -195,6 +196,12 @@ function createWindow(showNow = true): void {
   });
   window.on('close', (event) => {
     if (quitting || HIDDEN || !readSettings().background) {
+      // Closed for good with a setup going on: asked first (`quitWhenSetupAllows`). Not when Windows signs out.
+      if (!quitting && !HIDDEN && setupBusy()) {
+        event.preventDefault();
+        void quitWhenSetupAllows();
+        return;
+      }
       // Closed for good: the page is asked to save what it holds first (`flushPage`).
       const closing = window;
       if (flushed === 'done' || !closing || closing.webContents.isDestroyed() || closing.webContents.isCrashed()) return;
@@ -242,6 +249,44 @@ function createWindow(showNow = true): void {
   window.on('closed', () => {
     window = null;
   });
+}
+
+/**
+ * Quitting while a setup job runs (services/setup.ts) cut it short without a word: the engine's update half
+ * applied, a 2 GB download stopped, voice typing said installed without its model (desktop-shell-5). The person
+ * is asked first: quit once it is done (the window goes, the job goes on), quit anyway, or stay. A Windows
+ * sign-out or shutdown is never held up by it (`quitting` is already set then).
+ */
+let askingToQuit = false;
+async function quitWhenSetupAllows(): Promise<void> {
+  if (setupBusy() && !askingToQuit) {
+    askingToQuit = true;
+    const english = readSettings().language === 'en';
+    let response: number;
+    try {
+      ({ response } = await dialog.showMessageBox({
+        type: 'question',
+        title: 'Cortex',
+        message: english ? 'A setup is still going on.' : 'Bir kurulum hâlâ sürüyor.',
+        detail: english ? 'Quitting now leaves it half done. Cortex can quit by itself once it has finished.' : 'Şimdi çıkarsan yarıda kalır. Cortex, bitince kendiliğinden kapanabilir.',
+        buttons: english ? ['Quit when it is done', 'Quit anyway', 'Cancel'] : ['Bitince çık', 'Yine de çık', 'Vazgeç'],
+        defaultId: 0,
+        cancelId: 2,
+        noLink: true,
+      }));
+    } finally {
+      askingToQuit = false;
+    }
+    if (response === 2) return;
+    if (response === 0) {
+      window?.hide();
+      await whenSetupIdle();
+    }
+  } else if (askingToQuit) {
+    return;
+  }
+  quitting = true;
+  app.quit();
 }
 
 /** The window brought back and told something (the icon's "Ayarlar", its "listen all the time"), once its page is there to be told. */
@@ -313,15 +358,14 @@ if (!app.requestSingleInstanceLock()) {
         settings: showSettings,
         // "Listen all the time" from the icon, not allowed yet: asked in the window, where it is explained.
         askWake: () => showAndTell('app:askWake'),
-        quit: () => {
-          quitting = true;
-          app.quit();
-        },
+        quit: () => void quitWhenSetupAllows(),
       });
       startWithWindows(readSettings().background);
-      // Notes from the phone keep coming in while Cortex runs, in the notification area too.
-      startTelegram();
     }
+    // The vault kept from the last run bound to where it is now, in the background (services/setup.ts); notes
+    // from the phone then keep coming in while Cortex runs, in the notification area too.
+    const settled = settleVault();
+    if (!HIDDEN) void settled.then(() => startTelegram());
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -333,7 +377,14 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  // Quit from elsewhere (the menu's Exit) while a setup runs: asked first, as from the icon. Windows signing
+  // out has set `quitting` already (the window's query-session-end), and is not held up.
+  if (!quitting && !HIDDEN && setupBusy()) {
+    event.preventDefault();
+    void quitWhenSetupAllows();
+    return;
+  }
   quitting = true;
   stopMicrophoneWord();
   stopWatching();

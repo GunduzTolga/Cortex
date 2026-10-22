@@ -2,8 +2,10 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { app, safeStorage } from 'electron';
+import { engineFailureText } from '../../shared/engineError';
 import { BOT_KEY, type TelegramStatus } from '../../shared/telegram';
 import { childEnv } from './acp';
+import { writeWhole } from './fileWrite';
 import { pythonOf } from './localChat';
 import { readSettings } from './settings';
 import { installedVersion, runPython, trailingObject } from './setup';
@@ -58,10 +60,9 @@ function keptKey(): string | null {
 
 function keepKey(key: string): void {
   if (!safeStorage.isEncryptionAvailable()) throw new Error(say('Bu bilgisayar anahtarı saklayacak güvenli bir yer sunmuyor.', 'This computer offers no safe place to keep a key.'));
-  fs.mkdirSync(path.dirname(file()), { recursive: true });
-  const temp = `${file()}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify({ key: safeStorage.encryptString(key).toString('base64') }), { mode: 0o600 });
-  fs.renameSync(temp, file());
+  // Renamed into place, tried again for a moment while Windows says the file is busy (a scanner opens a file just
+  // written): the bot was already paired, and a key not kept left the listener off (desktop-shell-10).
+  writeWhole(file(), JSON.stringify({ key: safeStorage.encryptString(key).toString('base64') }), 0o600);
 }
 
 function dropKey(): void {
@@ -91,16 +92,10 @@ export function telegramOf(result: Record<string, unknown> | null, key: boolean)
   };
 }
 
-/** What the engine said when it refused: its JSON error's message, or the line as it came. */
+/** What the engine said when it refused, as the window says it (shared/engineError.ts): its sentence, never its JSON. */
 export function engineSentence(error: unknown): string {
   const said = error instanceof Error ? error.message : String(error);
-  try {
-    const parsed = JSON.parse(said) as { message?: unknown };
-    if (typeof parsed.message === 'string' && parsed.message) return parsed.message;
-  } catch {
-    // not JSON: the line itself
-  }
-  return said;
+  return engineFailureText(said, readSettings().language === 'en' ? 'en' : 'tr') ?? said;
 }
 
 /** How long to wait before starting the listener again, after it ran this long and stopped this many times in a row. */

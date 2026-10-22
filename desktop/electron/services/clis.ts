@@ -123,6 +123,18 @@ export function onPathFile(names: string[], env: NodeJS.ProcessEnv = process.env
   return null;
 }
 
+/** Every one of these files on the PATH that the test lets through, in the PATH's order. */
+export function onPathFiles(names: string[], env: NodeJS.ProcessEnv = process.env, accept: (file: string) => boolean = () => true): string[] {
+  const found: string[] = [];
+  for (const dir of pathDirs(env)) {
+    for (const name of names) {
+      const file = path.join(dir, name);
+      if (accept(file) && isFile(file)) found.push(file);
+    }
+  }
+  return found;
+}
+
 /**
  * The PATH with those of these folders it lacks added at its end, in their order. Windows'
  * PATH: its folders compared without case or a closing backslash.

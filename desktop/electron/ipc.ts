@@ -91,15 +91,18 @@ export function registerIpc(): void {
     if (!dir) return null;
     const before = readSettings().vault;
     const status = await setVault(dir);
+    const changed = before !== readSettings().vault;
     // The notes screen reads the vault now chosen, watched from its next read (services/vaultNotes.ts).
-    if (before !== readSettings().vault) {
+    if (changed) {
       vaultNotes.stopWatchingVault();
       // The CLIs were started in the vault left: ended, to start again in this one.
       chat.shutdownChats();
-      // The Telegram listener writes into the vault chosen now.
-      void telegram.restartTelegram();
       broadcast('notes:changed', null);
     }
+    // Its engine bound to where the folder is now (a vault moved, renamed or copied), in the background; the
+    // Telegram listener writes into the vault chosen now once that is done (services/setup.ts, settleVault).
+    const settled = setup.settleVault();
+    if (changed) void settled.then(() => telegram.restartTelegram());
     return status;
   });
 
@@ -173,6 +176,8 @@ export function registerIpc(): void {
   onHelperChange((word) => broadcast('setup:helper', word));
   handle('setup:helper', () => currentHelper());
   handle('setup:status', () => setup.setupStatus());
+  // The vault opened bound to where it is now: the window says a failure once (src/App.tsx).
+  handle('setup:settle', () => setup.settleVault());
   // What was set up is taken up now, not at the next start: the Telegram listener starts (or starts
   // again on the new engine), and the chats' CLIs take the engine's new hooks at their next message.
   handle('setup:installPython', async () => {

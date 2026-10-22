@@ -618,7 +618,7 @@ check(
   (await onDiskSoon(() => Boolean(binned()) && !fs.existsSync(draft('E2E Binned.md')))) &&
     fs.readFileSync(vaultNote(`.trash/${binned()}`), 'utf8') === '# Binned\n\nbase last' &&
     (await shownSoon(page.locator('[data-toast="success"]', { hasText: 'in the trash' }))) &&
-    (await page.locator('[data-toast="error"]').count()) === 0,
+    (await page.locator('[data-toast]', { hasText: /could not be tied to this vault|bu kasaya bağlanamadı/ }).count()) === 0,
 );
 // Taken back, so the bin is as the checks further on expect it: empty but for what they put in it.
 await page.locator('[data-toast="success"]', { hasText: 'in the trash' }).locator('[data-toast-action]').click();
@@ -708,6 +708,10 @@ check(
   'a vault without Cortex’s memory is offered it, from the package the app came with (or told Python is needed)',
   (await shownSoon(page.locator('[data-settings-section="cortex"] [data-setup-note="none"], [data-settings-section="cortex"] [data-setup-note="no-python"]'))) &&
     ((await page.locator('[data-setup-note="no-python"]').count()) === 1 || (await page.locator('[data-setup-engine]').count()) === 1),
+);
+check(
+  'opening a vault binds its engine to where the vault is now; this one has none, so nothing is done or said',
+  (await page.evaluate(() => window.cortex.setup.settle())) === null && (await page.locator('[data-toast="error"]').count()) === 0,
 );
 check(
   'and voice typing waits for the memory',

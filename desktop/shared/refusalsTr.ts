@@ -87,6 +87,10 @@ const RULES: Rule[] = [
   { pattern: /^This tool does not take a key here\.$/, say: () => 'Bu araç burada anahtar almıyor.' },
   { pattern: /^That is not an address\.$/, say: () => 'Bu bir adres değil.' },
   { pattern: /^This computer offers no safe place to keep a key\.$/, say: () => 'Bu bilgisayarda anahtarı saklayacak güvenli bir yer yok.' },
+  {
+    pattern: /^The kept keys could not be read just now, so nothing was written over them\. Try again in a moment\.$/,
+    say: () => 'Saklanan anahtarlar şu an okunamadı; üzerlerine hiçbir şey yazılmadı. Birazdan yeniden dene.',
+  },
 
   // electron/services/chat.ts: the chats
   { pattern: /^Choose the vault first\.$/, say: () => 'Önce kasayı seç.' },

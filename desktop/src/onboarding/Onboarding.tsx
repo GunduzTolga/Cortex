@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Download, FolderOpen, KeyRound, LogIn, Mic, RefreshCw, SkipForward } from 'lucide-react';
 import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz.svg';
 import type { CliAuth, CliId } from '@shared/chat';
-import type { SetupStatus } from '@shared/setup';
+import { engineAction, type SetupStatus } from '@shared/setup';
 import { AuthDialog, TOOL_NAMES } from '../chat/AuthDialog';
 import { useChat } from '../chat/chatStore';
 import type { Key } from '../i18n';
@@ -10,7 +10,7 @@ import { useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 import { useSetup } from '../store/setup';
 import { LanguageSwitch } from '../ui/LanguageSwitch';
-import { Progress, VoiceHelperBar } from '../ui/SetupSections';
+import { Progress, VoiceHelperBar, engineButtonText, pythonWantingText } from '../ui/SetupSections';
 import { Button, Switch, inputClass } from '../ui/ui';
 
 /**
@@ -43,11 +43,6 @@ const OPTIONAL = new Set<StepId>(['name', 'python', 'engine', 'tools', 'voice'])
  * not proof - it may have run out - so a tool counts only once it is signed in to here.
  */
 const serving = (tool: CliAuth) => Boolean(tool.local && tool.signedIn && tool.local.loaded.length);
-
-function newerBundled(status: SetupStatus | null): boolean {
-  const { installed, bundled } = status?.engine ?? { installed: null, bundled: null };
-  return Boolean(installed && bundled && bundled.localeCompare(installed, undefined, { numeric: true }) > 0);
-}
 
 export function Onboarding() {
   const t = useT();
@@ -127,7 +122,8 @@ export function Onboarding() {
     name: Boolean(settings.userName),
     vault: Boolean(vault),
     python: Boolean(status?.python),
-    engine: Boolean(status?.engine.installed) && !newerBundled(status),
+    // Installed and nothing to do: not an older one, nor the predecessor's, nor stale against the app's (shared/setup.ts).
+    engine: Boolean(status?.engine.installed) && !engineAction(status?.engine),
     tools: fresh.size > 0 || Boolean(auth?.some(serving)),
     voice: Boolean(status?.voice?.installed),
     done: false,
@@ -336,10 +332,17 @@ function VaultStep({ name }: { name: string | null }) {
 function PythonStep({ status }: { status: SetupStatus | null }) {
   const t = useT();
   const run = useSetup((s) => s.run);
+  // A Python found but not fit - too old, or a launcher with nothing behind it - is said, so the step is not a riddle (desktop-shell-1).
+  const wanting = status && !status.python ? pythonWantingText(t, status.pythonWanting) : null;
   return (
     <div>
       <Heading title={t('onboarding.python.title')}>
-        <p>{t('onboarding.python.body')}</p>
+        <p>{t(wanting ? 'onboarding.python.bodyWanting' : 'onboarding.python.body')}</p>
+        {wanting ? (
+          <p className="text-[12.5px] font-semibold text-darkDelegation" data-onboarding-python-wanting>
+            {wanting}
+          </p>
+        ) : null}
       </Heading>
       {status?.python ? (
         <Done>{t('onboarding.python.ready')}</Done>
@@ -364,22 +367,22 @@ function EngineStep({ status }: { status: SetupStatus | null }) {
   const t = useT();
   const run = useSetup((s) => s.run);
   const installed = status?.engine.installed ?? null;
-  const bundled = status?.engine.bundled ?? null;
-  const newer = newerBundled(status);
+  const action = engineAction(status?.engine);
   return (
     <div>
       <Heading title={t('onboarding.engine.title')}>
         <p>{t('onboarding.engine.body')}</p>
         <p className="text-[12.5px] text-zinc-500">{t('onboarding.engine.touch')}</p>
+        {status && action === 'migrate' ? <p className="text-[12.5px] text-zinc-500">{t('setup.engine.legacy', { installed: installed ?? '', bundled: status.engine.bundled ?? '' })}</p> : null}
       </Heading>
       {!status ? null : !status.python ? (
         <p className="mt-5 text-[13px] text-zinc-600">{t('onboarding.needsPython')}</p>
-      ) : installed && !newer ? (
+      ) : installed && !action ? (
         <Done>{t('setup.engine.current', { installed })}</Done>
-      ) : bundled ? (
-        <Button tone="primary" className="mt-5" disabled={Boolean(status.job)} onClick={() => void run('engine')} data-onboarding-engine>
+      ) : action ? (
+        <Button tone="primary" className="mt-5" disabled={Boolean(status.job)} onClick={() => void run('engine')} data-onboarding-engine={action}>
           {installed ? <RefreshCw size={14} /> : <Download size={14} />}
-          {installed ? t('setup.engine.update', { bundled }) : t('setup.engine.install')}
+          {engineButtonText(t, status.engine)}
         </Button>
       ) : (
         <p className="mt-5 text-[13px] text-zinc-600">{t('setup.engine.noneNoPackage')}</p>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Check, Download, Mic, RefreshCw, RotateCcw } from 'lucide-react';
-import { COMMAND_WORDS, CPU_MODELS, VOICE_COMMANDS, WAKE_PHRASES, percentOfStep, wakePhraseLabel } from '@shared/setup';
+import { COMMAND_WORDS, CPU_MODELS, VOICE_COMMANDS, WAKE_PHRASES, engineAction, percentOfStep, wakePhraseLabel } from '@shared/setup';
 import type { CpuModel, SetupJob, SetupStatus, VoiceCommands, WakePhrase } from '@shared/setup';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
@@ -70,6 +70,19 @@ export function Progress({ job, lines }: { job: SetupJob; lines: string[] }) {
   );
 }
 
+/** Why the Pythons found are not used, said before what to do about it: one too old, or a launcher with nothing behind it. */
+export function pythonWantingText(t: ReturnType<typeof useT>, wanting: string | null): string | null {
+  if (wanting === 'broken') return t('setup.python.broken');
+  return wanting ? t('setup.python.tooOld', { version: wanting }) : null;
+}
+
+/** The engine's button, as there is something to do about it (shared/setup.ts, engineAction). */
+export function engineButtonText(t: ReturnType<typeof useT>, engine: SetupStatus['engine']): string {
+  const action = engineAction(engine);
+  const bundled = engine.bundled ?? '';
+  return action === 'update' ? t('setup.engine.update', { bundled }) : action === 'refresh' ? t('setup.engine.refresh') : action === 'migrate' ? t('setup.engine.migrate', { bundled }) : t('setup.engine.install');
+}
+
 function EngineSection({ status }: { status: SetupStatus }) {
   const t = useT();
   const steps = useSetup((s) => s.steps);
@@ -77,33 +90,61 @@ function EngineSection({ status }: { status: SetupStatus }) {
   const run = useSetup((s) => s.run);
   const { installed, bundled } = status.engine;
   const busy = status.job !== null;
-  const newer = Boolean(installed && bundled && bundled.localeCompare(installed, undefined, { numeric: true }) > 0);
+  const action = engineAction(status.engine);
+  const wanting = pythonWantingText(t, status.pythonWanting);
   return (
     <Section title={t('setup.engine')} data="cortex">
       {!status.python ? (
-        <Note tone="error" data="no-python">
-          {t('setup.python.missing')}{' '}
-          <a className="font-semibold underline" href="https://www.python.org/downloads/windows/" target="_blank" rel="noreferrer">
-            python.org
-          </a>
-        </Note>
+        // Python offered here too, not only on the first-run screen: someone past it has nowhere else to find it (desktop-shell-1).
+        <>
+          <Note tone="error" data="no-python">
+            {wanting ? `${wanting} ` : null}
+            {status.pythonBundled ? (
+              t('setup.python.bundled', { version: status.pythonBundled })
+            ) : (
+              <>
+                {wanting ? null : `${t('setup.python.missing')} `}
+                <a className="font-semibold underline" href="https://www.python.org/downloads/windows/" target="_blank" rel="noreferrer">
+                  python.org
+                </a>
+              </>
+            )}
+          </Note>
+          {status.pythonBundled ? (
+            <div className="mt-2 px-3">
+              <Button tone="ghost" disabled={busy} onClick={() => void run('python')} data-setup-python>
+                <Download size={13} />
+                {t('onboarding.python.install', { version: status.pythonBundled })}
+              </Button>
+            </div>
+          ) : null}
+        </>
       ) : installed ? (
-        <Note data="installed">{newer ? t('setup.engine.older', { installed, bundled: bundled ?? '' }) : t('setup.engine.current', { installed })}</Note>
+        <Note data="installed">
+          {action === 'update'
+            ? t('setup.engine.older', { installed, bundled: bundled ?? '' })
+            : action === 'refresh'
+              ? t('setup.engine.stale', { installed })
+              : action === 'migrate' || status.engine.legacy
+                ? t('setup.engine.legacy', { installed, bundled: bundled ?? '' })
+                : t('setup.engine.current', { installed })}
+        </Note>
       ) : (
         <Note data="none">{bundled ? t('setup.engine.none') : t('setup.engine.noneNoPackage')}</Note>
       )}
-      {status.python && bundled && (!installed || newer) ? (
+      {status.python && action ? (
         <div className="mt-2 px-3">
-          <Button tone="ghost" disabled={busy} onClick={() => void run('engine')} data-setup-engine>
+          <Button tone="ghost" disabled={busy} onClick={() => void run('engine')} data-setup-engine={action}>
             {installed ? <RefreshCw size={13} /> : <Download size={13} />}
-            {installed ? t('setup.engine.update', { bundled }) : t('setup.engine.install')}
+            {engineButtonText(t, status.engine)}
           </Button>
         </div>
       ) : null}
+      {steps?.job === 'python' ? <Progress job="python" lines={steps.lines} /> : null}
       {steps?.job === 'engine' ? <Progress job="engine" lines={steps.lines} /> : null}
-      {error?.job === 'engine' ? (
+      {error?.job === 'engine' || error?.job === 'python' ? (
         <div className="mt-2">
-          <Note tone="error" data="engine-error">
+          <Note tone="error" data={`${error.job}-error`}>
             {error.text}
           </Note>
         </div>

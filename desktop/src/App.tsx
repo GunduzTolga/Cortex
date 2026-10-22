@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { engineAction } from '@shared/setup';
 import { BookOpen, Building2, FolderOpen, MessageCircle, Network, Settings } from 'lucide-react';
 import seal from '../../tema/ananas/marka/pyn-muhur.svg';
 import type { Key } from './i18n';
@@ -115,12 +116,20 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
   const setView = useView((state) => state.setView);
   const choose = () => void useApp.getState().chooseVault(t('app.vault.failed'));
 
-  // An older Cortex in the vault than the one the app brought: said once, with the button that updates it.
+  // An older Cortex in the vault than the one the app brought, a stale one or the predecessor's: said once, with the button that mends it.
   const updatable = useSetup((s) => {
-    const engine = s.status?.engine;
-    return Boolean(engine?.installed && engine.bundled && engine.bundled.localeCompare(engine.installed, undefined, { numeric: true }) > 0);
+    const action = engineAction(s.status?.engine);
+    return action !== null && action !== 'install';
   });
+  const vaultSeq = useApp((s) => s.vaultSeq);
   useEffect(() => {
+    // The vault bound to where it is now (moved, renamed, copied): in the background; a failure said once, and the app goes on.
+    void window.cortex.setup
+      .settle()
+      .then((failure) => {
+        if (failure) useApp.getState().toast({ tone: 'error', title: t('setup.settle.failed'), detail: failure, sticky: true });
+      })
+      .catch(() => undefined);
     void (async () => {
       await useSetup.getState().refresh();
       // Listening all the time found on without leave given here (set up before Cortex asked): it does not listen until allowed.
@@ -129,18 +138,23 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
         else await useSetup.getState().voice({ wake: false });
       }
       const engine = useSetup.getState().status?.engine;
-      if (!engine?.installed || !engine.bundled || engine.bundled.localeCompare(engine.installed, undefined, { numeric: true }) <= 0) return;
+      const action = engineAction(engine);
+      if (!engine?.installed || !engine.bundled || !action || action === 'install') return;
+      const values = { installed: engine.installed, bundled: engine.bundled };
       useApp.getState().toast({
         tone: 'info',
-        title: t('setup.update.title', { installed: engine.installed, bundled: engine.bundled }),
-        detail: t('setup.update.detail'),
+        title: t(action === 'refresh' ? 'setup.update.refreshTitle' : action === 'migrate' ? 'setup.update.migrateTitle' : 'setup.update.title', values),
+        detail: t(action === 'refresh' ? 'setup.update.refreshDetail' : action === 'migrate' ? 'setup.update.migrateDetail' : 'setup.update.detail', values),
         sticky: true,
-        action: { label: t('setup.update.action'), run: () => void useSetup.getState().run('engine') },
+        action: {
+          label: t(action === 'refresh' ? 'setup.update.refreshAction' : action === 'migrate' ? 'setup.update.migrateAction' : 'setup.update.action'),
+          run: () => void useSetup.getState().run('engine'),
+        },
       });
     })();
-    // Once per vault opened.
+    // Once per vault opened: chosen again counts, the same folder name or not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name]);
+  }, [name, vaultSeq]);
 
   // A vault gone from disk is said when the window comes back to it too, not only at the start.
   useEffect(() => {

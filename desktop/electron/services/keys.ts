@@ -34,9 +34,22 @@ export const KEY_ENV: Partial<Record<CliId, { variable: string; baseUrl?: string
 
 const file = () => path.join(app.getPath('userData'), 'keys.json');
 
-function readKept(): Partial<Record<CliId, Kept>> {
+/**
+ * The keys kept, as the file holds them; none where there is no file yet, or one that is not JSON (nothing in it
+ * could be read back anyway). A file that is there but would not be read - Windows saying it is busy while a scanner
+ * or the indexer holds it - is none for now to a reader, and refused to a writer (`forWriting`): written back, the
+ * file would have held only the key being saved, every other tool's gone (desktop-shell-10).
+ */
+function readKept(forWriting = false): Partial<Record<CliId, Kept>> {
+  let text: string;
   try {
-    const parsed = JSON.parse(fs.readFileSync(file(), 'utf8')) as unknown;
+    text = fs.readFileSync(file(), 'utf8');
+  } catch (err) {
+    if (!forWriting || (err as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw new KeyRefusal('The kept keys could not be read just now, so nothing was written over them. Try again in a moment.');
+  }
+  try {
+    const parsed = JSON.parse(text) as unknown;
     return typeof parsed === 'object' && parsed !== null ? (parsed as Partial<Record<CliId, Kept>>) : {};
   } catch {
     return {};
@@ -65,13 +78,13 @@ export function saveKey(id: CliId, key: unknown, baseUrl: unknown): void {
   if (typeof key !== 'string' || !key.trim() || key.length > 500 || /[\r\n]/.test(key)) throw new KeyRefusal('That is not a key.');
   if (where.baseUrl && baseUrl !== undefined && baseUrl !== null && baseUrl !== '' && (typeof baseUrl !== 'string' || !/^https?:\/\/[^\s]{3,300}$/.test(baseUrl))) throw new KeyRefusal('That is not an address.');
   if (!safeStorage.isEncryptionAvailable()) throw new KeyRefusal('This computer offers no safe place to keep a key.');
-  const kept = readKept();
+  const kept = readKept(true);
   kept[id] = { key: safeStorage.encryptString(key.trim()).toString('base64'), ...(where.baseUrl && typeof baseUrl === 'string' && baseUrl ? { baseUrl } : {}) };
   writeKept(kept);
 }
 
 export function forgetKey(id: CliId): void {
-  const kept = readKept();
+  const kept = readKept(true);
   if (!kept[id]) return;
   delete kept[id];
   writeKept(kept);

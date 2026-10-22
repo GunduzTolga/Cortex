@@ -82,24 +82,55 @@ export interface VoicePatch {
 export type SetupJob = 'python' | 'engine' | 'voice';
 
 export interface SetupStatus {
-  /** A Python the engine can run on was found; without one nothing below can run. */
+  /** A Python the engine can run on was found - one that runs, 3.11 or newer; without one nothing below can run. */
   python: boolean;
+  /**
+   * Why the Pythons found are not used, when none is: the newest one's version where it is too old ("3.10"), 'broken'
+   * where they do not run (a `py` launcher left behind when Python was uninstalled); null when none was found.
+   */
+  pythonWanting: string | null;
   /** The version of the Python the app came with, to install where there is none; null when it has none with it. */
   pythonBundled: string | null;
   /** A vault is chosen. */
   vault: boolean;
-  engine: {
-    /** The version of the vault's engine; null where the vault has none. */
-    installed: string | null;
-    /** The version that came with the app, to install or update from; null when the app has none with it. */
-    bundled: string | null;
-  };
+  engine: EngineStatus;
   /** Voice typing as the vault's engine reports it; null where its engine has none (or there is no engine). */
   voice: VoiceStatus | null;
   /** Voice typing is for Windows only (yakala's window and hotkey are). */
   voiceSupported: boolean;
   /** The job going on, one at a time. */
   job: SetupJob | null;
+}
+
+export interface EngineStatus {
+  /** The version of the vault's engine; null where the vault has none. */
+  installed: string | null;
+  /** The version that came with the app, to install or update from; null when the app has none with it. */
+  bundled: string | null;
+  /**
+   * The vault's engine is the predecessor project's (stamped 2.x or 3.x, before Cortex began again at 1.0): it looks
+   * newer than any Cortex, and its updater refuses Cortex's package, so it moves to Cortex once by the package's own
+   * installer (beyin.md, 3a).
+   */
+  legacy?: boolean;
+  /**
+   * The vault's engine has the version that came with the app but not its files: a build given out under an unchanged
+   * version (the package's digests against what the vault's installer last wrote, `<state>/v3-install.json`).
+   */
+  stale?: boolean;
+}
+
+/**
+ * What there is to do about the vault's engine, one answer for every place that offers it (the settings, the first-run
+ * screen, the toast at the start): install it, update it to a newer version, refresh it to the files that came with the
+ * app under the same version, move a predecessor's to Cortex; null when nothing.
+ */
+export function engineAction(engine: EngineStatus | null | undefined): 'install' | 'update' | 'refresh' | 'migrate' | null {
+  if (!engine?.bundled) return null;
+  if (!engine.installed) return 'install';
+  if (engine.legacy) return 'migrate';
+  if (engine.bundled.localeCompare(engine.installed, undefined, { numeric: true }) > 0) return 'update';
+  return engine.stale ? 'refresh' : null;
 }
 
 /** How a job goes: a step as the engine says it, then its end. */
@@ -129,6 +160,11 @@ export interface ListenerWord {
 
 export interface SetupApi {
   status(): Promise<SetupStatus>;
+  /**
+   * The vault just opened bound to where it is now - moved, renamed or copied, its engine still named the old place
+   * (`beyin.py relocate`): once per opening, in the background. The failure's sentence, or null.
+   */
+  settle(): Promise<string | null>;
   /** How the voice helper is now (the settings' bar); null without a listener running. */
   helper(): Promise<ListenerWord | null>;
   /** The Python that came with the app installed for this user (Windows): quietly, without asking for an administrator. */

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { HelperState, ListenerWord } from '../../shared/setup';
+import { renameRetrying } from './fileWrite';
 import { readSettings } from './settings';
 
 /**
@@ -34,13 +35,19 @@ export function microphoneWord(allowed: boolean, closed: boolean, at: number = D
   return `${JSON.stringify(word)}\n`;
 }
 
-/** Written whole or not at all: the listener never reads half a word. */
-function write(text: string, file = microphoneFile()): void {
+/**
+ * Written whole or not at all: the listener never reads half a word. A beat is written once - the next one tries
+ * again; the last word, that the app has quit, has no next beat, and Windows refuses the rename while the listener
+ * has the file open (it reads it every two seconds), so that one is tried again for a moment (`patient`): without
+ * it the microphone stayed open up to twenty seconds after Cortex quit.
+ */
+function write(text: string, file = microphoneFile(), patient = false): void {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const temp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(temp, text, 'utf8');
-    fs.renameSync(temp, file);
+    if (patient) renameRetrying(temp, file);
+    else fs.renameSync(temp, file);
   } catch {
     // Not written this time: the next beat tries again, and a stale word lets the microphone go.
   }
@@ -67,7 +74,7 @@ export function stopMicrophoneWord(): void {
   if (!timer) return;
   clearInterval(timer);
   timer = null;
-  write(microphoneWord(false, true));
+  write(microphoneWord(false, true), microphoneFile(), true);
 }
 
 /** How the listener's voice helper is, as the listener says it (beyin_v3_ses.say_listener). */

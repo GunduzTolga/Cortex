@@ -17,8 +17,9 @@
     "vitrin": "npm run build && node e2e/vitrin.mjs",
     "cortex-paket": "node scripts/cortex-paket.mjs",
     "python-paket": "node scripts/python-paket.mjs",
-    "package": "npm run build && electron-builder --win",
-    "package:dir": "npm run build && electron-builder --win --dir"
+    "package": "npm run cortex-paket && npm run python-paket && npm run build && electron-builder --win",
+    "package:dir": "npm run cortex-paket && npm run python-paket && npm run build && electron-builder --win --dir",
+    "check-resources": "node scripts/check-resources.cjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.14",
@@ -64,6 +65,7 @@
     "productName": "Cortex",
     "copyright": "Copyright © SoleLuna Tech",
     "publish": null,
+    "beforePack": "./scripts/check-resources.cjs",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -100,7 +102,8 @@
         "from": "cortex-paket",
         "to": "cortex",
         "filter": [
-          "beyin-v3-*.zip"
+          "beyin-v3-*.zip",
+          "beyin-v3-*.manifest.json"
         ]
       },
       {
