@@ -273,6 +273,27 @@ class ListenerTest(unittest.TestCase):
         self.assertTrue(self.own_state()['kisayol_calisiyor'])
         self.assertEqual(win32.killed, 7, 'no more retries once the key is held')
 
+    def test_the_key_taken_later_is_said_even_where_its_own_state_cannot_be_written(self):
+        # The state file held by another program (an antivirus scan, OneDrive): the desktop app
+        # still heard "mesgul" for good, though the key was the listener's.
+        win32 = Win32(key_free=False)
+        real, seen = yakala._write_listener_state, {}
+
+        def held(state, **values):
+            if values.get('kisayol_calisiyor') is True:
+                raise PermissionError('baska bir program kullaniyor')
+            return real(state, **values)
+
+        def free():
+            win32.key_free = True
+            win32.through_the_hotkey_thread(WM_TIMER)
+        with patch.object(yakala, '_write_listener_state', held):
+            code = self.listen(win32, [(31.0, free), (31.2, lambda: seen.update(after=self.said())),
+                                       (32.0, lambda: win32.signal('dur'))])
+        self.assertEqual(code, 0)
+        self.assertEqual(seen['after']['kisayol'], 'tamam')
+        self.assertIn('baska bir program kullaniyor', (self.state / 'yakala' / yakala.LISTENER_LOG).read_text(encoding='utf-8'))
+
     def test_it_leaves_within_two_seconds_once_the_key_is_another_vaults(self):
         win32 = Win32()
         record = yakala.owner_file

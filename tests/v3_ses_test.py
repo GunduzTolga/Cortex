@@ -1415,12 +1415,14 @@ class PopupVoiceTest(unittest.TestCase):
         self.addCleanup(gc.collect)
         self.addCleanup(self.root.destroy)
         from unittest.mock import patch
-        # Nothing appears on the screen and nothing is read from the person's clipboard.
+        # Nothing appears on the screen and nothing is read from the person's clipboard, nor the
+        # desktop app's language setting (masaustu.json): an English app made these windows English.
         for target in ('tkinter.Toplevel.deiconify', 'tkinter.Toplevel.lift', 'tkinter.Toplevel.focus_force'):
             patcher = patch(target, lambda *_a, **_k: None)
             patcher.start()
             self.addCleanup(patcher.stop)
-        for name, value in (('_clipboard', lambda _root: ''), ('clipboard_image', lambda *_a: None), ('_bring_to_front', lambda *_a: False)):
+        for name, value in (('_clipboard', lambda _root: ''), ('clipboard_image', lambda *_a: None), ('_bring_to_front', lambda *_a: False),
+                            ('_desktop_language', lambda: 'tr')):
             patcher = patch.object(yakala, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)

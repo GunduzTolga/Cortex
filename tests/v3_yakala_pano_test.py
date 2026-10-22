@@ -874,6 +874,14 @@ class ClipboardRulesTest(ScreenshotFiles, unittest.TestCase):
         self.assertNotIn('ornek.com', text)
         self.assertEqual(root.seen[0][0], 'Aklındakini yaz…')
         self.assertIn('Panodaki metni de ekle · https://github.com/foo/bar', root.seen[0][1])
+        # Ticked by hand instead, the copied link is the source: named by its page (which `isle`
+        # reads), not by the reason, which kept the page's title off the card for good.
+        result, _, _ = self.popup('https://github.com/foo/bar', [('key', '<Alt-s>'), ('key', '<Tab>'), ('type', 'repo bak'),
+                                                                 ('key', '<Return>')], context=page, sequence=43)
+        card = self.card(result)
+        self.assertEqual((card['meta']['kaynak_turu'], card['meta']['url'], card['meta']['baslik']),
+                         ('github', 'https://github.com/foo/bar', 'https://github.com/foo/bar'))
+        self.assertIn('repo bak', card['body'])
 
     def test_a_saved_window_is_marked_closing(self):
         _result, root, _ = self.popup('', [('type', 'not'), ('key', '<Return>')])

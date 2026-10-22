@@ -2664,8 +2664,11 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             canvas.itemconfigure(status, text=say('Önce bir şey yaz ya da söyle'), fill=P['bad'])
             return 'break'
         title = context.get('baslik') if page and page == context.get('url') else None
-        if text and why and not (page or files):
-            title = why  # what the person typed or said names the card and its file, never what was copied
+        if text and why and not (page or files) and not clip_is_url:
+            # What the person typed or said names the card and its file, never what was copied. Not
+            # for a copied link capture() takes as the source: like every link card it is named by
+            # its page, whose title `isle` reads (named by the reason, it never got that title).
+            title = why
         if not (page or files or text):
             text, why = why, ''  # only a typed line: the line itself is the note
         try:
@@ -3743,7 +3746,10 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
             active[0] = moment
         if ready.get('ok') and key.get('kisayol') != 'tamam':
             key['kisayol'] = 'tamam'  # the app that held the key let it go, and the hotkey thread took it
-            _write_listener_state(state, kisayol_calisiyor=True, at=time_now())
+            try:
+                _write_listener_state(state, kisayol_calisiyor=True, at=time_now())
+            except OSError:
+                log('durum')  # the desktop app is still told (below): it reads dinleyici.json
             say_voice()
         if moment >= due['clipboard']:
             due['clipboard'] = moment + 0.5
