@@ -305,7 +305,8 @@ class UsageReport(unittest.TestCase):
             'son', 'kisa', ['knowledge/concepts/yedekleme.md'], 'claude')
         receipt_source = 'receipts/' + hashlib.sha256(b'son').hexdigest() + '.md'
         receipt = hook.receipt_context(self.vault, Path(self.tmp.name) / 'runtime')
-        opening = companion.context(store, 6000, 'oturum', 'claude', 'yedekleme kovasi', receipt)
+        # A queried opening ranks through the per-turn strict passage path, which wants two shared words.
+        opening = companion.context(store, 6000, 'oturum', 'claude', 'yedekleme zirkon kovasi', receipt)
         items = usage.parse_context(opening)
         kinds = {(kind, source, detail) for kind, source, detail in items}
         self.assertIn(('companion', '🔮 850-Companion/Core.md', 'full'), kinds)

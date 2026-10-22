@@ -258,8 +258,11 @@ class ReceiptViewIsolationTest(unittest.TestCase):
         self.assertTrue(any('duplicate source id' in c['reason'] for c in result['conflicts']))
         self.assertFalse(any(c.get('kind') == 'receipt_view' for c in result['conflicts']))
         self.assertTrue(any(w.get('kind') == 'receipt_view' for w in result['warnings']))
-        with self.assertRaises(subject.ReceiptConflict):
-            self.engine.receipt('blocked', 'Blocked write.', ['notes/task.md'], 'codex')
+        # The conflict belongs to the two copies, not to a receipt: the receipt is stored, said to
+        # be stored, and still carries the conflict in its report.
+        receipt = self.engine.receipt('stored', 'Stored write.', ['notes/task.md'], 'codex')
+        self.assertEqual(receipt['status'], 'succeeded')
+        self.assertTrue(any('duplicate source id' in c['reason'] for c in receipt['source_sync']['conflicts']))
         self.assertEqual(self.view.read_bytes(), original)
 
     def test_cli_context_recap_and_list_history_keep_warning(self):

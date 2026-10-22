@@ -65,6 +65,20 @@ class PreferencesTest(unittest.TestCase):
                 prefs.save(self.vault, changes)
         self.assertEqual(before, (self.vault / '.beyin-preferences.json').read_bytes())
 
+    def test_a_byte_order_mark_is_read_and_utf16_is_a_clear_error(self):
+        # Notepad and PowerShell 5.1 write a BOM; the hook failed on every prompt for it.
+        path = self.vault / '.beyin-preferences.json'
+        path.write_bytes(b'\xef\xbb\xbf' + json.dumps({'context_chars': 3000}).encode('utf-8'))
+        self.assertEqual(prefs.read(self.vault)['context_chars'], 3000)
+        # Saving reads the file first and writes it back without the BOM.
+        self.assertEqual(prefs.save(self.vault, {'interval_minutes': 5})['context_chars'], 3000)
+        self.assertFalse(path.read_bytes().startswith(b'\xef\xbb\xbf'))
+        path.write_bytes(json.dumps({'context_chars': 3000}).encode('utf-16'))
+        with self.assertRaisesRegex(ValueError, 'not UTF-8 JSON'):
+            prefs.read(self.vault)
+        with self.assertRaises(ValueError):
+            prefs.save(self.vault, {'interval_minutes': 5})
+
     def test_larger_opening_budget_is_machine_local_and_rollback_safe(self):
         # #140: the opening may use up to 24000 characters, but the vault preference range
         # stays 1000..12000. An older release validates .beyin-preferences.json and would

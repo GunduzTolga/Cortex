@@ -334,6 +334,22 @@ class ProjectScopesTest(unittest.TestCase):
         json_file.write_bytes('\ufeff{"hello": "world"}'.encode('utf-8'))
         self.assertEqual(cli.read_json(str(json_file)), {'hello': 'world'})
 
+    def test_retrieval_and_doctor_read_one_scope_file_the_same_way(self):
+        # Notepad and PowerShell 5.1 write a BOM: doctor said ok while every project query failed.
+        import beyin_v3_projects as projects
+        self.vault_notes()
+        (self.vault / runtime.PROJECT_SCOPES_FILE).write_bytes(
+            '\ufeff'.encode('utf-8') + json.dumps({'folders': {GAME: 'oyun'}}, ensure_ascii=False).encode('utf-8'))
+        self.assertEqual(projects.check_project_scopes(self.vault)['status'], 'ok')
+        self.assertEqual(self.ids('oyun'), ['game', 'tagged'])
+        self.assertIs(projects.read_project_scopes, runtime.read_project_scopes)
+        # UTF-16 (PowerShell 5.1's Out-File) is a clear error on both sides, never a crash.
+        (self.vault / runtime.PROJECT_SCOPES_FILE).write_bytes(
+            json.dumps({'folders': {GAME: 'oyun'}}, ensure_ascii=False).encode('utf-16'))
+        self.assertEqual(projects.check_project_scopes(self.vault)['status'], 'error')
+        with self.assertRaisesRegex(ValueError, 'invalid project scopes file; expected JSON'):
+            self.store._eligible('internal', 'oyun')
+
     def test_prune_recovers_from_invalid_and_outside_folder_paths(self):
         """Invalid or outside-the-vault folder paths do not deadlock project-scope prune."""
         import beyin_v3_projects as projects

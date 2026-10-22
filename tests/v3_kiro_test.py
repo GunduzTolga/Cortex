@@ -89,6 +89,24 @@ class KiroIntegrationTest(unittest.TestCase):
         self.assertEqual(doctor["hook_paths"]["status"], "ok")
         self.assertGreaterEqual(doctor["acknowledged_events"], 0)
 
+    def test_context_reaches_kiro_as_utf8_under_a_windows_code_page(self):
+        # A piped stdout on Windows uses the ANSI code page: printing the companion folder's
+        # emoji raised there, the adapter exited 1 and the prompt got no memory at all.
+        self.install()
+        note = self.vault / "notes/pusula.md"
+        note.parent.mkdir()
+        note.write_text("Mor pusula kütüphaneyi gösterir; ışık şeridi Ağustos'ta yenilendi.\n", encoding="utf-8")
+        self.run_python(self.vault / "beyin.py", "sync")
+        adapter = self.vault / ".claude/scripts/beyin_v3_kiro.py"
+        args = ("--vault", self.vault, "--state", self.state)
+        env = dict(self.env, PYTHONIOENCODING="cp1254", USER_PROMPT="mor pusula kütüphane")
+        output = self.run_python(adapter, *args, "--event", "UserPromptSubmit",
+                                 payload={"session_id": "kiro-codepage", "cwd": str(self.vault)}, env=env)
+        self.assertIn("kütüphaneyi gösterir; ışık şeridi", output)
+        opening = self.run_python(adapter, *args, "--event", "SessionStart",
+                                  payload={"session_id": "kiro-codepage", "cwd": str(self.vault)}, env=env)
+        self.assertIn("🔮", opening)
+
     def test_kiro_skill_edit_syncs_and_divergence_is_preserved(self):
         self.install()
         cli = self.vault / "beyin.py"

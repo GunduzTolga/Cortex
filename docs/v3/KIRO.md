@@ -43,7 +43,8 @@ veya `beyin.py sync` kaynağı tazeler.
 
 Kiro başarılı komut hook'unun stdout'unu düz metin olarak bağlama ekler. Kurulu
 `beyin_v3_kiro.py` adaptörü ortak Python hook'unun JSON sonucundan yalnız metni
-çıkarır; boş olaylarda hiçbir şey yazmaz. Hook bir model çağırmaz ve özel sohbet
+çıkarır ve UTF-8 yazar (Windows'un ANSI kod sayfası companion klasörünün emojisini
+yazamıyor, hook hata verip boş dönüyordu); boş olaylarda hiçbir şey yazmaz. Hook bir model çağırmaz ve özel sohbet
 transkriptini arşivlemez. İstemci kapalıyken sürekli çalışan servis yoktur.
 
 Kiro'nun eski IDE 0.x `.kiro.hook` ve CLI 2.x profil hook biçimleri bu kurulumun

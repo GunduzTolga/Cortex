@@ -18,8 +18,9 @@ _MODULE_DIR = str(Path(__file__).resolve().parent)
 if _MODULE_DIR not in sys.path:
     sys.path.insert(0, _MODULE_DIR)
 
-from beyin_v3 import (HARNESSES, MAX_RECEIPT_LINKS, REJECTED_AT, RETIRED_STATUSES, MemoryStore, ReceiptConflict, RevisionConflict, _json,
-                      _path_redirected, _plain_link, _rejected_inference, _status_word, rejected_dependents, resolve_supersedes)
+from beyin_v3 import (GENERATION_KEY, HARNESSES, MAX_RECEIPT_LINKS, REJECTED_AT, RETIRED_STATUSES, MemoryStore, ReceiptConflict,
+                      RevisionConflict, _json, _path_redirected, _plain_link, _rejected_inference, _status_word, records_generation,
+                      rejected_dependents, resolve_supersedes, supersedes_inputs)
 from beyin_v3_index import applied_keys, dir_key, exclusions as index_exclusions, prune as prune_excluded
 from beyin_v3_hygiene import sensitive_excluded, sensitive_source
 from beyin_v3_projections import (is_receipt_view_source, is_receipt_view_conflict, project_receipts,
@@ -188,16 +189,29 @@ def _mapping_value(sub_key, value):
     return parsed
 
 
-def parse(text):
-    """JSON frontmatter or deliberately bounded flat scalar/list YAML with single-level mapping."""
+# A top-level property name. Python's Unicode-aware word class lets localized Obsidian property
+# names start with a letter while still rejecting digits/punctuation. Obsidian also allows
+# spaces inside a name ("Due date", "Date created"), and other tools quote the name.
+_TOP_KEY = re.compile(r'''(?:"([^"\\\n]+)"|'([^'\n]+)'|([^\W\d][\w-]*(?:[ \t]+[\w-]+)*)):[ \t]*(.*)''')
+
+
+def _frontmatter(text):
+    """(header lines, body) of a note that opens with `---`, or None when it does not."""
     lines = text.splitlines(keepends=True)
     if not lines or lines[0].lstrip('\ufeff').strip() != '---':
-        return {}, text
+        return None
     end = next((i for i in range(1, len(lines)) if lines[i].strip() == '---'), None)
     if end is None:
         raise ValueError('unterminated frontmatter')
-    header = ''.join(lines[1:end]).strip()
-    body = ''.join(lines[end + 1:])
+    return lines[1:end], ''.join(lines[end + 1:])
+
+
+def parse(text):
+    """JSON frontmatter or deliberately bounded flat scalar/list YAML with single-level mapping."""
+    split = _frontmatter(text)
+    if split is None:
+        return {}, text
+    header, body = ''.join(split[0]).strip(), split[1]
     if header.startswith('{'):
         metadata = json.loads(header)
         if not isinstance(metadata, dict):
@@ -211,23 +225,26 @@ def parse(text):
         index += 1
         if not line.strip() or line.lstrip().startswith('#'):
             continue
-        # Python's Unicode-aware word class lets localized Obsidian property
-        # names start with a letter while still rejecting digits/punctuation.
-        match = re.fullmatch(r'([^\W\d][\w-]*):[ \t]*(.*)', line)
-        if not match or match[1] in metadata:
+        match = _TOP_KEY.fullmatch(line)
+        key = match and next(group for group in match.groups()[:3] if group is not None)
+        if not match or key in metadata:
             raise ValueError('unsupported YAML metadata; use JSON frontmatter')
-        key, value = match.groups()
+        value = match[4]
         if not value.strip():
-            # Obsidian writes empty properties as `key:` and lists as indented `- item` blocks.
+            # Obsidian writes empty properties as `key:` and lists as indented `- item` blocks;
+            # PyYAML and other tools write the `- item` lines at the key's own column.
             # Single-level nested mapping (e.g. Claude Code auto-memory `metadata:`) writes indented `key: val` lines.
             items, mapping = [], {}
             indent, mode = None, None
-            while index < len(header_lines) and header_lines[index].startswith((' ', '\t')):
+            while index < len(header_lines):
                 cur = header_lines[index]
+                if not cur.startswith((' ', '\t')) and not (
+                        mode in (None, 'list') and indent in (None, '') and re.fullmatch(r'-[ ]+(.+)', cur)):
+                    break
                 if cur.startswith('\t'):
                     raise ValueError('unsupported YAML metadata; use JSON frontmatter')
                 if mode is None:
-                    list_match = re.fullmatch(r'( +)-[ ]+(.+)', cur)
+                    list_match = re.fullmatch(r'( *)-[ ]+(.+)', cur)
                     map_match = re.fullmatch(r'( +)([^\W\d][\w-]*):[ \t]*(.*)', cur)
                     if list_match:
                         mode = 'list'
@@ -240,7 +257,7 @@ def parse(text):
                     else:
                         raise ValueError('unsupported YAML metadata; use JSON frontmatter')
                 elif mode == 'list':
-                    list_match = re.fullmatch(r'( +)-[ ]+(.+)', cur)
+                    list_match = re.fullmatch(r'( *)-[ ]+(.+)', cur)
                     if not list_match or list_match[1] != indent:
                         raise ValueError('unsupported YAML metadata; use JSON frontmatter')
                     items.append(_yaml_scalar(list_match[2]))
@@ -276,12 +293,48 @@ def render(metadata, body):
     return '---\n' + json.dumps(metadata, ensure_ascii=False, indent=2) + '\n---\n' + body
 
 
+# A key that narrows what context may show, or takes the note out of the index, anywhere in a
+# header: quoted or not, nested or inline, in any letter case. GATE_KEYS plus status (untrusted,
+# retired), kind (receipt, task, untrusted) and generated.
+_GATE_LIKE = re.compile(r'''(?<![\w-])["']?(?:visibility|trust|trusted|remote_allowed|status|kind|generated)["']?[ \t]*:''',
+                        re.IGNORECASE)
+
+
+def body_without_metadata(text):
+    """The body of a note whose header the bounded parser rejected, or None to keep it out.
+
+    Templates, plugins and other tools write YAML that parse() does not read (block scalars,
+    lists of maps, digit-leading names). Such a note is indexed by its text alone, as if it had
+    no frontmatter: a path-derived id, kind note, internal. No partly read key is kept, since a
+    misread supersedes, id or project could retire or misattribute other notes. A header that
+    names a gate-like key stays out of the index as before, because ignoring it could show what
+    it hides.
+    """
+    try:
+        split = _frontmatter(text)
+    except ValueError:
+        return None  # unterminated: there is no body to tell apart from the header
+    if split is None or _GATE_LIKE.search(''.join(split[0])):
+        return None
+    return split[1]
+
+
 EXCLUDED_FILES = {'agents.md', 'claude.md', 'gemini.md', 'skill.md', 'hooks.md', 'config.md', 'settings.md', 'instructions.md', 'codex.md', 'setup.md', 'install.md'}
 EXCLUDED_DIRS = {'node_modules', 'receipts', '__pycache__'}
 # User-chosen directory names (<state>/index.json) are pruned on top of these; see beyin_v3_index.
 # Nothing else is skipped by name: "vendor" or "external" is also an ordinary notes folder.
 COMPLETION_FIELDS = {'completion_contract', 'completion_criterion', 'evidence_refs'}
 TASK_STATUSES = ('inbox', 'active', 'waiting', 'blocked', 'done', 'cancelled')
+# Conflicts that keep only the sources they name out of the index. Two files with one id (a copy
+# made in Explorer, Obsidian or a sync service) leave both out; the rest of the vault is indexed
+# and stays writable, and the conflict stays in every report until the user removes one copy.
+DUPLICATE_ID = 'duplicate source id; all copies quarantined'
+ID_OWNED = 'id already owned by another record'
+
+
+def is_quarantine_conflict(item):
+    """True for a conflict that is already contained by leaving its own sources out of the index."""
+    return isinstance(item, dict) and item.get('reason') in (DUPLICATE_ID, ID_OWNED)
 
 
 def _check_task_dates(fields):
@@ -376,6 +429,21 @@ def _signature_epoch():
     return '|'.join(parts)
 
 
+# Each write to records moves metadata.records_generation, whatever wrote it (beyin_v3.GENERATION_KEY).
+_GENERATION_TRIGGERS = tuple(
+    f"CREATE TRIGGER IF NOT EXISTS records_generation_{name} AFTER {name.upper()} ON records BEGIN "
+    f"UPDATE metadata SET value = CAST(value AS INTEGER) + 1 WHERE key = '{GENERATION_KEY}'; END"
+    for name in ('insert', 'update', 'delete'))
+
+
+def _install_generation(db):
+    """Make sure the records counter exists and moves; returns its value. Inside the sync's transaction."""
+    for statement in _GENERATION_TRIGGERS:
+        db.execute(statement)
+    db.execute('INSERT OR IGNORE INTO metadata VALUES (?, ?)', (GENERATION_KEY, '0'))
+    return records_generation(db)
+
+
 class _SignatureCache:
     """Per-sync view of source_signatures, inside the sync's BEGIN IMMEDIATE transaction.
 
@@ -385,6 +453,12 @@ class _SignatureCache:
     the one written (or confirmed) from that read. The payload hash also catches any other
     writer of the row, e.g. a rolled back version without this table re-indexing the source.
 
+    That proof is kept without reading a single payload while records_generation still holds
+    the value the last sync stored with its signatures: no writer has touched records since,
+    so every row is still the payload it was saved for. `payloads` is then None and `ids`
+    names the records that exist. Any other writer (the store API, an older engine) moves the
+    counter, and the next sync hashes every payload again.
+
     A row with an empty payload_sha256 is a signature seen once (at seen_ns): it is never a
     hit, it only lets a later read of the same signature settle it. Rows of sources the walk
     did not reach (deleted, renamed, in a directory that became excluded) are removed, so a
@@ -393,8 +467,9 @@ class _SignatureCache:
 
     COLUMNS = 'source, id, size, mtime_ns, ctime_ns, ino, payload_sha256, seen_ns'
 
-    def __init__(self, db, sources, payloads, full=False):
+    def __init__(self, db, sources, payloads, full=False, ids=None):
         self.db, self.sources, self.payloads = db, sources, payloads
+        self.ids = ids if ids is not None else set()
         self.started = time.time_ns()
         self.rows, self.kept, self.pending = {}, {}, {}
         self.full = full
@@ -425,9 +500,16 @@ class _SignatureCache:
         row = self.rows.get(relative)
         if self.full or row is None or not row[5] or row[1:5] != _stat_signature(st):
             return None
-        id, payload = row[0], self.payloads.get(row[0])
-        if payload is None or self.sources.get(id) != relative or _hash(payload) != row[5]:
+        id = row[0]
+        if self.sources.get(id) != relative:
             return None
+        if self.payloads is None:
+            if id not in self.ids:
+                return None
+        else:
+            payload = self.payloads.get(id)
+            if payload is None or _hash(payload) != row[5]:
+                return None
         self.kept[relative] = row
         return id
 
@@ -589,13 +671,22 @@ class SyncEngine:
                                                (record_id is not None and item.get('id') == record_id))]
 
     @staticmethod
-    def _write_blockers(result, source):
-        # Another receipt's divergence leaves this write's projection intact; it stays in every sync report (#210).
-        # Receipt view conflicts preserve edited or untracked generated views without blocking source writes (#323).
+    def _write_blockers(result, source, record_id=None):
+        """The conflicts that concern this write: its own source, its record id, or its journal entry.
+
+        A conflict elsewhere in the vault leaves this write's projection intact and stays in every
+        sync report: another receipt's divergence (#210), a duplicated id two other files share, a
+        recovery conflict of another source. Failing the write for it told the caller a stored
+        receipt or task update had not happened. Receipt view conflicts preserve edited or untracked
+        generated views without blocking source writes (#323). A receipt has no record id.
+        """
         from beyin_v3_projections import is_receipt_view_conflict
+        journal = _hash(source) + '.json'
         return [item for item in result.get('conflicts', [])
-                if not (item.get('kind') == 'receipt_divergence' and item.get('source') != source)
-                and not is_receipt_view_conflict(item)]
+                if isinstance(item, dict) and not is_receipt_view_conflict(item)
+                and (item.get('source') == source or source in (item.get('sources') or ())
+                     or (record_id is not None and item.get('id') == record_id)
+                     or item.get('journal') == journal)]
 
     def _path(self, relative, existing=False):
         if not isinstance(relative, str) or Path(relative).is_absolute() or '..' in Path(relative).parts:
@@ -770,7 +861,8 @@ class SyncEngine:
         """Read every source. With sync's signature cache, an unchanged indexed source is not read
         and its value in the returned records is None: sync keeps that record as indexed."""
         records, warnings, conflicts = {}, [], []
-        duplicate = set()
+        # Every source that claimed an id, so a duplicate names the files to fix.
+        duplicate, owners = set(), {}
         # Provenance is independent of editable frontmatter. Prove paths before
         # taking their identities so aliases on case-insensitive volumes are also
         # excluded, without treating distinct case-sensitive files as the same note.
@@ -784,6 +876,8 @@ class SyncEngine:
                 # The walk/projection still reports an unsafe or unreadable path.
                 pass
         self.copy_candidates = []
+        # Sources read this time whose header was set aside (body_without_metadata).
+        self.metadata_ignored = []
         # Read once per sync, not per directory: the config cannot change mid-walk.
         excluded, self.index_exclusions = index_exclusions(self.state, self.root)
         # A listed name the walk skips anyway is a no-op. One set prunes below and is stored by
@@ -827,12 +921,24 @@ class SyncEngine:
                             if id in records:
                                 duplicate.add(id)
                             records[id] = None
+                            owners.setdefault(id, []).append(relative)
                             continue
                     raw = path.read_bytes()
-                    text = raw.decode('utf-8')
+                    try:
+                        text = raw.decode('utf-8')
+                    except UnicodeDecodeError as exc:
+                        # Guessing a legacy code page (cp1254, ANSI) could index wrong letters.
+                        raise ValueError('not UTF-8 text; save the file as UTF-8') from exc
                     if _has_conflict_markers(text):
                         raise ValueError('unresolved git conflict markers; resolve the merge before sync')
-                    metadata, body = parse(text)
+                    ignored = False
+                    try:
+                        metadata, body = parse(text)
+                    except ValueError:
+                        body = body_without_metadata(text)
+                        if body is None:
+                            raise
+                        metadata, ignored = {}, True
                     if metadata.get('kind') == 'task' and body.lstrip().startswith('---'):
                         raise ValueError('task has embedded frontmatter; reconcile metadata and body explicitly')
                     if metadata.get('kind') == 'receipt' or metadata.get('generated') is True:
@@ -840,19 +946,25 @@ class SyncEngine:
                     record = dict(metadata, source=relative, text=body)
                     record.setdefault('id', 'md-' + _hash(relative)[:24])
                     record.setdefault('kind', 'note')
+                    if ignored:
+                        # Kept in the record, so a warm sync that does not reread the source still lists it.
+                        record['metadata_ignored'] = True
+                        self.metadata_ignored.append(relative)
                     record = self.store._validate(record, _resolved_source=resolved)
                     if record['source_sha256'] != _hash(raw):
                         raise ValueError('source changed while scanning')
                     if record['id'] in records:
                         duplicate.add(record['id'])
                     records[record['id']] = record
+                    owners.setdefault(record['id'], []).append(relative)
                     if cache is not None:
                         cache.read(relative, st, record['id'])
                 except (ValueError, OSError, UnicodeError) as exc:
                     warnings.append({'source': relative, 'reason': str(exc)})
         for id in sorted(duplicate):
             records.pop(id, None)
-            conflicts.append({'id': id, 'reason': 'duplicate source id; all copies quarantined'})
+            conflicts.append({'id': id, 'sources': sorted(owners.get(id, [])),
+                              'reason': DUPLICATE_ID})
         return records, warnings, conflicts
 
     def _copy_candidate(self, directory, name, original):
@@ -869,9 +981,34 @@ class SyncEngine:
             candidate['same_content'] = None
         return candidate
 
+    # Journal entries set aside because they can never complete; the newest are kept for the user.
+    JOURNAL_ASIDE = 'conflicts'
+    JOURNAL_ASIDE_KEEP = 50
+
+    def _set_aside(self, entry):
+        """Move a journal entry that can never complete out of the replay set; its text is kept."""
+        aside = self.journal / self.JOURNAL_ASIDE
+        aside.mkdir(exist_ok=True, mode=0o700)
+        target = aside / f'{time.strftime("%Y%m%dT%H%M%S")}-{time.time_ns() % 1_000_000_000:09d}-{entry.name}'
+        os.replace(entry, target)
+        kept = sorted(aside.glob('*.json'))
+        for old in kept[:-self.JOURNAL_ASIDE_KEEP]:
+            old.unlink(missing_ok=True)
+        return target
+
     def _recover(self, db):
-        completed, conflicts = [], []
+        """Replay the journal entries a crash left between intent and replace.
+
+        (completed, conflicts, warnings). An entry whose source now holds neither the bytes it
+        was written for nor the bytes it wanted (someone edited the file since) can never
+        complete: the edit wins, the entry is set aside under markdown-journal/conflicts/ with
+        its intended text, and one warning names the source. So is an entry that cannot be read
+        or names an invalid source. Only an error that may pass (a locked file) stays a conflict
+        and is tried again on the next sync.
+        """
+        completed, conflicts, warnings = [], [], []
         for entry in sorted(self.journal.glob('*.json')):
+            intent = None
             try:
                 intent = json.loads(entry.read_text(encoding='utf-8'))
                 path = self._path(intent['source'])
@@ -880,7 +1017,12 @@ class SyncEngine:
                 if actual == intent['old_hash']:
                     atomic(path, intent['content'])
                 elif actual != desired:
-                    conflicts.append({'source': intent['source'], 'reason': 'recovery conflict; manual edit preserved'})
+                    target = self._set_aside(entry)
+                    reason = ('unfinished write superseded by a manual edit; the edit is kept and the '
+                              'intended text is in the runtime journal: ' + target.relative_to(self.state).as_posix())
+                    if intent['kind'] == 'receipt':
+                        reason += '; this receipt was not stored, write it again if it is still needed'
+                    warnings.append({'source': intent['source'], 'kind': 'journal', 'reason': reason})
                     continue
                 if intent['kind'] == 'receipt':
                     event = intent['event']
@@ -893,9 +1035,25 @@ class SyncEngine:
                             raise ReceiptConflict('event id collision during recovery')
                     db.execute('INSERT OR IGNORE INTO receipts VALUES (?,?)', (event['event_id'], _json(event)))
                 completed.append(entry)
-            except (ValueError, OSError, KeyError) as exc:
-                conflicts.append({'journal': entry.name, 'reason': str(exc)})
-        return completed, conflicts
+            except OSError as exc:
+                conflict = {'journal': entry.name, 'reason': str(exc)}
+                if isinstance(intent, dict) and isinstance(intent.get('source'), str):
+                    conflict['source'] = intent['source']
+                conflicts.append(conflict)
+            except (ValueError, KeyError, TypeError) as exc:
+                # Unreadable, names an invalid source, or a receipt that collides with a stored one:
+                # no later sync can finish it either.
+                source = intent.get('source') if isinstance(intent, dict) else None
+                try:
+                    target = self._set_aside(entry)
+                except OSError:
+                    conflicts.append(dict({'journal': entry.name, 'reason': str(exc)},
+                                          **({'source': source} if isinstance(source, str) else {})))
+                    continue
+                warnings.append({'source': source if isinstance(source, str) else 'journal', 'kind': 'journal',
+                                 'reason': f'unfinished write could not be completed ({exc}); set aside in the '
+                                           'runtime journal: ' + target.relative_to(self.state).as_posix()})
+        return completed, conflicts, warnings
 
     def _receipt_event(self, relative):
         """Rebuild a receipts row from its immutable source; ValueError when the file is not a valid receipt."""
@@ -1004,7 +1162,7 @@ class SyncEngine:
                 except (ValueError, TypeError):
                     pass
             db.execute("INSERT OR REPLACE INTO metadata VALUES ('last_sync_time', ?)", (str(now_sec),))
-            completed, recovery_conflicts = self._recover(db)
+            completed, recovery_conflicts, recovery_warnings = self._recover(db)
             receipt_warnings, receipt_conflicts = self._scan_receipts(db)
             desired_views = _receipt_view_contents(self, db, receipt_warnings)
             view_paths = set(desired_views)
@@ -1041,10 +1199,22 @@ class SyncEngine:
             old_sources = dict(db.execute('SELECT id, source FROM markdown_sources ORDER BY id'))
             # Match the old covering-ID scan's set construction and deletion event order.
             old_owned = {id for id in old_sources}
-            old_payloads = dict(db.execute('SELECT id, payload FROM records'))
-            cache = _SignatureCache(db, old_sources, old_payloads, full=full)
+            generation = _install_generation(db)
+            trusted = (not full and generation is not None and db.execute(
+                "SELECT 1 FROM metadata WHERE key='signature_generation' AND value=?", (generation,)).fetchone())
+            if trusted:
+                # Every payload is as the last sync left it: a warm sync reads only the ones it
+                # rewrites or deletes, so its cost follows the files that changed, not the vault.
+                old_payloads, existing = None, {row[0] for row in db.execute('SELECT id FROM records')}
+            else:
+                old_payloads, existing = dict(db.execute('SELECT id, payload FROM records')), None
+            cache = _SignatureCache(db, old_sources, old_payloads, full=full, ids=existing)
             records, warnings, conflicts = self._scan(cache, view_paths, alias_identities)
+            if old_payloads is None:
+                old_payloads = self._payloads(db, (old_owned - records.keys()) |
+                                              {id for id, record in records.items() if record is not None})
             warnings.extend(state_regression_warnings)
+            warnings.extend(recovery_warnings)
             warnings.extend(receipt_warnings)
             conflicts.extend(recovery_conflicts + receipt_conflicts)
             deleted = 0
@@ -1070,7 +1240,7 @@ class SyncEngine:
                         record['revision'] = max(record['revision'], previous['revision'])
                 payload = _json(record)
                 if previous_payload is not None and id not in old_owned and previous_payload != payload:
-                    conflicts.append({'id': id, 'reason': 'id already owned by another record'})
+                    conflicts.append({'id': id, 'source': record['source'], 'reason': ID_OWNED})
                     continue
                 if previous_payload != payload:
                     event_type = 'update' if previous_payload is not None else 'ingest'
@@ -1105,9 +1275,14 @@ class SyncEngine:
                     warnings.append(dict(issue, kind='receipt_view'))
                 else:
                     conflicts.append(issue)
+            # Every write to records is behind this point: the signatures above stand for this value.
+            generation = records_generation(db)
+            if generation is not None:
+                db.execute("INSERT OR REPLACE INTO metadata VALUES ('signature_generation',?)", (generation,))
+            derived = self._derived(db, generation)
             # A supersedes value that retires nothing is reported, not a degraded scan: no
             # source was excluded and the hook must not warn on every turn about it.
-            dead_supersedes = resolve_supersedes([json.loads(row[0]) for row in db.execute('SELECT payload FROM records ORDER BY id')])[1]
+            dead_supersedes = derived['dead']
             if conflicts or view_issues:
                 # A receipt hidden by a directory mtime that did not move surfaces as a view
                 # conflict; the next sync then rescans receipts/ in full.
@@ -1120,6 +1295,10 @@ class SyncEngine:
         if dead_supersedes:
             result['supersedes_issues'] = dead_supersedes[:20]
             result['supersedes_issue_count'] = len(dead_supersedes)
+        if derived['metadata_ignored']:
+            # Reported, not a degraded scan: each note is indexed by its text, without its properties.
+            result['metadata_ignored'] = derived['metadata_ignored'][:20]
+            result['metadata_ignored_count'] = len(derived['metadata_ignored'])
         if self.copy_candidates:
             # Reported, not a degraded scan: both files are notes in the index until the user says otherwise.
             result['sync_copy_candidates'] = self.copy_candidates[:20]
@@ -1128,6 +1307,46 @@ class SyncEngine:
             # Reported, not a degraded scan: the user chose these names, or the file is not applied.
             result['index_exclusions'] = self.index_exclusions
         return result
+
+    @staticmethod
+    def _payloads(db, ids):
+        """id -> payload for these ids only."""
+        if not ids:
+            return {}
+        try:
+            return dict(db.execute('SELECT id, payload FROM records WHERE id IN (SELECT value FROM json_each(?))',
+                                   (json.dumps(sorted(ids), ensure_ascii=False),)))
+        except sqlite3.OperationalError:
+            # SQLite built without JSON functions.
+            return {id: payload for id, payload in db.execute('SELECT id, payload FROM records') if id in ids}
+
+    @staticmethod
+    def _derived(db, generation):
+        """What the whole index says beyond its records: the ids other notes retire, the supersedes
+        values that retire nothing, and the notes indexed without their properties.
+
+        Kept with the records counter it was computed at (MemoryStore.derived), so a warm sync
+        that changed nothing decodes nothing for it and a prompt reads the retired ids from here.
+        """
+        stored = dict(db.execute("SELECT key, value FROM metadata WHERE key IN ('derived_generation','derived')"))
+        if generation is not None and stored.get('derived_generation') == generation:
+            try:
+                derived = json.loads(stored['derived'])
+                if isinstance(derived, dict) and all(isinstance(derived.get(key), list)
+                                                     for key in ('retired', 'dead', 'metadata_ignored')):
+                    return derived
+            except (KeyError, ValueError):
+                pass
+        retired, dead = resolve_supersedes(supersedes_inputs(db))
+        # _json() writes compact keys: every record that carries the mark contains this text.
+        marked = (json.loads(row[0]) for row in db.execute(
+            'SELECT payload FROM records WHERE instr(payload, ?) > 0', ('"metadata_ignored":true',)))
+        ignored = sorted(str(record.get('source', '')) for record in marked if record.get('metadata_ignored') is True)
+        derived = {'retired': sorted(retired), 'dead': dead, 'metadata_ignored': ignored}
+        if generation is not None:
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('derived',?)", (_json(derived),))
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('derived_generation',?)", (generation,))
+        return derived
 
     def _refuse_excluded(self, source):
         """A new source under a directory the user keeps out of the index would be written and
@@ -1139,18 +1358,35 @@ class SyncEngine:
             raise ValueError('source is under a directory excluded from the index (excluded_dirs in index.json)')
 
     def _intent(self, relative, old_hash, content, kind, event=None):
+        """Write `content` over the source whose bytes hash to `old_hash`, through the journal.
+
+        The entry exists only for a crash between it and the replace: the next sync replays it.
+        A write that fails here, or bytes that changed first, remove it again before the error
+        reaches the caller. Kept, it would have been replayed later (a write the caller was told
+        had failed), or have wedged the source once anyone edited it.
+        """
         path = self._path(relative)
         entry = self.journal / (_hash(relative) + '.json')
         if entry.exists():
             raise RevisionConflict('pending source operation; sync and resolve first')
+
+        def current():
+            return _hash(path.read_bytes()) if path.exists() else None
+
+        if current() != old_hash:
+            raise RevisionConflict('source changed before replace')
         intent = {'source': relative, 'old_hash': old_hash, 'content': content, 'kind': kind}
         if event:
             intent['event'] = event
         atomic(entry, _json(intent))
-        actual = _hash(path.read_bytes()) if path.exists() else None
-        if actual != old_hash:
-            raise RevisionConflict('source changed before replace')
-        atomic(path, content)
+        try:
+            # Checked again with the entry in place: an editor that saved in between keeps its bytes.
+            if current() != old_hash:
+                raise RevisionConflict('source changed before replace')
+            atomic(path, content)
+        except Exception:
+            entry.unlink(missing_ok=True)
+            raise
         return entry
 
     def update_task(self, id, expected_revision, changes):
@@ -1203,7 +1439,7 @@ class SyncEngine:
             intended = render(metadata, body)
             self._intent(record['source'], record['source_sha256'], intended, 'task')
         result = self.sync()
-        if self._write_blockers(result, record['source']):
+        if self._write_blockers(result, record['source'], id):
             raise RevisionConflict('source projection conflict')
         with self.store._connect() as db:
             row = db.execute('SELECT payload FROM records WHERE id=?', (id,)).fetchone()

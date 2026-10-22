@@ -265,13 +265,37 @@ class SourceSyncTest(unittest.TestCase):
                         'no numbered file is dropped from the index')
         self.assertEqual(before, self.snapshot())
 
+    def test_a_copy_elsewhere_blocks_only_writes_to_its_own_files(self):
+        # Explorer's "görev - Kopya.md": the copies leave the index; a receipt or a task update
+        # elsewhere is stored and reported as stored, never as a projection conflict.
+        self.write(name='tasks/t1.md', id='t1')
+        self.write(name='tasks/t2.md', id='t2')
+        self.assertEqual(self.engine.sync()['status'], 'succeeded')
+        (self.vault / 'tasks/t1 - Kopya.md').write_bytes((self.vault / 'tasks/t1.md').read_bytes())
+        receipt = self.engine.receipt('copy-1', 'Checked t2.', ['tasks/t2.md'], 'codex')
+        self.assertEqual(receipt['status'], 'succeeded')
+        self.assertEqual(receipt['source_sync']['conflicts'],
+                         [{'id': 't1', 'sources': ['tasks/t1 - Kopya.md', 'tasks/t1.md'],
+                           'reason': 'duplicate source id; all copies quarantined'}])
+        updated = self.engine.update_task('t2', 1, {'status': 'done'})
+        self.assertEqual((updated['revision'], updated['status']), (2, 'done'))
+        # The quarantined task itself is not in the index, so it cannot be updated by its id.
+        with self.assertRaises(KeyError):
+            self.engine.update_task('t1', 1, {'status': 'done'})
+        # A write whose own source is in the conflict still fails.
+        result = {'conflicts': [{'id': 't1', 'sources': ['tasks/t1 - Kopya.md', 'tasks/t1.md'], 'reason': 'x'}]}
+        self.assertTrue(self.engine._write_blockers(result, 'tasks/t1.md'))
+        self.assertTrue(self.engine._write_blockers({'conflicts': [{'id': 't9', 'reason': 'x'}]}, 'tasks/t9.md', 't9'))
+        self.assertFalse(self.engine._write_blockers(result, 'tasks/t2.md', 't2'))
+
     def test_a_numbered_copy_that_kept_the_note_id_is_quarantined_and_listed(self):
         # The copy carries the original frontmatter id: the duplicate rule already holds both back.
         self.write(name='notes/task.md')
         self.write(name='notes/task 2.md')
         report = self.engine.sync()
         self.assertEqual(report['status'], 'conflict')
-        self.assertEqual(report['conflicts'], [{'id': 'nebula-task', 'reason': 'duplicate source id; all copies quarantined'}])
+        self.assertEqual(report['conflicts'], [{'id': 'nebula-task', 'sources': ['notes/task 2.md', 'notes/task.md'],
+                                                'reason': 'duplicate source id; all copies quarantined'}])
         self.assertEqual(report['sync_copy_candidates'],
                          [{'source': 'notes/task 2.md', 'original': 'notes/task.md', 'same_content': True}])
 
@@ -475,13 +499,59 @@ class SourceSyncTest(unittest.TestCase):
         self.engine.sync()
         self.assertEqual(self.records()[0]['revision'], 3)
 
-    def test_unsupported_metadata_reports_degraded_not_succeeded(self):
+    def test_unsupported_metadata_with_a_gate_key_reports_degraded_not_succeeded(self):
         source = self.vault / 'unsupported.md'
-        source.write_text('---\nid: unsupported\nfacts:\n  owner:\n    name: Synthetic Reviewer\n---\nNebula calibration metadata fixture.\n', encoding='utf-8')
+        source.write_text('---\nid: unsupported\nvisibility: private\nfacts:\n  owner:\n    name: Synthetic Reviewer\n'
+                          '---\nNebula calibration metadata fixture.\n', encoding='utf-8')
         report = self.engine.sync()
         self.assertTrue(report['warnings'])
         self.assertEqual(report['status'], 'degraded')
         self.assertEqual(self.records(), [])
+        self.assertEqual(self.engine.store.retrieve('Nebula calibration metadata')['records'], [])
+
+    def test_unsupported_metadata_without_a_gate_key_indexes_the_text(self):
+        # Templates and other tools write YAML parse() does not read; the note used to vanish
+        # from memory and every prompt said "V3 sync needs attention".
+        source = self.vault / 'unsupported.md'
+        source.write_text('---\nid: unsupported\nfacts:\n  owner:\n    name: Synthetic Reviewer\n'
+                          'özet: |\n  iki satır\n  açıklama\n---\nNebula calibration metadata fixture.\n', encoding='utf-8')
+        report = self.engine.sync()
+        self.assertEqual((report['status'], report['warnings']), ('succeeded', []))
+        self.assertEqual(report['metadata_ignored'], ['unsupported.md'])
+        found = self.engine.store.retrieve('Nebula calibration metadata')['records']
+        self.assertEqual([(r['source'], r['id'], r['facts']) for r in found],
+                         [('unsupported.md', 'md-' + self.module._hash('unsupported.md')[:24], {})])
+        # Fixing the header takes the note's own metadata and the listing away.
+        source.write_text('---\nid: unsupported\nproject: nebula\n---\nNebula calibration metadata fixture.\n',
+                          encoding='utf-8')
+        report = self.engine.sync()
+        self.assertNotIn('metadata_ignored', report)
+        self.assertEqual([r['id'] for r in self.records()], ['unsupported'])
+
+    def test_obsidian_spaced_and_quoted_keys_and_column_zero_lists_are_read(self):
+        text = ('---\nDate created: 2026-10-01\n"Due date": 2026-11-01\n\'Okuma durumu\': devam\n'
+                'tags:\n- kitap\n- okuma\nproject: nebula\n---\nNebula calibration okuma listesi.\n')
+        metadata, body = self.module.parse(text)
+        self.assertEqual(metadata, {'Date created': '2026-10-01', 'Due date': '2026-11-01', 'Okuma durumu': 'devam',
+                                    'tags': ['kitap', 'okuma'], 'project': 'nebula'})
+        self.assertEqual(body, 'Nebula calibration okuma listesi.\n')
+        (self.vault / 'okuma.md').write_text(text, encoding='utf-8')
+        report = self.engine.sync()
+        self.assertEqual((report['status'], report['warnings']), ('succeeded', []))
+        self.assertNotIn('metadata_ignored', report)
+        self.assertEqual(self.records()[0]['tags'], ['kitap', 'okuma'])
+        # A quoted gate key is the gate itself.
+        metadata, _ = self.module.parse('---\n"visibility": private\n---\nBody\n')
+        self.assertEqual(metadata, {'visibility': 'private'})
+        # Mixed indentation and a dash run after a mapping stay rejected.
+        for header in ('tags:\n  - a\n- b', 'meta:\n  a: 1\n- b', 'tags:\n- a\n  - b'):
+            with self.subTest(header=header), self.assertRaises(ValueError):
+                self.module.parse('---\n' + header + '\n---\nBody\n')
+
+    def test_a_legacy_code_page_note_is_named_not_utf8(self):
+        (self.vault / 'eski.md').write_bytes('Kira ödemesi, şubat ayı.\n'.encode('cp1254'))
+        report = self.engine.sync()
+        self.assertEqual(report['warnings'], [{'source': 'eski.md', 'reason': 'not UTF-8 text; save the file as UTF-8'}])
 
     def test_yaml_scalar_lists_and_empty_values_round_trip(self):
         cases = [
@@ -681,7 +751,7 @@ class SourceSyncTest(unittest.TestCase):
             'field: [# comment]', 'field: [a\t# comment]',
             'field: [a]\nfield: [b]', 'field:\nfield: value',
             'field:\n\t- a', 'field:\n \t- a', 'field:\n  - a\n\t- b',
-            '  field: value', '\tfield: value', 'field:\n- a',
+            '  field: value', '\tfield: value',
             'field:\n  - ', 'field:\n  - a\n  continuation',
             'field: [a,,b]', 'field: [a,]', 'field: [a', 'field: [a] trailing',
             'field: ["a" trailing]', "field: ['unclosed]", 'field: ["unclosed]',
@@ -693,15 +763,33 @@ class SourceSyncTest(unittest.TestCase):
             'field: [a, b] # comment',
         ]
         source = self.vault / 'unsupported.md'
+        body = 'Nebula calibration rejected fixture.\n'
+        body_only_id = 'md-' + self.module._hash('unsupported.md')[:24]
         for header in headers:
-            with self.subTest(header=header):
-                source.write_text('---\nid: unsupported\nproject: nebula\n' + header +
-                                  '\n---\nNebula calibration rejected fixture.\n', encoding='utf-8')
+            with self.subTest(header=header, gate=True):
+                # A gate-like key anywhere in the header keeps the note out, as before: ignoring
+                # the header could show what it hides.
+                source.write_text('---\nid: unsupported\nproject: nebula\nvisibility: private\n' + header +
+                                  '\n---\n' + body, encoding='utf-8')
                 report = self.engine.sync()
                 self.assertEqual(report['status'], 'degraded', report)
                 self.assertEqual(report['indexed'], 0)
                 self.assertEqual([w['source'] for w in report['warnings']], ['unsupported.md'])
+                self.assertNotIn('metadata_ignored', report)
                 self.assertEqual(self.records(), [])
+            with self.subTest(header=header, gate=False):
+                # Without one the note is indexed by its text alone: no partly read key is kept.
+                source.write_text('---\nid: unsupported\nproject: nebula\n' + header + '\n---\n' + body,
+                                  encoding='utf-8')
+                report = self.engine.sync()
+                self.assertEqual(report['status'], 'succeeded', report)
+                self.assertEqual(report['warnings'], [])
+                self.assertEqual(report['metadata_ignored'], ['unsupported.md'])
+                self.assertEqual(self.records(), [], 'the project key was not read')
+                with self.engine.store._connect() as db:
+                    stored = [json.loads(row[0]) for row in db.execute('SELECT payload FROM records')]
+                self.assertEqual([(r['id'], r['kind'], r['text'], r.get('project'), r['metadata_ignored'])
+                                  for r in stored], [(body_only_id, 'note', body, None, True)])
 
     def test_yaml_null_and_list_values_respect_record_validation(self):
         source = self.vault / 'invalid.md'
@@ -811,46 +899,111 @@ class SourceSyncTest(unittest.TestCase):
         self.assertIn('violet calibration', json.dumps(snapshot))
         self.assertIn('Synthetic Reviewer', json.dumps(snapshot))
 
-    def test_source_replace_failure_recovers_consistently(self):
+    def fail_source_replace(self, path, error):
+        real_replace = os.replace
+
+        def fail_source(src, dst, *args, **kwargs):
+            if Path(dst).resolve() == path.resolve():
+                raise error
+            return real_replace(src, dst, *args, **kwargs)
+        return patch.object(self.module.os, 'replace', side_effect=fail_source)
+
+    def journal(self):
+        return sorted(path.name for path in (self.state / 'markdown-journal').glob('*.json'))
+
+    def test_a_failed_source_replace_leaves_no_intent_and_a_retry_succeeds(self):
+        # The caller is told the update failed: replaying it at the next sync (from any client)
+        # would apply a write reported as not done.
         path = self.write()
         self.engine.sync()
         original = path.read_bytes()
-        real_replace = os.replace
-        def fail_source(src, dst, *args, **kwargs):
-            if Path(dst).resolve() == path.resolve():
-                raise OSError('Synthetic source replace failure')
-            return real_replace(src, dst, *args, **kwargs)
-        with patch.object(self.module.os, 'replace', side_effect=fail_source):
+        with self.fail_source_replace(path, OSError('Synthetic source replace failure')):
             with self.assertRaises(OSError):
                 self.engine.update_task('nebula-task', 1, {'status': 'waiting'})
         self.assertEqual(path.read_bytes(), original)
-        self.assertEqual(self.records()[0]['revision'], 1)
-        getattr(self.engine.store, 'close', lambda: None)()
+        self.assertEqual(self.journal(), [])
+        self.engine = self.module.SyncEngine(self.vault, self.state)
+        self.assertEqual(self.engine.sync()['status'], 'succeeded')
+        self.assertEqual((self.records()[0]['revision'], self.records()[0]['status']), (1, 'active'))
+        updated = self.engine.update_task('nebula-task', 1, {'status': 'waiting'})
+        self.assertEqual((updated['revision'], updated['status']), (2, 'waiting'))
+
+    def test_bytes_changed_after_the_intent_leave_no_intent(self):
+        path = self.write()
+        self.engine.sync()
+        real_atomic = self.module.atomic
+
+        def editor_saves_meanwhile(target, text):
+            real_atomic(target, text)
+            if Path(target).parent.name == 'markdown-journal':
+                path.write_bytes(path.read_bytes() + b'Edited in Obsidian meanwhile.\n')
+        with patch.object(self.module, 'atomic', side_effect=editor_saves_meanwhile):
+            with self.assertRaisesRegex(self.module.RevisionConflict, 'source changed before replace'):
+                self.engine.update_task('nebula-task', 1, {'status': 'waiting'})
+        self.assertEqual(self.journal(), [])
+        self.assertIn(b'Edited in Obsidian meanwhile.', path.read_bytes())
+        self.assertEqual(self.engine.sync()['status'], 'succeeded')
+
+    def test_a_crash_between_intent_and_replace_is_replayed(self):
+        # A killed process (no exception handler runs) keeps its entry: the next sync completes it.
+        path = self.write()
+        self.engine.sync()
+        with self.fail_source_replace(path, KeyboardInterrupt()):
+            with self.assertRaises(KeyboardInterrupt):
+                self.engine.update_task('nebula-task', 1, {'status': 'waiting'})
+        self.assertEqual(len(self.journal()), 1)
         self.engine = self.module.SyncEngine(self.vault, self.state)
         self.engine.sync()
         recovered = self.records()[0]
-        self.assertEqual(recovered['revision'], 2)
-        self.assertEqual(recovered['status'], 'waiting')
+        self.assertEqual((recovered['revision'], recovered['status']), (2, 'waiting'))
+        self.assertEqual(self.journal(), [])
         self.engine.sync()
         self.assertEqual(self.records()[0]['revision'], 2)
 
     def test_recovery_does_not_overwrite_intervening_manual_change(self):
+        # A crash left the intent, then the file was edited by hand: the edit wins, the intent is
+        # set aside once with a warning that names the source, and nothing stays wedged.
         path = self.write()
         self.engine.sync()
-        real_replace = os.replace
-        def fail_source(src, dst, *args, **kwargs):
-            if Path(dst).resolve() == path.resolve():
-                raise OSError('Synthetic source replace failure')
-            return real_replace(src, dst, *args, **kwargs)
-        with patch.object(self.module.os, 'replace', side_effect=fail_source):
-            with self.assertRaises(OSError):
+        with self.fail_source_replace(path, KeyboardInterrupt()):
+            with self.assertRaises(KeyboardInterrupt):
                 self.engine.update_task('nebula-task', 1, {'status': 'waiting'})
         self.write(body='Nebula calibration manual source revision wins.\n', revision=2, status='done')
         manual = path.read_bytes()
+        self.engine = self.module.SyncEngine(self.vault, self.state)
         report = self.engine.sync()
-        self.assertTrue(report['conflicts'])
+        self.assertEqual(report['conflicts'], [])
+        self.assertEqual([(w['source'], w['kind']) for w in report['warnings']], [('notes/task.md', 'journal')])
+        self.assertIn('superseded by a manual edit', report['warnings'][0]['reason'])
         self.assertEqual(path.read_bytes(), manual)
-        self.assertNotEqual(self.records()[0]['status'], 'waiting')
+        self.assertEqual(self.records()[0]['status'], 'done')
+        self.assertEqual(self.journal(), [])
+        aside = list((self.state / 'markdown-journal/conflicts').glob('*.json'))
+        self.assertEqual(len(aside), 1)
+        self.assertIn('"status": "waiting"', json.loads(aside[0].read_text(encoding='utf-8'))['content'])
+        self.assertEqual(self.engine.sync()['status'], 'succeeded')
+        self.assertEqual(self.engine.update_task('nebula-task', 2, {'status': 'active'})['revision'], 3)
+
+    def test_an_unreadable_intent_is_set_aside(self):
+        self.write()
+        self.engine.sync()
+        (self.state / 'markdown-journal/broken.json').write_text('{"source": "notes/task.md"', encoding='utf-8')
+        report = self.engine.sync()
+        self.assertEqual(report['conflicts'], [])
+        self.assertEqual([w['kind'] for w in report['warnings']], ['journal'])
+        self.assertEqual(self.journal(), [])
+        self.assertEqual(self.engine.sync()['status'], 'succeeded')
+
+    def test_set_aside_intents_are_bounded(self):
+        aside = self.state / 'markdown-journal/conflicts'
+        aside.mkdir(parents=True)
+        for index in range(60):
+            (aside / f'2026010{index:02d}-old.json').write_text('{}', encoding='utf-8')
+        (self.state / 'markdown-journal/broken.json').write_text('not json', encoding='utf-8')
+        self.engine.sync()
+        kept = sorted(path.name for path in aside.glob('*.json'))
+        self.assertEqual(len(kept), self.module.SyncEngine.JOURNAL_ASIDE_KEEP)
+        self.assertTrue(kept[-1].endswith('-broken.json'), kept[-1])
 
     def test_utf8_bom_frontmatter_preserves_visibility_and_metadata(self):
         """BOM-prefixed markdown files parse frontmatter cleanly without leaking private visibility."""

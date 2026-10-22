@@ -162,6 +162,51 @@ class StatSignatureTest(unittest.TestCase):
         self.assertEqual(len(old), len(new))
         path.write_bytes(raw.replace(old, new))
 
+    def traced_sync(self):
+        """One sync of the cached engine with its SQL recorded, normalized to upper case."""
+        statements = []
+        connect = self.engine.store._connect
+
+        @contextmanager
+        def traced():
+            with connect() as db:
+                db.set_trace_callback(statements.append)
+                yield db
+
+        with patch.object(self.engine.store, '_connect', traced), self.later():
+            result = self.engine.sync()
+        return result, [' '.join(s.upper().split()) for s in statements]
+
+    def test_a_settled_warm_sync_reads_no_payload(self):
+        # A warm sync's cost follows the files that changed, not the vault: a chat-history import
+        # made every sync load, hash and decode hundreds of MB of unchanged payloads.
+        self.write()
+        self.write('notes/other.md', id='other', supersedes=['note'])
+        self.settle()
+        result, sql = self.traced_sync()
+        self.assertEqual(result, self.sync_both())
+        self.assertFalse([s for s in sql if 'PAYLOAD FROM RECORDS' in s], sql)
+        self.assertEqual(result['status'], 'succeeded')
+        self.assertEqual(self.engine.store.superseded_ids(), {'note'}, 'still retired by other.md')
+        # One edit reads that payload alone (and, the index having changed, the few records a
+        # supersedes value names), never every payload.
+        put(self.vault / 'notes/other.md', get(self.vault / 'notes/other.md').replace('Alpha', 'Omega'))
+        _, sql = self.traced_sync()
+        self.assertNotIn('SELECT ID, PAYLOAD FROM RECORDS', sql)
+        loads = [s for s in sql if s.startswith('SELECT ID, PAYLOAD FROM RECORDS WHERE ID IN (SELECT VALUE FROM JSON_EACH')]
+        self.assertEqual(loads, ['SELECT ID, PAYLOAD FROM RECORDS WHERE ID IN (SELECT VALUE FROM JSON_EACH(\'["OTHER"]\'))'])
+        self.assertEqual(self.engine.store.superseded_ids(), {'note'})
+
+    def test_another_writer_makes_the_next_sync_check_every_payload(self):
+        self.write()
+        self.settle()
+        self.engine.store.update_task('note', 1, {'status': 'rewritten elsewhere'})
+        _, sql = self.traced_sync()
+        self.assertIn('SELECT ID, PAYLOAD FROM RECORDS', sql)
+        self.assertNotIn('status', self.record('note'))
+        _, sql = self.traced_sync()
+        self.assertNotIn('SELECT ID, PAYLOAD FROM RECORDS', sql)
+
     def test_settled_unchanged_sources_are_not_read(self):
         for index in range(5):
             self.write(f'notes/note-{index}.md', id=f'note-{index}')
@@ -346,7 +391,8 @@ class StatSignatureTest(unittest.TestCase):
         self.write('notes/copy.md')
         for _ in range(3):
             result = self.sync_both()
-            self.assertEqual(result['conflicts'], [{'id': 'note', 'reason': 'duplicate source id; all copies quarantined'}])
+            self.assertEqual(result['conflicts'], [{'id': 'note', 'sources': ['notes/copy.md', 'notes/note.md'],
+                                                    'reason': 'duplicate source id; all copies quarantined'}])
             self.assertIsNone(self.record('note'))
         (self.vault / 'notes/copy.md').unlink()
         self.assertEqual(self.sync_both()['status'], 'succeeded')
@@ -370,7 +416,8 @@ class StatSignatureTest(unittest.TestCase):
         self.write('notes/collision.md', id='foreign')
         for _ in range(3):
             result = self.sync_both()
-            self.assertEqual(result['conflicts'], [{'id': 'foreign', 'reason': 'id already owned by another record'}])
+            self.assertEqual(result['conflicts'], [{'id': 'foreign', 'source': 'notes/collision.md',
+                                                    'reason': 'id already owned by another record'}])
 
     def test_a_manual_receipt_view_edit_stays_a_typed_warning(self):
         self.write()
@@ -684,7 +731,10 @@ class StatSignatureTest(unittest.TestCase):
         self.write('notes/dead.md', id='dead', supersedes=['no-such-record'])
         self.write('notes/generated.md', id='generated', generated=True)
         self.write('notes/visibility.md', id='visibility', visibility='secret')
-        put(self.vault / 'notes/yaml.md', '---\nid: yaml\nnested: {a: 1}\n---\nBody.\n')
+        put(self.vault / 'notes/yaml.md', '---\nid: yaml\nvisibility: internal\nnested: {a: 1}\n---\nBody.\n')
+        # Without a gate-like key the same header is set aside and the text indexed; that note is
+        # a record with a signature, and still listed on every warm sync.
+        put(self.vault / 'notes/props.md', '---\nid: props\nnested: {a: 1}\n---\nBody.\n')
         put(self.vault / 'notes/task.md', '---\nid: task\nkind: task\n---\n---\nid: inner\n---\nBody.\n')
         put(self.vault / 'notes/open.md', '---\nid: open\nBody.\n')
         (self.vault / 'notes/binary.md').write_bytes(b'\xff\xfe\x00not utf-8')
@@ -692,12 +742,13 @@ class StatSignatureTest(unittest.TestCase):
         self.assertEqual(first['status'], 'degraded')
         self.assertEqual(sorted(warning['source'] for warning in first['warnings']),
                          ['notes/binary.md', 'notes/open.md', 'notes/task.md', 'notes/visibility.md', 'notes/yaml.md'])
-        self.assertEqual((first['indexed'], first['supersedes_issue_count']), (2, 1))
+        self.assertEqual((first['indexed'], first['supersedes_issue_count']), (3, 1))
+        self.assertEqual(first['metadata_ignored'], ['notes/props.md'])
         for _ in range(4):
             self.assertEqual(self.sync_both(), first)
         self.assertEqual(sorted(set(self.last_reads)),
                          ['binary.md', 'generated.md', 'open.md', 'task.md', 'visibility.md', 'yaml.md'])
-        self.assertEqual(set(self.signatures()), {'notes/good.md', 'notes/dead.md'})
+        self.assertEqual(set(self.signatures()), {'notes/good.md', 'notes/dead.md', 'notes/props.md'})
 
     def test_a_receipt_divergence_is_reported_on_every_warm_sync(self):
         # #205/#239: another device wrote the same event_id and the merge kept its file.

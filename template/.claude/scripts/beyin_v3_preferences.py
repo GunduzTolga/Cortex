@@ -39,7 +39,15 @@ def preferences_path(vault):
 
 def read(vault):
     path = preferences_path(vault)
-    return validate(json.loads(path.read_text(encoding='utf-8')) if path.exists() else {})
+    if not path.exists():
+        return validate({})
+    try:
+        # utf-8-sig: Windows PowerShell 5.1 and Notepad write a BOM.
+        value = json.loads(path.read_text(encoding='utf-8-sig'))
+    except UnicodeDecodeError as exc:
+        # PowerShell 5.1's Out-File writes UTF-16 by default.
+        raise ValueError('Preferences file is not UTF-8 JSON; save it as UTF-8 or use beyin.py preferences') from exc
+    return validate(value)
 
 
 def save(vault, changes, profile=None):
