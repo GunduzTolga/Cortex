@@ -5,10 +5,12 @@
 // run a command, "dosya" to change a file, "yetki" asks for more permissions
 // (the network, a folder outside the vault to write in) and says what it was
 // given, "plan" writes a plan, "yavaş" waits to be interrupted, "inatçı" waits
-// and never heeds an interrupt, "geç" answers its turn/start late, "hata" fails
-// as a sign-in that has gone does, "model" fails as a model the account may
-// not use does. Every method it is sent is written to FAKE_AGENT_LOG, when
-// set, with its process id.
+// and never heeds an interrupt (it goes on talking after one, and asks leave
+// for a command: at once, and again once its chat's next turn has begun on its
+// thread), "geç" answers its turn/start late, "hata" fails as a sign-in that
+// has gone does, "model" fails as a model the account may not use does. Every
+// method it is sent is written to FAKE_AGENT_LOG, when set, with its process
+// id, and so is every answer an interrupted turn is given ("answered").
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -21,6 +23,8 @@ const threads = new Set();
 let nextId = 5000;
 const waiting = new Map();
 const interrupted = new Set();
+/** The turn each thread was last asked to start. */
+const latest = new Map();
 let turns = 0;
 
 const ask = (method, params) =>
@@ -82,7 +86,18 @@ async function turn(threadId, turnId, text) {
   }
   if (text.includes('inatçı')) {
     notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg_c', delta: ' Durmayacağım…' });
-    for (;;) await sleep(1000);
+    // Interrupted, it goes on talking on its thread, as a turn that will not stop does, and asking leave.
+    let asked = 0;
+    for (;;) {
+      await sleep(100);
+      if (!interrupted.has(turnId)) continue;
+      notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg_s', delta: ' Hâlâ buradayım.' });
+      if (asked === 0 || (asked === 1 && latest.get(threadId) !== turnId)) {
+        asked += 1;
+        const answer = await ask('item/commandExecution/requestApproval', { threadId, turnId, itemId: `exec-s${asked}`, startedAtMs: Date.now(), command: 'rm -rf Notes', cwd, reason: null, environmentId: null });
+        log({ method: 'answered', params: { turnId, decision: answer?.decision ?? null }, cwd });
+      }
+    }
   }
   // The final answer comes whole, in its completion, with no pieces before it.
   item('item/started', { type: 'agentMessage', id: 'msg_f', text: '', phase: 'final_answer' });
@@ -122,6 +137,7 @@ process.stdin.on('data', (chunk) => {
     } else if (method === 'turn/start') {
       turns += 1;
       const turnId = `turn-${turns}`;
+      latest.set(params.threadId, turnId);
       const text = params.input.map((part) => part.text ?? '').join(' ');
       const begin = () => {
         send({ id, result: { turn: { id: turnId, items: [], status: 'inProgress', error: null } } });

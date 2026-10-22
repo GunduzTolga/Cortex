@@ -3,8 +3,8 @@
 // end-to-end run (CORTEX_TEST_CLAUDE). Its lines are shaped as Claude Code
 // 2.1.296 was recorded writing them (14 October). What it does is chosen by
 // words in the message: "izin" asks leave for a step, "plan" writes a todo
-// list, "yavaş" waits to be interrupted, "hata" fails as a sign-in that has
-// expired does, "çök" dies. A session named in FAKE_CLAUDE_GONE is one it no
+// list, "yavaş" waits to be interrupted, "inatçı" waits and never heeds an
+// interrupt, "hata" fails as a sign-in that has expired does, "çök" dies. A session named in FAKE_CLAUDE_GONE is one it no
 // longer has: told to resume it, it says so and ends, as Claude Code does, at
 // its start or (FAKE_CLAUDE_GONE_AT=turn) at the first message. It answers
 // `initialize` FAKE_INIT_DELAY milliseconds late. Its arguments, its process
@@ -73,6 +73,11 @@ async function turn(text) {
   if (text.includes('izin')) {
     const answer = await control({ subtype: 'can_use_tool', tool_name: 'Write', input: { file_path: note, content: 'x' }, permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'Write' }], behavior: 'allow', destination: 'localSettings' }], tool_use_id: 'toolu_2' });
     said = `izin: ${answer.behavior}${answer.updatedPermissions ? ' always' : ''}. `;
+  }
+  if (text.includes('inatçı')) {
+    stream({ type: 'message_start', message: { id: 'msg_2' } });
+    stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Durmayacağım…' } });
+    for (;;) await sleep(1000);
   }
   if (text.includes('yavaş')) {
     stream({ type: 'message_start', message: { id: 'msg_2' } });

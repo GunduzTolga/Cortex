@@ -31,7 +31,12 @@ export function writeWhole(file: string, text: string, mode?: number): void {
     fs.writeFileSync(temp, text, mode === undefined ? 'utf8' : { encoding: 'utf8', mode });
     renameRetrying(temp, file);
   } catch (err) {
-    fs.rmSync(temp, { force: true });
+    // The failure said is the write's: a temporary the same scanner still holds is not what went wrong.
+    try {
+      fs.rmSync(temp, { force: true });
+    } catch {
+      /* left beside the file, under a name nothing reads */
+    }
     throw err;
   }
 }

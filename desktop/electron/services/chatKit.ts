@@ -106,11 +106,13 @@ const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const spellings = (place: string) => [...new Set([place, place.replace(/\\/g, '/'), place.replace(/\//g, '\\')])].map(escape).join('|');
 /** A place's name ends where no letter or digit follows, nor a `.`, `-` or `_` before one: `Kasa` is not `Kasa2` or `Kasa.bak` beside it, and is still `Kasa` at the end of a sentence. */
 const ENDS = '(?![.\\-]?[\\w\\u00C0-\\uFFFF])';
+/** A place that ends with its separator - a drive's root, `D:\\` - has no name to end: anything follows it, as a path inside it does. */
+const endOf = (place: string) => (/[\\/]$/.test(place) ? '' : ENDS);
 
 /** Every spelling of the vault's place and the person's home in a text, the vault's taken off and home said as `~`. */
 export function scrubberFor(vault: string, home = os.homedir()): (text: string) => string {
-  const inVault = new RegExp(`(?:${spellings(vault)})${ENDS}[\\\\/]?`, 'gi');
-  const inHome = home ? new RegExp(`(?:${spellings(home)})${ENDS}`, 'gi') : null;
+  const inVault = new RegExp(`(?:${spellings(vault)})${endOf(vault)}[\\\\/]?`, 'gi');
+  const inHome = home ? new RegExp(`(?:${spellings(home)})${endOf(home)}`, 'gi') : null;
   return (text) => {
     const relative = text.replace(inVault, '');
     return inHome ? relative.replace(inHome, '~') : relative;
@@ -127,10 +129,11 @@ export const vaultWord = (turkish: boolean) => (turkish ? '‹Kasa›' : '‹Vau
  * step that deletes the vault shown as a step that does nothing.
  */
 export function cardTextFor(vault: string, word: string, home = os.homedir()): (text: string) => string {
-  const inVault = new RegExp(`(?:${spellings(vault)})${ENDS}`, 'gi');
-  const inHome = home ? new RegExp(`(?:${spellings(home)})${ENDS}`, 'gi') : null;
+  const inVault = new RegExp(`(?:${spellings(vault)})${endOf(vault)}`, 'gi');
+  const inHome = home ? new RegExp(`(?:${spellings(home)})${endOf(home)}`, 'gi') : null;
   return (text) => {
-    const named = text.replace(inVault, word);
+    // A vault at a drive's root keeps the separator it was spelled with: `‹Kasa›\\Notes`, not `‹Kasa›Notes`.
+    const named = text.replace(inVault, (found) => (/[\\/]$/.test(found) ? `${word}${found.slice(-1)}` : word));
     return inHome ? named.replace(inHome, '~') : named;
   };
 }

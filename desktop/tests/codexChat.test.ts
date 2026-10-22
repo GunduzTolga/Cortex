@@ -54,6 +54,8 @@ function useVault(): { vault: string; log: string } {
 }
 const sent = (log: string) => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { method: string; params: Record<string, unknown>; cwd: string; pid: number }) : []);
 const turnsStarted = (log: string) => sent(log).filter((one) => one.method === 'turn/start');
+/** What a turn that will not stop was answered when it asked leave after its interrupt, as the stand-in wrote it down. */
+const answered = (log: string) => sent(log).filter((one) => one.method === 'answered').map((one) => one.params as { turnId: string; decision: string | null });
 const lastText = (chatId: string, after = 0) => textOf(eventsOf(chatId).slice(after));
 /** What the stand-in was given for more permissions, as it said it back. */
 const granted = (chatId: string, after = 0) => JSON.parse(/yetki: (\{.*?\})\. /.exec(lastText(chatId, after))?.[1] ?? 'null') as { permissions: Record<string, unknown>; scope: string } | null;
@@ -279,5 +281,80 @@ test('Stop on one Codex chat that will not stop lets that one go, and the other 
     assert.equal(restartIdleChats(), true);
   } finally {
     STOP_GRACE.ms = grace;
+  }
+});
+
+test('a Codex server closed before it has answered a turn’s start ends that turn, and leaves no failure unheard', async () => {
+  const { log } = useVault();
+  const unheard: unknown[] = [];
+  const hear = (reason: unknown) => unheard.push(reason);
+  process.on('unhandledRejection', hear);
+  try {
+    const { id } = sendChat(null, 'test-codex', 'geç olsun');
+    await until(() => turnsStarted(log).length > 0, 'the turn sent');
+    // Another vault chosen while the server has not yet named the turn.
+    shutdownChats();
+    const ended = await doneOf(id);
+    assert.ok(ended.type === 'error' && ended.kind === 'stopped', JSON.stringify(ended));
+    await new Promise((done) => setTimeout(done, 50));
+    assert.deepEqual(unheard, [], 'the turn’s end is heard once, by the turn');
+  } finally {
+    process.off('unhandledRejection', hear);
+  }
+});
+
+test('a turn let go after Stop is never heard as its chat’s next turn, on the thread that turn resumes; nor is any leave it asks after Stop asked of the person', async () => {
+  const grace = STOP_GRACE.ms;
+  STOP_GRACE.ms = 300;
+  try {
+    const { log } = useVault();
+    const waiting = sendChat(null, 'test-codex', 'izin iste').id;
+    const card = await cardOf(waiting);
+    const stubborn = sendChat(null, 'test-codex', 'inatçı ol').id;
+    await until(() => eventsOf(stubborn).some((one) => one.type === 'text' && one.text.includes('Durmayacağım')), 'the stubborn answer');
+    cancelChat(stubborn);
+    assert.deepEqual(await doneOf(stubborn), { type: 'done', reason: 'cancelled' });
+    // Interrupted, it asked leave for a command while its grace ran: refused, no card shown after Stop.
+    await until(() => answered(log).length === 1, 'the leave it asked after Stop');
+    // Asked again at once, on the same thread, while the turn let go still talks on it: the new turn's start is answered late.
+    const before = eventsOf(stubborn).length;
+    sendChat(stubborn, 'test-codex', 'geç gel');
+    assert.deepEqual(await doneOf(stubborn, before), { type: 'done', reason: 'end_turn' });
+    const threadOf = (method: string) => sent(log).filter((one) => one.method === method).map((one) => one.params.threadId);
+    assert.ok(threadOf('thread/resume').length === 1 && threadOf('turn/start').at(-1) === threadOf('thread/resume')[0], 'the same thread, resumed');
+    assert.ok(!lastText(stubborn, before).includes('Hâlâ buradayım'), lastText(stubborn, before));
+    assert.ok(lastText(stubborn, before).includes('Merhaba dünya'));
+    // The turn let go asked leave again once the next turn had begun on its thread: refused, not put on that turn's card.
+    await until(() => answered(log).length === 2, 'the leave it asked during the next turn');
+    assert.deepEqual(answered(log).map((one) => one.decision), ['decline', 'decline']);
+    assert.ok(!eventsOf(stubborn).some((one) => one.type === 'permission'), 'no card in the stopped chat, then or after');
+    answerChat(waiting, card.id, 'once');
+    assert.deepEqual(await doneOf(waiting), { type: 'done', reason: 'end_turn' });
+  } finally {
+    STOP_GRACE.ms = grace;
+    shutdownChats();
+  }
+});
+
+test('a turn let go before Codex has named it is interrupted, and never heard again, once it is named', async () => {
+  const grace = STOP_GRACE.ms;
+  STOP_GRACE.ms = 100;
+  try {
+    const { log } = useVault();
+    const waiting = sendChat(null, 'test-codex', 'izin iste').id;
+    const card = await cardOf(waiting);
+    const late = sendChat(null, 'test-codex', 'geç ve inatçı').id;
+    await until(() => turnsStarted(log).length === 2, 'its turn sent');
+    // Stopped, and its grace over, before its start is answered: let go, the other chat still running on the server.
+    cancelChat(late);
+    assert.deepEqual(await doneOf(late), { type: 'done', reason: 'cancelled' });
+    const interrupt = await until(() => sent(log).find((one) => one.method === 'turn/interrupt'), 'the turn interrupted once named');
+    assert.equal(interrupt.params.threadId, turnsStarted(log)[1].params.threadId);
+    answerChat(waiting, card.id, 'once');
+    assert.deepEqual(await doneOf(waiting), { type: 'done', reason: 'end_turn' }, 'the other chat answered');
+    assert.equal(sent(log).filter((one) => one.method === 'initialize').length, 1, 'on the same server, never closed');
+  } finally {
+    STOP_GRACE.ms = grace;
+    shutdownChats();
   }
 });

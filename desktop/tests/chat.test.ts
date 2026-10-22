@@ -22,7 +22,7 @@ import {
   shownPath,
   shutdownChats,
 } from '../electron/services/chat';
-import { STOP_GRACE } from '../electron/services/chatKit';
+import { STOP_GRACE, cardTextFor } from '../electron/services/chatKit';
 import { renameRetrying, writeWhole } from '../electron/services/fileWrite';
 import { updateSettings } from '../electron/services/settings';
 
@@ -114,6 +114,11 @@ test('what a CLI says is made safe to show: the vault taken off every path, home
   // A folder beside the vault whose name begins as its does is not the vault; the vault at a sentence's end is.
   assert.equal(scrub(`${vault}2${path.sep}x.md`), `~${path.sep}Pyn2${path.sep}x.md`);
   assert.equal(scrub(`Working in ${vault}.`), 'Working in .');
+  // A vault at a drive's root - a USB stick, D:\ - is a place that ends with its separator: what follows it is in it.
+  const drive = scrubberFor('D:\\', home);
+  assert.equal(drive('Read D:\\Notes\\Plan.md and d:/Notes/b.md'), 'Read Notes\\Plan.md and Notes/b.md');
+  const card = cardTextFor('D:\\', '‹Kasa›', home);
+  assert.equal(card('Remove-Item -Recurse D:\\Notes; ls d:/'), 'Remove-Item -Recurse ‹Kasa›\\Notes; ls ‹Kasa›/');
 });
 
 test('a chat is kept short: the pieces of a message joined, every word on a step joined into it', () => {

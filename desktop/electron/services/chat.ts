@@ -256,7 +256,8 @@ function turnOf(chat: Live, signal: AbortSignal): Turn {
       saveIndexQuietly();
       push({ chatId: stored.id, summary: summaryOf(stored) });
     },
-    ask: (card) => (chat.running ? askPerson(chat, card) : Promise.resolve(null)),
+    // After Stop nothing more is asked: a step that a CLI which does not stop asks leave for is refused, unshown.
+    ask: (card) => (chat.running && !signal.aborted ? askPerson(chat, card) : Promise.resolve(null)),
   };
 }
 

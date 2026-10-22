@@ -37,6 +37,8 @@ interface Conn {
   rpc: AcpConnection;
   ready: Promise<void>;
   models: Model[];
+  /** Turns let go after Stop that the server may still be running: never heard as a later turn of their thread. */
+  abandoned: Set<string>;
 }
 
 interface Running {
@@ -133,10 +135,10 @@ function connectionFor(cli: CliId, vault: string): Promise<Conn> {
   had?.rpc.close();
   const launch = launchFor(cli);
   if (!launch) throw new ChatRefusal('Codex is not installed on this machine.');
-  const conn = { cli, vault, models: [] } as unknown as Conn;
+  const conn = { cli, vault, models: [], abandoned: new Set<string>() } as unknown as Conn;
   conn.rpc = new AcpConnection(launch, vault, {
     notify: (method, params) => heard(conn, method, params),
-    request: (method, params) => asked(method, params),
+    request: (method, params) => asked(conn, method, params),
     exited: (_code, stderr) => {
       if (conns.get(cli) === conn) conns.delete(cli);
       for (const [chatId, held] of threads) if (held.conn === conn) threads.delete(chatId);
@@ -204,15 +206,23 @@ async function threadFor(turn: Turn, conn: Conn, mode: string): Promise<string> 
   return made.thread.id;
 }
 
+/**
+ * Whether what the server sends names another turn than the one its thread runs now. A turn let go
+ * after Stop may still be heard from on the thread its chat's next turn runs on: only this turn's
+ * words are shown as its words, and only its own steps are asked of the person. The one let go is
+ * never this one, also before the server has named this one.
+ */
+function another(conn: Conn, now: Running, body: Record<string, unknown>): boolean {
+  const itsTurn = typeof body.turnId === 'string' ? body.turnId : textOf((body.turn as { id?: unknown } | undefined)?.id, 200);
+  return Boolean(itsTurn) && (conn.abandoned.has(itsTurn) || (now.turnId !== null && itsTurn !== now.turnId));
+}
+
 /** A notification from the server: what one of its threads did, told to the turn it runs. */
 function heard(conn: Conn, method: string, params: unknown): void {
   if (typeof params !== 'object' || params === null) return;
   const body = params as Record<string, unknown>;
   const now = typeof body.threadId === 'string' ? running.get(body.threadId) : undefined;
-  if (!now) return;
-  // A turn left after Stop may still be heard from on the thread its chat's next turn runs on: only this turn's words are this turn's.
-  const itsTurn = typeof body.turnId === 'string' ? body.turnId : textOf((body.turn as { id?: unknown } | undefined)?.id, 200);
-  if (now.turnId && itsTurn && itsTurn !== now.turnId) return;
+  if (!now || another(conn, now, body)) return;
   const { turn } = now;
   const scrub = scrubberFor(conn.vault);
   const item = (typeof body.item === 'object' && body.item !== null ? body.item : {}) as Record<string, unknown>;
@@ -328,10 +338,12 @@ function permissionsSaid(wanted: Record<string, unknown>, vault: string, say: (t
 }
 
 /** A request from the server: leave for a command, a file change or more permissions, asked of the person on a card; nothing else is answered. */
-async function asked(method: string, params: unknown): Promise<unknown> {
+async function asked(conn: Conn, method: string, params: unknown): Promise<unknown> {
   const body = (params ?? {}) as Record<string, unknown>;
   const threadId = typeof body.threadId === 'string' ? body.threadId : typeof body.conversationId === 'string' ? body.conversationId : '';
-  const now = running.get(threadId);
+  // A turn let go after Stop asking leave on its thread is not asked of the person on the card of the turn that runs there now: it is refused.
+  const held = running.get(threadId);
+  const now = held && !another(conn, held, body) ? held : undefined;
   const tr = turkish();
   const once = { id: 'once', name: tr ? 'Bir kez izin ver' : 'Allow once', kind: 'allow_once' as const };
   const session = { id: 'session', name: tr ? 'Bu sohbette hep izin ver' : 'Allow for this chat', kind: 'allow_always' as const };
@@ -399,6 +411,9 @@ export const codexBackend: Backend = {
         entry = { turn, conn, turnId: null, stopRequested: false, finish, fail, streamed: new Set(), changes: new Map() };
         running.set(threadId as string, entry);
       });
+      // Its server can end it while `turn/start` is still awaited (closed for another vault): the failure
+      // is the turn's, said by the start refused below, and not left unheard for the main process.
+      done.catch(() => undefined);
       const started = (await conn.rpc.request('turn/start', {
         threadId,
         input: [{ type: 'text', text: message, text_elements: [] }],
@@ -407,11 +422,14 @@ export const codexBackend: Backend = {
         approvalPolicy: policy.approvalPolicy,
         sandboxPolicy: policy.sandboxPolicy,
       })) as { turn?: { id?: unknown } } | null;
-      const now = running.get(threadId);
-      if (now && typeof started?.turn?.id === 'string') {
-        now.turnId = started.turn.id;
-        // Stop pressed before the server named the turn: it is interrupted now that it can be.
-        if (now.stopRequested) void conn.rpc.request('turn/interrupt', { threadId, turnId: now.turnId }).catch(() => undefined);
+      // This turn's own entry, whatever runs on its thread now: one let go while its start was awaited
+      // (Stop, then its grace, other chats on the server) left the thread to its chat's next turn.
+      const mine = entry as Running | null;
+      if (mine && typeof started?.turn?.id === 'string') {
+        mine.turnId = started.turn.id;
+        if (running.get(threadId) !== mine) mine.conn.abandoned.add(mine.turnId);
+        // Stop pressed before the server named the turn: it is interrupted now that it can be, let go or not.
+        if (mine.stopRequested) void conn.rpc.request('turn/interrupt', { threadId, turnId: mine.turnId }).catch(() => undefined);
       }
       return await done;
     } catch (err) {
@@ -444,6 +462,7 @@ export const codexBackend: Backend = {
         if ([...running.values()].some((other) => other !== now && other.conn === now.conn)) {
           running.delete(threadId);
           if (threads.get(chatId)?.threadId === threadId) threads.delete(chatId);
+          if (now.turnId) now.conn.abandoned.add(now.turnId);
           now.finish('cancelled');
         } else now.conn.rpc.close();
       }, STOP_GRACE.ms),

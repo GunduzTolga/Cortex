@@ -478,8 +478,9 @@ export const claudeBackend: Backend = {
     proc.cancelled = true;
     void control(proc, { subtype: 'interrupt' }, STOP_GRACE.ms);
     // Ended if this turn has not ended by then: a turn begun after it - Stop, then the question asked again - is not this one's to end.
+    // Stop pressed again does not put that off: the first press's grace holds (the timer goes with its turn's result).
     const stopped = proc.turn;
-    if (proc.stopTimer) clearTimeout(proc.stopTimer);
+    if (proc.stopTimer) return;
     proc.stopTimer = setTimeout(() => {
       proc.stopTimer = null;
       if (proc.turn === stopped) close(proc);
