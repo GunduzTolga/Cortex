@@ -269,7 +269,7 @@ export const tr: Record<keyof typeof en, string> = {
   'setup.voice.wake.trouble.sessiz': 'mikrofon yalnız sessizlik veriyor. Windows Ayarlar → Gizlilik ve güvenlik → Mikrofon\'da "Masaüstü uygulamalarının mikrofona erişmesine izin ver" açık olmalı, mikrofonun sesi de kapalı olmamalı.',
   'setup.voice.wake.trouble.model': 'uyandırma modeli açılamadı; ayrıntısı ses klasöründeki isci.log dosyasında.',
   'setup.voice.key.busy': '{key} başka bir uygulamada kayıtlı',
-  'setup.voice.key.busyHint': 'Not alma kısayolu şu an çalışmıyor; uyandırma sözü ve simgedeki "Not al" çalışıyor. Yakala için başka bir kısayol seç:',
+  'setup.voice.key.busyHint': 'Not alma kısayolu şu an çalışmıyor; sağ alttaki simgeden "Not al" çalışıyor. Yakala için başka bir kısayol seç:',
   'setup.voice.key.choose': 'Not alma kısayolu',
   'setup.voice.repair': 'Sesle yazmayı yeniden kur',
   'setup.voice.repair.hint': 'Ses bir türlü açılamıyor: sesle yazmayı yeniden kurmak ortamını onarır; modeller yerinde kalır, yeniden inmez.',

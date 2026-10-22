@@ -10,7 +10,7 @@ import { useLanguage, useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 import { useSetup } from '../store/setup';
 import { LanguageSwitch } from '../ui/LanguageSwitch';
-import { Progress, VoiceHelperBar, engineButtonText, pythonWantingText } from '../ui/SetupSections';
+import { HotkeyBusy, Progress, VoiceHelperBar, engineButtonText, pythonWantingText } from '../ui/SetupSections';
 import { Button, Switch, inputClass } from '../ui/ui';
 
 /**
@@ -490,6 +490,7 @@ function VoiceStep({ status }: { status: SetupStatus | null }) {
           <Done>{t('onboarding.voice.ready')}</Done>
           {/* Set up is not ready: its model loads, the first time downloads, while the app is already open. */}
           <VoiceHelperBar />
+          <HotkeyBusy />
           {/* The always-listening mode chosen here, where it is explained: not found later in the settings. */}
           <div className="mt-4 rounded-xl border border-darkDelegation/15 bg-white py-1">
             {/* The phrase as it is set: the words were shown with a "{phrase}" hole in them, and the hint named "Hey Pyn" while it was "Pyn, not al" (windows-e2e-4). */}

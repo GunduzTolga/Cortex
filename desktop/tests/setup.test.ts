@@ -705,6 +705,21 @@ test('yakala follows the vault chosen: moved there with its key where it served 
   });
 });
 
+test('at the app’s start, yakala comes to the vault open only from one no longer there: moved, renamed (yakala-3)', { skip: !hasPython }, async () => {
+  await withOwnFolder(async (own) => {
+    // Another vault still there was given yakala on purpose (a terminal's `yakala kur`): it keeps it.
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-baska-'));
+    ownerOf(own, other, 'ctrl+alt+y');
+    const vault = vaultWithEngine('1.0.33');
+    assert.equal(await repointYakala(true), null);
+    assert.ok(!fs.existsSync(path.join(vault, 'istenen.log')) || !asked(vault).some((one) => one.startsWith('yakala')));
+    // The vault it served is gone (OneDrive moved it, this is it now): moved here, with its key.
+    fs.rmSync(other, { recursive: true, force: true });
+    assert.equal(await repointYakala(true), 'Ctrl+Alt+Y');
+    assert.deepEqual(asked(vault).filter((one) => one.startsWith('yakala')), ['yakala kur --tus ctrl+alt+y']);
+  });
+});
+
 test('outside Windows, yakala’s key is not moved', { skip: !hasPython }, async () => {
   const before = process.env.LOCALAPPDATA;
   const local = fs.mkdtempSync(path.join(os.tmpdir(), 'yerel-'));

@@ -224,7 +224,8 @@ const WAKE_TROUBLE: Record<WakeTrouble, Key> = {
  * The voice getting ready, as yakala's listener says it: a model being fetched (how far), loading,
  * ready, or failed and tried again. The app opens at once while this goes on in the background:
  * here it is seen, not a voice that seems not to work. And what keeps it from working though it is
- * set up: no listener running, the wake phrase not hearing its microphone, the key another app's.
+ * set up: no listener running, the wake phrase not hearing its microphone. The key another app holds
+ * is said apart (`HotkeyBusy`): it is there with voice typing off too.
  */
 export function VoiceHelperBar() {
   const t = useT();
@@ -251,7 +252,7 @@ export function VoiceHelperBar() {
   return (
     <>
       <HelperState word={word} phrase={phrase} />
-      <ListenerTroubles word={word} hotkey={listener.hotkey} english={english} />
+      <WakeTroubleNote word={word} english={english} />
     </>
   );
 }
@@ -286,43 +287,51 @@ function HelperState({ word, phrase }: { word: ListenerWord; phrase: string }) {
   );
 }
 
-/** The wake phrase that cannot hear, and why; the key another app holds, and the keys it can move to (voice-4, yakala-6). */
-function ListenerTroubles({ word, hotkey, english }: { word: ListenerWord; hotkey: string | null; english: boolean }) {
+/** The wake phrase that cannot hear, and why (voice-4). */
+function WakeTroubleNote({ word, english }: { word: ListenerWord; english: boolean }) {
   const t = useT();
+  if (!word.uyandirma_sorun) return null;
+  // The engine's sentence says what to do, Windows' privacy switch by name; it is Turkish.
+  const why = !english && word.uyandirma_mesaj ? word.uyandirma_mesaj : t(WAKE_TROUBLE[word.uyandirma_sorun]);
+  return (
+    <div className="mt-1" data-setup-voice-wake-trouble={word.uyandirma_sorun}>
+      <Note tone="error">{t('setup.voice.wake.trouble', { why })}</Note>
+    </div>
+  );
+}
+
+/**
+ * The key another app holds, and the keys yakala can move to (yakala-6). Said with voice typing or without it: yakala's
+ * listener holds the key either way, and the key is how most people take a note. Where the vault has its engine, which
+ * sets yakala up again on the key chosen.
+ */
+export function HotkeyBusy() {
+  const t = useT();
+  const listener = useSetup((s) => s.listener);
   const busy = useSetup((s) => s.listenerBusy);
   const move = useSetup((s) => s.hotkey);
-  const key = hotkey ?? hotkeyLabel(HOTKEYS[0]);
-  // The engine's sentence says what to do, Windows' privacy switch by name; it is Turkish.
-  const why = word.uyandirma_sorun ? (!english && word.uyandirma_mesaj ? word.uyandirma_mesaj : t(WAKE_TROUBLE[word.uyandirma_sorun])) : null;
+  if (listener.missing || listener.word?.kisayol !== 'mesgul') return null;
+  const key = listener.hotkey ?? hotkeyLabel(HOTKEYS[0]);
   return (
-    <>
-      {why ? (
-        <div className="mt-1" data-setup-voice-wake-trouble={word.uyandirma_sorun ?? ''}>
-          <Note tone="error">{t('setup.voice.wake.trouble', { why })}</Note>
-        </div>
-      ) : null}
-      {word.kisayol === 'mesgul' ? (
-        <div className="mx-3 mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5" data-setup-voice-key-busy>
-          <p className="flex items-center gap-1.5 text-[12px] font-semibold text-red-700">
-            <Keyboard size={13} />
-            {t('setup.voice.key.busy', { key })}
-          </p>
-          <p className="mt-1 text-[11.5px] leading-relaxed text-zinc-600">{t('setup.voice.key.busyHint')}</p>
-          <div className="mt-1.5 flex items-center gap-2">
-            <Segments<Hotkey>
-              label={t('setup.voice.key.choose')}
-              data="setup-voice-key"
-              chosen={HOTKEYS.find((one) => hotkeyLabel(one) === key) ?? null}
-              onChoose={(spec) => {
-                if (!busy && hotkeyLabel(spec) !== key) void move(spec);
-              }}
-              options={HOTKEYS.map((one) => ({ id: one, label: hotkeyLabel(one) }))}
-            />
-            {busy ? <Spinner size={12} label={t('setup.working')} /> : null}
-          </div>
-        </div>
-      ) : null}
-    </>
+    <div className="mx-3 mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5" data-setup-voice-key-busy>
+      <p className="flex items-center gap-1.5 text-[12px] font-semibold text-red-700">
+        <Keyboard size={13} />
+        {t('setup.voice.key.busy', { key })}
+      </p>
+      <p className="mt-1 text-[11.5px] leading-relaxed text-zinc-600">{t('setup.voice.key.busyHint')}</p>
+      <div className="mt-1.5 flex items-center gap-2">
+        <Segments<Hotkey>
+          label={t('setup.voice.key.choose')}
+          data="setup-voice-key"
+          chosen={HOTKEYS.find((one) => hotkeyLabel(one) === key) ?? null}
+          onChoose={(spec) => {
+            if (!busy && hotkeyLabel(spec) !== key) void move(spec);
+          }}
+          options={HOTKEYS.map((one) => ({ id: one, label: hotkeyLabel(one) }))}
+        />
+        {busy ? <Spinner size={12} label={t('setup.working')} /> : null}
+      </div>
+    </div>
   );
 }
 
@@ -342,6 +351,7 @@ function VoiceSection({ status }: { status: SetupStatus }) {
   const helperFailing = useSetup((s) => s.listener.word?.ses === 'hata');
   return (
     <Section title={t('setup.voice')} data="voice">
+      {status.engine.installed ? <HotkeyBusy /> : null}
       {!status.engine.installed ? (
         <Note data="needs-engine">{t('setup.voice.needsEngine')}</Note>
       ) : !voice ? (

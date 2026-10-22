@@ -4,7 +4,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { BEAT_EVERY, type HelperState, type ListenerWord, listenerFile, microphoneFile, microphoneWord, ownerFile, readListener, readOwner } from '../electron/services/microphone';
+import {
+  BEAT_EVERY,
+  type HelperState,
+  LISTENER_COMES_UP,
+  type ListenerWord,
+  listenerFile,
+  listenerRestarting,
+  microphoneFile,
+  microphoneWord,
+  ownerFile,
+  readListener,
+  readOwner,
+  restartingListener,
+} from '../electron/services/microphone';
 import { helperTurn, isMissing, listenerTurn, MISSING_AFTER, MISSING_AT_START, missingSince, percentOf, trayItems, trayTooltip } from '../electron/services/tray';
 import { percentOfStep } from '../shared/setup';
 
@@ -148,6 +161,11 @@ test('the microphone is said to listen only while the listener says it hears: no
   const busy = trayItems(voice, false, false, true, { word: word({ uyandirma: true, kisayol: 'mesgul' }), hotkey: 'Ctrl+Alt+C' });
   assert.deepEqual(busy.filter((one) => one.label.includes('Ctrl+Alt+C')).map((one) => [one.label, one.action]), [['Ctrl+Alt+C başka bir uygulamada: kısayolu değiştir…', 'settings']]);
   assert.equal(busy[0].label, 'Mikrofon dinliyor: “Pyn, not al”', 'the phrase still works without the key');
+  // Without voice typing, or with it off, too: the key is yakala's listener's either way, and most people's way to take a note.
+  for (const off of [null, { ...voice, on: false }, { ...voice, installed: false }]) {
+    const keyOnly = trayItems(off, false, false, true, { word: word({ ses: 'yok', kisayol: 'mesgul' }), hotkey: 'Ctrl+Alt+C' });
+    assert.deepEqual(keyOnly.filter((one) => one.label.includes('Ctrl+Alt+C')).map((one) => one.action), ['settings']);
+  }
 });
 
 test('a listener is said not to run only past a restart’s grace, never while one is being started, and not right at the app’s start', () => {
@@ -168,6 +186,22 @@ test('a listener is said not to run only past a restart’s grace, never while o
   // Started with Windows, the listener starts beside the app, cold: not said in the app's first minute.
   assert.equal(isMissing(0, MISSING_AFTER + 1, started), false);
   assert.equal(isMissing(0, MISSING_AT_START, started), true);
+});
+
+test('a listener started again is given time to come up after the work that started it ends', async () => {
+  // `ses ayar` does not wait for the listener it starts, `yakala kur` waits 8 seconds: a cold start can take longer.
+  let during = false;
+  await restartingListener(async () => {
+    during = listenerRestarting();
+  });
+  const ended = Date.now();
+  assert.equal(during, true, 'while the work goes on');
+  assert.equal(listenerRestarting(ended), true, 'just after it');
+  assert.equal(listenerRestarting(ended + LISTENER_COMES_UP - 1_000), true, 'still coming up');
+  assert.equal(listenerRestarting(ended + LISTENER_COMES_UP + 1_000), false, 'then a listener not seen counts again');
+  // A failed one too: what it started may still be coming up.
+  await assert.rejects(restartingListener(async () => Promise.reject(new Error('x'))));
+  assert.equal(listenerRestarting(), true);
 });
 
 test('the wake phrase’s trouble, a key taken and no listener are each said once, when they begin', () => {

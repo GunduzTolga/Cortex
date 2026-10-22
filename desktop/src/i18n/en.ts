@@ -275,7 +275,7 @@ export const en = {
   'setup.voice.wake.trouble.sessiz': 'the microphone gives only silence. In Windows Settings → Privacy & security → Microphone, “Let desktop apps access your microphone” must be on, and the microphone must not be muted.',
   'setup.voice.wake.trouble.model': 'its small model did not load; isci.log in the voice folder says why.',
   'setup.voice.key.busy': '{key} is held by another app',
-  'setup.voice.key.busyHint': 'The note key does not work now; the wake phrase and the icon’s “Take a note” do. Choose another key for yakala:',
+  'setup.voice.key.busyHint': 'The note key does not work now; “Take a note” from the icon at the bottom right still works. Choose another key for yakala:',
   'setup.voice.key.choose': 'Note key',
   'setup.voice.repair': 'Set voice typing up again',
   'setup.voice.repair.hint': 'The voice keeps failing to start: setting it up again mends its environment; the models stay and are not downloaded again.',

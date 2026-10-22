@@ -879,14 +879,20 @@ function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
  * it. Not where the vault has no engine yet (its install moves it after), nor where nothing set yakala up; not while a
  * setup job runs, which may be setting the listener up itself: after it. Windows only, as yakala's key is. Resolves to
  * the key it serves now, as a person reads it, or null when nothing was moved; rejects with the engine's sentence.
+ *
+ * `onlyWhereGone`, at the app's start: moved only from a vault no longer there. A vault moved (OneDrive took Documents
+ * along) or renamed is bound to where it is now when it opens (`settleVault`), and yakala, left on its old place, had
+ * nowhere to write and, after a restart, no listener at all; a vault still there may have been given yakala on purpose,
+ * from a terminal, and keeps it.
  */
-export function repointYakala(): Promise<string | null> {
+export function repointYakala(onlyWhereGone = false): Promise<string | null> {
   return oneAtATime(async () => {
     if (yakalaPlatform !== 'win32') return null;
     await whenSetupIdle();
     const vault = vaultOrNull();
     const owner = readOwner();
     if (!vault || !owner || sameFolder(owner.vault, vault)) return null;
+    if (onlyWhereGone && fs.existsSync(owner.vault)) return null;
     const installed = installedVersion(vault);
     if (!installed || isPredecessor(installed)) return null;
     const python = await usablePython();

@@ -96,8 +96,9 @@ export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boo
     },
     // Nothing listens: the key, the phrase and the microphone are yakala's listener's. Set up again, it starts.
     ...(missing ? [{ label: say('Dinleyiciyi başlat', 'Start the listener'), type: 'normal' as const, enabled: !busy, icon: 'pyn' as const, action: 'listener' as const }] : []),
-    // Another app holds the key: yakala still listens for the phrase, and the settings move it to another key.
-    ...(usable && !missing && word?.kisayol === 'mesgul'
+    // Another app holds the key: yakala's listener runs on without it, and the settings move it to another key. Said
+    // with voice typing or without it: the key is most people's way to take a note, voice or not.
+    ...(!missing && word?.kisayol === 'mesgul'
       ? [{ label: say(`${key} başka bir uygulamada: kısayolu değiştir…`, `${key} is held by another app: change the key…`), type: 'normal' as const, icon: 'ayarlar' as const, action: 'settings' as const }]
       : []),
     ...(usable
@@ -331,8 +332,8 @@ export function listenerTurn(
     return {
       title: say(`${key} başka bir uygulamada`, `${key} is held by another app`),
       body: say(
-        'Not alma kısayolu şu an çalışmıyor; uyandırma sözü ve simgedeki "Not al" çalışıyor. Ayarlar → Sesle yazma\'dan başka bir kısayol seç.',
-        'The note key does not work now; the wake phrase and the icon’s "Take a note" do. Choose another key in Settings → Voice typing.',
+        'Not alma kısayolu şu an çalışmıyor; simgedeki "Not al" çalışıyor. Ayarlar → Sesle yazma\'dan başka bir kısayol seç.',
+        'The note key does not work now; the icon’s "Take a note" does. Choose another key in Settings → Voice typing.',
       ),
     };
   }
@@ -342,7 +343,7 @@ export function listenerTurn(
 function listenToHelper(): void {
   const next = readListener();
   const now = Date.now();
-  missingFrom = missingSince(missingFrom, voice, next, listenerRestarting(), now);
+  missingFrom = missingSince(missingFrom, voice, next, listenerRestarting(now), now);
   const before: ListenerSeen = { word: helper, missing, hotkey: null };
   helper = next;
   missing = isMissing(missingFrom, now, trayStarted);

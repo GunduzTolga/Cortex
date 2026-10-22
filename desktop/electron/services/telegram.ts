@@ -95,8 +95,14 @@ function vaultOrNull(): string | null {
 /** The engine's status (`telegram durum`) as the window holds it, its failure said in the window's language. */
 export function telegramOf(result: Record<string, unknown> | null, key: boolean, said: 'tr' | 'en' = 'tr'): TelegramStatus {
   const text = (value: unknown) => (typeof value === 'string' && value ? value : null);
-  const error = text(result?.son_hata);
-  const errorCode = error ? telegramErrorOf(error, result?.son_hata_kod) : null;
+  const last = text(result?.son_hata);
+  const lastCode = last ? telegramErrorOf(last, result?.son_hata_kod) : null;
+  // A key Telegram refused ends the listener there and then: one running now was started with a key given since, and
+  // that refusal is over, though the engine keeps it until the new listener's first round ends, up to a minute later.
+  // Shown meanwhile, the pairing screen, asked again every few seconds, put the key field back under a key just taken.
+  const over = lastCode === 'anahtar_gecersiz' && result?.calisiyor === true;
+  const error = over ? null : last;
+  const errorCode = over ? null : lastCode;
   return {
     key,
     supported: result !== null,

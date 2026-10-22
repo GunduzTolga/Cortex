@@ -168,6 +168,20 @@ test('what went wrong is said in the window’s language: by the engine’s code
   for (const code of TELEGRAM_ERRORS) assert.ok(TELEGRAM_SENTENCES[code].tr && TELEGRAM_SENTENCES[code].en, code);
 });
 
+test('a key refused before is not said while a listener runs: one was started with a key given since (pyn-telegram-jev-7)', () => {
+  const refused = { bot: 'pyn_bot', eslesti: false, son_hata: "Telegram anahtarı geçersiz; Ayarlar → Telegram'dan yeniden gir.", son_hata_kod: 'anahtar_gecersiz' };
+  // The engine keeps the refusal until the new listener's first round ends: the pairing screen, asking every few
+  // seconds, showed the key field again under the key just taken.
+  const running = telegramOf({ ...refused, calisiyor: true }, true, 'tr');
+  assert.deepEqual([running.error, running.errorCode, running.listening], [null, null, true]);
+  // Stopped by it (Telegram's 401 ends the listener): said, and the key asked for again.
+  const stopped = telegramOf({ ...refused, calisiyor: false }, true, 'tr');
+  assert.deepEqual([stopped.error, stopped.errorCode], [refused.son_hata, 'anahtar_gecersiz']);
+  // Any other trouble stays said while a listener runs: it is that listener's own.
+  const offline = telegramOf({ bot: 'pyn_bot', son_hata: 'Bağlantı yok: timed out', calisiyor: true }, true, 'tr');
+  assert.deepEqual([offline.error, offline.errorCode], ['Bağlantı yok: timed out', 'baglanti']);
+});
+
 test('what the engine refused with is its own sentence, not its JSON; in an English window, in English', () => {
   assert.equal(engineSentence(new Error('{"error": "ValueError", "message": "Telegram bu anahtarı tanımadı."}')), 'Telegram bu anahtarı tanımadı.');
   assert.equal(engineSentence(new Error('Çıkış kodu 1.')), 'Çıkış kodu 1.');

@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from 'elect
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { registerIpc, stopWatching, trustPagesWhere } from './ipc';
+import { moveYakala, registerIpc, stopWatching, trustPagesWhere } from './ipc';
 import { readSettings } from './services/settings';
 import { settleVault, setupBusy, whenSetupIdle } from './services/setup';
 import { startTelegram } from './services/telegram';
@@ -417,9 +417,15 @@ if (!app.requestSingleInstanceLock()) {
       keepStartWithWindows(readSettings().background);
     }
     // The vault kept from the last run bound to where it is now, in the background (services/setup.ts); notes
-    // from the phone then keep coming in while Cortex runs, in the notification area too.
+    // from the phone then keep coming in while Cortex runs, in the notification area too. Yakala, where it was left
+    // on a vault no longer there (this one, before it moved), comes to this one.
     const settled = settleVault();
-    if (!HIDDEN) void settled.then(() => startTelegram());
+    if (!HIDDEN) {
+      void settled.then(() => {
+        startTelegram();
+        moveYakala(true);
+      });
+    }
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

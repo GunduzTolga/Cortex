@@ -54,11 +54,12 @@ function notice(word: AppNotice): void {
 
 /**
  * Yakala moved to the vault open now, in the background, where it served another (services/setup.ts, repointYakala):
- * said once it has moved - the notes taken with the key go somewhere else from now on - or when it could not.
+ * said once it has moved - the notes taken with the key go somewhere else from now on - or when it could not. At the
+ * app's start (electron/main.ts), only from a vault no longer there.
  */
-function moveYakala(): void {
+export function moveYakala(onlyWhereGone = false): void {
   const say = (tr: string, en: string) => (readSettings().language === 'en' ? en : tr);
-  void setup.repointYakala().then(
+  void setup.repointYakala(onlyWhereGone).then(
     (key) => {
       if (!key) return;
       notice({

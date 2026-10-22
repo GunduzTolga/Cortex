@@ -152,13 +152,21 @@ export function readOwner(file: string = ownerFile()): YakalaOwner | null {
 }
 
 /**
- * Work that stops the listener and starts it again (`yakala kur`, `ses kur`, `ses ayar`): while it goes on, and for the
- * grace after (services/tray.ts), no listener running is not "the listener does not run".
+ * Work that stops the listener and starts it again (`yakala kur`, `ses kur`, `ses ayar`): while it goes on, for
+ * LISTENER_COMES_UP after it, and for the grace after that (services/tray.ts), no listener running is not "the listener
+ * does not run". The work can end before the listener it started says a word: `ses ayar` does not wait for it, and
+ * `yakala kur` waits 8 seconds, where a cold start on a slow laptop, the virus scanner reading every file, takes longer.
+ * Without the wait after, "Dinleyici çalışmıyor" was said over a listener still coming up, and its "Dinleyiciyi başlat"
+ * stopped that one and started it again.
  */
 let restarting = 0;
+let restartEnded = Number.NEGATIVE_INFINITY;
 
-export function listenerRestarting(): boolean {
-  return restarting > 0;
+/** As long as the engine waits for a listener it started (beyin_v3_ses.LISTENER_WAIT_SN). */
+export const LISTENER_COMES_UP = 20_000;
+
+export function listenerRestarting(now: number = Date.now()): boolean {
+  return restarting > 0 || now - restartEnded < LISTENER_COMES_UP;
 }
 
 export async function restartingListener<T>(work: () => Promise<T>): Promise<T> {
@@ -167,5 +175,6 @@ export async function restartingListener<T>(work: () => Promise<T>): Promise<T> 
     return await work();
   } finally {
     restarting -= 1;
+    restartEnded = Date.now();
   }
 }
