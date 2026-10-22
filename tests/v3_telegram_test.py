@@ -4,7 +4,9 @@ The stand-in keeps one numbering for every message the bot sees, as Telegram doe
 undelivered updates when told a day went by: what the bot then gets back by forwarding is what
 a real chat would still hold. Nothing reaches the network.
 """
+import contextlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -14,6 +16,7 @@ import tempfile
 import threading
 import unittest
 from unittest import mock
+from urllib.error import URLError
 import wave
 
 from v3_package_helpers import inherited_env
@@ -121,6 +124,37 @@ class FakeTelegram:
         return [params for method, params in self.calls if method == name]
 
 
+class Killed(BaseException):
+    """The listener ended from outside (the app quit: taskkill /F), at the point a stand-in call is made."""
+
+
+LOCK_ELSEWHERE = ('import sys; sys.path.insert(0, sys.argv[1]); import beyin_v3_telegram as t; '
+                  'h = t._lock_handle(sys.argv[2]); print(t._lock(h), flush=True); sys.argv[3:] and sys.stdin.read()')
+
+
+def lock_elsewhere(state, hold=False):
+    """The listener's lock asked for by another process, as a second listener would; `hold`: kept until stdin closes."""
+    command = [sys.executable, '-B', '-c', LOCK_ELSEWHERE, str(SCRIPTS), str(state)] + (['tut'] if hold else [])
+    env = inherited_env(PYTHONDONTWRITEBYTECODE='1', PYTHONIOENCODING='utf-8')
+    if not hold:
+        return subprocess.run(command, capture_output=True, text=True, env=env, timeout=60).stdout.strip()
+    return subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env)
+
+
+@contextlib.contextmanager
+def held_elsewhere(state):
+    """A listener running in another process: its lock held until the block ends."""
+    child = lock_elsewhere(state, hold=True)
+    try:
+        if child.stdout.readline().strip() != 'True':
+            raise AssertionError('the other process did not get the lock')
+        yield
+    finally:
+        child.stdin.close()
+        child.wait(60)
+        child.stdout.close()
+
+
 class TelegramTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-telegram-')
@@ -130,7 +164,7 @@ class TelegramTest(unittest.TestCase):
         self.vault.mkdir()
         self.fake = FakeTelegram()
         self.heard = []
-        env = mock.patch.dict(os.environ, {telegram.TOKEN_ENV: TOKEN})
+        env = mock.patch.dict(os.environ, {telegram.TOKEN_ENV: TOKEN, telegram.DIR_ENV: ''})
         env.start()
         self.addCleanup(env.stop)
 
@@ -159,6 +193,28 @@ class TelegramTest(unittest.TestCase):
 
     def cards(self):
         return yakala.cards(self.vault)
+
+    def offline_at(self, method, nth, error=None):
+        """The `nth` call of `method` from now on fails, once: as a lost connection does, or with `error`."""
+        real, seen = self.fake.call, {'n': 0}
+
+        def call(name, **params):
+            if name == method:
+                seen['n'] += 1
+                if seen['n'] == nth:
+                    raise error or URLError('ağ yok')
+            return real(name, **params)
+        self.fake.call = call
+
+    def missed(self, count):
+        """Notes sent while this machine was away, their updates expired."""
+        return [self.fake.say(PERSON, deliver=False, text='kaçan not %d' % number) for number in range(count)]
+
+    def numbers(self):
+        return sorted(int(card['meta']['telegram_mesaj']) for card in self.cards())
+
+    def answers(self):
+        return [message['text'] for message in self.fake.sent(PERSON['id'])]
 
     # ---------------------------------------------------------------- setup
     def test_setup_checks_the_key_and_hands_out_a_pairing_link(self):
@@ -195,6 +251,50 @@ class TelegramTest(unittest.TestCase):
         self.assertFalse(again['eslesti'])
         self.assertTrue(again['baglanti'])
 
+    def test_refusals_carry_a_name_the_app_says_in_its_language(self):
+        self.fake.token_ok = False
+        with self.assertRaises(telegram.Refusal) as refused:
+            telegram.setup(self.state, bot=self.fake)
+        self.assertEqual(refused.exception.code, 'anahtar_gecersiz')
+        self.fake.token_ok, self.fake.webhook = True, 'https://example.com/hook'
+        with self.assertRaises(telegram.Refusal) as refused:
+            telegram.setup(self.state, bot=self.fake)
+        self.assertEqual(refused.exception.code, 'webhook')
+        self.fake.webhook = ''
+        real = self.fake.call
+        self.fake.call = lambda method, **params: dict(BOT, is_bot=False) if method == 'getMe' else real(method, **params)
+        with self.assertRaises(telegram.Refusal) as refused:
+            telegram.setup(self.state, bot=self.fake)
+        self.assertEqual(refused.exception.code, 'bot_degil')
+        self.assertIsInstance(refused.exception, ValueError, 'beyin.py says it as the error it is, its name beside it')
+
+    def test_pairing_again_waits_for_a_running_listener(self):
+        # A listener writes back the state it read at the start of its round: a new link made under it was undone
+        # within the 50 seconds it waits, and the new phone's /start taken for a stranger's.
+        self.paired()
+        with held_elsewhere(self.state):
+            for attempt in (lambda: telegram.setup(self.state, again=True, bot=self.fake), lambda: telegram.forget(self.state)):
+                with self.assertRaises(telegram.Refusal) as refused:
+                    attempt()
+                self.assertEqual(refused.exception.code, 'calisiyor')
+            # The same bot's key given again changes nothing the listener writes back.
+            self.assertTrue(telegram.setup(self.state, bot=self.fake)['eslesti'])
+        self.assertTrue(telegram.status(self.state)['eslesti'])
+        again = telegram.setup(self.state, again=True, bot=self.fake)
+        self.assertEqual((again['eslesti'], bool(again['baglanti'])), (False, True))
+
+    def test_a_new_key_for_the_same_bot_keeps_the_pairing_and_ends_the_old_refusal(self):
+        # /revoke in BotFather: the old key stops the listener, a new one of the same bot is given in the settings.
+        self.paired()
+        self.fake.token_ok = False
+        result = telegram.listen(self.vault, self.state, bot=self.fake, stop=lambda: False, sleep=lambda _s: None)
+        self.assertEqual(result['status'], 'anahtar_gecersiz')
+        self.assertEqual(telegram.status(self.state)['son_hata_kod'], 'anahtar_gecersiz')
+        self.fake.token_ok = True
+        status = telegram.setup(self.state, bot=self.fake)
+        self.assertEqual((status['eslesti'], status['kisi'], status['son_hata'], status['son_hata_kod']), (True, 'Tolga', None, None))
+        self.assertEqual(telegram.load(self.state)['kisi_id'], PERSON['id'])
+
     # -------------------------------------------------------------- pairing
     def test_only_the_chat_that_opens_the_link_is_listened_to(self):
         telegram.setup(self.state, bot=self.fake)
@@ -217,11 +317,59 @@ class TelegramTest(unittest.TestCase):
 
     def test_a_code_guessed_at_is_given_up(self):
         telegram.setup(self.state, bot=self.fake)
-        for number in range(20):
-            self.fake.say(STRANGER, text='KOD%05d' % number)
+        # A stranger's plain words are no guesses at the code: they do not use it up.
+        for number in range(25):
+            self.fake.say(STRANGER, text='merhaba, bu kimin botu? %d' % number)
+        self.poll()
+        self.assertTrue(telegram.status(self.state)['baglanti'])
+        # Guesses: the link's `/start …`, or one word of the code's letters (0, 1, I and O are never in a code).
+        for number in range(10):
+            self.fake.say(STRANGER, text='/start KOD%05d' % number)
+        for number in range(10):
+            self.fake.say(STRANGER, text='KDZ' + ''.join(telegram.CODE_ALPHABET[(number * 7 + i) % 32] for i in range(5)).lower())
         self.poll()
         self.assertIsNone(telegram.status(self.state)['baglanti'])
         self.assertFalse(telegram.status(self.state)['eslesti'])
+        self.assertEqual(self.fake.methods('sendMessage'), [], 'a stranger gets no answer at all')
+
+    def test_notes_sent_before_pairing_do_not_use_up_the_code_and_come_in(self):
+        # The owner kept writing to the bot while no phone was paired (a key revoked, Telegram set up again):
+        # the first round meets those notes before the `/start` of the new link.
+        telegram.setup(self.state, bot=self.fake)
+        code = telegram.load(self.state)['eslesme_kodu']
+        notes = [self.fake.say(PERSON, text='Bekleyen not %d' % number) for number in range(25)]
+        self.fake.say(STRANGER, text='/start')  # another chat's message in between: not fetched into this one
+        self.fake.say(PERSON, text='/start ' + code)
+        self.poll()
+        status = telegram.status(self.state)
+        self.assertTrue(status['eslesti'])
+        self.assertEqual(sorted(card['meta']['telegram_mesaj'] for card in self.cards()),
+                         sorted(str(note['message_id']) for note in notes))
+        texts = [message['text'] for message in self.fake.sent(PERSON['id'])]
+        self.assertIn('Eşleşmeden önce gönderdiğin 25 mesajı aldım ✓', texts)
+        self.assertFalse(any('alamadım' in text for text in texts), texts)
+        self.assertNotIn('bekleyen', telegram.load(self.state))
+        self.assertNotIn('eslesme_oncesi', telegram.load(self.state))
+        # Done: the next message is a message, nothing is fetched again.
+        self.fake.calls.clear()
+        self.fake.say(PERSON, text='Sonraki')
+        self.poll()
+        self.assertEqual(self.fake.methods('forwardMessage'), [])
+        self.assertEqual(len(self.cards()), 26)
+
+    def test_notes_before_pairing_cut_short_are_fetched_on_the_next_round(self):
+        telegram.setup(self.state, bot=self.fake)
+        code = telegram.load(self.state)['eslesme_kodu']
+        notes = [self.fake.say(PERSON, text='Bekleyen not %d' % number) for number in range(6)]
+        self.fake.say(PERSON, text='ABCDEFGH')  # a try at the code: not a note
+        self.fake.say(PERSON, text='/start ' + code)
+        self.offline_at('forwardMessage', 3)
+        with self.assertRaises(OSError):
+            self.poll()
+        self.assertTrue(telegram.status(self.state)['eslesti'])
+        self.poll()
+        self.assertEqual(sorted(card['meta']['telegram_mesaj'] for card in self.cards()),
+                         sorted(str(note['message_id']) for note in notes))
 
     # -------------------------------------------------------------- capture
     def test_a_text_becomes_a_card_and_the_bot_says_so_quietly(self):
@@ -306,6 +454,7 @@ class TelegramTest(unittest.TestCase):
         [card] = self.cards()
         self.assertIn("Telegram'da kaldı: sunum.pdf (30 MB)", card['body'])
         self.assertEqual(self.fake.methods('getFile'), [])
+        self.assertIn('alamadım: sunum.pdf', self.answers()[-1])
 
     def test_a_file_telegram_will_not_hand_over_is_named_and_the_message_not_tried_for_ever(self):
         self.paired()
@@ -322,6 +471,61 @@ class TelegramTest(unittest.TestCase):
         self.assertIn('Telegram dosyayı vermedi: fatura.pdf', card['body'])
         self.assertEqual(telegram.load(self.state)['offset'], self.fake.updates[-1]['update_id'] + 1,
                          'taken: the next round does not meet it again')
+        self.assertEqual(self.answers()[-1], '✓ Gelen kutusuna eklendi, ama dosyayı alamadım: fatura.pdf',
+                         'a plain ✓ said the file had come')
+
+    def test_a_file_telegram_fails_on_for_a_moment_is_fetched_again(self):
+        self.paired()
+        self.offline_at('getFile', 1, telegram.TelegramError(502, 'HTTP 502'))
+        self.fake.say(PERSON, caption='Fatura', document=dict(self.fake.file('d', b'pdf'), file_name='fatura.pdf'))
+        with self.assertRaises(telegram.TelegramError):
+            self.poll()
+        self.assertEqual(self.cards(), [], 'nothing kept of it yet: the message is taken again')
+        self.poll()
+        [card] = self.cards()
+        self.assertNotIn('vermedi', card['body'])
+        [saved] = list((self.vault / yakala.INBOX / yakala.FILES).glob('telegram-*fatura.pdf'))
+        self.assertEqual(saved.read_bytes(), b'pdf')
+        self.assertEqual(self.answers()[-1], '✓ Gelen kutusuna eklendi')
+
+    def test_a_file_telegram_keeps_failing_on_is_given_up_after_a_while_and_the_answer_says_so(self):
+        self.paired()
+        real = self.fake.call
+
+        def failing(method, **params):
+            if method == 'getFile':
+                raise telegram.TelegramError(502, 'HTTP 502')
+            return real(method, **params)
+        self.fake.call = failing
+        self.fake.say(PERSON, voice=dict(self.fake.file('v', b'OggS'), duration=3))
+        context = self.context()  # one listener's run: it knows since when Telegram has failed on the file
+        with self.assertRaises(telegram.TelegramError):
+            telegram.poll_once(context)
+        self.fake.clock += telegram.GIVE_UP_SN - 60
+        with self.assertRaises(telegram.TelegramError):
+            telegram.poll_once(context)
+        self.fake.clock += 60
+        telegram.poll_once(context)
+        [card] = self.cards()
+        self.assertIn('Telegram dosyayı vermedi: sesli-not.ogg', card['body'])
+        self.assertEqual(self.answers()[-1], '✓ Gelen kutusuna eklendi, ama dosyayı alamadım: sesli-not.ogg')
+        self.assertEqual(self.heard, [])
+
+    def test_a_listener_ended_while_answering_does_not_make_the_card_twice(self):
+        self.paired()
+        real = self.fake.call
+
+        def ended(method, **params):
+            if method == 'sendMessage' and params['text'].startswith('✓'):
+                raise Killed()
+            return real(method, **params)
+        self.fake.call = ended
+        self.fake.say(PERSON, text='bir kez')
+        with self.assertRaises(Killed):
+            self.poll()
+        self.fake.call = real
+        self.poll()  # Telegram gives the message again: its offset was not kept
+        self.assertEqual(len(self.cards()), 1)
 
     def test_a_place_and_a_contact_are_written_as_text(self):
         self.paired()
@@ -410,6 +614,67 @@ class TelegramTest(unittest.TestCase):
         self.assertEqual(telegram.probe(self.context()), 0)
         self.assertEqual(self.fake.methods('forwardMessage'), [])
 
+    def test_a_gap_cut_short_by_a_lost_connection_is_finished_on_the_next_round(self):
+        # The copies the bot forwards are newer than the message that showed the gap: taken as seen on the way,
+        # the gap looked closed when that message came again, and the rest of it was never fetched.
+        self.paired()
+        missed = self.missed(10)
+        self.fake.clock += 3 * 86400
+        last = self.fake.say(PERSON, text='yeni mesaj')
+        self.offline_at('forwardMessage', 5)
+        with self.assertRaises(OSError):
+            self.poll()
+        self.assertEqual(len(self.cards()), 4)
+        self.poll()
+        self.poll()
+        self.assertEqual(self.numbers(), [m['message_id'] for m in missed] + [last['message_id']], 'each one card, once')
+        self.assertFalse(any('alamadım' in text for text in self.answers()), self.answers())
+        self.assertFalse([m for m in self.fake.chats[PERSON['id']] if 'forward_origin' in m], 'no copy left in the chat')
+
+    def test_a_listener_ended_mid_gap_goes_on_where_it_stopped(self):
+        self.paired()
+        missed = self.missed(8)
+        last = self.fake.say(PERSON, text='yeni')
+        self.offline_at('forwardMessage', 4, Killed())
+        with self.assertRaises(Killed):
+            self.poll()
+        before = [params['message_id'] for params in self.fake.methods('forwardMessage')]
+        self.assertEqual(len(before), 3)
+        self.poll()
+        after = [params['message_id'] for params in self.fake.methods('forwardMessage')][len(before):]
+        self.assertFalse(set(before) & set(after), 'what was done is not fetched again')
+        self.assertEqual(self.numbers(), [m['message_id'] for m in missed] + [last['message_id']])
+
+    def test_telegram_asking_twice_to_wait_is_waited_out_not_counted_as_missed(self):
+        self.paired()
+        missed = self.missed(3)
+        self.fake.say(PERSON, text='yeni')
+        real, busy = self.fake.call, {'n': 0}
+
+        def too_many(method, **params):
+            if method == 'forwardMessage' and params['message_id'] == missed[1]['message_id'] and busy['n'] < 2:
+                busy['n'] += 1
+                raise telegram.TelegramError(429, 'Too Many Requests: retry after 3', 3)
+            return real(method, **params)
+        self.fake.call = too_many
+        with self.assertRaises(telegram.TelegramError):
+            self.poll()
+        self.poll()
+        self.assertEqual(len(self.cards()), 4)
+        self.assertFalse(any('alamadım' in text for text in self.answers()), self.answers())
+
+    def test_the_look_at_start_cut_short_is_finished_at_the_next_start(self):
+        self.paired()
+        missed = self.missed(6)
+        self.fake.clock += 5 * 86400
+        self.offline_at('forwardMessage', 4)  # the look itself, two of the six, then the connection is lost
+        with self.assertRaises(OSError):
+            telegram.probe(self.context())
+        self.assertEqual(len(self.cards()), 2)
+        self.assertEqual(telegram.probe(self.context()), 4)
+        self.assertEqual(self.numbers(), [m['message_id'] for m in missed])
+        self.assertFalse(any('alamadım' in text for text in self.answers()), self.answers())
+
     # --------------------------------------------------------------- listen
     def test_listen_runs_once_per_machine_and_stops_on_a_bad_key(self):
         self.paired()
@@ -425,6 +690,46 @@ class TelegramTest(unittest.TestCase):
         result = telegram.listen(self.vault, self.state, bot=self.fake, stop=lambda: False, sleep=lambda _s: None)
         self.assertEqual(result['status'], 'anahtar_gecersiz')
         self.assertIn('geçersiz', telegram.status(self.state)['son_hata'])
+
+    def test_failures_are_named_for_the_app(self):
+        self.paired()
+        real, rounds, named = self.fake.call, {'n': 0}, []
+        failures = [URLError('ağ yok'), telegram.TelegramError(409, 'Conflict: terminated by other getUpdates request'),
+                    telegram.TelegramError(503, 'Service Unavailable')]
+
+        def failing(method, **params):
+            if method == 'getUpdates':
+                rounds['n'] += 1
+                if rounds['n'] <= len(failures):
+                    raise failures[rounds['n'] - 1]
+            return real(method, **params)
+        self.fake.call = failing
+        telegram.listen(self.vault, self.state, bot=self.fake, stop=lambda: rounds['n'] > len(failures),
+                        sleep=lambda _s: named.append(telegram.status(self.state)['son_hata_kod']))
+        self.assertEqual(named, ['baglanti', 'cakisma', 'telegram'])
+        status = telegram.status(self.state)
+        self.assertEqual((status['son_hata'], status['son_hata_kod']), (None, None), 'a round that worked clears both')
+
+    def test_a_listener_with_nothing_set_up_says_so_and_ends(self):
+        # The app starts no listener again for this (exit 3), as for a key Telegram does not take (2).
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = telegram.main(['dinle', '--json'], vault=self.vault, state=self.state)
+        self.assertEqual(code, 3)
+        self.assertEqual(json.loads(out.getvalue().strip().splitlines()[-1]), {'status': 'kurulmamis'})
+        self.assertFalse(telegram.status(self.state)['calisiyor'])
+        self.assertIn('kurulmamış', telegram.human({'status': 'kurulmamis'}, 'dinle'))
+
+    def test_the_lock_keeps_a_listener_of_another_process_out(self):
+        # The listener's one-per-machine lock, across processes, on every system (msvcrt on Windows, flock elsewhere).
+        handle = telegram._lock_handle(self.state)
+        try:
+            self.assertTrue(telegram._lock(handle))
+            self.assertEqual(lock_elsewhere(self.state), 'False')
+            telegram._unlock(handle)
+            self.assertEqual(lock_elsewhere(self.state), 'True')
+        finally:
+            handle.close()
 
     def test_a_second_listener_is_not_started(self):
         self.paired()
@@ -489,6 +794,57 @@ class TelegramTest(unittest.TestCase):
         self.assertEqual(result['status'], 'kaldirildi')
         self.assertFalse((self.state / 'telegram').exists())
         self.assertEqual(len(self.cards()), 1)
+
+    # ------------------------------------------- the app's own folder (C6)
+    def test_the_apps_telegram_folder_takes_over_the_vaults_and_serves_every_vault(self):
+        self.paired()
+        telegram.setup(self.state, token=TOKEN, keep_token=True, bot=self.fake)
+        telegram._lock_handle(self.state).close()  # a listener's lock file left behind
+        apps = Path(self.tmp.name) / 'userData' / 'telegram'
+        with mock.patch.dict(os.environ, {telegram.DIR_ENV: 'göreli/telegram'}):
+            self.assertEqual(telegram.folder(self.state), self.state / 'telegram', 'only an absolute path is taken')
+        with mock.patch.dict(os.environ, {telegram.DIR_ENV: str(apps)}):
+            self.assertEqual(telegram.folder(self.state), apps)
+            self.assertTrue(telegram.adopt(self.state))
+            self.assertEqual(sorted(item.name for item in apps.iterdir()), ['durum.json', 'token'], 'not the lock')
+            self.assertEqual(telegram.load(self.state), json.loads((self.state / 'telegram/durum.json').read_text(encoding='utf-8')))
+            if os.name != 'nt':
+                self.assertEqual((apps / 'token').stat().st_mode & 0o777, 0o600)
+            self.assertFalse(telegram.adopt(self.state), 'once')
+            # Another vault chosen: the same bot, still paired, its own old state not taken over the app's.
+            other_vault, other = Path(self.tmp.name) / 'Kasa B', Path(self.tmp.name) / 'state-b'
+            other_vault.mkdir()
+            (other / 'telegram').mkdir(parents=True)
+            (other / 'telegram/durum.json').write_text('{"schema": 1, "bot": {"id": 1}}', encoding='utf-8')
+            self.assertFalse(telegram.adopt(other))
+            status = telegram.status(other)
+            self.assertEqual((status['eslesti'], status['bot'], status['klasor']), (True, 'pyn_cortex_bot', str(apps)))
+            # Its notes land in the vault the listener was started for.
+            self.fake.say(PERSON, text='B kasasına')
+            telegram.poll_once(telegram.Context(other_vault, other, self.fake, transcribe=self.transcribe, sleep=lambda _s: None,
+                                                now=lambda: float(self.fake.clock)))
+            self.assertEqual([card['meta']['baslik'] for card in yakala.cards(other_vault)], ['B kasasına'])
+            self.assertEqual(self.cards(), [])
+            self.assertEqual(telegram.load(self.state)['yakalanan'], 1, 'one count, whichever vault is open')
+
+    def test_forgetting_with_the_apps_folder_brings_nothing_back(self):
+        self.paired()
+        apps = Path(self.tmp.name) / 'userData' / 'telegram'
+        with mock.patch.dict(os.environ, {telegram.DIR_ENV: str(apps)}):
+            telegram.adopt(self.state)
+            self.assertEqual(telegram.forget(self.state)['status'], 'kaldirildi')
+            self.assertFalse((self.state / 'telegram').exists(), "the vault's own copy goes too")
+            # A vault paired before, opened next: its old pairing is not taken back.
+            other = Path(self.tmp.name) / 'state-b'
+            (other / 'telegram').mkdir(parents=True)
+            (other / 'telegram/durum.json').write_text(json.dumps({'schema': 1, 'bot': {'id': BOT['id']}, 'sohbet': PERSON['id']}),
+                                                       encoding='utf-8')
+            self.assertFalse(telegram.adopt(other))
+            status = telegram.status(other)
+            self.assertEqual((status['kurulu'], status['bot'], status['eslesti']), (False, None, False))
+            self.assertEqual(telegram.forget(self.state)['status'], 'zaten-yok')
+            again = telegram.setup(self.state, bot=self.fake)
+            self.assertEqual((again['eslesti'], bool(again['baglanti'])), (False, True), 'set up again: a new pairing link')
 
     def test_human_lines(self):
         result = telegram.setup(self.state, bot=self.fake)
@@ -629,6 +985,15 @@ class TelegramInstalledTest(unittest.TestCase):
                                   capture_output=True, text=True, encoding='utf-8', env=env, cwd=vault, timeout=60)
             self.assertNotEqual(done.returncode, 0)
             self.assertIn('anahtar', done.stderr)
+            # The app's listener in the app's own folder, nothing set up: said so, ended with 3 (not started again).
+            apps = root / 'userData' / 'telegram'
+            app_env = dict(env, **{telegram.TOKEN_ENV: '1:x', telegram.DIR_ENV: str(apps)})
+            done = subprocess.run([sys.executable, str(vault / 'beyin.py'), 'telegram', 'dinle', '--json'], capture_output=True,
+                                  text=True, encoding='utf-8', env=app_env, cwd=vault, timeout=60)
+            self.assertEqual((done.returncode, json.loads(done.stdout.strip().splitlines()[-1])), (3, {'status': 'kurulmamis'}),
+                             done.stderr)
+            self.assertTrue((apps / telegram.LOCK_FILE).exists())
+            self.assertFalse((state / 'telegram' / telegram.LOCK_FILE).exists(), 'the vault\'s own folder is not used')
             # The listener's lock with only what the vault was given: no helper of the source tree (#151).
             listen = '\n'.join([
                 'import sys',

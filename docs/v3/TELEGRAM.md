@@ -16,7 +16,16 @@ ya da düzenlenmez; asistanın kartları sonra okuyup işler, tıpkı `Ctrl+Alt+
 
 Bot artık yalnız o sohbeti dinler. Botu bulan başka biri ona yazsa da cevap almaz ve yazdığı hiçbir
 yere kaydedilmez. Kod 20 kez yanlış denenirse kullanılamaz olur; yenisi için `telegram kur --yeniden-esle`
-(masaüstünde **Bağlantıyı kaldır**, sonra yeniden **Bağla**).
+(masaüstünde **Başka bir telefonla eşleştir**). Yalnız koda benzeyen denemeler sayılır (`/start …` ya da
+kodun harflerinden tek bir sözcük): eşleşmeden önce bota yazdığın notlar kodu harcamaz, eşleşince
+gelen kutusuna gelir ve bot "Eşleşmeden önce gönderdiğin N mesajı aldım ✓" der.
+
+Masaüstünde **Başka bir telefonla eşleştir** dinleyiciyi durdurup yeni bağlantıyı verir, sonra yeniden
+başlatır. Terminalden `kur --yeniden-esle` dinleyici çalışırken yapılmaz: dinleyici her turda okuduğu
+eşleşmeyi geri yazar ve yeni bağlantıyı bozardı; önce dinleyiciyi kapat.
+
+Telegram anahtarı geçersiz derse (BotFather'da `/revoke`) aynı botun yeni anahtarını Ayarlar → Telegram'a
+yapıştırman yeter: eşleşme korunur, telefonu yeniden eşleştirmen gerekmez.
 
 Cortex için ayrı bir bot aç. Başka bir yerde (webhook ile) kullanılan bir bot kabul edilmez, çünkü
 Telegram bir botun mesajlarını tek bir alıcıya verir.
@@ -36,7 +45,12 @@ Telegram bir botun mesajlarını tek bir alıcıya verir.
 
 Her kartın frontmatter'ında `arac: telegram`, mesajın numarası (`telegram_mesaj`) ve gönderildiği an
 (`gonderildi`) durur. Bot her mesaja sessiz bir cevapla "✓ Gelen kutusuna eklendi" der; sesli
-notta yazıya çevrilen cümlenin başını da gösterir.
+notta yazıya çevrilen cümlenin başını da gösterir. Bir dosya gelmediyse (20 MB'tan büyük, ya da Telegram
+vermedi) cevap bunu söyler: "✓ Gelen kutusuna eklendi, ama dosyayı alamadım: …"; kartta da yazar.
+
+Telegram bir dosyayı o an veremezse (sunucusu meşgul ya da hata veriyor) mesaj kaydedilmiş sayılmaz:
+dinleyici biraz bekleyip mesajı baştan yeniden alır. Telegram bir saat boyunca vermemeye devam ederse
+mesaj dosyasız kaydedilir ve bot bunu söyler; sıradaki mesajlar beklemez.
 
 Sesli notları yazıya çevirmek için sesle yazmanın kurulu olması gerekir (Ayarlar → Sesle yazma).
 AMD ya da Intel ekran kartıyla (Vulkan) 1.0.26'dan önce kurduysan Ayarlar'da **Sesle yazmayı güncelle**
@@ -61,12 +75,25 @@ Bilgisayar kapalıyken gönderdiklerin açılınca gelir. Telegram bir botun al�
 Kaçan mesajlar alındıktan sonra bot "Bilgisayar kapalıyken gönderdiğin N mesajı aldım ✓" der. Telefonda
 iletilen kopyalar bir an görünüp kaybolabilir.
 
+Bu iş yarıda kalırsa (bağlantı koptu, uygulama kapandı, Telegram "biraz bekle" dedi) kaldığı yerden
+sürer: alınan her mesaj hemen not edilir, boşluk ancak tamamı alınınca kapanmış sayılır. Aynı mesaj iki
+kart olmaz; uygulama tam bot cevap verirken kapansa da.
+
 ## Nasıl çalışır
 
 `beyin.py telegram dinle` Telegram'a sürekli "yeni mesaj var mı?" diye sorar (long polling).
 Bilgisayarda hiçbir kapı açılmaz, modem ya da sunucu ayarı gerekmez. Masaüstü uygulaması açıkken
 (sağ altta da) dinleyiciyi kendisi çalıştırır; durursa kendiliğinden, her seferinde biraz daha geç
-yeniden başlatır. Bir makinede tek dinleyici çalışır.
+yeniden başlatır. Anahtar geçersizse (çıkış kodu 2) ya da Telegram kurulmamışsa (`{"status": "kurulmamis"}`,
+çıkış kodu 3) yeniden başlatmaz. Bir makinede tek dinleyici çalışır; masaüstü açıkken terminalde ayrıca
+`telegram dinle` çalıştırma (ikisi aynı botu sorarsa Telegram "başka bir yerde de dinleniyor" der).
+
+Botun durumu (eşleşme, son görülen mesaj numarası, dinleyicinin kilidi) terminalde kasanın
+`state/telegram` klasöründe durur. Masaüstü uygulaması onu kendi veri klasöründe, anahtarın yanında
+tutar ve motora `BEYIN_TELEGRAM_DIR` ile verir: bot bir kasaya değil sana aittir. Böylece başka bir
+kasa seçince telefon eşleşmesi kopmaz, anahtar yeniden sorulmaz ve dinleyici yeni kasanın gelen
+kutusuna yazmaya devam eder. Bu klasör ilk kullanıldığında açık kasanın `state/telegram` içeriği oraya
+kopyalanır (kilit dosyası hariç); eşleşme korunur.
 
 Uygulamasız kullanmak için dinleyiciyi terminalde çalıştır ya da oturum açılışına bağla:
 
@@ -78,9 +105,9 @@ python3 beyin.py telegram dinle
 | --- | --- |
 | `telegram kur --token <anahtar>` | Anahtarı Telegram'a doğrulatır, eşleşme bağlantısı verir. Anahtar `state/telegram/token` dosyasına, yalnız senin okuyabileceğin şekilde yazılır. |
 | `telegram kur --yeniden-esle` | Eşleşmeyi bırakır, yeni bağlantı verir. |
-| `telegram durum` | Bot, eşleşme, dinleyici çalışıyor mu, son hata, gelen not sayısı. |
+| `telegram durum` | Bot, eşleşme, dinleyici çalışıyor mu, son hata (`son_hata`, adıyla `son_hata_kod`: `anahtar_gecersiz`, `cakisma`, `baglanti`, `telegram`), gelen not sayısı. |
 | `telegram dinle` | Gelen mesajları gelen kutusuna yazar; durdurulana kadar çalışır. |
-| `telegram kaldir` | Anahtarı ve eşleşmeyi siler. Gelen kutusundaki kartlara dokunmaz. |
+| `telegram kaldir` | Anahtarı ve eşleşmeyi siler. Gelen kutusundaki kartlara dokunmaz. `BEYIN_TELEGRAM_DIR` ile kasanın kendi `state/telegram` kopyası da silinir; başka bir kasanın eski eşleşmesi sonradan geri gelmez. |
 
 ## Gizlilik
 
