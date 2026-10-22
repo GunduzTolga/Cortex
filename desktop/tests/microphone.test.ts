@@ -10,6 +10,7 @@ import {
   LISTENER_COMES_UP,
   type ListenerWord,
   listenerFile,
+  listenerHasSpoken,
   listenerRestarting,
   microphoneFile,
   microphoneWord,
@@ -186,6 +187,33 @@ test('a listener is said not to run only past a restart’s grace, never while o
   // Started with Windows, the listener starts beside the app, cold: not said in the app's first minute.
   assert.equal(isMissing(0, MISSING_AFTER + 1, started), false);
   assert.equal(isMissing(0, MISSING_AT_START, started), true);
+});
+
+test('a listener from an engine before its word (1.0.32) is taken at the settings, as before: never "not running", the microphone said to listen when it is on', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-sessiz-'));
+  const file = path.join(dir, 'dinleyici.json');
+  try {
+    // Nothing on this computer ever wrote the listener's word: an engine from before it, whose listener says nothing.
+    assert.equal(listenerHasSpoken(file), false);
+    // One that ended keeps its word: the listener was one that speaks, and not seeing it again counts.
+    fs.writeFileSync(file, JSON.stringify({ surum: 1, pid: 424242, at: 1, ses: 'kapali' }));
+    assert.equal(listenerHasSpoken(file), true);
+    assert.equal(readListener(file, () => false), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  const voice = { installed: true, on: true, wake: true, auto: true, engine: 'vulkan' as const, model: 'large-v3-turbo', commands: null, wakePhrase: 'pyn not al' as const, readsFiles: true };
+  const late = MISSING_AT_START + 1_000;
+  // Before the engine's update, a minute after every start, "Dinleyici çalışmıyor" was said over a listener that listened.
+  assert.equal(missingSince(null, voice, null, false, late, true), null);
+  assert.equal(missingSince(late, voice, null, false, late + MISSING_AFTER, true), null, 'and what was counted is let go');
+  const quiet = trayItems(voice, false, false, true, { word: null, quiet: true });
+  assert.deepEqual([quiet[0].label, quiet[0].icon], ['Mikrofon dinliyor: “Pyn, not al”', 'mikrofon-acik']);
+  assert.ok(!quiet.some((one) => one.action === 'listener'));
+  assert.equal(trayTooltip(voice, false, { quiet: true }), 'Cortex · mikrofon “Pyn, not al” için dinliyor');
+  assert.equal(trayItems({ ...voice, wake: false }, false, false, true, { quiet: true })[0].label, 'Mikrofon kapalı');
+  // One that speaks and is not seen yet is not taken at the settings.
+  assert.equal(trayItems(voice, false, false, true, { word: null, quiet: false })[0].icon, 'mikrofon-kapali');
 });
 
 test('a listener started again is given time to come up after the work that started it ends', async () => {

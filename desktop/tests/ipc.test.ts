@@ -7,6 +7,7 @@ import { dialogAnswer, handlers, sent } from 'electron';
 import { registerIpc, trustPagesWhere } from '../electron/ipc';
 import { forgetSettings, readSettings, settingsPath, updateSettings } from '../electron/services/settings';
 import { pythonOf } from '../electron/services/localChat';
+import { listenerRestarting } from '../electron/services/microphone';
 import { setYakalaPlatform } from '../electron/services/setup';
 
 /**
@@ -101,6 +102,15 @@ elif args[:2] == ['yakala', 'kur']:
 else:
     sys.exit(2)
 `;
+
+// Before any test here starts or moves yakala's listener: the time it is given is the engine install's own.
+test('the engine installed or updated, yakala’s listener, starting itself again on the new files, is given time to come up', async () => {
+  firstRun();
+  assert.equal(listenerRestarting(), false, 'nothing started it yet');
+  await assert.rejects(call('setup:installEngine'), /kasa/);
+  // Not "Dinleyici çalışmıyor" over a listener still coming up on a slow laptop (services/tray.ts).
+  assert.equal(listenerRestarting(), true);
+});
 
 test('another vault chosen, yakala follows it from the vault that had it, and the window is told (yakala-3)', { skip: pythonOf() === null }, async () => {
   firstRun();

@@ -92,6 +92,14 @@ export function listenerFile(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(path.dirname(microphoneFile(env)), 'dinleyici.json');
 }
 
+/**
+ * Whether a listener on this computer has said a word, ever: the file stays when it ends. One from an engine before
+ * the word (1.0.32 and earlier, until the vault's engine is updated) never writes it, and listens all the same.
+ */
+export function listenerHasSpoken(file: string = listenerFile()): boolean {
+  return fs.existsSync(file);
+}
+
 function running(pid: number): boolean {
   try {
     process.kill(pid, 0);

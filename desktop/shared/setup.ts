@@ -191,6 +191,12 @@ export interface ListenerSeen {
   word: ListenerWord | null;
   missing: boolean;
   hotkey: string | null;
+  /**
+   * No listener on this computer has said a word yet (no `dinleyici.json`): one from an engine before it (1.0.32 and
+   * earlier), which listens as its settings say and says nothing. The settings are taken for it, as before, and not
+   * seeing it is not "not running".
+   */
+  quiet?: boolean;
 }
 
 export interface SetupApi {

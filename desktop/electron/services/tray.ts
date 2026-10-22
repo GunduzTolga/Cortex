@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { hotkeyLabel, HOTKEYS, type ListenerSeen, wakePhraseLabel, type VoiceStatus, type WakeTrouble } from '../../shared/setup';
 import { readSettings } from './settings';
-import { type ListenerWord, listenerRestarting, readListener, readOwner } from './microphone';
+import { type ListenerWord, listenerHasSpoken, listenerRestarting, readListener, readOwner } from './microphone';
 import { onVoiceStatus, openNoteWindow, restartListener, setupStatus, setVoice } from './setup';
 
 /**
@@ -53,9 +53,13 @@ export function wakeTroubleShort(trouble: WakeTrouble, english: boolean): string
   return said[trouble][english ? 1 : 0];
 }
 
-/** Whether the microphone really listens for the wake phrase now: on, allowed, and the listener says it hears. */
-export function hearsNow(voice: VoiceStatus | null, word: ListenerWord | null | undefined): boolean {
-  return listensAlways(voice) && word?.uyandirma === true;
+/**
+ * Whether the microphone really listens for the wake phrase now: on, allowed, and the listener says it hears. A listener
+ * that never says (`quiet`: an engine from before its word) listens as the settings say, and is taken at them, as before:
+ * read as off, the window closed did not say the microphone still listened.
+ */
+export function hearsNow(voice: VoiceStatus | null, word: ListenerWord | null | undefined, quiet = false): boolean {
+  return listensAlways(voice) && (word?.uyandirma === true || (quiet && !word));
 }
 
 /**
@@ -68,6 +72,7 @@ export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boo
   const listening = listensAlways(voice);
   const word = seen.word ?? null;
   const missing = usable && seen.missing === true;
+  const hears = hearsNow(voice, word, seen.quiet);
   const phrase = wakePhraseLabel(voice?.wakePhrase, english);
   const key = seen.hotkey ?? hotkeyLabel(HOTKEYS[0]);
   const separator: TrayItem = { label: '', type: 'separator' };
@@ -83,7 +88,7 @@ export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boo
               ? say('Ses açılamadı, yeniden deneniyor', 'Voice could not start; trying again')
               : !listening
                 ? say('Mikrofon kapalı', 'The microphone is off')
-                : word?.uyandirma
+                : hears
                   ? say(`Mikrofon dinliyor: ${phrase}`, `The microphone listens: ${phrase}`)
                   : word?.uyandirma_sorun
                     ? say(`Uyandırma açılamadı: ${wakeTroubleShort(word.uyandirma_sorun, false)}`, `The wake phrase could not start: ${wakeTroubleShort(word.uyandirma_sorun, true)}`)
@@ -92,7 +97,7 @@ export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boo
                       : say('Dinleyici başlıyor…', 'The listener is starting…'),
       type: 'normal',
       enabled: false,
-      icon: !missing && hearsNow(voice, word) ? 'mikrofon-acik' : 'mikrofon-kapali',
+      icon: !missing && hears ? 'mikrofon-acik' : 'mikrofon-kapali',
     },
     // Nothing listens: the key, the phrase and the microphone are yakala's listener's. Set up again, it starts.
     ...(missing ? [{ label: say('Dinleyiciyi başlat', 'Start the listener'), type: 'normal' as const, enabled: !busy, icon: 'pyn' as const, action: 'listener' as const }] : []),
@@ -130,7 +135,7 @@ export function trayTooltip(voice: VoiceStatus | null, english: boolean, seen: P
     const far = percent === null ? '' : english ? ` ${percent}%` : ` %${percent}`;
     return english ? `Cortex · voice is getting ready…${far}` : `Cortex · Pyn hazırlanıyor…${far}`;
   }
-  if (hearsNow(voice, seen.word)) return english ? `Cortex · the microphone listens for ${phrase}` : `Cortex · mikrofon ${phrase} için dinliyor`;
+  if (hearsNow(voice, seen.word, seen.quiet)) return english ? `Cortex · the microphone listens for ${phrase}` : `Cortex · mikrofon ${phrase} için dinliyor`;
   if (listensAlways(voice) && seen.word?.uyandirma_sorun) return english ? 'Cortex · the wake phrase could not start' : 'Cortex · uyandırma açılamadı';
   return english ? 'Cortex · the microphone is off' : 'Cortex · mikrofon kapalı';
 }
@@ -143,9 +148,13 @@ export function trayTooltip(voice: VoiceStatus | null, english: boolean, seen: P
 export const MISSING_AFTER = 10_000;
 export const MISSING_AT_START = 60_000;
 
-/** Since when no listener has been seen where one should run: voice set up and on, nothing starting it again now; null while one is, or none should. */
-export function missingSince(before: number | null, voice: VoiceStatus | null, word: ListenerWord | null, restarting: boolean, now: number): number | null {
-  if (!voice?.installed || !voice.on || word !== null || restarting) return null;
+/**
+ * Since when no listener has been seen where one should run: voice set up and on, nothing starting it again now; null
+ * while one is, or none should, or none would be seen: one that never says a word (`quiet`, an engine from before it)
+ * was said not to run a minute after every start, over a listener that listened, until the vault's engine was updated.
+ */
+export function missingSince(before: number | null, voice: VoiceStatus | null, word: ListenerWord | null, restarting: boolean, now: number, quiet = false): number | null {
+  if (!voice?.installed || !voice.on || word !== null || restarting || quiet) return null;
   return before ?? now;
 }
 
@@ -216,7 +225,7 @@ function lived(status: VoiceStatus | null): VoiceStatus | null {
 
 /** Whether the microphone listens all the time now - the listener says it hears - and the window closed says so, every time. */
 export function listeningNow(): boolean {
-  return !missing && hearsNow(lived(voice), helper);
+  return !missing && hearsNow(lived(voice), helper, quiet);
 }
 
 function show(): void {
@@ -244,14 +253,16 @@ function ownKey(): string | null {
   return owner ? hotkeyLabel(owner.tus ?? HOTKEYS[0]) : null;
 }
 
-/** How the listener is as last read: its word, whether it was found not running, its key. */
-export const currentListener = (): ListenerSeen => ({ word: helper, missing, hotkey: ownKey() });
+/** How the listener is as last read: its word, whether it was found not running, its key, and whether it says anything at all. */
+export const currentListener = (): ListenerSeen => ({ word: helper, missing, hotkey: ownKey(), quiet });
 
 /** What the listener said of its voice last, read every two seconds while the icon is there (services/microphone.ts). */
 let helper: ListenerWord | null = null;
 /** No listener where one should run, since then (`missingSince`), and whether that is said now (`isMissing`). */
 let missingFrom: number | null = null;
 let missing = false;
+/** No listener here has ever said a word (`listenerHasSpoken`): the vault's engine is from before it. */
+let quiet = false;
 const trayStarted = Date.now();
 /** A load said to be going on (it took longer than a moment): its end is said too. */
 let toldLoading = false;
@@ -343,7 +354,8 @@ export function listenerTurn(
 function listenToHelper(): void {
   const next = readListener();
   const now = Date.now();
-  missingFrom = missingSince(missingFrom, voice, next, listenerRestarting(now), now);
+  quiet = !next && !listenerHasSpoken();
+  missingFrom = missingSince(missingFrom, voice, next, listenerRestarting(now), now, quiet);
   const before: ListenerSeen = { word: helper, missing, hotkey: null };
   helper = next;
   missing = isMissing(missingFrom, now, trayStarted);

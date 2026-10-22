@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { AppNotice, BootstrapPayload, WindowSettings } from '../shared/api';
 import { readSettings, settingsUnreadable, tidyName, updateSettings } from './services/settings';
-import { sayMicrophone } from './services/microphone';
+import { restartingListener, sayMicrophone } from './services/microphone';
 import { currentListener, expectVoiceTurn, onHelperChange, startWithWindows, trayChanged } from './services/tray';
 import { setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
@@ -235,7 +235,9 @@ export function registerIpc(): void {
     return status;
   });
   handle('setup:installEngine', async () => {
-    const status = await setup.installEngine();
+    // Yakala's listener runs from the engine's files and starts itself again once they change: given the time to come
+    // up that every restart the app causes is given, not said "not running" meanwhile on a slow laptop.
+    const status = await restartingListener(() => setup.installEngine());
     chat.restartIdleChats();
     void telegram.restartTelegram();
     // A vault chosen before it had an engine: yakala moves to it now (yakala-3).
