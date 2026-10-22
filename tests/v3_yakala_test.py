@@ -144,7 +144,8 @@ class YakalaUnitTest(unittest.TestCase):
                 'sys.exit(y.listen_windows(%r, %r, spec="ctrl+alt+shift+f11", mutex_name=%r, stop_name=%r, open_name=%r))'
                 % (str(SCRIPTS), str(self.vault), str(state), *names))
         # Its windows are built and never shown: nothing appears on the screen of whoever runs the tests.
-        hidden = dict(os.environ, BEYIN_YAKALA_GIZLI='1')
+        # Its record of whose key it is and its word to the desktop app stay in the test's folder.
+        hidden = dict(os.environ, BEYIN_YAKALA_GIZLI='1', LOCALAPPDATA=str(Path(self.tmp.name) / 'local'))
         listener = subprocess.Popen([sys.executable, '-c', code], env=hidden)
         self.addCleanup(lambda: listener.poll() is None and listener.kill())
 
@@ -183,6 +184,52 @@ class YakalaUnitTest(unittest.TestCase):
         kernel32.CloseHandle(event)
         self.assertTrue(yakala.stop_windows_listener(stop_name=names[1], mutex_name=names[0], wait=10))
         self.assertFalse(yakala.open_windows_listener(open_name=names[2]), 'no listener: the window opens by itself')
+        self.assertEqual(listener.wait(timeout=10), 0)
+
+    @unittest.skipUnless(sys.platform == 'win32', 'Windows resident listener')
+    def test_windows_listener_survives_a_window_that_fails_to_open(self):
+        # A malformed link on the clipboard raised while the window was built, and the listener's
+        # loop never ran again: no window, no stop for `kur`, the microphone left open.
+        import time
+        try:
+            import tkinter
+            tkinter.Tk().destroy()
+        except Exception as exc:
+            self.skipTest('no Tk display: ' + type(exc).__name__)
+        state = Path(self.tmp.name) / 'state'
+        names = tuple('Local\\CortexTestHata%s-%d' % (kind, os.getpid()) for kind in ('Kilit', 'Dur', 'Ac'))
+        code = ('import sys; sys.path.insert(0, %r); import beyin_v3_yakala as y; real, calls = y.popup, []\n'
+                'def popup(*args, **options):\n'
+                '    calls.append(1)\n'
+                '    if len(calls) == 1:\n'
+                '        raise ValueError("Invalid IPv6 URL")\n'
+                '    return real(*args, **options)\n'
+                'y.popup = popup\n'
+                'sys.exit(y.listen_windows(%r, %r, spec="ctrl+alt+shift+f10", mutex_name=%r, stop_name=%r, open_name=%r))'
+                % (str(SCRIPTS), str(self.vault), str(state), *names))
+        hidden = dict(os.environ, BEYIN_YAKALA_GIZLI='1', LOCALAPPDATA=str(Path(self.tmp.name) / 'local'))
+        listener = subprocess.Popen([sys.executable, '-c', code], env=hidden)
+        self.addCleanup(lambda: listener.poll() is None and listener.kill())
+        log = state / 'yakala' / yakala.LISTENER_LOG
+
+        def info():
+            try:
+                return json.loads((state / yakala.LISTENER_STATE).read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                return {}
+
+        def wait_for(condition, seconds=20):
+            deadline = time.monotonic() + seconds
+            while not condition() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            return condition()
+        self.assertTrue(wait_for(lambda: 'kisayol_calisiyor' in info()), 'the listener came up')
+        self.assertTrue(yakala.open_windows_listener(open_name=names[2]))
+        self.assertTrue(wait_for(lambda: log.is_file() and 'Invalid IPv6 URL' in log.read_text(encoding='utf-8')))
+        asked = time.time()
+        self.assertTrue(yakala.open_windows_listener(open_name=names[2]))
+        self.assertTrue(wait_for(lambda: info().get('son_pencere', 0) >= asked), 'the next request still opens a window')
+        self.assertTrue(yakala.stop_windows_listener(stop_name=names[1], mutex_name=names[0], wait=10))
         self.assertEqual(listener.wait(timeout=10), 0)
 
     def test_vtt_text(self):
@@ -273,10 +320,180 @@ class YakalaUnitTest(unittest.TestCase):
         # Named events are shared by the whole Windows session, unlike APPDATA: a suite run
         # once ended the developer's own Ctrl+Alt+B listener.
         state = Path(self.tmp.name) / 'state'
-        with patch.dict(os.environ, {'BEYIN_V3_NO_SPAWN': '1', 'APPDATA': str(Path(self.tmp.name) / 'appdata')}), \
+        with patch.dict(os.environ, {'BEYIN_V3_NO_SPAWN': '1', 'APPDATA': str(Path(self.tmp.name) / 'appdata'),
+                                     'LOCALAPPDATA': str(Path(self.tmp.name) / 'local')}), \
                 patch.object(yakala, 'stop_windows_listener') as stop:
             yakala.install(self.vault, state)
+            self.assertTrue(yakala._owns(self.vault), 'the key is this vault\'s now')
+            yakala.uninstall(self.vault, state)
+            self.assertIsNone(yakala._owner())
         stop.assert_not_called()
+
+    def test_rewriting_a_card_keeps_what_the_person_added_by_hand(self):
+        # Obsidian's Properties panel writes tags as a block list: the next `isle`, `bitti` or
+        # recapture dropped them and turned the rest into strings.
+        added = ('tags:\n  - okunacak\n  - yapay-zeka\naliases: [Yazi, Makale]\nokundu: true\nsayi: 3\n'
+                 'ozet: |\n  birinci satir\n  ikinci satir\n# kendi notum\n')
+        result = yakala.capture(self.vault, text='Bağlam kaybı en pahalı kalem.', why='ders')
+        path = self.vault / result['path']
+        path.write_text(path.read_text(encoding='utf-8').replace('\n---\n', '\n' + added + '---\n', 1), encoding='utf-8')
+        none = {name: None for name in ('npx', 'yt_dlp', 'whisper', 'pdftotext', 'ffmpeg')}
+        with patch.object(yakala, 'tools', return_value=none):
+            yakala.process(self.vault)
+        concept = self.vault / 'knowledge/concepts/baglam.md'
+        concept.parent.mkdir(parents=True)
+        concept.write_text('# Bağlam\n', encoding='utf-8')
+        yakala.finish(self.vault, result['id'], ['knowledge/concepts/baglam.md'], 'tek ders')
+        text = path.read_text(encoding='utf-8')
+        self.assertIn(added, text, 'byte for byte, in its place')
+        meta = yakala.find_card(self.vault, result['id'])['meta']
+        self.assertEqual((meta['durum'], meta['yontem']), ('islendi', 'metin'), 'the engine\'s own fields still change')
+        # A field the engine changes is written anew; one it removes is gone with its lines.
+        card = yakala.find_card(self.vault, result['id'])
+        yakala.write_card(card['path'], {key: value for key, value in card['meta'].items() if key != 'ozet'}, card['body'])
+        text = path.read_text(encoding='utf-8')
+        self.assertNotIn('ozet:', text)
+        self.assertNotIn('birinci satir', text)
+        self.assertIn('tags:\n  - okunacak\n  - yapay-zeka\n', text)
+
+    def test_a_source_captured_again_after_it_was_handled_is_queued_again_without_fetching(self):
+        first = yakala.capture(self.vault, url='https://www.youtube.com/watch?v=abc', why='ilk bakış')
+        card = yakala.find_card(self.vault, first['id'])
+        raw = self.vault / INBOX / '.ham' / (first['id'] + '.md')
+        raw.parent.mkdir(parents=True)
+        raw.write_text('transkript', encoding='utf-8')
+        yakala.write_card(card['path'], dict(card['meta'], durum='islendi', ham=raw.relative_to(self.vault).as_posix()),
+                          card['body'] + '\n\n## Islendi\n\nders')
+        self.assertEqual(yakala.pending(self.vault), 0)
+        again = yakala.capture(self.vault, url='https://youtu.be/abc', why="12:30'daki kısmı bilgi notuna ekle")
+        self.assertEqual((again['status'], again['id']), ('mevcut_karta_eklendi', first['id']))
+        meta = yakala.find_card(self.vault, first['id'])['meta']
+        self.assertEqual(meta['durum'], 'bekliyor')
+        self.assertTrue(meta['yeniden_yakalandi'])
+        self.assertEqual(yakala.pending(self.vault), 1, 'the session notice counts it')
+        with patch.object(yakala, 'via_youtube', side_effect=AssertionError('fetched')), \
+                patch.object(yakala, 'via_defuddle', side_effect=AssertionError('fetched')), \
+                patch.object(yakala, 'tools', return_value={}):
+            result = yakala.process(self.vault)
+        entry = result['kartlar'][0]
+        self.assertEqual((entry['durum'], entry['yontem'], entry['ham']), ('cikarildi', 'onceki', raw.relative_to(self.vault).as_posix()))
+        self.assertIn('Yeniden yakalandi', entry['not'])
+        self.assertEqual(raw.read_text(encoding='utf-8'), 'transkript')
+        # A source that failed before is retried for the new reason; one still waiting stays as it is.
+        failed = yakala.capture(self.vault, url='https://ornek.com/yazi')
+        card = yakala.find_card(self.vault, failed['id'])
+        yakala.write_card(card['path'], dict(card['meta'], durum='hata', hata='giris'), card['body'])
+        yakala.capture(self.vault, url='https://ornek.com/yazi/', why='yeniden dene')
+        self.assertEqual(yakala.find_card(self.vault, failed['id'])['meta']['durum'], 'bekliyor')
+
+    def test_a_repeated_link_is_found_from_the_cards_heads(self):
+        # Every card in the inbox was read whole on the listener's window thread for each page captured.
+        folder = self.vault / INBOX
+        folder.mkdir(parents=True)
+        for number in range(300):
+            (folder / ('kart-%03d.md' % number)).write_text(
+                '---\ntur: "yakala"\ndurum: "islendi"\nurl: "https://ornek.com/%d"\n---\n\n# Kart\n\n%s\n'
+                % (number, 'uzun metin ' * 2000), encoding='utf-8')
+        real, reads = yakala.read_card, []
+        with patch.object(yakala, 'read_card', lambda path: reads.append(path) or real(path)):
+            result = yakala.capture(self.vault, url='https://www.ornek.com/150/', why='yeniden')
+        self.assertEqual((result['status'], result['id']), ('mevcut_karta_eklendi', 'kart-150'))
+        self.assertEqual([path.name for path in reads], ['kart-150.md'], 'only the matching card is read whole')
+        self.assertIn('yeniden', (folder / 'kart-150.md').read_text(encoding='utf-8'))
+
+    def test_a_vault_that_is_gone_is_not_made_again(self):
+        gone = Path(self.tmp.name) / 'Tasinan Kasa'
+        with self.assertRaisesRegex(ValueError, 'Kasa bulunamadi'):
+            yakala.capture(gone, text='not')
+        self.assertFalse(gone.exists())
+
+    def owner_record(self, vault):
+        path = yakala.owner_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({'surum': 1, 'vault': str(vault), 'state': 'x', 'tus': 'ctrl+alt+c', 'at': 1}), encoding='utf-8')
+
+    def test_the_key_is_one_vaults_at_a_time(self):
+        other = Path(self.tmp.name) / 'Baska'
+        with patch.dict(os.environ, {'LOCALAPPDATA': str(Path(self.tmp.name) / 'local')}):
+            self.assertIsNone(yakala._owner())
+            self.assertFalse(yakala._owns(self.vault), 'no record: not known to be this vault\'s')
+            yakala._write_owner(self.vault.resolve(), Path(self.tmp.name) / 'state', 'ctrl+alt+x')
+            said = yakala._owner()
+            self.assertEqual((said['surum'], said['tus']), (1, 'ctrl+alt+x'))
+            self.assertIsInstance(said['at'], float)
+            self.assertTrue(yakala._owns(self.vault))
+            self.owner_record(other)
+            self.assertFalse(yakala._owns(self.vault))
+            yakala.owner_file().write_text('{yarim', encoding='utf-8')
+            self.assertIsNone(yakala._owner(), 'a half-written record says nothing')
+        self.assertTrue(yakala._same_vault('/a/b/', '/a/b'))
+        self.assertFalse(yakala._same_vault('/a/b', '/a/c'))
+        if os.name == 'nt':
+            self.assertTrue(yakala._same_vault('C:\\Users\\Ali\\Kasa', 'c:/users/ali/kasa'))
+
+    def test_kaldir_in_a_vault_used_before_leaves_the_current_vaults_listener_and_shortcuts(self):
+        state = Path(self.tmp.name) / 'state'
+        state.mkdir()
+        (state / yakala.STATE_FILE).write_text('{"kisayol": "Ctrl+Alt+C"}', encoding='utf-8')
+        (state / yakala.LISTENER_STATE).write_text('{"pid": 4242}', encoding='utf-8')  # it ran a listener once
+        programs, sendto = Path(self.tmp.name) / 'programs', Path(self.tmp.name) / 'sendto'
+        links = [programs / 'Startup' / yakala.STARTUP_NAME, programs / 'Beyne At.lnk', sendto / 'Beyne At.lnk']
+        environment = {key: value for key, value in os.environ.items() if key != 'BEYIN_V3_NO_SPAWN'}
+        environment['LOCALAPPDATA'] = str(Path(self.tmp.name) / 'local')
+        for owner, mine in ((Path(self.tmp.name) / 'Yeni Kasa', False), (self.vault.resolve(), True)):
+            for link in links:
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.write_text('lnk', encoding='utf-8')
+            with patch.dict(os.environ, environment, clear=True), \
+                    patch.object(yakala, '_windows_dirs', return_value=(programs, sendto)), \
+                    patch.object(yakala, 'stop_windows_listener') as stop, \
+                    patch.object(yakala, 'windows_listener_running', return_value=True):
+                self.owner_record(owner)
+                running, elsewhere = yakala._windows_listener_for(self.vault)
+                removed, other = yakala._uninstall_windows(self.vault, state)
+                record = yakala._owner()
+            self.assertEqual(stop.called, mine, owner)
+            self.assertEqual([link.exists() for link in links], [not mine] * 3, owner)
+            self.assertEqual(record is None, mine, 'the record goes only with its own vault')
+            self.assertEqual((running, elsewhere), (True, None) if mine else (False, str(owner)))
+            self.assertEqual(other, None if mine else str(owner))
+            self.assertFalse((state / yakala.LISTENER_STATE).exists(), 'this vault\'s own note goes either way')
+        self.assertIn('baska bir kasanin', yakala.human({'status': 'kaldirildi', 'sahip_kasa': 'D:\\Yeni'}, 'kaldir'))
+
+    def test_pencere_goes_to_the_running_listener_only_when_it_is_this_vaults(self):
+        opened = []
+        with patch.dict(os.environ, {'LOCALAPPDATA': str(Path(self.tmp.name) / 'local')}), \
+                patch.object(yakala, 'open_windows_listener', return_value=True), \
+                patch.object(yakala, 'gather_context', return_value={}), \
+                patch.object(yakala, 'popup', lambda vault, context, state=None: opened.append(vault) or {'status': 'vazgecildi'}), \
+                patch('sys.stdout', new_callable=__import__('io').StringIO) as out:
+            self.owner_record(Path(self.tmp.name) / 'Baska')
+            yakala.main(['--vault', str(self.vault), '--json', 'pencere'])
+            self.assertEqual(opened, [self.vault.resolve()], 'its own window, on this vault')
+            self.owner_record(self.vault.resolve())
+            yakala.main(['--vault', str(self.vault), '--json', 'pencere'])
+            self.assertEqual(len(opened), 1)
+            self.assertIn('"dinleyici"', out.getvalue())
+
+    def test_send_to_says_what_happened(self):
+        source = Path(self.tmp.name) / 'rapor.pdf'
+        source.write_bytes(b'%PDF-1.4')
+        told = []
+        arguments = ['--vault', str(self.vault), 'ekle', '--arac', 'gonder-menusu']
+        with patch.object(yakala, '_sent_note', lambda ok, text: told.append((ok, text))), patch('sys.stdout', None):
+            self.assertEqual(yakala.main(arguments + [str(source)]), 0)
+            with patch.object(yakala.shutil, 'copy2', side_effect=PermissionError('Outlook dosyayi kullaniyor')):
+                self.assertEqual(yakala.main(arguments + [str(source)]), 1)
+            self.assertEqual(yakala.main(arguments + [str(Path(self.tmp.name))]), 1)
+        self.assertEqual(told[0], (True, 'rapor.pdf'))
+        self.assertEqual(told[1], (False, 'Outlook dosyayi kullaniyor'))
+        self.assertFalse(told[2][0])
+        self.assertIn('Klasor gonderilemez', told[2][1])
+        self.assertEqual(len(list((self.vault / INBOX).glob('*.md'))), 1, 'a folder is not saved as a card of its path')
+        # From a terminal it is as before: the error is raised, nothing is shown on the screen.
+        with patch.object(yakala, '_sent_note', side_effect=AssertionError('shown')):
+            with self.assertRaises(ValueError):
+                yakala.main(['--vault', str(self.vault), '--json', 'ekle', '--arac', 'gonder-menusu', str(Path(self.tmp.name))])
 
     def test_inbox_report_skips_processed_cards(self):
         import beyin_v3_hygiene as hygiene
@@ -304,7 +521,7 @@ class YakalaInstalledTest(unittest.TestCase):
         self.vault, self.state = root / 'Örnek Beyin', root / 'state'
         self.vault.mkdir()
         self.env = inherited_env(BEYIN_V3_NO_SPAWN='1', PYTHONDONTWRITEBYTECODE='1', PYTHONIOENCODING='utf-8',
-                                 HOME=str(root / 'home'), APPDATA=str(root / 'appdata'))
+                                 HOME=str(root / 'home'), APPDATA=str(root / 'appdata'), LOCALAPPDATA=str(root / 'local'))
         self.env.pop('BEYIN_V3_FILTER_HARNESS_TURNS', None)
         result = subprocess.run([sys.executable, str(ROOT / 'scripts/install_v3.py'), '--vault', str(self.vault),
                                  '--state', str(self.state)], capture_output=True, text=True, encoding='utf-8',
@@ -355,6 +572,9 @@ class YakalaInstalledTest(unittest.TestCase):
         appdata = Path(self.env['APPDATA'])
         installed = self.entry('kur')
         self.assertEqual(installed['kisayol'], 'Ctrl+Alt+C')
+        owner = json.loads((Path(self.env['LOCALAPPDATA']) / 'beyin-v3' / yakala.OWNER_FILE).read_text(encoding='utf-8'))
+        self.assertEqual((owner['surum'], owner['tus']), (1, 'ctrl+alt+c'))
+        self.assertTrue(yakala._same_vault(owner['vault'], self.vault.resolve()))
         start = appdata / 'Microsoft/Windows/Start Menu/Programs/Beyne At.lnk'
         sendto = appdata / 'Microsoft/Windows/SendTo/Beyne At.lnk'
         self.assertTrue(start.is_file() and sendto.is_file())
@@ -363,6 +583,7 @@ class YakalaInstalledTest(unittest.TestCase):
         self.assertIsInstance(yakala.windows_context(), dict)
         self.entry('kaldir')
         self.assertFalse(start.exists() or sendto.exists() or icon.exists())
+        self.assertFalse((Path(self.env['LOCALAPPDATA']) / 'beyin-v3' / yakala.OWNER_FILE).exists())
 
     def test_user_skill_with_same_name_is_kept(self):
         own = self.vault / '.agents/skills/beyin-yakala/SKILL.md'
@@ -421,17 +642,24 @@ class ListenerRestartTest(unittest.TestCase):
             done['startup_kept'] = (programs / 'Startup' / yakala.STARTUP_NAME).exists()
         return result, done
 
-    def test_a_listener_slow_to_start_is_left_to_start_and_one_whose_key_is_taken_is_not(self):
+    def test_a_listener_slow_to_start_or_without_its_key_is_left_running(self):
         # A fresh laptop with the virus scanner reading every file took longer than the wait: the
         # listener was stopped and its Startup shortcut removed, and nothing listened, ever.
         result, done = self.start_listener(iter([]))
-        self.assertIsNone(result, 'not known yet: not called failed')
+        self.assertEqual(result, (None, None), 'not known yet: not called failed')
         self.assertEqual((done['startup_kept'], done['stopped']), (True, 0), 'left to come up, and to start with Windows')
         result, done = self.start_listener(iter([{}, {'at': 101.0, 'kisayol_calisiyor': True}]))
-        self.assertEqual((result, done['startup_kept'], done['stopped']), (True, True, 0))
+        self.assertEqual((result, done['startup_kept'], done['stopped']), ((True, True), True, 0))
+        # Another app holds the key: the listener was stopped and its Startup shortcut removed, and
+        # the voice and the wake phrase, which only it runs, went with it. Now it stays without
+        # the key (and asks for it again); only the key is reported as taken.
         result, done = self.start_listener(iter([{'at': 101.0, 'kisayol_calisiyor': False}]))
-        self.assertEqual((result, done['startup_kept'], done['stopped']), (False, False, 1), 'another app holds the key')
+        self.assertEqual((result, done['startup_kept'], done['stopped']), ((True, False), True, 0), 'another app holds the key')
         self.assertIn('Dinleyici aciliyor', yakala.human({'status': 'kuruldu', 'dinleyici': None, 'web_clipper_sablonu': 'x'}, 'kur'))
+        said = yakala.human({'status': 'kuruldu', 'dinleyici': True, 'kisayol': 'Ctrl+Alt+C', 'kisayol_calisiyor': False,
+                             'web_clipper_sablonu': 'x'}, 'kur')
+        self.assertIn('Ctrl+Alt+C baska bir uygulamada kayitli. Dinleyici yine calisiyor', said)
+        self.assertNotIn('Pencere aninda acilir', said)
 
 
 class HotkeyMoveTest(unittest.TestCase):

@@ -591,25 +591,31 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
         self.bitmap = {'image': True, 'png': None, 'dib': make_dib(self.pixels, bits=32)}
         Photo.opened = []
 
-    def popup(self, clip, payload, script, context=None, copied_now=True):
-        """`copied_now`: the clipboard changed after the listener started (fresh text goes by default);
-        False: it was already there (unknown age: the text is offered, Tab adds it)."""
+    def popup(self, clip, payload, script, context=None, copied_now=True, listening=False, sequence=42):
+        """`copied_now`: the clipboard changed after the listener started, a moment ago (fresh text goes
+        by default); False: it was already there (unknown age: the text is offered, Tab adds it); a
+        number: it changed that many seconds ago. `listening`: opened by the wake phrase. `sequence`:
+        the clipboard's number (a new copy has a new one; a save takes the one it showed)."""
         roots = []
-        context = dict(context or {}, clipboard_generation='test-run', clipboard_baseline=41 if copied_now else 42)
+        age = copied_now if type(copied_now) in (int, float) else 5.0 if copied_now else None
+        context = dict({'clipboard_generation': 'test-run', 'clipboard_baseline': sequence if copied_now is False else 41,
+                        'pano_yasi': age}, **(context or {}))
         fake = types.ModuleType('tkinter')
         fake.Tk = lambda: roots.append(Root(script)) or roots[-1]
         fake.Canvas, fake.Entry, fake.Text, fake.PhotoImage, fake.TclError = Canvas, Entry, Text, Photo, RuntimeError
         fake.font = types.ModuleType('tkinter.font')
         fake.font.Font = lambda **_options: types.SimpleNamespace(measure=lambda text: len(text) * 6, metrics=lambda _what: 32)
         environment = {key: value for key, value in os.environ.items() if key != 'BEYIN_YAKALA_SNAPSHOT'}
+        # The desktop app's word (masaustu.json, its language) is this test's, not the machine's.
+        environment['LOCALAPPDATA'] = str(Path(self.tmp.name) / 'local')
         with patch.dict(sys.modules, {'tkinter': fake, 'tkinter.font': fake.font}), \
                 patch.dict(os.environ, environment, clear=True), \
                 patch.object(yakala, '_clipboard', return_value=clip), \
                 patch.object(yakala, '_clipboard_payload', return_value=payload, create=True) as probe, \
-                patch.object(yakala, '_clipboard_sequence', return_value=42, create=True), \
+                patch.object(yakala, '_clipboard_sequence', return_value=sequence, create=True), \
                 patch.object(yakala, 'resolve_state', return_value=Path(self.tmp.name) / 'state'), \
                 patch.object(yakala, '_style_mac'):
-            result = yakala.popup(self.vault, context)
+            result = yakala.popup(self.vault, context, listening=listening)
         return result, roots[0], probe
 
     def card(self, result):
@@ -727,7 +733,6 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
         self.assertFalse(any('Panoda' in text for text in root.seen[0][1]))
         self.assertEqual(Photo.opened, [])
 
-    @unittest.skipUnless(os.name == 'nt', 'the clipboard sequence number is Windows only')
     def test_text_of_unknown_age_is_offered_not_saved_by_enter(self):
         # Copied before the listener started (a password, hours ago): Enter saves only the typed line.
         result, root, _ = self.popup('gizli-parola-123', None, [('look', None), ('type', 'süt al'), ('key', '<Return>')],
@@ -762,6 +767,132 @@ class PopupWiringTest(ScreenshotFiles, unittest.TestCase):
         result, _, probe = self.popup('https://ornek.com/yazi', self.bitmap, [('key', '<Return>')])
         self.assertEqual(result['kaynak_turu'], 'makale')
         probe.assert_not_called()
+
+
+class ClipboardRulesTest(ScreenshotFiles, unittest.TestCase):
+    """What the window takes from the clipboard by itself: only what was copied a moment ago and not
+    saved since, never in a window the wake phrase opened, and never a link it did not show."""
+
+    PASSWORD = 'Gizli-Parola-2024!'
+
+    def setUp(self):
+        self.make_store('v3-yakala-pano-kural-')
+        self.vault = Path(self.tmp.name) / 'Kasa'
+        self.vault.mkdir()
+        self.pixels = picture(4, 3)
+        self.wiring = PopupWiringTest('test_link_on_the_clipboard_is_unchanged')
+        self.wiring.tmp, self.wiring.vault = self.tmp, self.vault
+
+    def popup(self, clip, script, **options):
+        return self.wiring.popup(clip, None, script, **options)
+
+    def card(self, result):
+        return yakala.find_card(self.vault, result['id'])
+
+    def card_file(self, result):
+        return (self.vault / result['path']).read_text(encoding='utf-8')
+
+    def test_a_window_the_wake_phrase_opened_takes_nothing_copied_by_itself(self):
+        # "Hey Pyn, yarın toplantı var, Pyn kaydet" from across the room: nobody looked at the window.
+        result, root, _ = self.popup(self.PASSWORD, [('look', None), ('type', 'yarın toplantı var'), ('key', '<Return>')],
+                                     listening=True)
+        self.assertNotIn(self.PASSWORD, self.card_file(result))
+        self.assertNotIn('parola', result['path'])
+        self.assertIn('Tab: panoyu ekle', root.seen[0][1])
+        # The same in a link: shown, not attached.
+        result, root, _ = self.popup('https://github.com/foo/bar', [('look', None), ('type', 'annemi ara'), ('key', '<Return>')],
+                                     listening=True)
+        self.assertEqual(result['kaynak_turu'], 'metin')
+        self.assertNotIn('github.com', self.card_file(result))
+
+    def test_text_copied_minutes_ago_waits_for_tab_and_text_copied_now_goes(self):
+        result, root, _ = self.popup(self.PASSWORD, [('look', None), ('type', 'süt al'), ('key', '<Return>')],
+                                     copied_now=yakala.CLIP_FRESH + 60)
+        self.assertNotIn(self.PASSWORD, self.card_file(result))
+        self.assertIn('Tab: panoyu ekle', root.seen[0][1])
+        result, _, _ = self.popup('kira 12.500', [('type', 'bütçe'), ('key', '<Return>')], copied_now=30, sequence=43)
+        self.assertIn('> kira 12.500', self.card(result)['body'])
+
+    def test_a_copy_left_out_is_not_ticked_again_in_the_next_window(self):
+        result, _, _ = self.popup('kira 12.500', [('key', '<Tab>'), ('type', 'süt al'), ('key', '<Return>')])
+        self.assertNotIn('12.500', self.card_file(result))
+        # Same copy (sequence 42), next window: it was shown and left out, so it is not news.
+        result, root, _ = self.popup('kira 12.500', [('look', None), ('type', 'ekmek al'), ('key', '<Return>')])
+        self.assertNotIn('12.500', self.card_file(result))
+        self.assertIn('Tab: panoyu ekle', root.seen[0][1])
+
+    def test_what_was_typed_names_the_card_never_what_was_copied(self):
+        result, _, _ = self.popup(self.PASSWORD, [('type', 'toplantı notu'), ('key', '<Return>')])
+        card = self.card(result)
+        self.assertEqual(card['meta']['baslik'], 'toplantı notu')
+        self.assertRegex(result['path'], r'-toplanti-notu\.md$')
+        self.assertTrue(card['body'].startswith('# toplantı notu\n'))
+        self.assertIn('> ' + self.PASSWORD, card['body'], 'ticked, the copy itself still goes with the note')
+
+    def test_a_local_or_malformed_link_on_the_clipboard_is_copied_text(self):
+        # Taken as the page, capture() refused it: nothing could be saved from the window.
+        for number, clip in enumerate(('http://localhost:3000/panel', 'http://intranet/duyuru', 'http://192.168.1.1/', 'http://[fe80::1')):
+            with self.subTest(clip=clip):
+                result, root, _ = self.popup(clip, [('type', 'yarın'), ('key', '<Return>')], sequence=50 + number)
+                self.assertEqual(result['status'], 'yakalandi', root.canvas.texts())
+                card = self.card(result)
+                self.assertEqual(card['meta']['kaynak_turu'], 'metin')
+                self.assertNotIn('url', card['meta'])
+                self.assertIn('> ' + clip, card['body'])
+        self.assertEqual(yakala.kind_of('http://[abc'), 'makale')
+        self.assertEqual(yakala.canonical('http://[abc'), 'http://[abc')
+
+    def test_a_link_copied_long_ago_is_a_row_to_tick_not_the_note(self):
+        # A link captured and processed long ago, copied again to send to a friend: the note
+        # "annemi saat 5te ara" was appended to that old card, where nobody would see it.
+        old = yakala.capture(self.vault, url='https://github.com/foo/bar', why='repo')
+        card = self.card(old)
+        yakala.write_card(card['path'], dict(card['meta'], durum='islendi'), card['body'])
+        before = card['path'].read_text(encoding='utf-8')
+        result, root, _ = self.popup('https://github.com/foo/bar', [('look', None), ('type', 'annemi saat 5te ara'), ('key', '<Return>')],
+                                     copied_now=False)
+        self.assertEqual((result['status'], result['kaynak_turu']), ('yakalandi', 'metin'))
+        self.assertEqual(card['path'].read_text(encoding='utf-8'), before, 'the old card is untouched')
+        self.assertIn('Panodaki bağlantıyı nota bağla · Tab', root.seen[0][1])
+        self.assertIn('Tab: bağlantıyı ekle', root.seen[0][1])
+        self.assertEqual(root.seen[0][0], 'Aklındakini yaz…')
+        # Copied a moment ago it goes, as before; Tab takes it off.
+        result, root, _ = self.popup('https://ornek.com/yeni', [('look', None), ('key', '<Return>')], sequence=60)
+        self.assertEqual(result['kaynak_turu'], 'makale')
+        self.assertEqual(root.seen[0][0], 'Neden kaydediyorsun?')
+        result, _, _ = self.popup('https://ornek.com/baska', [('key', '<Tab>'), ('type', 'süt al'), ('key', '<Return>')], sequence=61)
+        self.assertEqual(result['kaynak_turu'], 'metin')
+        self.assertNotIn('ornek.com', self.card_file(result))
+
+    def test_unticking_the_browser_page_never_swaps_in_the_copied_link(self):
+        page = {'url': 'https://ornek.com/sayfa', 'url_kaynak': 'tarayici', 'baslik': 'Sayfa'}
+        result, root, _ = self.popup('https://github.com/foo/bar', [('key', '<Alt-s>'), ('look', None), ('type', 'süt al'),
+                                                                    ('key', '<Return>')], context=page)
+        self.assertEqual(result['kaynak_turu'], 'metin')
+        text = self.card_file(result)
+        self.assertNotIn('github.com', text)
+        self.assertNotIn('ornek.com', text)
+        self.assertEqual(root.seen[0][0], 'Aklındakini yaz…')
+        self.assertIn('Panodaki metni de ekle · https://github.com/foo/bar', root.seen[0][1])
+
+    def test_a_saved_window_is_marked_closing(self):
+        _result, root, _ = self.popup('', [('type', 'not'), ('key', '<Return>')])
+        self.assertIs(root.__dict__.get('closing'), True)
+
+    def test_the_window_speaks_english_when_the_app_does(self):
+        local = Path(self.tmp.name) / 'local' / 'beyin-v3'
+        local.mkdir(parents=True)
+        (local / 'masaustu.json').write_text('{"surum": 1, "at": 1, "dil": "en"}', encoding='utf-8')
+        result, root, _ = self.popup('kira 12.500', [('look', None), ('key', '<Return>')], copied_now=False)
+        texts = root.seen[0][1]
+        for line in ('Take a note', 'Save', 'Close', 'Tab: add the clipboard'):
+            self.assertIn(line, texts)
+        self.assertEqual(root.seen[0][0], 'Write what is on your mind…')
+        self.assertIn('Type or say something first', root.canvas.texts())
+        self.assertEqual(result, {'status': 'vazgecildi'})
+        (local / 'masaustu.json').write_text('{"surum": 1, "at": 1, "kapali": true}', encoding='utf-8')
+        _result, root, _ = self.popup('', [('look', None), ('key', '<Escape>')])
+        self.assertIn('Not al', root.seen[0][1])
 
 
 class StandaloneCopyTest(unittest.TestCase):

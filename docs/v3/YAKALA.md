@@ -26,11 +26,28 @@ Kısayol ek paket istemez; Python'un kendisiyle çalışır. Mac'te bir oturum a
 (LaunchAgent) tuşu dinler.
 
 Windows'ta küçük bir **dinleyici** tuşu tutar ve pencereyi önceden hazır bekletir; tuşa basınca
-pencere anında (yaklaşık 50 ms) açılır. Dinleyici Windows açılırken Başlangıç klasöründeki
+pencere anında açılır. Boştayken saniyede on kez bakar (önceden kırk kez bakıyor, dizüstünün
+işlemcisini gün boyu uyandırıyordu); bir pencere açıkken ya da bir şey olduktan sonraki iki saniye
+saniyede kırk kez. Dinleyici Windows açılırken Başlangıç klasöründeki
 "Pyn Yakala" kısayoluyla başlar, kullanıcı başına bir tanedir ve yaklaşık 40-45 MB bellek kullanır.
 Cortex güncellenince kendini yeni kodla yeniden başlatır. `yakala kaldir` onu durdurur ve
-Başlangıç kısayolunu siler. Tuşu başka bir uygulama tutuyorsa dinleyici çekilir ve eski yönteme,
-Başlat menüsü kısayolunun tuşuna dönülür (o yol her basışta Python'u yeniden açtığı için daha yavaştır).
+Başlangıç kısayolunu siler.
+
+Tuşu başka bir uygulama tutuyorsa dinleyici yine çalışır: ses, "Pyn, not al" ve masaüstü
+uygulamasının "Not al"ı tuşa bağlı değildir. Tuşu yarım dakikada bir yeniden ister, o uygulama
+bırakınca alır. `yakala kur` bunu söyler, dinleyici de `dinleyici.json` dosyasına
+`kisayol: "mesgul"` yazar (masaüstü uygulaması "kısayolu değiştir" der); başka bir tuş için
+`beyin.py yakala kisayol ctrl+alt+x`. Önceden dinleyici çekiliyordu ve sesle "Pyn, not al" da
+onunla birlikte, bir sonraki oturuma kadar hiçbir şey söylemeden gidiyordu. Başlat menüsü
+kısayolu tuş almaz: başka bir uygulamanın tuttuğu tuşu Explorer da alamaz, alırsa dinleyiciye
+hiç bırakmaz.
+
+Dinleyicinin kendi hataları state klasöründeki `yakala/dinleyici.log` dosyasına yazılır (aynı
+hata dakikada en çok bir kez). Bir pencere açılırken bir hata olursa (panoda bozuk bir bağlantı
+gibi) yarım kalan pencere kapatılır ve dinleyici bir sonraki basışı dinlemeyi sürdürür; önceden
+böyle bir hata dinleyiciyi sessizce durduruyordu: tuş bir şey açmıyor, `kur` onu durduramıyor,
+mikrofon uygulama kapandıktan sonra da açık kalıyordu.
+
 İlk açılışı yavaşsa (yeni bir bilgisayarda virüs tarayıcısı her dosyayı okurken) `yakala kur` onu
 durdurmaz, Başlangıç kısayolunu da silmez: dinleyici açılmayı sürdürür ve Windows açılışında da
 başlar (`"dinleyici": null`, "Dinleyici açılıyor"). Önceden sekiz saniye içinde haber vermeyen
@@ -41,6 +58,23 @@ etiketler. Fontlar Windows'a kurulmaz; yakala onları bu makinenin state klasör
 yalnız kendi sürecine yükler. Başka programlar etkilenmez.
 
 Yalnız şablon ve skill istiyorsan: `python3 beyin.py yakala kur --kisayol-yok`.
+
+### Kasa değiştirince (Windows)
+
+Kısayol, dinleyici ve Başlat menüsü, Gönder ve Başlangıç kısayolları kişinindir: bütün kasalar
+için bir tane. Hangi kasaya yazdıklarını `%LOCALAPPDATA%\beyin-v3\yakala-sahip.json` söyler
+(`vault`, `state`, `tus`); `yakala kur` yazar.
+
+- Başka bir kasada `yakala kur` çalışınca kısayol oraya taşınır; eski kasanın dinleyicisi iki
+  saniye içinde kendiliğinden çekilir. Masaüstü uygulaması kasa değiştirince bunu kendisi yapar.
+- Masaüstü uygulamasının "Not al"ı (`yakala pencere`) çalışan dinleyiciye yalnız o dinleyici bu
+  kasanınsa gider; değilse pencere bu kasada kendisi açılır. Önceden notlar eski kasaya gidiyordu.
+- Eski bir kasada `yakala kaldir` kısayola, dinleyiciye ve kısayol dosyalarına dokunmaz; yalnız
+  o kasanın kendi parçalarını kaldırır ve tuşun hangi kasada olduğunu söyler. `yakala durum` da
+  dinleyiciyi yalnız kendi kasası için "çalışıyor" gösterir.
+- Kasa klasörü taşındıysa ya da silindiyse yakalama "Kasa bulunamadi" der; gelen kutusunu eski
+  yolda yeniden açmaz.
+- 1.0.33'ten önce kurulmuş bir dinleyici ilk açılışında bu kaydı kendi kasası için yazar.
 
 ### Kısayolu değiştir
 
@@ -73,28 +107,56 @@ Kart adları kısayolla yakalananlarla aynı biçimde, boşluksuz ve kesme işar
 2. **İşlet.** Ajanına "yakalananları işle" de. Oturum başında bekleyen kaynak sayısı da görünür.
 
 Her yakalama `📥 000-Inbox/Yakala/` içinde bir kart olur. Aynı videoyu ya da sayfayı ikinci kez
-yakalarsan yeni kart açılmaz; yeni notun aynı karta eklenir.
+yakalarsan yeni kart açılmaz; yeni notun aynı karta eklenir. Kart daha önce işlendiyse (ya da
+hata aldıysa) yeniden kuyruğa girer (`durum: bekliyor`, `yeniden_yakalandi`): oturum bildirimi onu
+sayar, `isle` metni yeniden indirmez (yöntem `onceki`), ajan yalnız yeni isteği işler. Önceden yeni
+not işlenmiş kartın sonunda kalıyor, kimse görmüyordu.
+
+Kartlara Obsidian'da etiket, takma ad ya da başka bir özellik ekleyebilirsin: `isle`, `bitti` ve
+yeniden yakalama yalnız kendi alanlarını değiştirir, seninkileri yazdığın gibi bırakır (listeler,
+`true`, sayılar, çok satırlı değerler). Önceden her yeniden yazışta listeler siliniyordu.
+
+**Gönder > Beyne At (Windows):** dosya kaydedilince ekranın sağ altında kısa bir "Beyne atıldı"
+notu çıkar ve kendiliğinden kaybolur; kaydedilemezse (dosyayı Outlook gibi başka bir program
+kullanıyorsa) nedenini söyleyen bir uyarı açılır. Klasör gönderilemez; içindeki dosyaları seç.
 
 **Ekran görüntüsü (Windows):** `Win+Shift+S` ile alan seç, sonra kısayola bas. Pencere görüntüyü
 küçük resmiyle bir **GÖRSEL** kartı olarak gösterir ve Enter onu kartın dosyası olarak kaydeder.
 Son 10 dakikada alınmış görüntü ekli gelir; daha eski ya da kaynağı bilinmeyen bir görüntü
-pencerede görünür ama `Tab` ile eklemeden karta girmez. Panoda metin ya da bağlantı varsa
-pencere eskisi gibi onu yakalar.
+pencerede görünür ama `Tab` ile eklemeden karta girmez. "Pyn, not al" ile açılan pencerede
+görüntü de işaretsiz gelir. Panoda metin ya da bağlantı varsa pencere görüntüyü değil onu
+gösterir (aşağıda).
 
 **Açık sayfa (Windows):** Chrome, Edge, Brave, Vivaldi ya da Opera öndeyken kısayola basarsan
 açık sayfanın bağlantısı da gelir; tarayıcının adres çubuğundan okunur, yazıp Enter'a basmadığın
 taslak adres sayılmaz. Pencerede **Bu sayfayı nota bağla** işaretli gelir: tıklarsan ya da `Alt+S`
-ile kaldırırsan not, sayfa olmadan düz not olarak kaydedilir. "Pyn, not al" ile açılan pencere
+ile kaldırırsan not, sayfa olmadan düz not olarak kaydedilir; panodaki bir bağlantı onun yerine
+geçmez (önceden pencerede görünmeyen pano bağlantısı sessizce sayfanın yerini alıyordu), o
+**Panodaki metni de ekle** seçeneği olarak görünür. "Pyn, not al" ile açılan pencere
 sayfayı okumaz, hemen açılır. Okuma en çok bir saniye sürer; tarayıcı cevap vermezse pencere
 sayfasız açılır.
 
-**Panodaki metin (Windows):** yalnız son kayıttan sonra (ya da dinleyici açıldıktan sonra)
-kopyaladığın metin nota işaretli gelir. Daha önce kopyalanmış, yaşı bilinmeyen metin
-**Panodaki metni de ekle** seçeneği olarak görünür, `Tab` ya da tıklamayla eklenir. Saatler önce
-kopyaladığın bir parola, Enter'a bastın diye nota girmez.
+**Panodaki metin ve bağlantı (Windows):** son beş dakikada kopyaladığın metin nota işaretli gelir;
+altındaki kutu ya da `Tab` onu çıkarır. Daha eski bir kopya, dinleyici açılmadan önce kopyalanmış
+olan ya da bir pencerede görünüp eklenmeden kaydedilmiş olan **Panodaki metni de ekle** seçeneği
+olarak görünür, `Tab` ya da tıklamayla eklenir. "Pyn, not al" ile açılan pencere panodan hiçbir şeyi kendiliğinden almaz:
+karşıdan konuşurken pencereye kimse bakmaz. Saatler önce kopyaladığın bir parola, Enter'a bastın ya
+da "Pyn, kaydet" dedin diye nota girmez; önceden dinleyici açıldıktan sonra kopyalanan her metin,
+saatler önce kopyalanmış olsa da giriyordu, kartın başlığı ve dosya adı da oluyordu.
+- Panodaki bir bağlantı kendi satırında **Panodaki bağlantıyı nota bağla** kutusuyla görünür;
+  kopyalanmasının üstünden beş dakika geçtiyse işaretsiz gelir. Önceden her pencere onu sormadan
+  alıyor, not o bağlantının eski kartına ekleniyordu.
+- Yerel ya da bozuk bir bağlantı (`http://localhost:3000`, `http://192.168.1.1`, `http://intranet`)
+  sayfa sayılmaz, düz metin olarak eklenir. Önceden pencere ondan hiçbir notu kaydedemiyordu.
+- Panodaki metni eklediğin bir notta kartın başlığı ve dosya adı senin yazdığın ya da söylediğin
+  cümleden gelir, kopyaladığın metinden gelmez.
+- Kopyalamanın zamanını dinleyici panonun değiştiğini görerek bilir; aynı metni yeniden yazan bir
+  pano yöneticisi onu yeni bir kopya gibi gösterebilir.
 
 **Pencere:** boş bir yerinden tutup sürükleyebilirsin. Kısayola hangi ekrandaki pencerede
-bastıysan o ekranda açılır.
+bastıysan o ekranda açılır. Kaydedip hemen yeniden kısayola basarsan kapanmakta olan pencere değil
+yeni bir pencere açılır. Masaüstü uygulaması İngilizceye ayarlıysa (`masaustu.json`'da `dil: "en"`)
+pencere İngilizce açılır; sesli komutlar Türkçe kalır ve pencerede söylenecekleri gibi yazılır.
 
 ## Sesle yazma (Windows, isteğe bağlı)
 
@@ -231,10 +293,12 @@ Hiçbiri zorunlu değil; varsa işleme genişler, yoksa elde olanla devam edilir
 - Yakalama ağa çıkmaz; yalnız vault'a bir dosya yazar.
 - Ağ yalnız `isle` adımında ve yalnız yakaladığın kaynaklar için kullanılır. Defuddle,
   X gönderisi sayfada yoksa gönderi adresini FxTwitter API'sine sorar.
-- Mail, pano metni ve dosya kartları `visibility: private` ile yazılır. Windows'ta pano metni,
-  görüntüsü ya da dosyası eklenen sayfa kartı da (daha önce yakalanmış bir sayfanınki dahil) private olur.
+- Mail, pano metni ve dosya kartları `visibility: private` ile yazılır. Pano metni, görüntüsü ya da
+  dosyası eklenen sayfa kartı da (daha önce yakalanmış bir sayfanınki dahil) private olur; 1.0.33'ten
+  önce bu yalnız Windows'taydı. Ajanların otomatik bağlamı private kayıtları almaz.
 - Sesle yazmada ses yalnız bellekte tutulur, yazıya çevrilince atılır; hiçbir yere gönderilmez ve diske yazılmaz.
 - Kaldırmak için `python3 beyin.py yakala kaldir`: kısayol, skill ve bildirim gider, kartların kalır.
+  Windows'ta kısayol ve dinleyici yalnız onların ait olduğu kasada kaldırılır (yukarıda **Kasa değiştirince**).
 
 ## Güvenlik
 
