@@ -4,8 +4,11 @@
 // 2.1.296 was recorded writing them (14 October). What it does is chosen by
 // words in the message: "izin" asks leave for a step, "plan" writes a todo
 // list, "yavaş" waits to be interrupted, "hata" fails as a sign-in that has
-// expired does, "çök" dies. Its arguments and every line it is sent are
-// written to FAKE_AGENT_LOG, when set.
+// expired does, "çök" dies. A session named in FAKE_CLAUDE_GONE is one it no
+// longer has: told to resume it, it says so and ends, as Claude Code does, at
+// its start or (FAKE_CLAUDE_GONE_AT=turn) at the first message. It answers
+// `initialize` FAKE_INIT_DELAY milliseconds late. Its arguments, its process
+// id and every line it is sent are written to FAKE_AGENT_LOG, when set.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -14,7 +17,13 @@ const resumed = argv.includes('--resume') ? argv[argv.indexOf('--resume') + 1] :
 const session = resumed ?? `claude-ses-${process.pid}`;
 const cwd = process.cwd();
 const log = (entry) => process.env.FAKE_AGENT_LOG && fs.appendFileSync(process.env.FAKE_AGENT_LOG, `${JSON.stringify(entry)}\n`);
-log({ argv, cwd });
+log({ argv, cwd, pid: process.pid });
+const gone = Boolean(resumed) && resumed === process.env.FAKE_CLAUDE_GONE;
+const forgotten = () => {
+  process.stderr.write(`No conversation found with session ID: ${resumed}\n`);
+  process.exit(1);
+};
+if (gone && process.env.FAKE_CLAUDE_GONE_AT !== 'turn') forgotten();
 
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -97,11 +106,13 @@ process.stdin.on('data', (chunk) => {
       waiting.get(message.response.request_id)?.(message.response.response);
       waiting.delete(message.response.request_id);
     } else if (message.type === 'control_request' && message.request.subtype === 'initialize') {
-      send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: { models: [{ value: 'default', displayName: 'Default (recommended)' }, { value: 'haiku', displayName: 'Haiku' }, { value: 'opus', displayName: 'Opus' }], current_permission_mode: 'default' } } });
+      const ready = () => send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: { models: [{ value: 'default', displayName: 'Default (recommended)' }, { value: 'haiku', displayName: 'Haiku' }, { value: 'opus', displayName: 'Opus' }], current_permission_mode: 'default' } } });
+      setTimeout(ready, Number(process.env.FAKE_INIT_DELAY) || 0);
     } else if (message.type === 'control_request' && message.request.subtype === 'interrupt') {
       interrupted = true;
       send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: {} } });
     } else if (message.type === 'user') {
+      if (gone) forgotten();
       void turn(message.message.content.map((part) => part.text ?? '').join(' '));
     }
   }

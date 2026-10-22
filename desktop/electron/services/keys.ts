@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, safeStorage } from 'electron';
 import type { CliId } from '../../shared/chat';
+import { writeWhole } from './fileWrite';
 
 /**
  * The API keys the person gives Cortex for a CLI that takes its key from the
@@ -43,10 +44,7 @@ function readKept(): Partial<Record<CliId, Kept>> {
 }
 
 function writeKept(kept: Partial<Record<CliId, Kept>>): void {
-  fs.mkdirSync(path.dirname(file()), { recursive: true });
-  const temp = `${file()}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(kept), { mode: 0o600 });
-  fs.renameSync(temp, file());
+  writeWhole(file(), JSON.stringify(kept), 0o600);
 }
 
 export class KeyRefusal extends Error {}

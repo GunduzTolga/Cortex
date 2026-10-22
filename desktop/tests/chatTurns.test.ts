@@ -52,6 +52,18 @@ test('an error ends a turn with what was said; an answer that comes before any m
   assert.deepEqual(turns[1].end, { kind: 'error', message: 'Insufficient balance', error: 'provider.quota' });
 });
 
+test('a CLI that began the conversation anew says so on that answer, once', () => {
+  const turns = turnsOf([
+    { type: 'user', text: 'kaldığımız yerden', at: 4 },
+    { type: 'notice', notice: 'new-session' },
+    { type: 'notice', notice: 'new-session' },
+    { type: 'text', id: 'm', text: 'Merhaba.' },
+    { type: 'done', reason: 'end_turn' },
+    { type: 'user', text: 'sonra', at: 5 },
+  ]);
+  assert.deepEqual(turns.map((one) => one.notices), [['new-session'], []]);
+});
+
 test('a setting is found by its category, else its id', () => {
   const options = [
     { id: 'm', name: 'Model', category: 'model', current: 'a', choices: [] },

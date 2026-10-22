@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import type { CliId, ConfigOption, ToolStatus } from '../../shared/chat';
 import { AcpConnection, AcpError } from './acp';
-import { type Backend, type Card, ChatRefusal, OUTPUT_MAX, STOP_GRACE, TITLE_MAX, type Turn, TurnFailure, scrubberFor, shownPath, textOf } from './chatKit';
+import { type Backend, type Card, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
 import { launchFor } from './clis';
 import { readSettings } from './settings';
 
@@ -41,12 +41,16 @@ interface Conn {
 
 interface Running {
   turn: Turn;
+  /** The server the turn runs on: a turn is settled when its server ends, whatever became of the chat's thread. */
+  conn: Conn;
   turnId: string | null;
+  /** Stop was pressed: the turn ends as stopped, not failed, however the server ends it. */
+  stopRequested: boolean;
   finish: (reason: string) => void;
   fail: (error: TurnFailure) => void;
   /** Items whose words came in pieces: their whole text at completion is not shown again. */
   streamed: Set<string>;
-  /** The paths of each file change, for the card that asks to apply it. */
+  /** The paths of each file change, as the server named them, for the card that asks to apply it. */
   changes: Map<string, string[]>;
 }
 
@@ -133,9 +137,18 @@ function connectionFor(cli: CliId, vault: string): Promise<Conn> {
   conn.rpc = new AcpConnection(launch, vault, {
     notify: (method, params) => heard(conn, method, params),
     request: (method, params) => asked(method, params),
-    exited: () => {
+    exited: (_code, stderr) => {
       if (conns.get(cli) === conn) conns.delete(cli);
       for (const [chatId, held] of threads) if (held.conn === conn) threads.delete(chatId);
+      // Its turns end with it: only `turn/completed` settles a turn, and a server gone - crashed, ended
+      // after Stop, closed for another vault - sends none, which left the chat "running" for good.
+      const why = stderr ? `Codex stopped: ${stderr.split('\n').slice(-3).join(' ').slice(0, 500)}` : 'Codex stopped.';
+      for (const [threadId, now] of [...running]) {
+        if (now.conn !== conn) continue;
+        running.delete(threadId);
+        if (now.stopRequested) now.finish('cancelled');
+        else now.fail(new TurnFailure(why, 'stopped'));
+      }
     },
   });
   conn.ready = (async () => {
@@ -152,6 +165,12 @@ function connectionFor(cli: CliId, vault: string): Promise<Conn> {
       }))
       .slice(0, 40);
   })();
+  // A start that failed is not kept: the next message starts the server again, rather than meet the same failure until the app is closed.
+  conn.ready.catch(() => {
+    if (conns.get(cli) !== conn) return;
+    conns.delete(cli);
+    conn.rpc.close();
+  });
   conns.set(cli, conn);
   return conn.ready.then(() => conn);
 }
@@ -164,18 +183,24 @@ async function threadFor(turn: Turn, conn: Conn, mode: string): Promise<string> 
   if (turn.sessionId) {
     try {
       const resumed = (await conn.rpc.request('thread/resume', { threadId: turn.sessionId, cwd: conn.vault, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox })) as { thread?: { id?: unknown } } | null;
+      if (turn.signal.aborted) throw new Stopped();
       if (typeof resumed?.thread?.id === 'string') {
         threads.set(turn.chatId, { conn, threadId: resumed.thread.id });
         return resumed.thread.id;
       }
-    } catch {
+    } catch (err) {
+      if (err instanceof Stopped) throw err;
       /* A thread the server no longer has: a new one. */
     }
   }
   const made = (await conn.rpc.request('thread/start', { cwd: conn.vault, approvalPolicy: policy.approvalPolicy, sandbox: policy.sandbox })) as { thread?: { id?: unknown } } | null;
+  // Stopped meanwhile: the thread is left unrecorded rather than written over a later turn's.
+  if (turn.signal.aborted) throw new Stopped();
   if (typeof made?.thread?.id !== 'string') throw new TurnFailure('Codex did not start a thread.', null);
   threads.set(turn.chatId, { conn, threadId: made.thread.id });
   turn.setSession(made.thread.id);
+  // The chat had a thread the server could not continue: the person is told it begins anew, rather than find it forgotten.
+  if (turn.sessionId) turn.emit({ type: 'notice', notice: 'new-session' });
   return made.thread.id;
 }
 
@@ -185,6 +210,9 @@ function heard(conn: Conn, method: string, params: unknown): void {
   const body = params as Record<string, unknown>;
   const now = typeof body.threadId === 'string' ? running.get(body.threadId) : undefined;
   if (!now) return;
+  // A turn left after Stop may still be heard from on the thread its chat's next turn runs on: only this turn's words are this turn's.
+  const itsTurn = typeof body.turnId === 'string' ? body.turnId : textOf((body.turn as { id?: unknown } | undefined)?.id, 200);
+  if (now.turnId && itsTurn && itsTurn !== now.turnId) return;
   const { turn } = now;
   const scrub = scrubberFor(conn.vault);
   const item = (typeof body.item === 'object' && body.item !== null ? body.item : {}) as Record<string, unknown>;
@@ -224,8 +252,9 @@ function heard(conn: Conn, method: string, params: unknown): void {
         });
       } else if (item.type === 'fileChange') {
         const changes = Array.isArray(item.changes) ? (item.changes as Array<{ path?: unknown; diff?: unknown }>) : [];
-        const paths = changes.map((one) => (typeof one.path === 'string' ? shownPath(conn.vault, one.path) : null)).filter((one): one is string => one !== null);
-        now.changes.set(itemId, paths);
+        const named = changes.map((one) => (typeof one.path === 'string' ? one.path : null)).filter((one): one is string => one !== null);
+        const paths = named.map((one) => shownPath(conn.vault, one));
+        now.changes.set(itemId, named);
         turn.emit({
           type: 'tool',
           id: itemId,
@@ -281,6 +310,23 @@ function heard(conn: Conn, method: string, params: unknown): void {
   }
 }
 
+/** What a request for more permissions asks, said on its card: the network, and every folder to read or write, whole. */
+function permissionsSaid(wanted: Record<string, unknown>, vault: string, say: (text: string) => string, tr: boolean): string[] {
+  const out: string[] = [];
+  const network = wanted.network as { enabled?: unknown } | null | undefined;
+  if (typeof network === 'object' && network !== null && network.enabled === true) out.push(tr ? 'Ağ erişimi' : 'Network access');
+  const files = wanted.fileSystem as Record<string, unknown> | null | undefined;
+  if (typeof files === 'object' && files !== null) {
+    for (const [key, label] of [['read', tr ? 'Okuma' : 'Read'], ['write', tr ? 'Yazma' : 'Write']] as const) {
+      const places = Array.isArray(files[key]) ? (files[key] as unknown[]) : [];
+      for (const place of places.slice(0, 20)) if (typeof place === 'string') out.push(`${label}: ${cardPath(vault, place, say)}`);
+    }
+  }
+  // Anything else it asks for, by its name: nothing that would be granted goes unsaid.
+  for (const [key, value] of Object.entries(wanted)) if (key !== 'network' && key !== 'fileSystem' && value !== null && value !== undefined) out.push(key.slice(0, 60));
+  return out;
+}
+
 /** A request from the server: leave for a command, a file change or more permissions, asked of the person on a card; nothing else is answered. */
 async function asked(method: string, params: unknown): Promise<unknown> {
   const body = (params ?? {}) as Record<string, unknown>;
@@ -291,28 +337,37 @@ async function asked(method: string, params: unknown): Promise<unknown> {
   const session = { id: 'session', name: tr ? 'Bu sohbette hep izin ver' : 'Allow for this chat', kind: 'allow_always' as const };
   const refuse = { id: 'decline', name: tr ? 'Reddet' : 'Reject', kind: 'reject_once' as const };
   const ask = (card: Card) => (now ? now.turn.ask(card) : Promise.resolve(null));
-  const scrub = now ? scrubberFor(now.turn.vault) : (text: string) => text;
+  // A card hides nothing: the vault said as a word, a path outside it whole, a command whole (chatKit.ts).
+  const vault = now?.turn.vault ?? '';
+  const say = now ? cardTextFor(vault, vaultWord(tr)) : (text: string) => text;
   switch (method) {
     case 'item/commandExecution/requestApproval': {
-      const chosen = await ask({ title: scrub(`$ ${command(body)}`).slice(0, TITLE_MAX), kind: 'execute', paths: [], options: [once, session, refuse] });
+      // The command as the server will run it, whole: its first parsed part alone hid what came after `&&`.
+      const whole = textOf(body.command, 100_000) || command(body);
+      const chosen = await ask({ title: cutSaid(say(`$ ${whole}`)), kind: 'execute', paths: [], options: [once, session, refuse] });
       return { decision: chosen === 'once' ? 'accept' : chosen === 'session' ? 'acceptForSession' : 'decline' };
     }
     case 'item/fileChange/requestApproval': {
-      const paths = now?.changes.get(textOf(body.itemId, 200)) ?? [];
-      const chosen = await ask({ title: `${tr ? 'Düzenle' : 'Edit'} ${paths.join(', ')}`.trim(), kind: 'edit', paths, options: [once, session, refuse] });
+      const paths = (now?.changes.get(textOf(body.itemId, 200)) ?? []).map((one) => cardPath(vault, one, say));
+      // Leave to write anywhere under a folder for the rest of the chat, when it asks for it: said with the folder.
+      const root = textOf(body.grantRoot, 4000);
+      const granting = root ? [`${tr ? 'Yazma izni' : 'Write access'}: ${cardPath(vault, root, say)}`] : [];
+      const chosen = await ask({ title: `${tr ? 'Düzenle' : 'Edit'} ${paths.join(', ')}`.trim(), kind: 'edit', paths: [...paths, ...granting], options: [once, session, refuse] });
       return { decision: chosen === 'once' ? 'accept' : chosen === 'session' ? 'acceptForSession' : 'decline' };
     }
     case 'item/permissions/requestApproval': {
       const wanted = (typeof body.permissions === 'object' && body.permissions !== null ? body.permissions : {}) as Record<string, unknown>;
-      const chosen = await ask({ title: scrub(textOf(body.reason, TITLE_MAX)) || (tr ? 'Ek izin' : 'More permissions'), kind: 'other', paths: [], options: [once, session, refuse] });
-      // What it asked for, and nothing more; refused, nothing.
+      // The reason is the model's own words: what it would be given is said beside it.
+      const chosen = await ask({ title: cutSaid(say(textOf(body.reason, 100_000))) || (tr ? 'Ek izin' : 'More permissions'), kind: 'other', paths: permissionsSaid(wanted, vault, say, tr), options: [once, session, refuse] });
+      // What it asked for, and nothing more, only when allowed: Reject answers "decline", a word, and a word granted it all.
       const granted = Object.fromEntries(Object.entries(wanted).filter(([, value]) => value !== null && value !== undefined));
-      return { permissions: chosen ? granted : {}, scope: chosen === 'session' ? 'session' : 'turn' };
+      const allowed = chosen === 'once' || chosen === 'session';
+      return { permissions: allowed ? granted : {}, scope: chosen === 'session' ? 'session' : 'turn' };
     }
     case 'execCommandApproval':
     case 'applyPatchApproval': {
       const title = method === 'execCommandApproval' ? `$ ${(Array.isArray(body.command) ? body.command : []).join(' ')}` : tr ? 'Dosya değişikliği' : 'File change';
-      const chosen = await ask({ title: scrub(title).slice(0, TITLE_MAX), kind: method === 'execCommandApproval' ? 'execute' : 'edit', paths: [], options: [once, session, refuse] });
+      const chosen = await ask({ title: cutSaid(say(title)), kind: method === 'execCommandApproval' ? 'execute' : 'edit', paths: [], options: [once, session, refuse] });
       return { decision: chosen === 'once' ? 'approved' : chosen === 'session' ? 'approved_for_session' : { denied: { rejection: 'The person did not allow this step.' } } };
     }
     default:
@@ -320,11 +375,15 @@ async function asked(method: string, params: unknown): Promise<unknown> {
   }
 }
 
+/** The turn a chat runs now, whatever became of its thread. */
+const runningOf = (chatId: string) => [...running.entries()].find(([, now]) => now.turn.chatId === chatId);
+
 export const codexBackend: Backend = {
   async run(turn, message) {
     let threadId: string | null = null;
+    let entry: Running | null = null;
     try {
-      const conn = await connectionFor(turn.cli, turn.vault);
+      const conn = await unlessStopped(turn.signal, connectionFor(turn.cli, turn.vault));
       let options = settings.get(turn.chatId);
       if (!options) {
         options = codexOptions(conn.models, turn.prefs);
@@ -333,11 +392,12 @@ export const codexBackend: Backend = {
       turn.setOptions(options);
       const current = (id: string) => options?.find((one) => one.id === id)?.current;
       const mode = current('mode') ?? 'ask';
-      threadId = await threadFor(turn, conn, mode);
+      threadId = await unlessStopped(turn.signal, threadFor(turn, conn, mode));
       const policy = policyOf(mode);
       const effort = current('effort');
       const done = new Promise<string>((finish, fail) => {
-        running.set(threadId as string, { turn, turnId: null, finish, fail, streamed: new Set(), changes: new Map() });
+        entry = { turn, conn, turnId: null, stopRequested: false, finish, fail, streamed: new Set(), changes: new Map() };
+        running.set(threadId as string, entry);
       });
       const started = (await conn.rpc.request('turn/start', {
         threadId,
@@ -348,14 +408,20 @@ export const codexBackend: Backend = {
         sandboxPolicy: policy.sandboxPolicy,
       })) as { turn?: { id?: unknown } } | null;
       const now = running.get(threadId);
-      if (now && typeof started?.turn?.id === 'string') now.turnId = started.turn.id;
+      if (now && typeof started?.turn?.id === 'string') {
+        now.turnId = started.turn.id;
+        // Stop pressed before the server named the turn: it is interrupted now that it can be.
+        if (now.stopRequested) void conn.rpc.request('turn/interrupt', { threadId, turnId: now.turnId }).catch(() => undefined);
+      }
       return await done;
     } catch (err) {
+      // After Stop, however the turn ended - the server ended under it, its start refused - it was stopped.
+      if (err instanceof Stopped || turn.signal.aborted) return 'cancelled';
       if (err instanceof TurnFailure) throw err;
       if (err instanceof AcpError) throw new TurnFailure(sentenceOf(err.message), err.code === null ? 'stopped' : null);
       throw new TurnFailure(err instanceof Error ? err.message : String(err), null);
     } finally {
-      if (threadId) running.delete(threadId);
+      if (threadId && entry && running.get(threadId) === entry) running.delete(threadId);
       const timer = stopping.get(turn.chatId);
       if (timer) clearTimeout(timer);
       stopping.delete(turn.chatId);
@@ -363,11 +429,25 @@ export const codexBackend: Backend = {
   },
 
   cancel(chatId) {
-    const held = threads.get(chatId);
-    const now = held ? running.get(held.threadId) : undefined;
-    if (!held || !now) return;
-    if (now.turnId) void held.conn.rpc.request('turn/interrupt', { threadId: held.threadId, turnId: now.turnId }).catch(() => undefined);
-    if (!stopping.has(chatId)) stopping.set(chatId, setTimeout(() => running.has(held.threadId) && held.conn.rpc.close(), STOP_GRACE));
+    const found = runningOf(chatId);
+    if (!found) return;
+    const [threadId, now] = found;
+    now.stopRequested = true;
+    if (now.turnId) void now.conn.rpc.request('turn/interrupt', { threadId, turnId: now.turnId }).catch(() => undefined);
+    if (stopping.has(chatId)) return;
+    stopping.set(
+      chatId,
+      setTimeout(() => {
+        if (running.get(threadId) !== now) return;
+        // One server carries every Codex chat: ended only when this turn is the only one on it. Else this
+        // turn alone is let go, its thread with it, and the chat's next message resumes or starts one.
+        if ([...running.values()].some((other) => other !== now && other.conn === now.conn)) {
+          running.delete(threadId);
+          if (threads.get(chatId)?.threadId === threadId) threads.delete(chatId);
+          now.finish('cancelled');
+        } else now.conn.rpc.close();
+      }, STOP_GRACE.ms),
+    );
   },
 
   async setOption(chatId, options, option, value) {

@@ -36,10 +36,12 @@ export interface Turn {
   text: string;
   asked: Asked[];
   plan: Array<{ content: string; status: string }> | null;
+  /** What the person should know about this answer (`new-session`: the CLI began the conversation anew). */
+  notices: string[];
   end: { kind: 'done'; reason: string } | { kind: 'error'; message: string; error: string | null } | null;
 }
 
-const empty = (user: Turn['user']): Turn => ({ user, thought: '', steps: [], text: '', asked: [], plan: null, end: null });
+const empty = (user: Turn['user']): Turn => ({ user, thought: '', steps: [], text: '', asked: [], plan: null, notices: [], end: null });
 
 export function turnsOf(events: readonly ChatEvent[]): Turn[] {
   const turns: Turn[] = [];
@@ -94,6 +96,9 @@ export function turnsOf(events: readonly ChatEvent[]): Turn[] {
       }
       case 'plan':
         current().plan = event.entries;
+        break;
+      case 'notice':
+        if (!current().notices.includes(event.notice)) current().notices.push(event.notice);
         break;
       case 'done':
         current().end = { kind: 'done', reason: event.reason };

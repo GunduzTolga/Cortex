@@ -180,8 +180,11 @@ function PermissionCard({ asked, onAnswer }: { asked: Asked; onAnswer: (option: 
         <ShieldQuestion size={13} />
         {t('chat.permission.title')}
       </p>
-      <p className="mt-1.5 break-words font-mono text-[12px] text-zinc-700">{asked.title || asked.kind}</p>
-      {asked.paths.length ? <p className="mt-0.5 truncate font-mono text-[11px] text-zinc-400">{asked.paths.join(' · ')}</p> : null}
+      {/* Said whole, never cut to a line: what is asked for is what the person allows (electron/services/chatKit.ts, cardTextFor). */}
+      <p className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] text-zinc-700" data-chat-permission-title>
+        {asked.title || asked.kind}
+      </p>
+      {asked.paths.length ? <p className="mt-0.5 max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] text-zinc-500">{asked.paths.join(' · ')}</p> : null}
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {asked.options.map((option) => (
           <button

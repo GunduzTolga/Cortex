@@ -5,8 +5,9 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { ConfigOption } from '../../shared/chat';
 import { childEnv } from './acp';
-import { type Backend, type Turn, TurnFailure, scrubberFor } from './chatKit';
+import { type Backend, Stopped, type Turn, TurnFailure, scrubberFor, unlessStopped } from './chatKit';
 import { onPathFile } from './clis';
+import { writeWhole } from './fileWrite';
 import { captureToInbox } from './inbox';
 import { LOCAL, type LocalId, type LocalModels, baseOf, findLocal, localModel } from './localModels';
 import { readSettings } from './settings';
@@ -118,10 +119,7 @@ function loadSession(id: string): Session | null {
 
 function saveSession(session: Session): void {
   try {
-    fs.mkdirSync(sessionDir(), { recursive: true });
-    const temp = `${sessionFile(session.id)}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify({ chosen: session.chosen, started: session.started, messages: session.messages.slice(-MESSAGES_MAX) }), 'utf8');
-    fs.renameSync(temp, sessionFile(session.id));
+    writeWhole(sessionFile(session.id), JSON.stringify({ chosen: session.chosen, started: session.started, messages: session.messages.slice(-MESSAGES_MAX) }));
   } catch {
     /* Kept in memory for this start. */
   }
@@ -149,8 +147,8 @@ export function pythonOf(env: NodeJS.ProcessEnv = process.env): { command: strin
   return python ? { command: python, args: [] } : null;
 }
 
-/** The context the vault's hook gives for this moment of the chat; empty where there is none to give. */
-export function hookContext(vault: string, event: 'SessionStart' | 'UserPromptSubmit', sessionId: string, prompt: string): Promise<string> {
+/** The context the vault's hook gives for this moment of the chat; empty where there is none to give, or when the turn is stopped (the hook ended with it). */
+export function hookContext(vault: string, event: 'SessionStart' | 'UserPromptSubmit', sessionId: string, prompt: string, signal?: AbortSignal): Promise<string> {
   const hook = path.join(vault, '.claude', 'scripts', 'beyin_v3_hook.py');
   let state: string | null = null;
   try {
@@ -166,7 +164,7 @@ export function hookContext(vault: string, event: 'SessionStart' | 'UserPromptSu
       const child = execFile(
         python.command,
         [...python.args, hook, '--vault', vault, '--state', state, '--harness', 'opencode'],
-        { cwd: vault, timeout: HOOK_TIMEOUT, windowsHide: true, maxBuffer: 4 * 1024 * 1024, env: childEnv({ PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' }) },
+        { cwd: vault, timeout: HOOK_TIMEOUT, windowsHide: true, maxBuffer: 4 * 1024 * 1024, signal, env: childEnv({ PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' }) },
         (error, stdout) => {
           try {
             const text = error ? '' : (JSON.parse(String(stdout || '{}')) as { hookSpecificOutput?: { additionalContext?: unknown } })?.hookSpecificOutput?.additionalContext;
@@ -239,13 +237,31 @@ export function localOptions(found: LocalModels, current: string): ConfigOption[
   return [{ id: 'model', name: 'Model', category: 'model', current, choices: ordered.map((one) => ({ value: one, name: found.loaded.includes(one) ? `${one} · ${loadedWord}` : one })) }];
 }
 
-/** The conversation cut to what the model can hold: the session's own context always, the oldest turns dropped first. */
+/** Two messages of one side running together, made one: the person's two questions with a blank line between. */
+function alternating(messages: Message[]): Message[] {
+  const out: Message[] = [];
+  for (const one of messages) {
+    const last = out[out.length - 1];
+    if (last && last.role === one.role) out[out.length - 1] = { role: one.role, content: `${last.content}\n\n${one.content}` };
+    else out.push(one);
+  }
+  return out;
+}
+
+/**
+ * The conversation cut to what the model can hold: the session's own context always, the oldest
+ * turns dropped first. What goes takes turns, the person first: the chat templates of Gemma and
+ * Mistral in LM Studio refuse anything else ("Conversation roles must alternate"), and a turn that
+ * failed (two of the person's messages in a row) or a cut that left the model's answer first broke
+ * every later message of the chat.
+ */
 export function fitted(messages: Message[], contextTokens: number | undefined): Message[] {
   const budget = Math.max(4_000, (contextTokens ?? 8_192) * 3);
   const system = messages.filter((one) => one.role === 'system');
-  const rest = messages.filter((one) => one.role !== 'system');
+  const rest = alternating(messages.filter((one) => one.role !== 'system'));
   let size = [...system, ...rest].reduce((sum, one) => sum + one.content.length, 0);
   while (rest.length > 1 && size > budget) size -= rest.shift()!.content.length;
+  while (rest.length > 1 && rest[0].role === 'assistant') rest.shift();
   return [...system, ...rest];
 }
 
@@ -380,85 +396,114 @@ function complete(
   });
 }
 
+/** One turn of a local chat: the hook asked for its memory, the model asked, its tool run; how the turn ended. */
+async function answer(turn: Turn, message: string, session: Session, found: LocalModels, model: string, signal: AbortSignal): Promise<string> {
+  const id = turn.cli as LocalId;
+  const scrub = scrubberFor(turn.vault);
+  let content = message;
+  if (!session.started) {
+    const context = await hookContext(turn.vault, 'SessionStart', session.id, message, signal);
+    // Stopped while the hook was asked: nothing of the turn is kept, and the session is begun at the next.
+    if (signal.aborted) return 'cancelled';
+    session.messages.unshift({ role: 'system', content: [preamble(), context].filter(Boolean).join('\n\n') });
+    session.started = true;
+  } else {
+    const context = await hookContext(turn.vault, 'UserPromptSubmit', session.id, message, signal);
+    if (signal.aborted) return 'cancelled';
+    if (context) content = `${context}\n\n---\n\n${message}`;
+  }
+  const asked: Message = { role: 'user', content };
+  session.messages.push(asked);
+  // A turn that came to no answer - failed, or stopped before a word - is taken back, so the conversation kept goes on taking turns.
+  const takeBack = () => {
+    const at = session.messages.lastIndexOf(asked);
+    if (at >= 0) session.messages.splice(at, 1);
+  };
+  try {
+    const answerId = `turn-${turn.number}`;
+    const key = `${id}:${model}`;
+    // The tool's exchange in this turn: sent with the conversation while it lasts, never kept.
+    const exchange: Wire[] = [];
+    let answer = '';
+    let used: number | null = null;
+    for (let round = 0; ; round += 1) {
+      const tools = round < TOOL_ROUNDS && !toolless.has(key) ? TOOLS : undefined;
+      let result: { text: string; used: number | null; calls: ToolCall[] };
+      try {
+        result = await complete(
+          id,
+          model,
+          [...fitted(session.messages, found.contexts[model]), ...exchange],
+          signal,
+          (piece) => turn.emit({ type: 'text', id: round ? `${answerId}:${round}` : answerId, text: scrub(piece) }),
+          (piece) => turn.emit({ type: 'thought', id: `${answerId}:thought`, text: scrub(piece) }),
+          tools,
+        );
+      } catch (err) {
+        // A model that takes no tools: asked again without it, and from then on.
+        if (tools && err instanceof TurnFailure && NO_TOOLS.test(err.message)) {
+          toolless.add(key);
+          round -= 1;
+          continue;
+        }
+        throw err;
+      }
+      used = result.used ?? used;
+      if (result.text) answer = answer ? `${answer}\n\n${result.text}` : result.text;
+      if (!result.calls.length || signal.aborted) break;
+      exchange.push({ role: 'assistant', content: result.text || null, tool_calls: result.calls });
+      for (const [at, call] of result.calls.entries()) {
+        const outcome = await runTool(call, turn, `${answerId}:tool:${round}:${at}`);
+        exchange.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(outcome) });
+      }
+    }
+    if (answer) session.messages.push({ role: 'assistant', content: answer });
+    else if (signal.aborted) takeBack();
+    const size = found.contexts[model];
+    if (used !== null && size) turn.emit({ type: 'usage', used, size, cost: null, currency: null });
+    return signal.aborted ? 'cancelled' : 'end_turn';
+  } catch (err) {
+    takeBack();
+    throw err;
+  }
+}
+
 export const localBackend: Backend = {
   async run(turn, message) {
     const id = turn.cli as LocalId;
-    const found = await findLocal(id);
-    if (!found.models.length) throw new TurnFailure(`${LOCAL[id].name} is not running, or has no model. Open it, load a model, and write again.`, 'local-off');
-    // The conversation is the chat's, by its id: the hook's session and the file it is kept in.
-    let session = sessions.get(turn.chatId) ?? loadSession(turn.chatId);
-    if (!session) {
-      session = { id: turn.chatId, chosen: null, started: false, messages: [] };
-      turn.setSession(session.id);
-    }
-    sessions.set(turn.chatId, session);
-    const pending = pendingChoice.get(turn.chatId);
-    if (pending) session.chosen = pending;
-    pendingChoice.delete(turn.chatId);
-    // The model chosen on this chat's chip while the server has it; else the one loaded in its app now.
-    const model = session.chosen && found.models.includes(session.chosen) ? session.chosen : localModel(found, turn.prefs.model ?? null);
-    if (!model) throw new TurnFailure(`${LOCAL[id].name} has no model.`, 'local-off');
-    turn.setOptions(localOptions(found, model));
-
-    const scrub = scrubberFor(turn.vault);
-    let content = message;
-    if (!session.started) {
-      const context = await hookContext(turn.vault, 'SessionStart', session.id, message);
-      session.messages.unshift({ role: 'system', content: [preamble(), context].filter(Boolean).join('\n\n') });
-      session.started = true;
-    } else {
-      const context = await hookContext(turn.vault, 'UserPromptSubmit', session.id, message);
-      if (context) content = `${context}\n\n---\n\n${message}`;
-    }
-    session.messages.push({ role: 'user', content });
-
+    // Stopped by the person, by the chat forgotten, or by the app closing: the hook, the request, all of it.
     const stop = new AbortController();
+    const stopped = () => stop.abort();
+    turn.signal.addEventListener('abort', stopped, { once: true });
+    if (turn.signal.aborted) stop.abort();
     running.set(turn.chatId, stop);
+    let session: Session | null = null;
     try {
-      const answerId = `turn-${turn.number}`;
-      const key = `${id}:${model}`;
-      // The tool's exchange in this turn: sent with the conversation while it lasts, never kept.
-      const exchange: Wire[] = [];
-      let answer = '';
-      let used: number | null = null;
-      for (let round = 0; ; round += 1) {
-        const tools = round < TOOL_ROUNDS && !toolless.has(key) ? TOOLS : undefined;
-        let result: { text: string; used: number | null; calls: ToolCall[] };
-        try {
-          result = await complete(
-            id,
-            model,
-            [...fitted(session.messages, found.contexts[model]), ...exchange],
-            stop.signal,
-            (piece) => turn.emit({ type: 'text', id: round ? `${answerId}:${round}` : answerId, text: scrub(piece) }),
-            (piece) => turn.emit({ type: 'thought', id: `${answerId}:thought`, text: scrub(piece) }),
-            tools,
-          );
-        } catch (err) {
-          // A model that takes no tools: asked again without it, and from then on.
-          if (tools && err instanceof TurnFailure && NO_TOOLS.test(err.message)) {
-            toolless.add(key);
-            round -= 1;
-            continue;
-          }
-          throw err;
-        }
-        used = result.used ?? used;
-        if (result.text) answer = answer ? `${answer}\n\n${result.text}` : result.text;
-        if (!result.calls.length || stop.signal.aborted) break;
-        exchange.push({ role: 'assistant', content: result.text || null, tool_calls: result.calls });
-        for (const [at, call] of result.calls.entries()) {
-          const outcome = await runTool(call, turn, `${answerId}:tool:${round}:${at}`);
-          exchange.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(outcome) });
-        }
+      const found = await unlessStopped(stop.signal, findLocal(id));
+      if (!found.models.length) throw new TurnFailure(`${LOCAL[id].name} is not running, or has no model. Open it, load a model, and write again.`, 'local-off');
+      // The conversation is the chat's, by its id: the hook's session and the file it is kept in.
+      session = sessions.get(turn.chatId) ?? loadSession(turn.chatId);
+      if (!session) {
+        session = { id: turn.chatId, chosen: null, started: false, messages: [] };
+        turn.setSession(session.id);
       }
-      if (answer) session.messages.push({ role: 'assistant', content: answer });
-      const size = found.contexts[model];
-      if (used !== null && size) turn.emit({ type: 'usage', used, size, cost: null, currency: null });
-      return stop.signal.aborted ? 'cancelled' : 'end_turn';
+      sessions.set(turn.chatId, session);
+      const pending = pendingChoice.get(turn.chatId);
+      if (pending) session.chosen = pending;
+      pendingChoice.delete(turn.chatId);
+      // The model chosen on this chat's chip while the server has it; else the one loaded in its app now.
+      const model = session.chosen && found.models.includes(session.chosen) ? session.chosen : localModel(found, turn.prefs.model ?? null);
+      if (!model) throw new TurnFailure(`${LOCAL[id].name} has no model.`, 'local-off');
+      turn.setOptions(localOptions(found, model));
+      return await answer(turn, message, session, found, model, stop.signal);
+    } catch (err) {
+      if (err instanceof Stopped) return 'cancelled';
+      throw err;
     } finally {
-      running.delete(turn.chatId);
-      saveSession(session);
+      turn.signal.removeEventListener('abort', stopped);
+      if (running.get(turn.chatId) === stop) running.delete(turn.chatId);
+      // A chat deleted while it answered leaves nothing behind: its conversation is not written again.
+      if (session && sessions.get(session.id) === session) saveSession(session);
     }
   },
 

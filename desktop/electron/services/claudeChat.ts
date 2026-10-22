@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child
 import { randomUUID } from 'node:crypto';
 import type { ConfigOption, ToolStatus } from '../../shared/chat';
 import { childEnv } from './acp';
-import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, TITLE_MAX, type Turn, TurnFailure, scrubberFor, shownPath, textOf } from './chatKit';
+import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
 import { launchFor } from './clis';
 import { readSettings } from './settings';
 
@@ -24,7 +24,10 @@ import { readSettings } from './settings';
  *
  * A setting changed - the model, the permission mode, the effort - is given
  * at the next start: the program is ended between turns and started again on
- * the same session (`--resume`), with the setting as a flag.
+ * the same session (`--resume`), with the setting as a flag. A session Claude
+ * Code no longer has - it deletes transcripts after a month
+ * (`cleanupPeriodDays`) - is not resumed for ever: the message goes to a new
+ * one, and the chat says so.
  */
 
 interface Proc {
@@ -39,6 +42,8 @@ interface Proc {
   finish: ((reason: string) => void) | null;
   fail: ((error: TurnFailure) => void) | null;
   cancelled: boolean;
+  /** After Stop, the program ended if the stopped turn has not: for that turn only, never the one after it. */
+  stopTimer: ReturnType<typeof setTimeout> | null;
   /** The message being streamed, and whether its words already came in pieces. */
   messageId: string | null;
   streamed: Set<string>;
@@ -50,6 +55,10 @@ const procs = new Map<string, Proc>();
 const STDERR_KEPT = 8 * 1024;
 const LINE_MAX = 16 * 1024 * 1024;
 const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto'] as const;
+/** What Claude Code says when the session it was told to resume is gone. */
+const SESSION_GONE = /no conversation found/i;
+/** After its exit, how long the program's last words on standard error are waited for. */
+const DRAIN_MS = 1000;
 const EFFORTS = ['default', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 /** The models offered before Claude Code says which it has, as its own `initialize` named them on 14 October. */
@@ -100,26 +109,44 @@ export function claudeArgs(base: string[], options: ConfigOption[], sessionId: s
   return args;
 }
 
+const KINDS: Record<string, string> = {
+  Read: 'read',
+  Write: 'edit',
+  Edit: 'edit',
+  MultiEdit: 'edit',
+  NotebookEdit: 'edit',
+  Bash: 'execute',
+  PowerShell: 'execute',
+  Grep: 'search',
+  Glob: 'search',
+  WebFetch: 'fetch',
+  WebSearch: 'fetch',
+  Task: 'think',
+};
+
+const fileOf = (input: Record<string, unknown>, max: number) => textOf(input.file_path, max) || textOf(input.notebook_path, max) || textOf(input.path, max);
+const whatOf = (input: Record<string, unknown>, max: number, path: string | undefined) =>
+  textOf(input.command, max) || textOf(input.pattern, max) || textOf(input.url, max) || textOf(input.query, max) || textOf(input.description, max) || (path ?? '');
+
 /** A tool's step as the chat shows it: its kind, a title with what it works on, and the paths it touches. */
 export function stepOf(name: string, input: Record<string, unknown>, vault: string, scrub: (text: string) => string): { title: string; kind: string; paths: string[] } {
-  const file = textOf(input.file_path, 1000) || textOf(input.notebook_path, 1000) || textOf(input.path, 1000);
+  const file = fileOf(input, 1000);
   const paths = file ? [shownPath(vault, file)] : [];
-  const kinds: Record<string, string> = {
-    Read: 'read',
-    Write: 'edit',
-    Edit: 'edit',
-    MultiEdit: 'edit',
-    NotebookEdit: 'edit',
-    Bash: 'execute',
-    PowerShell: 'execute',
-    Grep: 'search',
-    Glob: 'search',
-    WebFetch: 'fetch',
-    WebSearch: 'fetch',
-    Task: 'think',
-  };
-  const what = textOf(input.command, 200) || textOf(input.pattern, 200) || textOf(input.url, 200) || textOf(input.query, 200) || textOf(input.description, 200) || (paths[0] ?? '');
-  return { title: scrub(what ? `${name} ${what}` : name).slice(0, TITLE_MAX), kind: kinds[name] ?? 'other', paths };
+  const what = whatOf(input, 200, paths[0]);
+  return { title: scrub(what ? `${name} ${what}` : name).slice(0, TITLE_MAX), kind: KINDS[name] ?? 'other', paths };
+}
+
+/**
+ * A step as its card asks leave for it: said whole, where the step in the transcript is cut and
+ * made short. The vault is said as a word, a path outside it in full, a command to its end (a cut
+ * said as one): the card is the one check before a command or a write outside the vault, and it
+ * showed `Bash rm -rf ""` for the vault deleted, and only the harmless head of a long command.
+ */
+export function cardOf(name: string, input: Record<string, unknown>, vault: string, say: (text: string) => string): { title: string; kind: string; paths: string[] } {
+  const file = fileOf(input, 4000);
+  const paths = file ? [cardPath(vault, file, say)] : [];
+  const what = whatOf(input, 100_000, paths[0]);
+  return { title: cutSaid(say(what ? `${name} ${what}` : name)), kind: KINDS[name] ?? 'other', paths };
 }
 
 /** A tool result's words: a string, or the text parts of a list. */
@@ -162,6 +189,8 @@ function control(proc: Proc, request: Record<string, unknown>, ms = 30_000): Pro
 function end(proc: Proc, why: TurnFailure): void {
   if (!proc.alive) return;
   proc.alive = false;
+  if (proc.stopTimer) clearTimeout(proc.stopTimer);
+  proc.stopTimer = null;
   if (procs.get(proc.chatId) === proc) procs.delete(proc.chatId);
   for (const answer of proc.controls.values()) answer(null);
   proc.controls.clear();
@@ -200,6 +229,11 @@ function receive(proc: Proc, line: string): void {
   if (message.type === 'control_request') {
     void answerControl(proc, message);
     return;
+  }
+  // An error said before any turn - a session it cannot resume, said in its own JSON rather than on standard error - is kept as why it stopped.
+  if (!turn && message.type === 'result' && message.is_error) {
+    const said = textOf(message.result, 1000) || (Array.isArray(message.errors) ? message.errors.filter((one): one is string => typeof one === 'string').join(' ').slice(0, 1000) : '');
+    if (said) proc.stderr = `${proc.stderr}\n${said}`.slice(-STDERR_KEPT);
   }
   if (!turn) return;
   const scrub = scrubberFor(turn.vault);
@@ -273,6 +307,8 @@ function receive(proc: Proc, line: string): void {
       proc.finish = null;
       proc.fail = null;
       proc.streamed.clear();
+      if (proc.stopTimer) clearTimeout(proc.stopTimer);
+      proc.stopTimer = null;
       if (proc.cancelled) finish?.('cancelled');
       else if (message.is_error) {
         const text = textOf(message.result, 1000) || textOf(message.terminal_reason, 100) || 'Claude Code could not answer.';
@@ -305,8 +341,8 @@ async function answerControl(proc: Proc, message: Record<string, unknown>): Prom
     return;
   }
   const suggestions = Array.isArray(request.permission_suggestions) && request.permission_suggestions.length ? request.permission_suggestions : null;
-  const step = stepOf(request.tool_name, input, turn.vault, scrubberFor(turn.vault));
   const tr = turkish();
+  const step = cardOf(request.tool_name, input, turn.vault, cardTextFor(turn.vault, vaultWord(tr)));
   const chosen = await turn.ask({
     title: step.title,
     kind: step.kind,
@@ -328,7 +364,7 @@ async function start(turn: Turn, options: ConfigOption[]): Promise<Proc> {
   const launch = launchFor(turn.cli);
   if (!launch) throw new ChatRefusal('Claude Code is not installed on this machine.');
   const child = spawn(launch.command, claudeArgs(launch.args, options, turn.sessionId), { cwd: turn.vault, env: childEnv(launch.env), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false });
-  const proc: Proc = { chatId: turn.chatId, child, alive: true, buffer: '', stderr: '', controls: new Map(), turn: null, finish: null, fail: null, cancelled: false, messageId: null, streamed: new Set(), lastUsage: null };
+  const proc: Proc = { chatId: turn.chatId, child, alive: true, buffer: '', stderr: '', controls: new Map(), turn: null, finish: null, fail: null, cancelled: false, stopTimer: null, messageId: null, streamed: new Set(), lastUsage: null };
   procs.set(turn.chatId, proc);
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
@@ -351,8 +387,19 @@ async function start(turn: Turn, options: ConfigOption[]): Promise<Proc> {
   });
   const stopped = () => new TurnFailure(proc.stderr.trim() ? `Claude Code stopped: ${proc.stderr.trim().split('\n').slice(-3).join(' ').slice(0, 500)}` : 'Claude Code stopped.', 'stopped');
   child.on('error', (err) => end(proc, new TurnFailure(`Claude Code could not start: ${err.message}`, 'stopped')));
-  child.on('exit', () => end(proc, stopped()));
-  const ready = (await control(proc, { subtype: 'initialize', hooks: null })) as { models?: unknown } | null;
+  // Why it stopped is read once its output is closed: at its exit, Node may not have handed over all
+  // it wrote to standard error, and the reason was cut to "Claude Code stopped.". A program it left
+  // holding the pipes open is not waited for long.
+  child.on('exit', () => setTimeout(() => end(proc, stopped()), DRAIN_MS).unref());
+  child.on('close', () => end(proc, stopped()));
+  let ready: { models?: unknown } | null;
+  try {
+    ready = (await unlessStopped(turn.signal, control(proc, { subtype: 'initialize', hooks: null }))) as { models?: unknown } | null;
+  } catch (err) {
+    // Stopped while it started: ended, and the message never sent.
+    if (err instanceof Stopped) close(proc);
+    throw err;
+  }
   if (!proc.alive) throw stopped();
   if (Array.isArray(ready?.models)) {
     const models = (ready.models as Array<{ value?: unknown; displayName?: unknown }>)
@@ -367,6 +414,33 @@ async function start(turn: Turn, options: ConfigOption[]): Promise<Proc> {
 /** Each chat's settings, as last set, for its next start. */
 const settings = new Map<string, ConfigOption[]>();
 
+/** A message sent to the chat's program, as its next turn; how the turn ended. */
+function send(proc: Proc, turn: Turn, message: string): Promise<string> {
+  if (turn.signal.aborted) return Promise.resolve('cancelled');
+  return new Promise<string>((resolve, reject) => {
+    proc.turn = turn;
+    proc.cancelled = false;
+    proc.lastUsage = null;
+    proc.finish = resolve;
+    proc.fail = reject;
+    write(proc, { type: 'user', message: { role: 'user', content: [{ type: 'text', text: message }] }, parent_tool_use_id: null });
+  });
+}
+
+/** The chat's program started, and the message sent as its first turn; `said` learns whether anything of it was shown. */
+async function startAndSend(turn: Turn, options: ConfigOption[], message: string, said: { any: boolean }): Promise<string> {
+  // The models Claude Code names replace the fallback list: kept as this chat's settings.
+  const relay: Turn = {
+    ...turn,
+    emit: (event) => {
+      said.any = true;
+      turn.emit(event);
+    },
+    setOptions: (next) => (settings.set(turn.chatId, next), turn.setOptions(next)),
+  };
+  return send(await start(relay, options), relay, message);
+}
+
 export const claudeBackend: Backend = {
   async run(turn, message) {
     let options = settings.get(turn.chatId);
@@ -375,30 +449,41 @@ export const claudeBackend: Backend = {
       settings.set(turn.chatId, options);
       turn.setOptions(options);
     }
-    let proc = procs.get(turn.chatId);
-    if (!proc || !proc.alive) {
-      const held = options;
-      // The models Claude Code names replace the fallback list: kept as this chat's settings.
-      const relay: Turn = { ...turn, setOptions: (next) => (settings.set(turn.chatId, next), turn.setOptions(next)) };
-      proc = await start(relay, held);
+    const proc = procs.get(turn.chatId);
+    if (proc && proc.alive) return send(proc, turn, message);
+    const said = { any: false };
+    try {
+      return await startAndSend(turn, options, message, said);
+    } catch (err) {
+      if (err instanceof Stopped) return 'cancelled';
+      // The session the chat continues is gone - Claude Code deletes its transcripts after a month - and
+      // every message failed on it for good. The message goes to a new session, once, before anything
+      // of it was shown; system/init keeps that one as the chat's.
+      if (!(err instanceof TurnFailure) || !turn.sessionId || said.any || !SESSION_GONE.test(err.message) || turn.signal.aborted) throw err;
+      const left = procs.get(turn.chatId);
+      if (left) close(left);
+      turn.emit({ type: 'notice', notice: 'new-session' });
+      try {
+        return await startAndSend({ ...turn, sessionId: null }, options, message, said);
+      } catch (again) {
+        if (again instanceof Stopped) return 'cancelled';
+        throw again;
+      }
     }
-    const running = proc;
-    return new Promise<string>((resolve, reject) => {
-      running.turn = turn;
-      running.cancelled = false;
-      running.lastUsage = null;
-      running.finish = resolve;
-      running.fail = reject;
-      write(running, { type: 'user', message: { role: 'user', content: [{ type: 'text', text: message }] }, parent_tool_use_id: null });
-    });
   },
 
   cancel(chatId) {
     const proc = procs.get(chatId);
     if (!proc?.turn) return;
     proc.cancelled = true;
-    void control(proc, { subtype: 'interrupt' }, STOP_GRACE);
-    setTimeout(() => proc.turn && close(proc), STOP_GRACE);
+    void control(proc, { subtype: 'interrupt' }, STOP_GRACE.ms);
+    // Ended if this turn has not ended by then: a turn begun after it - Stop, then the question asked again - is not this one's to end.
+    const stopped = proc.turn;
+    if (proc.stopTimer) clearTimeout(proc.stopTimer);
+    proc.stopTimer = setTimeout(() => {
+      proc.stopTimer = null;
+      if (proc.turn === stopped) close(proc);
+    }, STOP_GRACE.ms);
   },
 
   async setOption(chatId, options, option, value) {

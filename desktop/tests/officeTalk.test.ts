@@ -62,6 +62,11 @@ test('LM Studio writes the scene with the model chosen, about the vault’s last
   // can come by its 8.3 short name, which the vault's reader takes for a link and does not read.
   const vault = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-ofis-')));
   fs.writeFileSync(path.join(vault, 'Proje planı.md'), '# Plan\n\nÜçüncü madde havada kaldı.\n');
+  // Caught from the clipboard and marked private by the engine: newer, and never sent.
+  fs.mkdirSync(path.join(vault, '📥 000-Inbox', 'Yakala'), { recursive: true });
+  fs.writeFileSync(path.join(vault, '📥 000-Inbox', 'Yakala', '2026-10-22-iban.md'), '---\ntur: yakala\nvisibility: private\n---\n# TR12 0006 IBAN\n');
+  fs.writeFileSync(path.join(vault, 'Gizli.md'), '---\nvisibility: private\n---\nŞifre: hunter2\n');
+  fs.writeFileSync(path.join(vault, 'Forward.md'), '---\nkaynak_guveni: guvenilmeyen\n---\nGelen ileti.\n');
   fs.mkdirSync(path.join(vault, 'receipts'));
   fs.writeFileSync(path.join(vault, 'receipts', 'abc.md'), '---\n{"kind": "receipt"}\n---\nMakbuz.\n');
   updateSettings((settings) => {
@@ -95,6 +100,7 @@ test('LM Studio writes the scene with the model chosen, about the vault’s last
     const prompt = asked[0].messages.map((one) => one.content).join('\n');
     assert.ok(prompt.includes('«Proje planı» — Plan Üçüncü madde havada kaldı.'));
     assert.ok(!prompt.includes('Makbuz'), 'what Cortex’s engine keeps does not go');
+    for (const kept of ['IBAN', 'iban', 'hunter2', 'Gizli', 'Forward', 'Gelen ileti']) assert.ok(!prompt.includes(kept), `nothing private, caught or untrusted goes: ${kept}`);
     await officeTalk({ tool: 'lmstudio', model: 'yok-boyle-bir-model', cast, language: 'tr' });
     assert.equal(asked[1].model, 'qwen3-8b', 'a model the server no longer has: the loaded one');
     await assert.rejects(officeTalk({ tool: 'codex', model: null, cast, language: 'tr' }));

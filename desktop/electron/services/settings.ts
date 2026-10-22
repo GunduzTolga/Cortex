@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
 import type { AppLanguage } from '../../shared/language';
+import { renameRetrying } from './fileWrite';
 
 /**
  * The app's own settings file: which vault is open, which language the
@@ -115,20 +116,6 @@ export function readSettings(): Settings {
 export function settingsUnreadable(): 'copied' | 'left' | null {
   readSettings();
   return unreadable;
-}
-
-/** A rename tried again for a moment while Windows says the file is busy: an antivirus or the indexer opens a file just written. */
-function renameRetrying(from: string, to: string): void {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      fs.renameSync(from, to);
-      return;
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code ?? '';
-      if (process.platform !== 'win32' || attempt >= 8 || !['EPERM', 'EACCES', 'EBUSY'].includes(code)) throw err;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25 * (attempt + 1));
-    }
-  }
 }
 
 /** Change the settings and write them at once: two small facts, written rarely, need no debounce. */

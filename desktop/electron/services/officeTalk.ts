@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { app } from 'electron';
+import { readProperties, splitProperties } from '../../core/vaultNotes';
 import { TALK_TOOLS, type TalkLine, type TalkPerson, type TalkRequest, type TalkTool } from '../../shared/office';
 import { childEnv } from './acp';
 import { programOf } from './clis';
@@ -16,7 +17,9 @@ import { readVaultNote, vaultIndex } from './vaultNotes';
  * settings writes a short scene for the team, about the notes they last worked on.
  *
  * What goes to the model is what the office's settings say goes: the titles of the notes edited
- * last and a short piece of each, the cast, how the person is addressed. A model server on this
+ * last and a short piece of each, the cast, how the person is addressed. Not the inbox, and no note
+ * the engine marks private or from a source it does not trust: a clipboard, a mail, a forwarded
+ * Telegram message caught there. A model server on this
  * machine keeps it on the machine; Claude Code sends it to Anthropic, as any of its turns does.
  * Claude Code runs in a folder of the app's own, not in the vault, so no hook or file of the
  * vault is in its reach. Programs are started without a shell.
@@ -55,22 +58,37 @@ export function pieceOf(text: string, limit = PIECE): string {
   return plain.length > limit ? `${plain.slice(0, limit).trimEnd()}…` : plain;
 }
 
-/** The notes worked on last, by title with a short piece: what Cortex's engine keeps left out. */
+/** The vault's inbox, at its top (`📥 000-Inbox`), as core/vaultNotes.ts finds it: what was caught there is the person's, not yet a note. */
+const IN_INBOX = /^(?:[^/]*\s)?000-Inbox\//;
+
+/** Whether the engine marks a note as not to go anywhere: private (a clipboard, a mail, a file caught), or from a source it does not trust. */
+export function keptPrivate(text: string): boolean {
+  const properties = readProperties(splitProperties(text).yaml).properties;
+  const value = (key: string) => {
+    const found = properties.find((one) => one.key.toLowerCase() === key)?.value;
+    return typeof found === 'string' ? found.trim().toLowerCase() : found;
+  };
+  return value('visibility') === 'private' || value('untrusted') === true || value('trust') === 'untrusted' || value('kaynak_guveni') === 'guvenilmeyen';
+}
+
+/** The notes worked on last, by title with a short piece: what Cortex's engine keeps left out, and what it marks private. */
 async function recentNotes(): Promise<Array<{ title: string; piece: string }>> {
   const index = await vaultIndex();
-  const notes = index.notes
-    .filter((note) => !note.keeper && !note.tooLarge && !/^(receipts|daily|knowledge)\//.test(note.path))
+  const candidates = index.notes
+    .filter((note) => !note.keeper && !note.tooLarge && !/^(receipts|daily|knowledge)\//.test(note.path) && !IN_INBOX.test(note.path.normalize('NFC')))
     .sort((a, b) => b.modified - a.modified)
-    .slice(0, NOTES);
+    .slice(0, NOTES * 4);
   const out: Array<{ title: string; piece: string }> = [];
-  for (const note of notes) {
-    let piece = '';
+  for (const note of candidates) {
+    if (out.length >= NOTES) break;
+    let text = '';
     try {
-      piece = pieceOf((await readVaultNote(note.path)).text ?? '');
+      text = (await readVaultNote(note.path)).text ?? '';
     } catch {
-      piece = '';
+      text = '';
     }
-    out.push({ title: path.posix.basename(note.path).replace(/\.md$/i, ''), piece });
+    if (keptPrivate(text)) continue;
+    out.push({ title: path.posix.basename(note.path).replace(/\.md$/i, ''), piece: pieceOf(text) });
   }
   return out;
 }

@@ -66,6 +66,8 @@ const RULES: Rule[] = [
   { pattern: /^Claude Code could not start: ([\s\S]*)$/, say: ([words]) => `Claude Code başlatılamadı: ${words}` },
   { pattern: /^(Claude Code|Codex) could not answer\.$/, say: ([tool]) => `${tool} cevap veremedi.` },
   { pattern: /^Codex did not start a thread\.$/, say: () => 'Codex bir konuşma başlatmadı.' },
+  { pattern: /^Codex stopped\.$/, say: () => 'Codex durdu.' },
+  { pattern: /^Codex stopped: ([\s\S]*)$/, say: ([words]) => `Codex durdu: ${words}` },
 
   // electron/services/localChat.ts: LM Studio, Ollama
   { pattern: /^([\s\S]+?) is not running\. Open it, load a model, and write again\.$/, say: ([server]) => `${server} çalışmıyor. Uygulamayı aç, bir model yükle ve yeniden yaz.` },

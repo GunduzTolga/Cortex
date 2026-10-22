@@ -81,7 +81,9 @@ export type ChatEvent =
   | { type: 'plan'; entries: Array<{ content: string; status: string }> }
   | { type: 'usage'; used: number; size: number; cost: number | null; currency: string | null }
   | { type: 'done'; reason: string }
-  | { type: 'error'; message: string; kind: string | null };
+  | { type: 'error'; message: string; kind: string | null }
+  /** Something the person should know about the answer: `new-session`, the CLI could not continue the chat's conversation and began a new one. */
+  | { type: 'notice'; notice: string };
 
 export interface ChatOpened {
   chat: ChatSummary;

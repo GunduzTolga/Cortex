@@ -35,6 +35,12 @@ export interface Turn {
   chatId: string;
   cli: CliId;
   vault: string;
+  /**
+   * Aborted when the person presses Stop. A turn still starting its CLI - a cold start, a session
+   * resumed, the memory hook asked - ends there as `cancelled`, its message never sent: Stop used to
+   * wait for the start, and the message it was pressed against was then sent and answered anyway.
+   */
+  signal: AbortSignal;
   /** The session the chat continues, or null for a new one. */
   sessionId: string | null;
   /** The turn's number in the chat since the app started, for a message the CLI gave no id. */
@@ -62,22 +68,82 @@ export interface Backend {
   shutdown(): void;
 }
 
-/** After Stop, how long a CLI has to end its turn before it is ended itself. */
-export const STOP_GRACE = 8000;
+/** After Stop, how long a CLI has to end its turn before it is ended itself: in an object, so a test can wait less. */
+export const STOP_GRACE = { ms: 8000 };
 export const OUTPUT_MAX = 4000;
 export const TITLE_MAX = 300;
 
+/** A turn's setup given up because the person pressed Stop: the backend ends the turn as `cancelled`. */
+export class Stopped extends Error {}
+
+/**
+ * A step of a turn's setup, or the turn's Stop, whichever comes first. Racing matters: a setup that
+ * never ends - a CLI stuck in its `initialize`, a request with no answer - held the chat "running"
+ * until the app was closed. The step itself goes on and is used by the next turn, or not at all.
+ */
+export function unlessStopped<T>(signal: AbortSignal, step: Promise<T>): Promise<T> {
+  if (signal.aborted) {
+    step.catch(() => undefined);
+    return Promise.reject(new Stopped());
+  }
+  return new Promise<T>((resolve, reject) => {
+    const stop = () => reject(new Stopped());
+    signal.addEventListener('abort', stop, { once: true });
+    step.then(
+      (value) => {
+        signal.removeEventListener('abort', stop);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener('abort', stop);
+        reject(err);
+      },
+    );
+  });
+}
+
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const spellings = (place: string) => [...new Set([place, place.replace(/\\/g, '/'), place.replace(/\//g, '\\')])].map(escape).join('|');
+/** A place's name ends where no letter or digit follows, nor a `.`, `-` or `_` before one: `Kasa` is not `Kasa2` or `Kasa.bak` beside it, and is still `Kasa` at the end of a sentence. */
+const ENDS = '(?![.\\-]?[\\w\\u00C0-\\uFFFF])';
 
 /** Every spelling of the vault's place and the person's home in a text, the vault's taken off and home said as `~`. */
 export function scrubberFor(vault: string, home = os.homedir()): (text: string) => string {
-  const spellings = (place: string) => [...new Set([place, place.replace(/\\/g, '/'), place.replace(/\//g, '\\')])].map(escape).join('|');
-  const inVault = new RegExp(`(?:${spellings(vault)})[\\\\/]?`, 'gi');
-  const inHome = home ? new RegExp(`(?:${spellings(home)})`, 'gi') : null;
+  const inVault = new RegExp(`(?:${spellings(vault)})${ENDS}[\\\\/]?`, 'gi');
+  const inHome = home ? new RegExp(`(?:${spellings(home)})${ENDS}`, 'gi') : null;
   return (text) => {
     const relative = text.replace(inVault, '');
     return inHome ? relative.replace(inHome, '~') : relative;
   };
+}
+
+/** How a card names the vault's place, in the window's language. */
+export const vaultWord = (turkish: boolean) => (turkish ? '‹Kasa›' : '‹Vault›');
+
+/**
+ * What a card asking leave says, made safe to show but hiding nothing: the vault's place said as a
+ * word (`‹Kasa›/Notes/a.md`), home as `~`, the rest as it is. The transcript's scrubber takes the
+ * vault's place off, which on a card read `rm -rf "C:\Users\ayse\Kasa"` as `rm -rf ""`: the one
+ * step that deletes the vault shown as a step that does nothing.
+ */
+export function cardTextFor(vault: string, word: string, home = os.homedir()): (text: string) => string {
+  const inVault = new RegExp(`(?:${spellings(vault)})${ENDS}`, 'gi');
+  const inHome = home ? new RegExp(`(?:${spellings(home)})${ENDS}`, 'gi') : null;
+  return (text) => {
+    const named = text.replace(inVault, word);
+    return inHome ? named.replace(inHome, '~') : named;
+  };
+}
+
+/** A path on a card: relative to the vault with `/`, the vault itself by its word, and outside it whole (home as `~`), never cut to its file's name. */
+export function cardPath(vault: string, place: string, say: (text: string) => string): string {
+  const shown = shownPath(vault, place);
+  return shown.startsWith('…/') || shown === '.' ? say(path.resolve(vault, place)) : shown;
+}
+
+/** Text cut for a card, the cut said: a command's harmless head never stands for the whole of it. */
+export function cutSaid(text: string, max = OUTPUT_MAX): string {
+  return text.length > max ? `${text.slice(0, max)}… (+${text.length - max})` : text;
 }
 
 /** A path a CLI names, as the window may see it: relative to the vault with `/`, or only its file's name outside it. */

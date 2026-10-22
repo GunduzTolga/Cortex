@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import type { ChatEvent, ChatPush } from '../shared/chat';
-import { answerChat, cancelChat, forgetChats, onChatPush, openChat, sendChat, setChatOption, shutdownChats } from '../electron/services/chat';
+import { answerChat, cancelChat, forgetChats, onChatPush, openChat, restartIdleChats, sendChat, setChatOption, shutdownChats } from '../electron/services/chat';
+import { STOP_GRACE } from '../electron/services/chatKit';
 import { codexOptions, sentenceOf } from '../electron/services/codexChat';
 import { updateSettings } from '../electron/services/settings';
 
@@ -51,8 +52,11 @@ function useVault(): { vault: string; log: string } {
   process.env.FAKE_AGENT_LOG = log;
   return { vault, log };
 }
-const sent = (log: string) => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { method: string; params: Record<string, unknown>; cwd: string }) : []);
+const sent = (log: string) => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { method: string; params: Record<string, unknown>; cwd: string; pid: number }) : []);
 const turnsStarted = (log: string) => sent(log).filter((one) => one.method === 'turn/start');
+const lastText = (chatId: string, after = 0) => textOf(eventsOf(chatId).slice(after));
+/** What the stand-in was given for more permissions, as it said it back. */
+const granted = (chatId: string, after = 0) => JSON.parse(/yetki: (\{.*?\})\. /.exec(lastText(chatId, after))?.[1] ?? 'null') as { permissions: Record<string, unknown>; scope: string } | null;
 
 test.after(() => shutdownChats());
 
@@ -163,4 +167,117 @@ test('Codex not signed in, or on a model the account may not use, says so; Stop 
   assert.deepEqual(await doneOf(id, before), { type: 'done', reason: 'end_turn' });
   const resumed = sent(log).find((one) => one.method === 'thread/resume');
   assert.match(String(resumed?.params.threadId), /^thr-\d+-1$/, 'the thread the chat had, resumed');
+});
+
+test('more permissions asked for are given only when allowed: Reject gives nothing, as does a turn stopped while the card waits; the card says what would be given', async () => {
+  const outside = path.join(os.homedir(), 'Dis', 'indirilenler');
+  process.env.FAKE_CODEX_OUTSIDE = outside;
+  try {
+    useVault();
+    const { id } = sendChat(null, 'test-codex', 'yetki iste');
+    let card = await cardOf(id);
+    assert.equal(card.title, 'Paketleri indirmem gerekiyor', 'the reason, as the model wrote it');
+    assert.deepEqual(card.paths, ['Network access', `Write: ${path.join('~', 'Dis', 'indirilenler')}`], 'and beside it what would be given, a folder outside the vault whole');
+    answerChat(id, card.id, 'decline');
+    await doneOf(id);
+    assert.deepEqual(granted(id), { permissions: {}, scope: 'turn' }, 'Reject grants nothing');
+
+    for (const [answer, scope] of [['once', 'turn'], ['session', 'session']] as const) {
+      const before = eventsOf(id).length;
+      sendChat(id, 'test-codex', 'yetki iste');
+      card = await cardOf(id, before);
+      answerChat(id, card.id, answer);
+      await doneOf(id, before);
+      const given = granted(id, before);
+      assert.equal(given?.scope, scope, answer);
+      assert.deepEqual(given?.permissions.network, { enabled: true }, answer);
+      // Said back in the chat, where home is said as ~.
+      const write = (given?.permissions.fileSystem as { write?: string[] } | undefined)?.write ?? [];
+      assert.ok(write.length === 1 && write[0].endsWith(path.join('Dis', 'indirilenler')), `${answer}: ${JSON.stringify(given)}`);
+    }
+
+    const before = eventsOf(id).length;
+    sendChat(id, 'test-codex', 'yetki iste');
+    await cardOf(id, before);
+    cancelChat(id);
+    await doneOf(id, before);
+    assert.deepEqual(granted(id, before)?.permissions, {}, 'a card left by Stop is no');
+  } finally {
+    delete process.env.FAKE_CODEX_OUTSIDE;
+  }
+});
+
+test('a command card says the whole command, the vault as a word: not its first part, not an empty string', async () => {
+  const { vault } = useVault();
+  const { id } = sendChat(null, 'test-codex', 'izin iste');
+  const card = await cardOf(id);
+  assert.equal(card.title, `$ git status ‹Vault›`, 'the command as the server will run it, the vault named');
+  assert.ok(!card.title.includes(vault));
+  answerChat(id, card.id, 'decline');
+  await doneOf(id);
+});
+
+test('a Codex server that dies mid-turn ends the turn, and the next message starts it again', async () => {
+  const { log } = useVault();
+  const { id } = sendChat(null, 'test-codex', 'yavaş olsun');
+  await until(() => eventsOf(id).some((one) => one.type === 'text' && one.text.includes('Uzun')), 'the slow answer');
+  process.kill(sent(log)[0].pid, 'SIGKILL');
+  const ended = await doneOf(id);
+  assert.ok(ended.type === 'error' && ended.kind === 'stopped', JSON.stringify(ended));
+  assert.equal(openChat(id).running, false);
+  const before = eventsOf(id).length;
+  sendChat(id, 'test-codex', 'tekrar merhaba');
+  assert.deepEqual(await doneOf(id, before), { type: 'done', reason: 'end_turn' }, 'started again');
+  assert.equal(new Set(sent(log).map((one) => one.pid)).size, 2);
+});
+
+test('Stop ends a Codex turn that will not stop, and a turn whose server is closed for another vault', async () => {
+  const grace = STOP_GRACE.ms;
+  STOP_GRACE.ms = 300;
+  try {
+    useVault();
+    const { id } = sendChat(null, 'test-codex', 'inatçı ol');
+    await until(() => eventsOf(id).some((one) => one.type === 'text' && one.text.includes('Durmayacağım')), 'the stubborn answer');
+    cancelChat(id);
+    assert.deepEqual(await doneOf(id), { type: 'done', reason: 'cancelled' }, 'ended after its grace, as stopped');
+
+    const before = eventsOf(id).length;
+    sendChat(id, 'test-codex', 'yavaş olsun');
+    await until(() => eventsOf(id).slice(before).some((one) => one.type === 'text' && one.text.includes('Uzun')), 'the slow answer');
+    shutdownChats();
+    const ended = await doneOf(id, before);
+    assert.ok(ended.type === 'error' && ended.kind === 'stopped', JSON.stringify(ended));
+    assert.equal(openChat(id).running, false);
+  } finally {
+    STOP_GRACE.ms = grace;
+  }
+});
+
+test('Stop pressed before Codex has named the turn still interrupts it', async () => {
+  const { log } = useVault();
+  const { id } = sendChat(null, 'test-codex', 'geç ve yavaş');
+  await until(() => turnsStarted(log).length > 0, 'the turn sent');
+  cancelChat(id);
+  assert.deepEqual(await doneOf(id), { type: 'done', reason: 'cancelled' });
+  assert.match(String(sent(log).find((one) => one.method === 'turn/interrupt')?.params.turnId), /^turn-\d+$/);
+});
+
+test('Stop on one Codex chat that will not stop lets that one go, and the other chats on the server go on', async () => {
+  const grace = STOP_GRACE.ms;
+  STOP_GRACE.ms = 300;
+  try {
+    const { log } = useVault();
+    const waiting = sendChat(null, 'test-codex', 'izin iste').id;
+    const card = await cardOf(waiting);
+    const stubborn = sendChat(null, 'test-codex', 'inatçı ol').id;
+    await until(() => eventsOf(stubborn).some((one) => one.type === 'text' && one.text.includes('Durmayacağım')), 'the stubborn answer');
+    cancelChat(stubborn);
+    assert.deepEqual(await doneOf(stubborn), { type: 'done', reason: 'cancelled' });
+    answerChat(waiting, card.id, 'once');
+    assert.deepEqual(await doneOf(waiting), { type: 'done', reason: 'end_turn' }, 'the other chat answered');
+    assert.equal(sent(log).filter((one) => one.method === 'initialize').length, 1, 'on the same server, never closed');
+    assert.equal(restartIdleChats(), true);
+  } finally {
+    STOP_GRACE.ms = grace;
+  }
 });

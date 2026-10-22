@@ -2,15 +2,18 @@
 // and the end-to-end run (CORTEX_TEST_CODEX). Its messages are shaped as Codex
 // 0.162.1 was recorded writing them (14 October), from the types it generates
 // itself. What it does is chosen by words in the message: "izin" asks leave to
-// run a command, "dosya" to change a file, "plan" writes a plan, "yavaş" waits
-// to be interrupted, "hata" fails as a sign-in that has gone does, "model"
-// fails as a model the account may not use does. Every method it is sent is
-// written to FAKE_AGENT_LOG, when set.
+// run a command, "dosya" to change a file, "yetki" asks for more permissions
+// (the network, a folder outside the vault to write in) and says what it was
+// given, "plan" writes a plan, "yavaş" waits to be interrupted, "inatçı" waits
+// and never heeds an interrupt, "geç" answers its turn/start late, "hata" fails
+// as a sign-in that has gone does, "model" fails as a model the account may
+// not use does. Every method it is sent is written to FAKE_AGENT_LOG, when
+// set, with its process id.
 import fs from 'node:fs';
 import path from 'node:path';
 
 const cwd = process.cwd();
-const log = (entry) => process.env.FAKE_AGENT_LOG && fs.appendFileSync(process.env.FAKE_AGENT_LOG, `${JSON.stringify(entry)}\n`);
+const log = (entry) => process.env.FAKE_AGENT_LOG && fs.appendFileSync(process.env.FAKE_AGENT_LOG, `${JSON.stringify({ ...entry, pid: process.pid })}\n`);
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const notify = (method, params) => send({ method, params, emittedAtMs: Date.now() });
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -60,6 +63,11 @@ async function turn(threadId, turnId, text) {
     const answer = await ask('item/commandExecution/requestApproval', { threadId, turnId, itemId: 'exec-2', startedAtMs: Date.now(), command: `git status ${cwd}`, cwd, reason: null, environmentId: null });
     said += `komut: ${answer.decision}. `;
   }
+  if (text.includes('yetki')) {
+    const permissions = { network: { enabled: true }, fileSystem: { write: [process.env.FAKE_CODEX_OUTSIDE ?? path.join(path.parse(cwd).root, 'dis')] } };
+    const answer = await ask('item/permissions/requestApproval', { threadId, turnId, itemId: 'perm-1', reason: 'Paketleri indirmem gerekiyor', permissions });
+    said += `yetki: ${JSON.stringify(answer)}. `;
+  }
   if (text.includes('dosya')) {
     const change = { type: 'fileChange', id: 'patch-1', changes: [{ path: note, kind: 'update', diff: '@@\n-# Plan\n+# Plan 2\n+yeni satır\n' }], status: 'inProgress' };
     item('item/started', change);
@@ -71,6 +79,10 @@ async function turn(threadId, turnId, text) {
     notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg_c', delta: ' Uzun sürecek…' });
     while (!interrupted.has(turnId)) await sleep(20);
     return finish('interrupted');
+  }
+  if (text.includes('inatçı')) {
+    notify('item/agentMessage/delta', { threadId, turnId, itemId: 'msg_c', delta: ' Durmayacağım…' });
+    for (;;) await sleep(1000);
   }
   // The final answer comes whole, in its completion, with no pieces before it.
   item('item/started', { type: 'agentMessage', id: 'msg_f', text: '', phase: 'final_answer' });
@@ -110,8 +122,14 @@ process.stdin.on('data', (chunk) => {
     } else if (method === 'turn/start') {
       turns += 1;
       const turnId = `turn-${turns}`;
-      send({ id, result: { turn: { id: turnId, items: [], status: 'inProgress', error: null } } });
-      void turn(params.threadId, turnId, params.input.map((part) => part.text ?? '').join(' '));
+      const text = params.input.map((part) => part.text ?? '').join(' ');
+      const begin = () => {
+        send({ id, result: { turn: { id: turnId, items: [], status: 'inProgress', error: null } } });
+        void turn(params.threadId, turnId, text);
+      };
+      // Answered late: Stop can be pressed before the turn has its id.
+      if (text.includes('geç')) setTimeout(begin, 400);
+      else begin();
     } else if (method === 'turn/interrupt') {
       interrupted.add(params.turnId);
       send({ id, result: {} });

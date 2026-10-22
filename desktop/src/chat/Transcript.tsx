@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Brain, Check, ChevronRight, FileText, Globe, ListChecks, PencilLine, Search, Terminal, Wrench, X } from 'lucide-react';
+import { AlertTriangle, Brain, Check, ChevronRight, FileText, Globe, Info, ListChecks, PencilLine, Search, Terminal, Wrench, X } from 'lucide-react';
 // The small face: drawn for 24-32 px. While Pyn is still writing, the thinking one.
 import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz-kucuk.svg';
 import thinkingFace from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz-kucuk-dusunuyor.svg';
@@ -105,6 +105,12 @@ function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?
     <div className="flex gap-3" data-chat-answer>
       <img src={working ? thinkingFace : face} alt="" className="mt-0.5 h-7 w-7 shrink-0" data-chat-face={working ? 'thinking' : 'idle'} />
       <div className="min-w-0 flex-1">
+        {turn.notices.includes('new-session') ? (
+          <p className="mb-2 flex items-start gap-1.5 text-[11.5px] text-zinc-500" data-chat-notice="new-session">
+            <Info size={13} className="mt-0.5 shrink-0" />
+            {t('chat.notice.newSession')}
+          </p>
+        ) : null}
         {turn.thought ? (
           <Fold data="thought" icon={<Brain size={12} />} label={t(working && !turn.text ? 'chat.thinking' : 'chat.thought')} busy={working && !turn.text}>
             <p className="max-h-64 overflow-y-auto whitespace-pre-wrap text-[12.5px] italic leading-relaxed text-zinc-500">{turn.thought}</p>

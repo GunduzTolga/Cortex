@@ -41,9 +41,16 @@ interface Known {
  * one JSON object a line, steps it would ask about asked of the host. The host is asked only
  * when it is named (`--permission-prompt-tool stdio`, as the SDK does when it is given a
  * `canUseTool`): without it every such step was refused unasked, and Pyn could not write to
- * Core.md (21 October). The vault's notes are Pyn's to write without asking (`Edit(/**)`, the
- * folder it starts in, for every file-editing tool); outside the vault it still asks, and
- * Claude Code keeps asking for its own `.claude` settings and hooks whatever the rule.
+ * Core.md (21 October).
+ *
+ * The vault's notes are Pyn's to write without asking: its Markdown files, at any depth of the
+ * folder it starts in, for every file-editing tool (the rule below), Core.md and the inbox's cards
+ * among them. Nothing else in the vault is: it holds code that runs - the engine (`beyin.py`),
+ * the other CLIs' hooks and plugins (`.opencode/plugins`, `.gemini/settings.json`,
+ * `.codex/hooks.json`…) - and a note with words planted in it could have had Pyn rewrite them
+ * unasked, for them to run at the next start (`Edit(/**)` did, until 22 October). Those, and
+ * anything outside the vault, ask. So does every command but the one receipt the vault's own Stop
+ * hook asks for, in the spelling it gives on Windows (`py -3`) and elsewhere (`python3`).
  */
 export const CLAUDE_ARGS = [
   '-p',
@@ -56,7 +63,9 @@ export const CLAUDE_ARGS = [
   '--permission-prompt-tool',
   'stdio',
   '--allowedTools',
-  'Edit(/**)',
+  'Edit(/**/*.md)',
+  'Bash(py -3 beyin.py receipt:*)',
+  'Bash(python3 beyin.py receipt:*)',
 ];
 
 const KNOWN: Known[] = [

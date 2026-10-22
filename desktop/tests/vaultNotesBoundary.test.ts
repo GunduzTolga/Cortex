@@ -23,12 +23,16 @@ function sources(dir: string): string[] {
   return out;
 }
 
-test('only the IPC module imports the whole-vault reader', () => {
+test('only the IPC module imports the whole-vault reader, and the office, which keeps what is private out', () => {
+  // Imported by any path: `./vaultNotes` from beside it was missed, and the office's import with it.
   const importers = ['core', 'electron', 'shared', 'src']
     .flatMap(sources)
-    .filter((file) => /services\/vaultNotes['"]/.test(fs.readFileSync(file, 'utf8')))
-    .map((file) => file.split(path.sep).join('/'));
-  assert.deepEqual(importers, ['electron/ipc.ts']);
+    .filter((file) => /(?:services\/|\.\/)vaultNotes['"]/.test(fs.readFileSync(file, 'utf8')))
+    .map((file) => file.split(path.sep).join('/'))
+    .sort();
+  // electron/services/officeTalk.ts: the office's live conversation, opt in, sends note titles and short
+  // pieces to the model chosen; never the inbox, nor a note the engine marks private or untrusted.
+  assert.deepEqual(importers, ['electron/ipc.ts', 'electron/services/officeTalk.ts']);
 });
 
 test('and uses it in the notes channels and where a vault is chosen, nowhere else', () => {
