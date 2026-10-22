@@ -706,13 +706,17 @@ const enterInNote = await page.evaluate(() => Boolean(document.activeElement?.cl
 await page.keyboard.press('Enter');
 await notesView.locator('[data-note-mode="read"]').click();
 // An Enter that had answered would have taken the notice and the card with it: then the run goes on to say so, not stop.
-await waitingNotice
+const ledBack = await waitingNotice
   .locator('[data-toast-action]')
   .click({ timeout: 5_000 })
-  .catch(() => page.locator('[data-app-view="pyn"]').click());
+  .then(
+    () => true,
+    () => page.locator('[data-app-view="pyn"]').click().then(() => false),
+  );
 check(
   'and the notice leads back to the chat and its card, and goes; the chat is marked in the list',
-  (await page.locator('[data-app-view="pyn"]').getAttribute('aria-pressed')) === 'true' &&
+  ledBack &&
+    (await page.locator('[data-app-view="pyn"]').getAttribute('aria-pressed')) === 'true' &&
     (await shownSoon(page.locator('[data-chat-permission]'), 3_000)) &&
     (await waitingNotice.count()) === 0 &&
     (await page.locator('[data-chat-item] [data-chat-waiting]').count()) === 1,
@@ -912,7 +916,8 @@ check(
   'nothing was written into what is hidden',
   fs.readFileSync(vaultNote('.hidden/Secret.md'), 'utf8') === hiddenBefore && fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'utf8') === obsidianBefore,
 );
-await page.locator('[data-app-view="notes"]').click();
+// The graph left in front: the app opens on it again, with neither the notes nor the chat drawn to read the vault for it.
+await page.locator('[data-app-view="graph"]').click();
 
 /*
   Last before the restart, because Playwright waits for a navigation it saw
@@ -938,7 +943,19 @@ page = await app.firstWindow();
 await page.waitForLoadState('domcontentloaded');
 await holdBrowser();
 listen(page);
-check('the vault chosen is opened again, with nothing to choose', await shownSoon(page.locator('[data-notes-view]'), 30_000));
+check('the vault chosen is opened again, with nothing to choose', await shownSoon(page.locator('[data-vault-screen]'), 30_000));
+check(
+  'on the graph, as it was left, and it draws the vault’s notes with nothing else opened to read them',
+  (await page.locator('[data-app-view="graph"]').getAttribute('aria-pressed')) === 'true' &&
+    (await page
+      .waitForFunction(() => Number(document.querySelector('[data-notes-graph="vault"]')?.getAttribute('data-graph-nodes')) >= 4, null, { timeout: 10_000 })
+      .then(
+        () => true,
+        () => false,
+      )) &&
+    (await page.locator('[data-notes-view]').count()) === 0 &&
+    (await page.locator('[data-chat-view]').count()) === 0,
+);
 check('in the language chosen', (await page.evaluate(() => document.documentElement.lang)) === 'en');
 check('and the settings file is in the app’s data, not in the vault', fs.existsSync(path.join(userData, 'settings.json')) && !fs.readdirSync(vaultDir).includes('settings.json'));
 

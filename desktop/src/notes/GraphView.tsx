@@ -155,10 +155,14 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
   const current = useRef(graph);
   current.current = graph;
 
-  const folders = useMemo(() => {
-    const tops = [...new Set((index?.notes ?? []).map((note) => (note.path.includes('/') ? note.path.slice(0, note.path.indexOf('/')) : '')))].sort();
-    return new Map(tops.map((top, at) => [top, COLOURS[at % COLOURS.length]]));
-  }, [index]);
+  /*
+    The top folders' colours, made again only when the folders are. The index is
+    a new object at every read, and it is read again in every view (App.tsx): a
+    map made from it each time made the simulation again, behind whichever view
+    was in front, at every note Pyn wrote and every return to the window.
+  */
+  const tops = useMemo(() => JSON.stringify([...new Set((index?.notes ?? []).map((note) => (note.path.includes('/') ? note.path.slice(0, note.path.indexOf('/')) : '')))].sort()), [index]);
+  const folders = useMemo(() => new Map((JSON.parse(tops) as string[]).map((top, at) => [top, COLOURS[at % COLOURS.length]])), [tops]);
 
   /** The view that shows every point, with a margin around them. */
   const fitted = (): View | null => {

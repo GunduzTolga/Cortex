@@ -154,10 +154,13 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
     the links in its answers, the graph and the office showed the vault as it
     was until the notes were opened (desktop-ui-7). The index is built again
     only for what changed (electron/services/vaultNotes.ts), so this is cheap.
+    Read at the start too, where none is yet: with the graph or the office in
+    front from the last run, nothing else read it, and they showed no notes.
   */
   useEffect(() => {
     if (missing) return;
     const again = () => void useNotes.getState().refresh();
+    if (!useNotes.getState().index) again();
     const stop = window.cortex.on.notesChanged(again);
     window.addEventListener('focus', again);
     return () => {
