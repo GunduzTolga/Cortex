@@ -17,7 +17,7 @@ import test from 'node:test';
 const { problems } = createRequire(import.meta.url)(path.resolve('scripts', 'check-resources.cjs')) as { problems: (desktop: string) => string[] };
 const packaged = JSON.parse(fs.readFileSync('package.json', 'utf8')) as {
   scripts: Record<string, string>;
-  build: { beforePack?: string; extraResources: Array<{ from: string; to: string; filter?: string[] }> };
+  build: { appId: string; beforePack?: string; nsis: { include?: string }; extraResources: Array<{ from: string; to: string; filter?: string[] }> };
 };
 
 test('packaging builds the engine package and fetches Python first, and checks them before anything is packed, in CI too', () => {
@@ -65,4 +65,17 @@ test('what is missing, stale or not the pinned file is named, and nothing when a
   // The app's version is the engine's: one bumped without the other is caught.
   fs.writeFileSync(path.join(desktop, 'package.json'), JSON.stringify({ version: '1.2.2' }));
   assert.match(problems(desktop)[0], /package\.json sürümü \(1\.2\.2\)/);
+});
+
+test('uninstalled, Cortex no longer starts with Windows; updated, it still does (desktop-shell-6)', () => {
+  assert.equal(packaged.build.nsis.include, 'build/installer.nsh');
+  const script = fs.readFileSync(packaged.build.nsis.include, 'utf8');
+  // The value Electron writes is named after the app's id (electron/main.ts sets it as the AppUserModelId).
+  assert.match(fs.readFileSync('electron/main.ts', 'utf8'), new RegExp(`setAppUserModelId\\('${packaged.build.appId.replace(/\./g, '\\.')}'\\)`));
+  const macro = /!macro customUnInstall([\s\S]*?)!macroend/.exec(script)?.[1] ?? '';
+  const guarded = /\$\{ifNot\} \$\{isUpdated\}([\s\S]*?)\$\{endIf\}/.exec(macro)?.[1] ?? '';
+  for (const key of ['Software\\Microsoft\\Windows\\CurrentVersion\\Run', 'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run']) {
+    assert.ok(guarded.includes(`DeleteRegValue HKCU "${key}" "${packaged.build.appId}"`), key);
+  }
+  assert.ok(!macro.replace(guarded, '').includes('DeleteRegValue'), 'nothing deleted outside the guard: an update keeps it');
 });

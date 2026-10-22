@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { HelperState, ListenerWord } from '../../shared/setup';
+import type { HelperState, ListenerWord, WakeTrouble } from '../../shared/setup';
 import { renameRetrying } from './fileWrite';
 import { readSettings } from './settings';
 
@@ -17,7 +17,9 @@ import { readSettings } from './settings';
  * two seconds and keeps the microphone open only while it is fresh and says
  * yes (beyin_v3_ses.wake_allowed); quitting writes that the app is closed, and
  * an app that crashed stops saying it runs, which the listener takes as closed.
- * Windows only: the listener is.
+ * The window's language goes with it (`dil`): yakala's own window, opened by
+ * the key or the icon's "Not al", speaks it too, and keeps it after the app
+ * has quit (yakala-14). Windows only: the listener is.
  */
 
 /** How often the app says it runs; the listener takes it as closed after 20 seconds without a word. */
@@ -29,11 +31,13 @@ export function microphoneFile(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(base, 'beyin-v3', 'masaustu.json');
 }
 
-/** What the app says: that it runs now and whether the microphone may listen all the time, or that it has quit. */
-export function microphoneWord(allowed: boolean, closed: boolean, at: number = Date.now()): string {
-  const word = closed ? { surum: 1, pid: process.pid, at: at / 1000, kapali: true } : { surum: 1, pid: process.pid, at: at / 1000, dinle: allowed };
+/** What the app says: that it runs now and whether the microphone may listen all the time, or that it has quit; and its language. */
+export function microphoneWord(allowed: boolean, closed: boolean, at: number = Date.now(), language: 'tr' | 'en' = 'tr'): string {
+  const word = closed ? { surum: 1, pid: process.pid, at: at / 1000, kapali: true, dil: language } : { surum: 1, pid: process.pid, at: at / 1000, dinle: allowed, dil: language };
   return `${JSON.stringify(word)}\n`;
 }
+
+const languageNow = (): 'tr' | 'en' => (readSettings().language === 'en' ? 'en' : 'tr');
 
 /**
  * Written whole or not at all: the listener never reads half a word. A beat is written once - the next one tries
@@ -55,10 +59,10 @@ function write(text: string, file = microphoneFile(), patient = false): void {
 
 let timer: NodeJS.Timeout | null = null;
 
-/** Said now, with the settings as they are: at every beat, and at once when the person allows it or takes it back. */
+/** Said now, with the settings as they are: at every beat, and at once when the person allows it or takes it back, or changes the language. */
 export function sayMicrophone(): void {
   if (process.platform !== 'win32' || !timer) return;
-  write(microphoneWord(readSettings().wakeConsent, false));
+  write(microphoneWord(readSettings().wakeConsent, false, Date.now(), languageNow()));
 }
 
 /** Saying it, from the app's start until it quits. */
@@ -74,13 +78,14 @@ export function stopMicrophoneWord(): void {
   if (!timer) return;
   clearInterval(timer);
   timer = null;
-  write(microphoneWord(false, true), microphoneFile(), true);
+  write(microphoneWord(false, true, Date.now(), languageNow()), microphoneFile(), true);
 }
 
 /** How the listener's voice helper is, as the listener says it (beyin_v3_ses.say_listener). */
 export type { HelperState, ListenerWord } from '../../shared/setup';
 
 const HELPER_STATES: readonly HelperState[] = ['yok', 'yukleniyor', 'hazir', 'hata', 'kapali'];
+const WAKE_TROUBLES: readonly WakeTrouble[] = ['mikrofon', 'sessiz', 'model'];
 
 /** The listener's word, beside the app's own. */
 export function listenerFile(env: NodeJS.ProcessEnv = process.env): string {
@@ -115,5 +120,52 @@ export function readListener(file: string = listenerFile(), alive: (pid: number)
     uyandirma: said.uyandirma === true,
     mb: total ? megabytes(said.mb) : null,
     toplam: total || null,
+    uyandirma_sorun: WAKE_TROUBLES.includes(said.uyandirma_sorun as WakeTrouble) ? (said.uyandirma_sorun as WakeTrouble) : null,
+    uyandirma_mesaj: typeof said.uyandirma_mesaj === 'string' ? said.uyandirma_mesaj.slice(0, 300) : '',
+    kisayol: said.kisayol === 'tamam' || said.kisayol === 'mesgul' ? said.kisayol : null,
   };
+}
+
+/**
+ * Which vault yakala serves - its key, the listener with its voice, "Not al", Send To - as `beyin.py yakala kur` last
+ * wrote it, beside the app's word (`yakala-sahip.json`: {surum, vault, state, tus, at}); one for the person, whichever
+ * vault each of their apps has open. Null where none is, or none whole.
+ */
+export interface YakalaOwner {
+  vault: string;
+  /** The key as `kur --tus` takes it ("ctrl+alt+c"); null where the record names none. */
+  tus: string | null;
+}
+
+export function ownerFile(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(path.dirname(microphoneFile(env)), 'yakala-sahip.json');
+}
+
+export function readOwner(file: string = ownerFile()): YakalaOwner | null {
+  try {
+    const said = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
+    if (!said || typeof said !== 'object' || typeof said.vault !== 'string' || !said.vault) return null;
+    return { vault: said.vault, tus: typeof said.tus === 'string' && said.tus.trim() ? said.tus.trim() : null };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Work that stops the listener and starts it again (`yakala kur`, `ses kur`, `ses ayar`): while it goes on, and for the
+ * grace after (services/tray.ts), no listener running is not "the listener does not run".
+ */
+let restarting = 0;
+
+export function listenerRestarting(): boolean {
+  return restarting > 0;
+}
+
+export async function restartingListener<T>(work: () => Promise<T>): Promise<T> {
+  restarting += 1;
+  try {
+    return await work();
+  } finally {
+    restarting -= 1;
+  }
 }

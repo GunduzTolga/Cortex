@@ -7,7 +7,7 @@ import { readSettings } from './services/settings';
 import { settleVault, setupBusy, whenSetupIdle } from './services/setup';
 import { startTelegram } from './services/telegram';
 import { startMicrophoneWord, stopMicrophoneWord } from './services/microphone';
-import { listeningNow, startTray, startWithWindows, trayNotice } from './services/tray';
+import { keepStartWithWindows, listeningNow, startTray, trayNotice } from './services/tray';
 
 const DEV_SERVER = process.env.VITE_DEV_SERVER_URL;
 const isDev = Boolean(DEV_SERVER);
@@ -159,6 +159,51 @@ function holdSession(): void {
   });
 }
 
+/*
+  A page that died - out of memory on a large vault, the GPU process gone on a
+  laptop - is loaded again: left, the window stayed a blank sheet of paper, and
+  with `background` on, closing it only hid it, so "Cortex'i aç" brought the
+  same blank page back (desktop-shell-9). At most CRASHES_PER_MINUTE times a
+  minute; past that the person is asked, rather than the page dying and coming
+  back for ever. What the main process holds - the chats, a setup going on,
+  Telegram - goes on; the page reads it again as it starts.
+*/
+const CRASHES_PER_MINUTE = 3;
+let crashes: number[] = [];
+let askingAfterCrash = false;
+
+async function pageGone(contents: Electron.WebContents, details: Electron.RenderProcessGoneDetails): Promise<void> {
+  if (details.reason === 'clean-exit' || quitting || contents.isDestroyed()) return;
+  const now = Date.now();
+  crashes = [...crashes.filter((at) => now - at < 60_000), now];
+  if (crashes.length <= CRASHES_PER_MINUTE) {
+    contents.reload();
+    return;
+  }
+  if (askingAfterCrash || HIDDEN) return;
+  askingAfterCrash = true;
+  const english = readSettings().language === 'en';
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: 'error',
+      title: 'Cortex',
+      message: english ? 'Cortex’s window stopped working several times in a short while.' : 'Cortex’in penceresi kısa sürede birkaç kez çöktü.',
+      detail: english ? 'Try once more; if it goes on, quit Cortex and open it again.' : 'Bir kez daha dene; sürerse Cortex’i kapatıp yeniden aç.',
+      buttons: english ? ['Try again', 'Quit'] : ['Yeniden dene', 'Çık'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (response === 1) void quitWhenSetupAllows();
+    else if (!contents.isDestroyed()) {
+      crashes = [];
+      contents.reload();
+    }
+  } finally {
+    askingAfterCrash = false;
+  }
+}
+
 function createWindow(showNow = true): void {
   flushed = 'no';
   window = new BrowserWindow({
@@ -185,6 +230,8 @@ function createWindow(showNow = true): void {
     },
   });
   if (HIDDEN) window.webContents.setFrameRate(30);
+  const contents = window.webContents;
+  contents.on('render-process-gone', (_event, details) => void pageGone(contents, details));
 
   window.once('ready-to-show', () => {
     if (!HIDDEN && showNow) window?.show();
@@ -246,8 +293,10 @@ function createWindow(showNow = true): void {
     void window.loadFile(pageFile);
   }
 
-  window.on('closed', () => {
-    window = null;
+  // This window's going, not one made after it: a window whose page died is replaced (`showWindow`), and its end comes after.
+  const made = window;
+  made.on('closed', () => {
+    if (window === made) window = null;
   });
 }
 
@@ -301,8 +350,12 @@ function showAndTell(channel: string): void {
 
 const showSettings = () => showAndTell('app:openSettings');
 
-/** The window brought back: from the icon, or a second launch; made again if it was closed for good. */
+/** The window brought back: from the icon, or a second launch; made again if it was closed for good, or its page died and stayed dead. */
 function showWindow(): void {
+  if (window && !window.isDestroyed() && window.webContents.isCrashed()) {
+    window.destroy();
+    window = null;
+  }
   if (!window) {
     createWindow();
     return;
@@ -360,7 +413,8 @@ if (!app.requestSingleInstanceLock()) {
         askWake: () => showAndTell('app:askWake'),
         quit: () => void quitWhenSetupAllows(),
       });
-      startWithWindows(readSettings().background);
+      // Written where it is missing, not at every start: a person who turned Cortex off in Windows' own start-up list keeps it off.
+      keepStartWithWindows(readSettings().background);
     }
     // The vault kept from the last run bound to where it is now, in the background (services/setup.ts); notes
     // from the phone then keep coming in while Cortex runs, in the notification area too.

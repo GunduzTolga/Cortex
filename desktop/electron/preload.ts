@@ -94,6 +94,8 @@ const api: CortexApi = {
     installVoice: () => invoke('setup:installVoice'),
     voice: (patch) => invoke('setup:voice', patch),
     helper: () => invoke('setup:helper'),
+    restartListener: () => invoke('setup:restartListener'),
+    hotkey: (spec) => invoke('setup:hotkey', spec),
   },
   on: {
     notesChanged: (handler) => subscribe('notes:changed', handler),
@@ -102,6 +104,7 @@ const api: CortexApi = {
     setup: (handler) => listen('setup:event', handler),
     voiceStatus: (handler) => listen('setup:voice', handler),
     voiceHelper: (handler) => listen('setup:helper', handler),
+    notice: (handler) => listen('app:notice', handler),
     openSettings: (handler) => subscribe('app:openSettings', handler),
     askWake: (handler) => subscribe('app:askWake', handler),
     flush: (handler) => {

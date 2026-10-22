@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Download, FolderOpen, KeyRound, LogIn, Mic, RefreshCw, SkipForward } from 'lucide-react';
 import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz.svg';
 import type { CliAuth, CliId } from '@shared/chat';
-import { engineAction, type SetupStatus } from '@shared/setup';
+import { engineAction, type SetupStatus, wakePhraseLabel } from '@shared/setup';
 import { AuthDialog, TOOL_NAMES } from '../chat/AuthDialog';
 import { useChat } from '../chat/chatStore';
 import type { Key } from '../i18n';
-import { useT } from '../i18n/useT';
+import { useLanguage, useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 import { useSetup } from '../store/setup';
 import { LanguageSwitch } from '../ui/LanguageSwitch';
@@ -473,6 +473,7 @@ function ToolsStep({
 
 function VoiceStep({ status }: { status: SetupStatus | null }) {
   const t = useT();
+  const english = useLanguage() === 'en';
   const wakeConsent = useApp((s) => s.settings.wakeConsent);
   const run = useSetup((s) => s.run);
   const voice = status?.voice ?? null;
@@ -491,7 +492,14 @@ function VoiceStep({ status }: { status: SetupStatus | null }) {
           <VoiceHelperBar />
           {/* The always-listening mode chosen here, where it is explained: not found later in the settings. */}
           <div className="mt-4 rounded-xl border border-darkDelegation/15 bg-white py-1">
-            <Switch checked={voice.wake && wakeConsent} onChange={(wake) => void useSetup.getState().voice({ wake })} label={t('setup.voice.wake')} hint={t('setup.voice.wake.hint')} data-onboarding-voice-wake />
+            {/* The phrase as it is set: the words were shown with a "{phrase}" hole in them, and the hint named "Hey Pyn" while it was "Pyn, not al" (windows-e2e-4). */}
+            <Switch
+              checked={voice.wake && wakeConsent}
+              onChange={(wake) => void useSetup.getState().voice({ wake })}
+              label={t('setup.voice.wake', { phrase: wakePhraseLabel(voice.wakePhrase, english) })}
+              hint={t('setup.voice.wake.hint', { phrase: wakePhraseLabel(voice.wakePhrase, english) })}
+              data-onboarding-voice-wake
+            />
             <Switch checked={voice.auto} onChange={(auto) => void useSetup.getState().voice({ auto })} label={t('setup.voice.auto')} hint={t('setup.voice.auto.hint')} data-onboarding-voice-auto />
           </div>
         </>

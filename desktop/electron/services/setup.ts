@@ -5,12 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { app } from 'electron';
 import { type EngineCode, readEngineError, engineSentence } from '../../shared/engineError';
-import { COMMAND_WORDS, CPU_MODELS, VOICE_COMMANDS, WAKE_PHRASES } from '../../shared/setup';
-import type { CpuModel, EngineStatus, SetupJob, SetupPush, SetupStatus, VoiceCommands, VoiceEngine, VoiceStatus, WakePhrase } from '../../shared/setup';
+import { COMMAND_WORDS, CPU_MODELS, HOTKEYS, VOICE_COMMANDS, WAKE_PHRASES, hotkeyLabel } from '../../shared/setup';
+import type { CpuModel, EngineStatus, Hotkey, SetupJob, SetupPush, SetupStatus, VoiceCommands, VoiceEngine, VoiceStatus, WakePhrase } from '../../shared/setup';
 import pythonPin from '../../python.json';
 import { childEnv } from './acp';
 import { refreshPath } from './clis';
 import { forgetPythonVerdicts, type PythonLaunch, pythonOf, pythonWanting, usablePython } from './localChat';
+import { readOwner, restartingListener } from './microphone';
 import { readSettings } from './settings';
 
 /**
@@ -30,6 +31,9 @@ import { readSettings } from './settings';
  *   for the predecessor project's 2.x/3.x;
  * - voice typing: yakala set up if it is not (`beyin.py yakala kur`), then
  *   `beyin.py ses kur`, whose steps come one JSON line each (`{"adim": …}`).
+ * - yakala moved to the vault open now, where it served another (`yakala kur`
+ *   again, in the background), and set up again where its listener was found
+ *   not running or another app holds its key.
  *
  * A vault with an engine is bound to where it is now when it is opened
  * (`beyin.py relocate`). A failure is said as the engine's sentence in the
@@ -99,6 +103,10 @@ const ENGINE_STEPS: Array<[RegExp, string]> = [
   [/^whisper\.cpp \(Vulkan\) indiriliyor…$/, 'Downloading whisper.cpp (Vulkan)…'],
   [/^whisper\.cpp \(Vulkan\) indirilemedi: (.+)$/, 'whisper.cpp (Vulkan) could not be downloaded: $1'],
   [/^İşlemciye geçiliyor\.$/, 'Going on with the processor.'],
+  // A card that would not start, or was slower than the processor's quick model: the processor writes (voice-2).
+  [/^Ekran kartı açılamadı; işlemciye geçiliyor\.$/, 'The graphics card would not start; going on with the processor.'],
+  [/^Ekran kartı bu bilgisayarda işlemciden yavaş kaldı \((\d+),(\d+) sn\); işlemciye geçiliyor\.$/, 'On this computer the graphics card was slower than the processor ($1.$2 s); going on with the processor.'],
+  [/^İşlemcinin modeli hazırlanamadı; ekran kartı kalıyor\.$/, 'The processor’s model could not be had; the graphics card stays.'],
   [/^whisper\.cpp modeli indiriliyor \(yaklaşık 1,6 GB\)…$/, 'Downloading the whisper.cpp model (about 1.6 GB)…'],
   [/^Sanal ortam kuruluyor…$/, 'Setting up its own environment…'],
   [/^Paketler yükleniyor \(ilk kurulumda birkaç dakika sürer\): (.+)$/, 'Installing packages (a few minutes the first time): $1'],
@@ -106,6 +114,10 @@ const ENGINE_STEPS: Array<[RegExp, string]> = [
   [/^Whisper modeli hazırlanıyor \(ilk seferde yaklaşık (\d+),(\d) GB iner\)…$/, 'Preparing the Whisper model (about $1.$2 GB the first time)…'],
   [/^Whisper modeli hazırlanıyor…$/, 'Preparing the Whisper model…'],
   [/^%(\d+) \((\d+) \/ (\d+) MB\)$/, '$1% ($2 / $3 MB)'],
+  // pip's downloads and installs, each as it goes, and a download that broke and goes on.
+  [/^İniyor: (.+) \(([^()]+)\)$/, 'Downloading: $1 ($2)'],
+  [/^Kuruluyor: (.+)$/, 'Installing: $1'],
+  [/^Bağlantı koptu; kaldığı yerden yeniden deneniyor \((\d+)\/(\d+)\)…$/, 'The connection broke; going on from where it stopped ($1/$2)…'],
 ];
 
 /** An engine step in the window's language. */
@@ -572,8 +584,11 @@ export async function setupStatus(): Promise<SetupStatus> {
   };
 }
 
-/** A job, the only one going on: its steps and its end pushed to the window, the status after it returned. */
-async function job(kind: SetupJob, work: (vault: string, step: (text: string) => void) => Promise<void>): Promise<SetupStatus> {
+/**
+ * A job, the only one going on: its steps and its end pushed to the window, the status after it returned. A job that
+ * ended but not as wished - voice typing set up, its listener not running - returns what to say, and ends with it.
+ */
+async function job(kind: SetupJob, work: (vault: string, step: (text: string) => void) => Promise<string | void>): Promise<SetupStatus> {
   if (current) throw new Error(say('Başka bir kurulum sürüyor.', 'Another setup is going on.'));
   // Python is installed before there is a vault, or a Python, to need.
   const vault = vaultOrNull();
@@ -584,9 +599,9 @@ async function job(kind: SetupJob, work: (vault: string, step: (text: string) =>
     throw new Error(say('Python bulunamadı.', 'Python was not found.'));
   }
   try {
-    await work(vault ?? '', (text) => push({ job: kind, step: text }));
+    const warning = await work(vault ?? '', (text) => push({ job: kind, step: text }));
     jobEnded();
-    push({ job: kind, done: true, ok: true });
+    push({ job: kind, done: true, ok: true, ...(warning ? { warning } : {}) });
   } catch (err) {
     jobEnded();
     const error = err instanceof Error ? err.message : String(err);
@@ -791,17 +806,129 @@ export function vaultSettled(): Promise<void> {
   return settling ? settling.done.then(() => undefined) : Promise.resolve();
 }
 
-/** Yakala, if it is not set up yet, then voice typing; each step as the engine says it. */
+/**
+ * Yakala, if it is not set up yet, then voice typing; each step as the engine says it. Its end says whether yakala's
+ * listener runs after it (`dinleyici` in `ses kur`'s result): the voice, the key and "Pyn, not al" live in it, and a
+ * listener that did not start - the key held by another app at its first start, a first start slower than its wait -
+ * ended the setup with "Sesle yazma hazır" over nothing that listened (windows-e2e-5).
+ */
 export function installVoice(): Promise<SetupStatus> {
   return job('voice', async (vault, step) => {
     if (process.platform !== 'win32') throw new Error(say("Sesle yazma yalnız Windows'ta.", 'Voice typing is for Windows only.'));
     const beyin = path.join(vault, 'beyin.py');
-    const capture = await runPython([beyin, 'yakala', 'durum'], { cwd: vault, timeout: STATUS_TIMEOUT });
-    if (capture.kurulu !== true) {
-      step(say('Yakala kuruluyor (Ctrl+Alt+C)…', 'Setting up yakala (Ctrl+Alt+C)…'));
-      await runPython([beyin, 'yakala', 'kur'], { cwd: vault, timeout: STATUS_TIMEOUT * 5 });
+    return restartingListener(async () => {
+      const capture = await runPython([beyin, 'yakala', 'durum'], { cwd: vault, timeout: STATUS_TIMEOUT });
+      if (capture.kurulu !== true) {
+        step(say('Yakala kuruluyor (Ctrl+Alt+C)…', 'Setting up yakala (Ctrl+Alt+C)…'));
+        await runPython([beyin, 'yakala', 'kur'], { cwd: vault, timeout: STATUS_TIMEOUT * 5 });
+      }
+      const result = await runPython([beyin, 'ses', 'kur'], { cwd: vault, timeout: JOB_TIMEOUT, onStep: (line) => step(engineStep(line)) });
+      if (result.dinleyici !== false) return undefined;
+      const warning = say(
+        'Sesle yazma kuruldu, ama arka plandaki dinleyici başlamadı: kısayol, uyandırma sözü ve sesle yazma şimdilik çalışmıyor. Ayarlar → Sesle yazma\'dan dinleyiciyi yeniden başlat.',
+        'Voice typing is set up, but the listener in the background did not start: the key, the wake phrase and voice typing do not work for now. Start the listener again from Settings → Voice typing.',
+      );
+      step(warning);
+      return warning;
+    });
+  });
+}
+
+/** The platform yakala's key and listener are set up on: Windows. The tests stand in for it (`setYakalaPlatform`). */
+let yakalaPlatform: NodeJS.Platform = process.platform;
+
+export function setYakalaPlatform(platform: NodeJS.Platform): void {
+  yakalaPlatform = platform;
+}
+
+/** One folder, as the platform compares paths: Windows' in any letter case, either slash; a folder still there by where it really is. */
+export function sameFolder(one: string, other: string, platform: NodeJS.Platform = yakalaPlatform): boolean {
+  const real = (folder: string) => {
+    try {
+      return fs.realpathSync.native(folder);
+    } catch {
+      return path.resolve(folder);
     }
-    await runPython([beyin, 'ses', 'kur'], { cwd: vault, timeout: JOB_TIMEOUT, onStep: (line) => step(engineStep(line)) });
+  };
+  const plain = (folder: string) => {
+    const text = path.normalize(real(folder)).replace(/[\\/]+$/, '');
+    return platform === 'win32' ? text.replace(/\//g, '\\').toLowerCase() : text;
+  };
+  return plain(one) === plain(other);
+}
+
+/** `beyin.py yakala kur` in the vault open now, with these arguments; its result, or the engine's sentence. */
+async function yakalaKur(vault: string, args: string[], python: PythonLaunch): Promise<Record<string, unknown>> {
+  return restartingListener(() => runPython([path.join(vault, 'beyin.py'), 'yakala', 'kur', ...args], { cwd: vault, timeout: STATUS_TIMEOUT * 5, python }));
+}
+
+/** Yakala's work, one at a time: two vaults chosen quickly move it twice, in turn. */
+let yakalaQueue: Promise<unknown> = Promise.resolve();
+
+function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
+  const next = yakalaQueue.then(work, work);
+  yakalaQueue = next.catch(() => undefined);
+  return next;
+}
+
+/**
+ * Yakala - its key, "Pyn, not al" and the voice with it, the icon's "Not al", Send To - moved to the vault open now,
+ * where it serves another (`yakala-sahip.json`, which `yakala kur` writes): after another vault is chosen, and once an
+ * engine is installed in one. Before, all of it kept writing into the vault left - one that might be gone, and was made
+ * again - while the settings switched the voice of the new one, and nothing said so (yakala-3). The same key goes with
+ * it. Not where the vault has no engine yet (its install moves it after), nor where nothing set yakala up; not while a
+ * setup job runs, which may be setting the listener up itself: after it. Windows only, as yakala's key is. Resolves to
+ * the key it serves now, as a person reads it, or null when nothing was moved; rejects with the engine's sentence.
+ */
+export function repointYakala(): Promise<string | null> {
+  return oneAtATime(async () => {
+    if (yakalaPlatform !== 'win32') return null;
+    await whenSetupIdle();
+    const vault = vaultOrNull();
+    const owner = readOwner();
+    if (!vault || !owner || sameFolder(owner.vault, vault)) return null;
+    const installed = installedVersion(vault);
+    if (!installed || isPredecessor(installed)) return null;
+    const python = await usablePython();
+    if (!python) return null;
+    await yakalaKur(vault, owner.tus ? ['--tus', owner.tus] : [], python);
+    return hotkeyLabel(owner.tus ?? HOTKEYS[0]);
+  });
+}
+
+/** The vault open now, its engine, and a Python to run it with; the reason it cannot be, said, where one is missing. */
+async function yakalaPlace(): Promise<{ vault: string; python: PythonLaunch }> {
+  if (current) throw new Error(say('Başka bir kurulum sürüyor.', 'Another setup is going on.'));
+  const vault = vaultOrNull();
+  if (!vault) throw new Error(say('Önce bir kasa seç.', 'Choose a vault first.'));
+  const installed = installedVersion(vault);
+  if (!installed || isPredecessor(installed)) throw new Error(say("Önce Cortex'i kasaya kur (Ayarlar → Cortex).", 'Set Cortex up in the vault first (Settings → Cortex).'));
+  const python = await usablePython();
+  if (!python) throw new Error(say('Python bulunamadı.', 'Python was not found.'));
+  return { vault, python };
+}
+
+/**
+ * Yakala set up again in the vault open now, its key kept: the listener found not running (the settings' and the icon's
+ * "Dinleyici çalışmıyor") is started again with Windows and now. Rejects with the engine's sentence, or when it still
+ * does not run.
+ */
+export function restartListener(): Promise<void> {
+  return oneAtATime(async () => {
+    const { vault, python } = await yakalaPlace();
+    const result = await yakalaKur(vault, [], python);
+    if (result.dinleyici === false) {
+      throw new Error(say('Dinleyici yine başlamadı. Bilgisayarı yeniden başlatıp dene; sürerse sesle yazmayı yeniden kur.', 'The listener did not start this time either. Restart the computer and try again; if it goes on, set voice typing up again.'));
+    }
+  });
+}
+
+/** Yakala's key changed to one of HOTKEYS, where another app holds the one it has (`kisayol: 'mesgul'`). */
+export function changeHotkey(asked: unknown): Promise<void> {
+  return oneAtATime(async () => {
+    if (!HOTKEYS.includes(asked as Hotkey)) throw new Error(say('Bu kısayol seçilemez.', 'That key cannot be chosen.'));
+    const { vault, python } = await yakalaPlace();
+    await yakalaKur(vault, ['--tus', asked as Hotkey], python);
   });
 }
 
@@ -825,6 +952,7 @@ export async function setVoice(patch: unknown): Promise<SetupStatus> {
   if (asked.wake === true && !readSettings().wakeConsent) {
     throw new Error(say('Mikrofonun sürekli dinlemesine önce izin ver.', 'Allow the microphone to listen all the time first.'));
   }
-  await runPython([path.join(vault, 'beyin.py'), 'ses', 'ayar', ...args], { cwd: vault, timeout: STATUS_TIMEOUT });
+  // A switch, a model or the engine changed starts the listener again: not "not running" meanwhile.
+  await restartingListener(() => runPython([path.join(vault, 'beyin.py'), 'ses', 'ayar', ...args], { cwd: vault, timeout: STATUS_TIMEOUT }));
   return setupStatus();
 }

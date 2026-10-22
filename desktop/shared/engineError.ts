@@ -48,6 +48,8 @@ export interface EngineError {
   hint: string | null;
   /** The engine named the code itself: its sentence is Turkish and says the detail. */
   named: boolean;
+  /** The code as the engine wrote it, one the table below does not know too (a Telegram command's: shared/telegram.ts); null where it wrote none. */
+  given: string | null;
 }
 
 /** The longest a sentence is shown: the engine's are short, a program's last words need not be. */
@@ -163,12 +165,13 @@ export function readEngineError(text: string): EngineError | null {
       message,
       hint: typeof found.hint === 'string' && found.hint.trim() ? found.hint.trim() : null,
       named,
+      given: typeof found.code === 'string' && found.code ? found.code : null,
     };
   }
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const last = lines[lines.length - 1];
   if (!last) return null;
-  return { type: null, code: codeOf(text), message: last, hint: null, named: false };
+  return { type: null, code: codeOf(text), message: last, hint: null, named: false, given: null };
 }
 
 function codeOf(message: string): EngineCode | null {

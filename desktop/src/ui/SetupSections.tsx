@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Check, Download, Mic, RefreshCw, RotateCcw } from 'lucide-react';
-import { COMMAND_WORDS, CPU_MODELS, VOICE_COMMANDS, WAKE_PHRASES, engineAction, percentOfStep, wakePhraseLabel } from '@shared/setup';
-import type { CpuModel, SetupJob, SetupStatus, VoiceCommands, WakePhrase } from '@shared/setup';
+import { Check, Download, Keyboard, Mic, Play, RefreshCw, RotateCcw } from 'lucide-react';
+import { COMMAND_WORDS, CPU_MODELS, HOTKEYS, VOICE_COMMANDS, WAKE_PHRASES, engineAction, hotkeyLabel, percentOfStep, wakePhraseLabel } from '@shared/setup';
+import type { CpuModel, Hotkey, ListenerWord, SetupJob, SetupStatus, VoiceCommands, WakePhrase, WakeTrouble } from '@shared/setup';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
 import { useApp } from '../store/app';
@@ -214,40 +214,115 @@ function VoiceCommandsBlock({ commands, busy }: { commands: VoiceCommands; busy:
   );
 }
 
+const WAKE_TROUBLE: Record<WakeTrouble, Key> = {
+  mikrofon: 'setup.voice.wake.trouble.mikrofon',
+  sessiz: 'setup.voice.wake.trouble.sessiz',
+  model: 'setup.voice.wake.trouble.model',
+};
+
 /**
  * The voice getting ready, as yakala's listener says it: a model being fetched (how far), loading,
  * ready, or failed and tried again. The app opens at once while this goes on in the background:
- * here it is seen, not a voice that seems not to work.
+ * here it is seen, not a voice that seems not to work. And what keeps it from working though it is
+ * set up: no listener running, the wake phrase not hearing its microphone, the key another app's.
  */
 export function VoiceHelperBar() {
   const t = useT();
-  const helper = useSetup((s) => s.helper);
-  if (!helper || helper.ses === 'yok' || helper.ses === 'kapali') return null;
-  if (helper.ses === 'hazir') {
+  const english = useLanguage() === 'en';
+  const listener = useSetup((s) => s.listener);
+  const busy = useSetup((s) => s.listenerBusy);
+  const restart = useSetup((s) => s.restartListener);
+  const phrase = wakePhraseLabel(useSetup((s) => s.status?.voice?.wakePhrase), english);
+  if (listener.missing) {
+    // Nothing runs that hears the key, the phrase or the microphone: set up again, it starts (windows-e2e-5).
     return (
-      <p className="mx-3 mt-1 flex items-center gap-1.5 text-[12px] font-semibold text-good" data-setup-voice-helper="hazir">
-        <Check size={13} strokeWidth={3} />
-        {helper.model ? t('setup.voice.helper.ready', { model: helper.model }) : t('setup.voice.helper.readyBare')}
-      </p>
-    );
-  }
-  if (helper.ses === 'hata') {
-    return (
-      <div className="mt-1" data-setup-voice-helper="hata">
-        <Note tone="error">{t('setup.voice.helper.error', { message: helper.mesaj })}</Note>
+      <div className="mx-3 mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5" data-setup-voice-helper="calismiyor">
+        <p className="text-[12px] font-semibold text-red-700">{t('setup.voice.listener.missing')}</p>
+        <p className="mt-1 text-[11.5px] leading-relaxed text-zinc-600">{t('setup.voice.listener.missingHint', { phrase })}</p>
+        <Button tone="ghost" className="mt-1.5" disabled={busy} onClick={() => void restart()} data-setup-voice-listener-restart>
+          {busy ? <Spinner size={12} label={t('setup.working')} /> : <Play size={13} />}
+          {t('setup.voice.listener.restart')}
+        </Button>
       </div>
     );
   }
-  const percent = helper.mb !== null && helper.toplam ? Math.min(100, Math.floor((helper.mb * 100) / helper.toplam)) : null;
+  const word = listener.word;
+  if (!word || word.ses === 'yok' || word.ses === 'kapali') return null;
+  return (
+    <>
+      <HelperState word={word} phrase={phrase} />
+      <ListenerTroubles word={word} hotkey={listener.hotkey} english={english} />
+    </>
+  );
+}
+
+function HelperState({ word, phrase }: { word: ListenerWord; phrase: string }) {
+  const t = useT();
+  if (word.ses === 'hazir') {
+    return (
+      <p className="mx-3 mt-1 flex items-center gap-1.5 text-[12px] font-semibold text-good" data-setup-voice-helper="hazir">
+        <Check size={13} strokeWidth={3} />
+        {word.model ? t('setup.voice.helper.ready', { model: word.model }) : t('setup.voice.helper.readyBare')}
+      </p>
+    );
+  }
+  if (word.ses === 'hata') {
+    return (
+      <div className="mt-1" data-setup-voice-helper="hata">
+        <Note tone="error">{t('setup.voice.helper.error', { message: word.mesaj })}</Note>
+      </div>
+    );
+  }
+  const percent = word.mb !== null && word.toplam ? Math.min(100, Math.floor((word.mb * 100) / word.toplam)) : null;
   return (
     <div className="mx-3 mt-2 rounded-xl border border-gold/50 bg-gold/10 px-3 py-2.5" data-setup-voice-helper="yukleniyor">
       <div className="flex items-center gap-2 text-[12px] font-semibold text-darkDelegation">
         <Spinner size={12} label={t('setup.working')} />
-        {percent !== null ? t('setup.voice.helper.downloading', { mb: helper.mb ?? 0, total: helper.toplam ?? 0, percent }) : t('setup.voice.helper.loading')}
+        {percent !== null ? t('setup.voice.helper.downloading', { mb: word.mb ?? 0, total: word.toplam ?? 0, percent }) : t('setup.voice.helper.loading')}
       </div>
       <Bar percent={percent} />
-      <p className="mt-1.5 text-[11.5px] leading-relaxed text-zinc-500">{t('setup.voice.helper.hint')}</p>
+      <p className="mt-1.5 text-[11.5px] leading-relaxed text-zinc-500">{t('setup.voice.helper.hint', { phrase })}</p>
     </div>
+  );
+}
+
+/** The wake phrase that cannot hear, and why; the key another app holds, and the keys it can move to (voice-4, yakala-6). */
+function ListenerTroubles({ word, hotkey, english }: { word: ListenerWord; hotkey: string | null; english: boolean }) {
+  const t = useT();
+  const busy = useSetup((s) => s.listenerBusy);
+  const move = useSetup((s) => s.hotkey);
+  const key = hotkey ?? hotkeyLabel(HOTKEYS[0]);
+  // The engine's sentence says what to do, Windows' privacy switch by name; it is Turkish.
+  const why = word.uyandirma_sorun ? (!english && word.uyandirma_mesaj ? word.uyandirma_mesaj : t(WAKE_TROUBLE[word.uyandirma_sorun])) : null;
+  return (
+    <>
+      {why ? (
+        <div className="mt-1" data-setup-voice-wake-trouble={word.uyandirma_sorun ?? ''}>
+          <Note tone="error">{t('setup.voice.wake.trouble', { why })}</Note>
+        </div>
+      ) : null}
+      {word.kisayol === 'mesgul' ? (
+        <div className="mx-3 mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5" data-setup-voice-key-busy>
+          <p className="flex items-center gap-1.5 text-[12px] font-semibold text-red-700">
+            <Keyboard size={13} />
+            {t('setup.voice.key.busy', { key })}
+          </p>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-zinc-600">{t('setup.voice.key.busyHint')}</p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <Segments<Hotkey>
+              label={t('setup.voice.key.choose')}
+              data="setup-voice-key"
+              chosen={HOTKEYS.find((one) => hotkeyLabel(one) === key) ?? null}
+              onChoose={(spec) => {
+                if (!busy && hotkeyLabel(spec) !== key) void move(spec);
+              }}
+              options={HOTKEYS.map((one) => ({ id: one, label: hotkeyLabel(one) }))}
+            />
+            {busy ? <Spinner size={12} label={t('setup.working')} /> : null}
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -262,6 +337,9 @@ function VoiceSection({ status }: { status: SetupStatus }) {
   const busy = status.job !== null;
   // Listening all the time counts once it is allowed here: on in the engine without it, the microphone does not listen.
   const wakeConsent = useApp((s) => s.settings.wakeConsent);
+  // The voice helper failing to start, again and again (an environment left half built, a Python removed since): set
+  // up again from here, which mends its environment, where before nothing in the app could (voice-8).
+  const helperFailing = useSetup((s) => s.listener.word?.ses === 'hata');
   return (
     <Section title={t('setup.voice')} data="voice">
       {!status.engine.installed ? (
@@ -312,11 +390,12 @@ function VoiceSection({ status }: { status: SetupStatus }) {
       ) : (
         <Note data="not-installed">{t('setup.voice.intro')}</Note>
       )}
-      {status.engine.installed && status.python && (status.job === 'voice' || (voice && (!voice.installed || voice.readsFiles === false))) ? (
+      {voice?.installed && voice.readsFiles !== false && helperFailing ? <Note data="repair">{t('setup.voice.repair.hint')}</Note> : null}
+      {status.engine.installed && status.python && (status.job === 'voice' || (voice && (!voice.installed || voice.readsFiles === false || helperFailing))) ? (
         <div className="mt-2 px-3">
           <Button tone="ghost" disabled={busy} onClick={() => void run('voice')} data-setup-voice>
             <Mic size={13} />
-            {t(voice?.installed ? 'setup.voice.update' : 'setup.voice.install')}
+            {t(!voice?.installed ? 'setup.voice.install' : voice.readsFiles === false ? 'setup.voice.update' : 'setup.voice.repair')}
           </Button>
         </div>
       ) : null}

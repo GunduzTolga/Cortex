@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { messageOf } from '@shared/ipcError';
-import type { ListenerWord, SetupJob, SetupPush, SetupStatus, VoicePatch } from '@shared/setup';
+import type { Hotkey, ListenerSeen, SetupJob, SetupPush, SetupStatus, VoicePatch } from '@shared/setup';
 import { translate } from '../i18n';
 import { useApp } from './app';
 import { useConsent } from './consent';
@@ -17,12 +17,20 @@ interface SetupState {
   /** The job going on and the last of what it said; a download's percent replaces the one before it. */
   steps: { job: SetupJob; lines: string[] } | null;
   error: { job: SetupJob; text: string } | null;
-  /** How the voice helper is: fetching a model (how far), loading, ready, failed; null without a listener running. */
-  helper: ListenerWord | null;
+  /** How yakala's listener is: its voice helper fetching a model (how far), loading, ready, failed; the wake phrase heard or not; its key; or not running. */
+  listener: ListenerSeen;
+  /** The listener being started again, or moved to another key: once at a time. */
+  listenerBusy: boolean;
   refresh(): Promise<void>;
   run(job: SetupJob): Promise<void>;
   voice(patch: VoicePatch): Promise<void>;
+  /** Yakala's listener, found not running, started again (`beyin.py yakala kur`). */
+  restartListener(): Promise<void>;
+  /** Yakala moved to another key, where another app holds its own. */
+  hotkey(spec: Hotkey): Promise<void>;
 }
+
+const NO_LISTENER: ListenerSeen = { word: null, missing: false, hotkey: null };
 
 /** A download's progress line, as the engine says it ("%40 (650 / 1624 MB)") or in English ("40% (…)"). */
 const percent = (line: string) => /^%?\d+%? \(\d+ \/ \d+ MB\)$/.test(line.trim());
@@ -30,7 +38,7 @@ let listening = false;
 
 const DONE = { python: 'setup.python.done', engine: 'setup.engine.done', voice: 'setup.voice.done' } as const;
 
-function said(key: (typeof DONE)[SetupJob] | 'setup.failed', values?: Record<string, string>): string {
+function said(key: (typeof DONE)[SetupJob] | 'setup.failed' | 'setup.voice.doneWarning' | 'setup.voice.listener.restart' | 'setup.voice.listener.failed', values?: Record<string, string>): string {
   return translate(useApp.getState().settings.language ?? 'tr', key, values);
 }
 
@@ -39,7 +47,7 @@ export const useSetup = create<SetupState>((set, get) => {
     if (listening) return;
     listening = true;
     window.cortex.on.voiceStatus((voice) => set((state) => (state.status ? { status: { ...state.status, voice } } : {})));
-    window.cortex.on.voiceHelper((helper) => set({ helper }));
+    window.cortex.on.voiceHelper((listener) => set({ listener }));
     window.cortex.on.setup((push: SetupPush) => {
       if ('step' in push) {
         const before = get().steps;
@@ -49,7 +57,16 @@ export const useSetup = create<SetupState>((set, get) => {
         set({ steps: { job: push.job, lines: lines.slice(-6) } });
         return;
       }
-      if (push.ok) {
+      if (push.ok && push.warning) {
+        // Set up, but not as wished (voice typing's listener did not start): said, with what mends it, until closed.
+        useApp.getState().toast({
+          tone: 'error',
+          title: said('setup.voice.doneWarning'),
+          detail: push.warning,
+          sticky: true,
+          action: { label: said('setup.voice.listener.restart'), run: () => void get().restartListener() },
+        });
+      } else if (push.ok) {
         useApp.getState().toast({ tone: 'success', title: said(DONE[push.job]) });
       } else {
         useApp.getState().toast({ tone: 'error', title: said('setup.failed'), detail: push.error, sticky: true });
@@ -61,13 +78,14 @@ export const useSetup = create<SetupState>((set, get) => {
     status: null,
     steps: null,
     error: null,
-    helper: null,
+    listener: NO_LISTENER,
+    listenerBusy: false,
 
     async refresh() {
       listen();
       try {
-        const [status, helper] = await Promise.all([window.cortex.setup.status(), window.cortex.setup.helper()]);
-        set({ status, helper });
+        const [status, listener] = await Promise.all([window.cortex.setup.status(), window.cortex.setup.helper()]);
+        set({ status, listener });
       } catch (err) {
         set({ error: { job: 'engine', text: messageOf(err) } });
       }
@@ -105,5 +123,28 @@ export const useSetup = create<SetupState>((set, get) => {
         set({ error: { job: 'voice', text: messageOf(err) } });
       }
     },
+
+    async restartListener() {
+      await listenerWork(() => window.cortex.setup.restartListener());
+    },
+
+    async hotkey(spec) {
+      await listenerWork(() => window.cortex.setup.hotkey(spec));
+    },
   };
+
+  /** Work on the listener, one at a time; its failure said in a toast, its end read back (the listener says how it is in a moment). */
+  async function listenerWork(work: () => Promise<void>): Promise<void> {
+    if (get().listenerBusy) return;
+    set({ listenerBusy: true });
+    try {
+      await work();
+      useSaved.getState().flash();
+    } catch (err) {
+      useApp.getState().toast({ tone: 'error', title: said('setup.voice.listener.failed'), detail: messageOf(err) });
+    } finally {
+      set({ listenerBusy: false });
+      void get().refresh();
+    }
+  }
 });

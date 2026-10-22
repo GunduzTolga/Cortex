@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron';
-import type { BootstrapPayload, WindowSettings } from '../shared/api';
+import type { AppNotice, BootstrapPayload, WindowSettings } from '../shared/api';
 import { readSettings, settingsUnreadable, tidyName, updateSettings } from './services/settings';
 import { sayMicrophone } from './services/microphone';
-import { currentHelper, onHelperChange, startWithWindows, trayChanged } from './services/tray';
+import { currentListener, expectVoiceTurn, onHelperChange, startWithWindows, trayChanged } from './services/tray';
 import { setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
@@ -47,6 +47,35 @@ function broadcast(channel: string, payload: unknown): void {
   }
 }
 
+/** A word for the window from work it did not ask for and does not wait on (yakala moved): said in a toast. */
+function notice(word: AppNotice): void {
+  broadcast('app:notice', word);
+}
+
+/**
+ * Yakala moved to the vault open now, in the background, where it served another (services/setup.ts, repointYakala):
+ * said once it has moved - the notes taken with the key go somewhere else from now on - or when it could not.
+ */
+function moveYakala(): void {
+  const say = (tr: string, en: string) => (readSettings().language === 'en' ? en : tr);
+  void setup.repointYakala().then(
+    (key) => {
+      if (!key) return;
+      notice({
+        tone: 'success',
+        title: say('Not alma bu kasaya taşındı', 'Note taking moved to this vault'),
+        detail: say(`${key}, uyandırma sözü ve Gönder → Beyne At ile alınan notlar artık bu kasaya kaydediliyor.`, `Notes taken with ${key}, the wake phrase and Send to → Beyne At now go into this vault.`),
+      });
+    },
+    (err: unknown) =>
+      notice({
+        tone: 'error',
+        title: say('Not alma bu kasaya taşınamadı', 'Note taking could not be moved to this vault'),
+        detail: `${err instanceof Error ? err.message : String(err)} ${say('Kısayolla alınan notlar hâlâ önceki kasaya gidiyor.', 'Notes taken with the key still go into the vault before.')}`,
+      }),
+  );
+}
+
 function windowSettings(): WindowSettings {
   const { language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent } = readSettings();
   return { language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent };
@@ -74,8 +103,9 @@ export function registerIpc(): void {
     if (typeof asked.wakeConsent === 'boolean') change.wakeConsent = asked.wakeConsent;
     if (Object.keys(change).length) updateSettings((settings) => Object.assign(settings, change));
     if (change.background !== undefined) startWithWindows(change.background);
-    // The listener hears it within two seconds: allowed, the microphone listens; taken back, it lets go.
-    if (change.wakeConsent !== undefined) sayMicrophone();
+    // The listener hears it within two seconds: allowed, the microphone listens; taken back, it lets go. Yakala's
+    // window takes the language from the same word.
+    if (change.wakeConsent !== undefined || change.language !== undefined) sayMicrophone();
     // The icon's words follow: leave given or taken back, or another language.
     if (change.wakeConsent !== undefined || change.language !== undefined) trayChanged();
     return windowSettings();
@@ -103,6 +133,9 @@ export function registerIpc(): void {
     // Telegram listener writes into the vault chosen now once that is done (services/setup.ts, settleVault).
     const settled = setup.settleVault();
     if (changed) void settled.then(() => telegram.restartTelegram());
+    // Yakala - the key, "Pyn, not al", Send To - kept writing into the vault left (yakala-3): it follows, once bound.
+    // Chosen again, the same vault tries again where moving it failed; where it is this vault's already, nothing runs.
+    void settled.then(() => moveYakala());
     return status;
   });
 
@@ -172,9 +205,18 @@ export function registerIpc(): void {
   setup.onSetupPush((payload) => broadcast('setup:event', payload));
   // Switched from the notification-area icon: the settings, open or not, show the voice as it is now.
   setup.onVoiceStatus((voice) => broadcast('setup:voice', voice));
-  // The voice helper fetching a model, loading it, ready or failed: the settings' bar follows.
-  onHelperChange((word) => broadcast('setup:helper', word));
-  handle('setup:helper', () => currentHelper());
+  // The voice helper fetching a model, loading it, ready or failed, the listener not running: the settings' bar follows.
+  onHelperChange((seen) => broadcast('setup:helper', seen));
+  handle('setup:helper', () => currentListener());
+  // The listener found not running started again; the key another app holds changed (yakala kur).
+  handle('setup:restartListener', () => {
+    expectVoiceTurn();
+    return setup.restartListener();
+  });
+  handle('setup:hotkey', (spec) => {
+    expectVoiceTurn();
+    return setup.changeHotkey(spec);
+  });
   handle('setup:status', () => setup.setupStatus());
   // The vault opened bound to where it is now: the window says a failure once (src/App.tsx).
   handle('setup:settle', () => setup.settleVault());
@@ -189,10 +231,19 @@ export function registerIpc(): void {
     const status = await setup.installEngine();
     chat.restartIdleChats();
     void telegram.restartTelegram();
+    // A vault chosen before it had an engine: yakala moves to it now (yakala-3).
+    moveYakala();
     return status;
   });
-  handle('setup:installVoice', () => setup.installVoice());
-  handle('setup:voice', (patch) => setup.setVoice(patch));
+  handle('setup:installVoice', () => {
+    // The voice getting ready is said in the notification area: asked for now.
+    expectVoiceTurn();
+    return setup.installVoice();
+  });
+  handle('setup:voice', (patch) => {
+    expectVoiceTurn();
+    return setup.setVoice(patch);
+  });
 
   // Notes from the phone through the person's own Telegram bot (services/telegram.ts): a key goes in and is never sent back.
   handle('telegram:status', () => telegram.telegramStatus());

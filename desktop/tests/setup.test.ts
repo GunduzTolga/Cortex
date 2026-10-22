@@ -10,6 +10,7 @@ import { pythonOf } from '../electron/services/localChat';
 import { updateSettings } from '../electron/services/settings';
 import {
   bundledPackage,
+  changeHotkey,
   compareVersions,
   EngineFailure,
   engineStep,
@@ -23,8 +24,12 @@ import {
   onSetupPush,
   onVoiceStatus,
   readLine,
+  repointYakala,
+  restartListener,
   runPython,
+  sameFolder,
   setBusyWaits,
+  setYakalaPlatform,
   setVoice,
   settleVault,
   setupBusy,
@@ -129,14 +134,21 @@ if args[:2] == ['yakala', 'durum']:
     say({'status': 'tamam', 'kurulu': seen['yakala']})
 elif args[:2] == ['yakala', 'kur']:
     seen['yakala'] = True; keep()
-    print(json.dumps({'status': 'kuruldu'}, indent=2))
+    # The key, the listener and the shortcuts are this vault's now: written where the app looks for it (yakala-sahip.json),
+    # only in a test's own folder: on a Windows with Cortex the person's own record is there.
+    if os.environ.get('CORTEX_TEST_OWNER') == '1':
+        tus = args[args.index('--tus') + 1] if '--tus' in args else 'ctrl+alt+c'
+        os.makedirs(os.path.join(os.environ['LOCALAPPDATA'], 'beyin-v3'), exist_ok=True)
+        json.dump({'surum': 1, 'vault': here, 'state': os.path.join(here, 'durum'), 'tus': tus, 'at': 1},
+                  open(os.path.join(os.environ['LOCALAPPDATA'], 'beyin-v3', 'yakala-sahip.json'), 'w', encoding='utf-8'))
+    print(json.dumps({'status': 'kuruldu', 'dinleyici': not os.path.exists(os.path.join(here, 'dinleyici-yok'))}, indent=2))
 elif args[:2] == ['ses', 'durum']:
     say({'kurulu': seen['ses'], 'acik': seen['acik'], 'uyandirma': seen['uyandirma'], 'motor': 'vulkan', 'model': 'large-v3-turbo (ekran kartı, Vulkan)'})
 elif args[:2] == ['ses', 'kur']:
     for step in ('Motor: AMD/Intel ekran kartı (Vulkan, whisper.cpp)', 'whisper.cpp modeli indiriliyor (yaklaşık 1,6 GB)…', '  %50 (812 / 1624 MB)', '  %100 (1624 / 1624 MB)'):
         say({'adim': step})
     seen['ses'] = True; keep()
-    say({'status': 'kuruldu', 'motor': 'vulkan'})
+    say({'status': 'kuruldu', 'motor': 'vulkan', 'dinleyici': not os.path.exists(os.path.join(here, 'dinleyici-yok'))})
 elif args[:2] == ['ses', 'ayar']:
     if '--uyandirma' in args: seen['uyandirma'] = args[args.index('--uyandirma') + 1] == 'ac'
     if '--ses' in args: seen['acik'] = args[args.index('--ses') + 1] == 'ac'
@@ -321,6 +333,13 @@ test('the engine’s Turkish steps are said in English in an English window, the
   assert.equal(engineStep('Whisper modeli hazırlanıyor (ilk seferde yaklaşık 1,6 GB iner)…', 'en'), 'Preparing the Whisper model (about 1.6 GB the first time)…');
   assert.equal(engineStep('  %50 (812 / 1624 MB)', 'tr'), '%50 (812 / 1624 MB)');
   assert.equal(engineStep('Bilinmeyen bir satır', 'en'), 'Bilinmeyen bir satır', 'an unknown line as it was');
+  // A card that would not start, or was slow: the processor is set up instead, and that is said (voice-2).
+  assert.equal(engineStep('Ekran kartı bu bilgisayarda işlemciden yavaş kaldı (3,2 sn); işlemciye geçiliyor.', 'en'), 'On this computer the graphics card was slower than the processor (3.2 s); going on with the processor.');
+  assert.equal(engineStep('Ekran kartı açılamadı; işlemciye geçiliyor.', 'en'), 'The graphics card would not start; going on with the processor.');
+  assert.equal(engineStep('İşlemcinin modeli hazırlanamadı; ekran kartı kalıyor.', 'en'), 'The processor’s model could not be had; the graphics card stays.');
+  assert.equal(engineStep('  İniyor: faster_whisper-1.1.1-py3-none-any.whl (1.1 MB)', 'en'), 'Downloading: faster_whisper-1.1.1-py3-none-any.whl (1.1 MB)');
+  assert.equal(engineStep('  Kuruluyor: av, ctranslate2', 'en'), 'Installing: av, ctranslate2');
+  assert.equal(engineStep('  Bağlantı koptu; kaldığı yerden yeniden deneniyor (2/5)…', 'en'), 'The connection broke; going on from where it stopped (2/5)…');
 });
 
 /* ------------------------------------------------------------------ */
@@ -618,4 +637,115 @@ test('a job going on is known, and its end can be waited for: the app asked to q
   } finally {
     delete process.env.CORTEX_ENGINE_PACKAGES;
   }
+});
+
+/** The person's own folder (`%LOCALAPPDATA%\beyin-v3`) where yakala's owner record is, made for a test; given back as it was after. */
+async function withOwnFolder(work: (folder: string) => Promise<void>): Promise<void> {
+  const before = process.env.LOCALAPPDATA;
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'yerel-'));
+  process.env.LOCALAPPDATA = local;
+  process.env.CORTEX_TEST_OWNER = '1';
+  setYakalaPlatform('win32');
+  try {
+    await work(path.join(local, 'beyin-v3'));
+  } finally {
+    setYakalaPlatform(process.platform);
+    delete process.env.CORTEX_TEST_OWNER;
+    if (before === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = before;
+  }
+}
+
+const ownerOf = (folder: string, vault: string, tus = 'ctrl+alt+n') => {
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, 'yakala-sahip.json'), JSON.stringify({ surum: 1, vault, state: path.join(vault, 'durum'), tus, at: 1 }));
+};
+
+test('one folder is one folder: on Windows in any letter case and with either slash; elsewhere as written', () => {
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'Klasor-')));
+  assert.ok(sameFolder(root, `${root}${path.sep}`, 'linux'), 'a slash at the end is the same folder');
+  assert.ok(sameFolder(path.join(root, 'Kasa'), path.join(root, 'kasa'), 'win32'));
+  assert.ok(!sameFolder(path.join(root, 'Kasa'), path.join(root, 'kasa'), 'linux'));
+  assert.ok(!sameFolder(path.join(root, 'A'), path.join(root, 'B'), 'win32'));
+});
+
+test('yakala follows the vault chosen: moved there with its key where it served another, and left where it is this vault’s (yakala-3)', { skip: !hasPython }, async () => {
+  await withOwnFolder(async (own) => {
+    const before = fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-onceki-'));
+    ownerOf(own, before, 'ctrl+alt+n');
+    const vault = vaultWithEngine('1.0.33');
+    assert.equal(await repointYakala(), 'Ctrl+Alt+N', 'moved, with the key it had');
+    assert.deepEqual(asked(vault).filter((one) => one.startsWith('yakala')), ['yakala kur --tus ctrl+alt+n']);
+    assert.ok(sameFolder(JSON.parse(fs.readFileSync(path.join(own, 'yakala-sahip.json'), 'utf8')).vault, vault));
+    // This vault's now: nothing to move, nothing run.
+    assert.equal(await repointYakala(), null);
+    assert.equal(asked(vault).filter((one) => one.startsWith('yakala')).length, 1);
+    // Named in another letter case, as Windows may: the same folder.
+    ownerOf(own, vault.toUpperCase());
+    assert.equal(await repointYakala(), null);
+    // A vault without an engine yet: left until its engine is installed; the predecessor's is no engine for it either.
+    ownerOf(own, before);
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-motorsuz-'));
+    updateSettings((settings) => {
+      settings.vault = empty;
+    });
+    assert.equal(await repointYakala(), null);
+    const predecessor = vaultWithEngine('3.9.0');
+    assert.equal(await repointYakala(), null);
+    assert.ok(!fs.existsSync(path.join(predecessor, 'istenen.log')));
+    // Nothing set yakala up: nothing to move.
+    fs.rmSync(path.join(own, 'yakala-sahip.json'));
+    const fresh = vaultWithEngine('1.0.33');
+    assert.equal(await repointYakala(), null);
+    assert.ok(!fs.existsSync(path.join(fresh, 'istenen.log')));
+    // Refused by the engine: its sentence, said by the caller (electron/ipc.ts).
+    ownerOf(own, before);
+    fs.writeFileSync(path.join(fresh, 'beyin.py'), "import json, sys\nprint(json.dumps({'error': 'ValueError', 'message': 'Kisayol bos olamaz'}), file=sys.stderr)\nsys.exit(1)\n");
+    await assert.rejects(repointYakala(), /Kisayol bos olamaz/);
+  });
+});
+
+test('outside Windows, yakala’s key is not moved', { skip: !hasPython }, async () => {
+  const before = process.env.LOCALAPPDATA;
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'yerel-'));
+  process.env.LOCALAPPDATA = local;
+  try {
+    ownerOf(path.join(local, 'beyin-v3'), fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-onceki-')));
+    const vault = vaultWithEngine('1.0.33');
+    setYakalaPlatform('darwin');
+    assert.equal(await repointYakala(), null);
+    assert.ok(!fs.existsSync(path.join(vault, 'istenen.log')));
+  } finally {
+    setYakalaPlatform(process.platform);
+    if (before === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = before;
+  }
+});
+
+test('a listener found not running is started again with its key kept, and a key another app holds is changed to one offered', { skip: !hasPython }, async () => {
+  await withOwnFolder(async () => {
+    const vault = vaultWithEngine('1.0.33');
+    await restartListener();
+    assert.ok(asked(vault).includes('yakala kur'), 'set up again, its own key kept: no --tus');
+    fs.writeFileSync(path.join(vault, 'dinleyici-yok'), '');
+    await assert.rejects(restartListener(), /Dinleyici yine başlamadı/);
+    fs.rmSync(path.join(vault, 'dinleyici-yok'));
+    await changeHotkey('ctrl+alt+y');
+    assert.ok(asked(vault).includes('yakala kur --tus ctrl+alt+y'));
+    await assert.rejects(changeHotkey('ctrl+alt+del'), /seçilemez/);
+    await assert.rejects(changeHotkey('win+x'), /seçilemez/);
+    assert.equal(asked(vault).filter((one) => one.startsWith('yakala kur')).length, 3, 'nothing run for a key not offered');
+  });
+});
+
+test('voice typing set up with its listener not running ends with that said, not with plain success (windows-e2e-5)', { skip: !hasPython || process.platform !== 'win32' }, async () => {
+  const vault = vaultWithEngine('1.0.9');
+  fs.writeFileSync(path.join(vault, 'dinleyici-yok'), '');
+  const pushes: SetupPush[] = [];
+  onSetupPush((one) => pushes.push(one));
+  await installVoice();
+  const end = pushes[pushes.length - 1] as { job: 'voice'; done: true; ok: boolean; warning?: string };
+  assert.equal(end.ok, true);
+  assert.match(end.warning ?? '', /dinleyici başlamadı/);
+  assert.ok(pushes.some((one) => 'step' in one && one.step === end.warning), 'said among its steps too');
 });

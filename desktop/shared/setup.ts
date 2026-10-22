@@ -134,12 +134,27 @@ export function engineAction(engine: EngineStatus | null | undefined): 'install'
 }
 
 /** How a job goes: a step as the engine says it, then its end. */
-export type SetupPush = { job: SetupJob; step: string } | { job: SetupJob; done: true; ok: boolean; error?: string };
+export type SetupPush = { job: SetupJob; step: string } | { job: SetupJob; done: true; ok: boolean; error?: string; warning?: string };
 
 /** How far a download step has come, in percent ("%40 (650 / 1624 MB)", or "40% (…)" in English); null for any other step. */
 export function percentOfStep(line: string): number | null {
   const found = /^%?(\d+)%? \(\d+ \/ \d+ MB\)$/.exec(line.trim());
   return found ? Math.min(100, Number(found[1])) : null;
+}
+
+/**
+ * The keys yakala can be moved to from the settings when another app holds its own (`beyin.py yakala kur --tus`):
+ * Ctrl+Alt with a letter that writes nothing with AltGr on a Turkish keyboard, or Ctrl+Shift.
+ */
+export const HOTKEYS = ['ctrl+alt+c', 'ctrl+alt+n', 'ctrl+alt+y', 'ctrl+shift+y'] as const;
+export type Hotkey = (typeof HOTKEYS)[number];
+
+/** A key as a person reads it: "ctrl+alt+c" is "Ctrl+Alt+C". */
+export function hotkeyLabel(spec: string): string {
+  return spec
+    .split('+')
+    .map((part) => (part.length === 1 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()))
+    .join('+');
 }
 
 /** How yakala's listener says its voice helper is (beyin_v3_ses.say_listener): loading - fetching a model, with how much has come - ready, or failed. */
@@ -151,11 +166,31 @@ export interface ListenerWord {
   model: string;
   /** Why it failed, while it is being started again. */
   mesaj: string;
-  /** Whether it listens for the wake phrase now. */
+  /** Whether it listens for the wake phrase now: true only while the wake listener really hears its microphone. */
   uyandirma: boolean;
   /** A model being fetched: MB come, and MB in all; null when none is. */
   mb: number | null;
   toplam: number | null;
+  /** Why the wake phrase is not listened for though it is on: no sound from the microphone, only silence from it, or its model; null when nothing is wrong (or the engine does not say). */
+  uyandirma_sorun: WakeTrouble | null;
+  /** That, in the engine's Turkish sentence (what to do about it); empty when nothing is wrong. */
+  uyandirma_mesaj: string;
+  /** Whether the listener holds its key ('tamam'), or another app does ('mesgul'); null until it knows, or from an engine that does not say. */
+  kisayol: 'tamam' | 'mesgul' | null;
+}
+
+/** Why the wake listener does not hear (beyin_v3_ses.WAKE_TROUBLE): no sound comes from the microphone, only exact silence (Windows' privacy switch), or its small model would not load. */
+export type WakeTrouble = 'mikrofon' | 'sessiz' | 'model';
+
+/**
+ * How yakala's listener is, as the app sees it (electron/services/tray.ts): its word; whether none has run for longer
+ * than a restart takes though voice typing is set up and on - then nothing hears the key, the phrase or the microphone -
+ * and the key it was set up with, as a person reads it ("Ctrl+Alt+C").
+ */
+export interface ListenerSeen {
+  word: ListenerWord | null;
+  missing: boolean;
+  hotkey: string | null;
 }
 
 export interface SetupApi {
@@ -165,8 +200,12 @@ export interface SetupApi {
    * (`beyin.py relocate`): once per opening, in the background. The failure's sentence, or null.
    */
   settle(): Promise<string | null>;
-  /** How the voice helper is now (the settings' bar); null without a listener running. */
-  helper(): Promise<ListenerWord | null>;
+  /** How the listener and its voice helper are now (the settings' bar). */
+  helper(): Promise<ListenerSeen>;
+  /** Yakala set up again in this vault (`beyin.py yakala kur`): its listener started again, where it was found not running. */
+  restartListener(): Promise<void>;
+  /** Yakala's key changed to one of HOTKEYS (`beyin.py yakala kur --tus`), where another app holds the one it has. */
+  hotkey(spec: Hotkey): Promise<void>;
   /** The Python that came with the app installed for this user (Windows): quietly, without asking for an administrator. */
   installPython(): Promise<SetupStatus>;
   /** The vault's engine installed, or updated, from the package that came with the app. */

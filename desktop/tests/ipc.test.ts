@@ -6,6 +6,8 @@ import test from 'node:test';
 import { dialogAnswer, handlers, sent } from 'electron';
 import { registerIpc, trustPagesWhere } from '../electron/ipc';
 import { forgetSettings, readSettings, settingsPath } from '../electron/services/settings';
+import { pythonOf } from '../electron/services/localChat';
+import { setYakalaPlatform } from '../electron/services/setup';
 
 /**
  * What the window can ask (electron/ipc.ts): the channels the preload names
@@ -81,4 +83,56 @@ test('the vault comes through the dialog, and what the window is told of it hold
   const boot = await call('app:bootstrap');
   assert.ok(!JSON.stringify(boot).includes(path.dirname(dir)), 'no path in the bootstrap either');
   assert.equal(readSettings().vault, dir);
+});
+
+/** A vault with an engine that answers `relocate` and `yakala kur` as beyin.py does, and logs what it was asked. */
+const ENGINE = String.raw`import json, os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+args = sys.argv[1:]
+open(os.path.join(here, 'istenen.log'), 'a', encoding='utf-8').write(' '.join(args) + '\n')
+if args[:1] == ['relocate']:
+    print(json.dumps({'status': 'unchanged', 'vault': here, 'state': os.path.join(here, 'durum')}))
+elif args[:2] == ['yakala', 'kur']:
+    folder = os.path.join(os.environ['LOCALAPPDATA'], 'beyin-v3')
+    os.makedirs(folder, exist_ok=True)
+    json.dump({'surum': 1, 'vault': here, 'state': os.path.join(here, 'durum'), 'tus': args[args.index('--tus') + 1], 'at': 1},
+              open(os.path.join(folder, 'yakala-sahip.json'), 'w', encoding='utf-8'))
+    print(json.dumps({'status': 'kuruldu', 'dinleyici': True}))
+else:
+    sys.exit(2)
+`;
+
+test('another vault chosen, yakala follows it from the vault that had it, and the window is told (yakala-3)', { skip: pythonOf() === null }, async () => {
+  firstRun();
+  const before = process.env.LOCALAPPDATA;
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'yerel-'));
+  process.env.LOCALAPPDATA = local;
+  setYakalaPlatform('win32');
+  try {
+    const left = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-onceki-')));
+    fs.mkdirSync(path.join(local, 'beyin-v3'));
+    fs.writeFileSync(path.join(local, 'beyin-v3', 'yakala-sahip.json'), JSON.stringify({ surum: 1, vault: left, state: path.join(left, 'durum'), tus: 'ctrl+alt+n', at: 1 }));
+    const chosen = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-')));
+    fs.writeFileSync(path.join(chosen, 'beyin.py'), ENGINE);
+    fs.writeFileSync(path.join(chosen, '.beyin-version'), '1.0.33\n');
+    dialogAnswer.value = { canceled: false, filePaths: [chosen] };
+    sent.length = 0;
+    await call('vault:choose');
+    const told = async () => {
+      for (const end = Date.now() + 20_000; Date.now() < end; await new Promise((done) => setTimeout(done, 50))) {
+        const notice = sent.find(([channel]) => channel === 'app:notice');
+        if (notice) return notice[1] as { tone: string; title: string; detail: string };
+      }
+      return null;
+    };
+    const notice = await told();
+    assert.equal(notice?.tone, 'success');
+    assert.match(notice?.detail ?? '', /Ctrl\+Alt\+N/);
+    const asked = fs.readFileSync(path.join(chosen, 'istenen.log'), 'utf8').trim().split(/\r?\n/);
+    assert.deepEqual(asked, ['relocate', 'yakala kur --tus ctrl+alt+n'], 'bound first, then yakala moved with its key');
+  } finally {
+    setYakalaPlatform(process.platform);
+    if (before === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = before;
+  }
 });

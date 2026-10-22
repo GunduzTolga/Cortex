@@ -139,6 +139,7 @@
       "installerLanguages": [
         "tr_TR"
       ],
+      "include": "build/installer.nsh",
       "language": "1055"
     }
   }

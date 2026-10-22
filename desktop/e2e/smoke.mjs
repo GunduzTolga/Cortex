@@ -69,8 +69,11 @@ const write = (relative, text) => {
 };
 
 /*
-  The vault: Cortex's template as the installer lays it out, the hidden parts
-  Obsidian, git and Cortex keep, and a few notes of the person's.
+  The vault: this repository's template, in the shape the owner's vault has
+  (its `📋 Templates/Note.md`, `📥 000-Inbox/Dump`, from the installer before
+  v3; a vault the v3 installer starts has neither, and a new note there starts
+  empty: misc-scripts-2), the hidden parts Obsidian, git and Cortex keep, and a
+  few notes of the person's.
 */
 fs.cpSync(path.resolve('..', 'template'), vaultDir, { recursive: true });
 write('.obsidian/workspace.json', '{"main":{}}\n');
@@ -1281,6 +1284,40 @@ check(
   'a note written a moment before Cortex quits is saved before the window goes',
   closingOpen && fs.readFileSync(vaultNote('Drafts/E2E Closing.md'), 'utf8') === '# Closing\n\nStart closed',
 );
+
+/*
+  The page dying - out of memory on a large vault, the GPU process gone on a laptop - is loaded again by itself
+  (electron/main.ts, desktop-shell-9): before, the window stayed a blank sheet, and the icon's "Cortex'i aç" brought
+  the same blank page back. Opened again for it: a page that crashed cannot be driven further.
+*/
+console.log('\nThe page dying');
+app = await launch();
+page = await app.firstWindow();
+await page.waitForLoadState('domcontentloaded');
+const beforeCrash = await shownSoon(page.locator('[data-vault-screen]'), 30_000);
+// Its end and the page loaded after it are heard in the main process: a question put to the dying page is never answered.
+await app.evaluate(({ BrowserWindow }) => {
+  const contents = BrowserWindow.getAllWindows()[0].webContents;
+  globalThis.cortexPage = { gone: null, loaded: 0 };
+  contents.on('render-process-gone', (_event, details) => {
+    globalThis.cortexPage.gone = details.reason;
+  });
+  contents.on('did-finish-load', () => {
+    if (globalThis.cortexPage.gone) globalThis.cortexPage.loaded += 1;
+  });
+  contents.forcefullyCrashRenderer();
+});
+const answered = (promise, ms = 5_000) => Promise.race([promise.catch(() => null), new Promise((done) => setTimeout(() => done(null), ms))]);
+let backAfterCrash = false;
+for (const end = Date.now() + 30_000; Date.now() < end && !backAfterCrash; await new Promise((done) => setTimeout(done, 250))) {
+  const seen = await answered(app.evaluate(() => globalThis.cortexPage));
+  if (!seen?.gone || !seen.loaded) continue;
+  backAfterCrash = Boolean(
+    await answered(app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.executeJavaScript('Boolean(document.querySelector("[data-vault-screen]"))'))),
+  );
+}
+check('a page that dies is loaded again by itself, the vault on screen again', beforeCrash && backAfterCrash);
+await app.close();
 fs.rmSync(userData, { recursive: true, force: true });
 fs.rmSync(vaultDir, { recursive: true, force: true });
 fs.rmSync(agentGateDir, { recursive: true, force: true });
