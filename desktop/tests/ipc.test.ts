@@ -8,7 +8,7 @@ import { registerIpc, trustPagesWhere } from '../electron/ipc';
 import { forgetSettings, readSettings, settingsPath, updateSettings } from '../electron/services/settings';
 import { pythonOf } from '../electron/services/localChat';
 import { listenerRestarting } from '../electron/services/microphone';
-import { setYakalaPlatform } from '../electron/services/setup';
+import { repointYakala, setYakalaPlatform } from '../electron/services/setup';
 
 /**
  * What the window can ask (electron/ipc.ts): the channels the preload names
@@ -140,6 +140,66 @@ test('another vault chosen, yakala follows it from the vault that had it, and th
     assert.match(notice?.detail ?? '', /Ctrl\+Alt\+N/);
     const asked = fs.readFileSync(path.join(chosen, 'istenen.log'), 'utf8').trim().split(/\r?\n/);
     assert.deepEqual(asked, ['relocate', 'yakala kur --tus ctrl+alt+n'], 'bound first, then yakala moved with its key');
+  } finally {
+    setYakalaPlatform(process.platform);
+    if (before === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = before;
+  }
+});
+
+/** The same engine, its `relocate` held until the test lets it go (a file `devam` beside it), and saying when it ends. */
+const HELD = ENGINE.replace(
+  "if args[:1] == ['relocate']:\n",
+  "if args[:1] == ['relocate']:\n    import time\n    for _ in range(1500):\n        if os.path.exists(os.path.join(here, 'devam')): break\n        time.sleep(0.02)\n    open(os.path.join(here, 'istenen.log'), 'a', encoding='utf-8').write('relocate bitti\\n')\n",
+);
+
+test('two vaults chosen one after the other: yakala goes to the second once it is bound, not while it is being bound', { skip: pythonOf() === null }, async () => {
+  firstRun();
+  const before = process.env.LOCALAPPDATA;
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'yerel-'));
+  process.env.LOCALAPPDATA = local;
+  setYakalaPlatform('win32');
+  try {
+    const left = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-onceki-')));
+    fs.mkdirSync(path.join(local, 'beyin-v3'));
+    fs.writeFileSync(path.join(local, 'beyin-v3', 'yakala-sahip.json'), JSON.stringify({ surum: 1, vault: left, state: path.join(left, 'durum'), tus: 'ctrl+alt+y', at: 1 }));
+    const held = () => {
+      const vault = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-')));
+      fs.writeFileSync(path.join(vault, 'beyin.py'), HELD);
+      fs.writeFileSync(path.join(vault, '.beyin-version'), '1.0.33\n');
+      return vault;
+    };
+    const asked = (vault: string) => (fs.existsSync(path.join(vault, 'istenen.log')) ? fs.readFileSync(path.join(vault, 'istenen.log'), 'utf8').trim().split(/\r?\n/) : []);
+    const until = async (done: () => boolean, ms = 20_000) => {
+      for (const end = Date.now() + ms; Date.now() < end && !done(); ) await new Promise((wait) => setTimeout(wait, 20));
+      return done();
+    };
+    const first = held();
+    const second = held();
+    sent.length = 0;
+    // Chosen, then another before the first was bound: both bindings going on, the second vault the one open.
+    dialogAnswer.value = { canceled: false, filePaths: [first] };
+    await call('vault:choose');
+    dialogAnswer.value = { canceled: false, filePaths: [second] };
+    await call('vault:choose');
+    assert.ok(await until(() => asked(first).includes('relocate') && asked(second).includes('relocate')), 'both being bound');
+    // The first bound: what its opening asked for yakala goes on, in the vault open now, the second, still being bound.
+    fs.writeFileSync(path.join(first, 'devam'), '');
+    assert.ok(await until(() => asked(first).includes('relocate bitti')));
+    // Given the moment a run of the engine takes to start: yakala kur in the second vault before it is bound gave its
+    // listener a vault whose engine still named the folder it was set up in.
+    await until(() => asked(second).some((one) => one.startsWith('yakala')), 1_000);
+    assert.deepEqual(asked(second), ['relocate'], 'nothing else run in the second vault while it is being bound');
+    fs.writeFileSync(path.join(second, 'devam'), '');
+    assert.ok(await until(() => sent.some(([channel]) => channel === 'app:notice')));
+    const notice = sent.find(([channel]) => channel === 'app:notice')?.[1] as { tone: string; detail: string };
+    assert.equal(notice.tone, 'success');
+    assert.match(notice.detail, /Ctrl\+Alt\+Y/);
+    assert.deepEqual(asked(second), ['relocate', 'relocate bitti', 'yakala kur --tus ctrl+alt+y'], 'bound first, then yakala moved, once');
+    assert.ok(!asked(first).some((one) => one.startsWith('yakala')), 'nothing moved into the vault left');
+    // Each opening's yakala work is done, one after the other: the second vault's own finds yakala there already.
+    assert.equal(await repointYakala(), null);
+    assert.equal(sent.filter(([channel]) => channel === 'app:notice').length, 1, 'said once');
   } finally {
     setYakalaPlatform(process.platform);
     if (before === undefined) delete process.env.LOCALAPPDATA;

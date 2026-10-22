@@ -11,7 +11,7 @@ import pythonPin from '../../python.json';
 import { childEnv } from './acp';
 import { refreshPath } from './clis';
 import { forgetPythonVerdicts, type PythonLaunch, pythonOf, pythonWanting, usablePython } from './localChat';
-import { readOwner, restartingListener } from './microphone';
+import { readOwner, restartingListener, type YakalaOwner } from './microphone';
 import { readSettings } from './settings';
 
 /**
@@ -906,19 +906,29 @@ function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
  * along) or renamed is bound to where it is now when it opens (`settleVault`), and yakala, left on its old place, had
  * nowhere to write and, after a restart, no listener at all; a vault still there may have been given yakala on purpose,
  * from a terminal, and keeps it.
+ *
+ * Moved only once the vault open now is bound (`settleVault`), whoever asked: two vaults chosen one after the other,
+ * the first one's binding ended while the second's went on, and what its opening asked for set yakala up in the second
+ * before its engine stopped naming the folder it was set up in. What changed while it waited is looked at again: another
+ * vault opened meanwhile is left to its own opening, which moves yakala there once it is bound, and a setup job that set
+ * yakala up in this vault leaves nothing to move.
  */
 export function repointYakala(onlyWhereGone = false): Promise<string | null> {
   return oneAtATime(async () => {
     if (yakalaPlatform !== 'win32') return null;
     await whenSetupIdle();
     const vault = vaultOrNull();
-    const owner = readOwner();
-    if (!vault || !owner || sameFolder(owner.vault, vault)) return null;
-    if (onlyWhereGone && fs.existsSync(owner.vault)) return null;
+    const servesAnother = (owner: YakalaOwner | null): owner is YakalaOwner =>
+      Boolean(vault && owner && !sameFolder(owner.vault, vault) && !(onlyWhereGone && fs.existsSync(owner.vault)));
+    if (!vault || !servesAnother(readOwner())) return null;
     const installed = installedVersion(vault);
     if (!installed || isPredecessor(installed)) return null;
     const python = await usablePython();
     if (!python) return null;
+    await settleVault();
+    await whenSetupIdle();
+    const owner = readOwner();
+    if (vaultOrNull() !== vault || !servesAnother(owner)) return null;
     await yakalaKur(vault, owner.tus ? ['--tus', owner.tus] : [], python);
     return hotkeyLabel(owner.tus ?? HOTKEYS[0]);
   });
