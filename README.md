@@ -200,6 +200,7 @@ Kendin derlemek ve ayrıntılar için: [desktop/README.md](desktop/README.md).
   - İşlemcide hızlı `small` modeli yazar; "Hey Pyn"i küçük ayrı bir model doğrular, böylece pencere hemen açılır.
   - Daha doğru ama işlemcide yavaş modeli Ayarlar → Sesle yazma → **Yazı modeli**'nden seçebilirsin.
   - Uygulama hemen açılır, ses arka planda hazırlanır. Ayarlar → Sesle yazma'daki çubuk modelin ne kadarının indiğini ya da yüklendiğini gösterir. Sağ alttaki simge de "Ses hazırlanıyor…" der. Hazırlık uzun sürerse bildirim gelir; hazır olunca "Pyn hazır" der. Kablosuz kulaklık sonradan bağlansa ya da Windows'un varsayılan mikrofonu değişse de dinleyici yeni mikrofona kendiliğinden geçer.
+- **Bir kez kurulur.** Paketler ve modeller kullanıcının tek ses klasöründe durur (`%LOCALAPPDATA%\beyin-v3\ses`); bütün kasalar onu kullanır, başka bir kasaya geçince ses yeniden inmez. Kurulum olmazsa nedeni tek cümleyle söylenir (internet yok, disk dolu); ayrıntısı aynı klasördeki `kurulum.log` dosyasında.
 
 [Ayrıntılar](docs/v3/YAKALA.md#sesle-yazma-windows-isteğe-bağlı)
 
@@ -351,8 +352,8 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 | Belirti | Çözüm |
 | --- | --- |
 | Kurulumda "Windows bilgisayarınızı korudu" | Kurulum dosyası henüz imzasız. **Ek bilgi** → **Yine de çalıştır**. |
-| "Hey Pyn" pencereyi geç açıyor ya da yazı geç geliyor | Bilgisayarda NVIDIA, AMD ya da Intel Arc kartı yoksa ses işlemcide yazıya çevrilir. Ayarlar → Sesle yazma → **Yazı modeli**: **Hızlı** seçili olsun (1.0.32'den beri varsayılan). Açılıştan hemen sonra model yükleniyor olabilir: sağ alttaki simge "Ses hazırlanıyor…" diyorsa "Pyn hazır" bildirimini bekle. Süreler `state/ses/isci.log` dosyasında. |
-| "Hey Pyn" pencereyi açmıyor | Cortex çalışıyor mu? **Sürekli dinle** yalnız Cortex açıkken (sağ altta simgesi varken) dinler. Ayarlar → Sesle yazma: **Sürekli dinle** açık mı, izin verildi mi? Uyandırma sözü "Hey Pyn" ya da "İkisi de" mi (varsayılan "Pyn, not al")? Sağ alttaki simgenin menüsü mikrofonun dinleyip dinlemediğini ve hangi sözü beklediğini söyler. Ne duyduğunu görmek için: `py -3 beyin.py ses dene --uyandirma`. |
+| "Hey Pyn" pencereyi geç açıyor ya da yazı geç geliyor | Bilgisayarda NVIDIA, AMD ya da Intel Arc kartı yoksa ses işlemcide yazıya çevrilir. Ayarlar → Sesle yazma → **Yazı modeli**: **Hızlı** seçili olsun (1.0.32'den beri varsayılan). Açılıştan hemen sonra model yükleniyor olabilir: sağ alttaki simge "Ses hazırlanıyor…" diyorsa "Pyn hazır" bildirimini bekle. Süreler `%LOCALAPPDATA%\beyin-v3\ses\isci.log` dosyasında. |
+| "Hey Pyn" pencereyi açmıyor | Cortex çalışıyor mu? **Sürekli dinle** yalnız Cortex açıkken (sağ altta simgesi varken) dinler. Ayarlar → Sesle yazma: **Sürekli dinle** açık mı, izin verildi mi? Uyandırma sözü "Hey Pyn" ya da "İkisi de" mi (varsayılan "Pyn, not al")? Sağ alttaki simgenin menüsü mikrofonun dinleyip dinlemediğini ve hangi sözü beklediğini söyler; dinleyemiyorsa nedenini de (yalnız sessizlik geliyorsa Windows Ayarlar → Gizlilik ve güvenlik → Mikrofon → masaüstü uygulamalarının erişimi açık olmalı). Ne duyduğunu görmek için: `py -3 beyin.py ses dene --uyandirma`. |
 | Not al'da "Mikrofondan ses gelmiyor" | Mikrofon kapalı ya da sessizde olabilir, ya da Windows başka bir mikrofonu dinliyor: Windows ses ayarlarından doğru mikrofonu varsayılan yap. |
 | Asistan notları hatırlamıyor | İstemcide hook güvenini onayladığını kontrol et, sonra asistana "beyin-doktor ile kontrol et" de ya da `beyin.py doctor` çalıştır. |
 | Bir not bağlama hiç girmiyor | Notta `visibility: private` var mı, klasörünün adında "Özel", "Şifreler" gibi bir sözcük geçiyor mu? `beyin.py doctor` indeks dışı tutulanları gösterir. |
@@ -406,7 +407,7 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 
 [Kaynak formatı](docs/v3/MARKDOWN.md) · [Runtime](docs/v3/RUNTIME.md) · [Semantik test sözleşmesi](docs/v3/SEMANTIC-TEST-CONTRACT.md) · [Sürüm paketi ve güncelleyici](docs/v3/UPDATE.md) · [Birden çok makine](docs/v3/MULTI-MACHINE.md) · [Tercihler](docs/v3/PREFERENCES.md) · [Yakala](docs/v3/YAKALA.md) · [Telegram](docs/v3/TELEGRAM.md) · [OpenCode](docs/v3/OPENCODE.md) · [Hermes](docs/v3/HERMES.md) · [OMP](docs/v3/OMP.md) · [Kiro](docs/v3/KIRO.md) · [Yakalama sunucusu](docs/v3/INGEST-SERVER.md) · [Masaüstü uygulaması](desktop/README.md)
 
-- **Motor:** `template/.claude/scripts/` altında, yalnız Python standart kütüphanesiyle. Sesle yazma kendi sanal ortamında (`state/ses/venv`) çalışan ayrı bir yardımcıdır; motor onun paketlerini içe almaz.
+- **Motor:** `template/.claude/scripts/` altında, yalnız Python standart kütüphanesiyle. Sesle yazma kendi sanal ortamında (kullanıcının tek ses klasörü, `%LOCALAPPDATA%\beyin-v3\ses\venv`; bütün kasalar onu kullanır) çalışan ayrı bir yardımcıdır; motor onun paketlerini içe almaz.
 - **Masaüstü uygulaması:** `desktop/` altında Electron, React ve TypeScript. Yalnız Windows için derlenir (NSIS kurulum dosyası); kod büyük ölçüde macOS ve Linux'ta da çalışır ama orada kurulum dosyası ve CI yoktur.
 - **Testler:** motor her sürümde Windows, macOS ve Linux'ta, Python 3.11 ve 3.13 ile 1.700'ü aşkın otomatik testle ve anlamsal senaryolarla doğrulanır; masaüstü uygulamasının ayrıca birim ve uçtan uca testleri vardır. Gerçek istemci kontrolleri [ayrı raporlanır](docs/v3/README.md).
 

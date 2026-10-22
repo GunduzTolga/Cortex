@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,15 @@ SCRIPTS = ROOT / 'template/.claude/scripts'
 sys.path.insert(0, str(SCRIPTS))
 import beyin_v3_ses as ses  # noqa: E402
 import beyin_v3_yakala as yakala  # noqa: E402
+
+
+def popen_from(run):
+    """A Popen stand-in made of a test's `run`: the command's output, there at once (pip's step)."""
+    def popen(command, **_options):
+        done = run(command)
+        return types.SimpleNamespace(stdout=io.StringIO((done.stdout or '') + (done.stderr or '')),
+                                     wait=lambda timeout=None: done.returncode, kill=lambda: None)
+    return popen
 
 
 class WordsTest(unittest.TestCase):
@@ -98,6 +108,20 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(ses.without_wake('Pyne, yarın toplantı var', both), 'yarın toplantı var')
         self.assertEqual(ses.without_wake('Al. Süt al', both), 'Süt al')
         self.assertEqual(ses.phrase_label(both), 'Hey Pyn ya da Pyn, not al')
+
+    def test_a_word_that_only_sounds_like_pyn_is_neither_the_wake_phrase_nor_taken_off_a_note(self):
+        # "Hey Pyn, …" then "Bin beş yüz lira market": the note was saved as "beş yüz lira market".
+        for phrase in ('hey pyn', 'ikisi'):
+            for kept in ('Bin lira ödedim.', 'Ayın sonunda ödeme var.', 'Bayan Ayşe aradı.', 'Payını ayır.', 'Pin kodunu değiştir.',
+                         'Plan yap.'):
+                self.assertEqual(ses.without_wake(kept, phrase), kept, (phrase, kept))
+            for written in ('Pyn, yarın', 'Payn yarın', 'Pyne, yarın', 'Pain yarın', 'Payın, yarın', 'Payne, yarın', 'Hey Payne, yarın'):
+                self.assertEqual(ses.without_wake(written, phrase), 'yarın', (phrase, written))
+        # "aynen" is said all day: "Hey, aynen öyle" opened the window and recorded for 24 seconds.
+        for said in ('Hey aynen', 'Hey Aynur', 'Hey Ayten', 'Hey ayna', 'Hey plan', 'Hey panik', 'Hey kayın', 'Hey payını'):
+            self.assertFalse(ses.wake_heard(said, 'hey pyn'), said)
+        for said in ('Hey Py', 'Hey Pyne.', 'Hey Payne', 'Hey Pain!', 'hey pin'):
+            self.assertTrue(ses.wake_heard(said, 'hey pyn'), said)
 
     def test_the_picture_on_the_clipboard_is_added_by_voice(self):
         self.assertEqual(ses.command_of('Panodaki resmi ekle.'), ('resim_ekle', ''))
@@ -351,6 +375,24 @@ class SetupTest(unittest.TestCase):
         self.assertEqual((broken.word(), broken.retry_at), ('hata', 30.0), 'tried again later')
         self.assertIn('venv yok', broken.error)
 
+    def test_the_listener_says_the_wake_phrase_is_listened_for_only_while_it_really_is(self):
+        link = yakala.VoiceLink(types.SimpleNamespace(send=lambda *_a, **_k: True), start=lambda: None)
+        link.heard({'olay': 'hazir', 'aciklama': 'small (işlemci)'}, 0.0)
+        self.assertFalse(link.listens(), 'ready, but the wake listener has not heard its microphone yet')
+        self.assertTrue(link.heard({'olay': 'uyandirma', 'durum': 'dinliyor'}, 1.0))
+        self.assertTrue(link.listens())
+        trouble = {'olay': 'uyandirma', 'durum': 'sorun', 'neden': 'sessiz', 'mesaj': 'mikrofon yalnız sessizlik veriyor'}
+        self.assertTrue(link.heard(trouble, 2.0))
+        self.assertEqual((link.listens(), link.wake_problem, link.wake_message), (False, 'sessiz', 'mikrofon yalnız sessizlik veriyor'))
+        self.assertFalse(link.heard(trouble, 3.0), 'nothing new')
+        link.heard({'olay': 'uyandirma', 'durum': 'sorun', 'neden': 'bilinmeyen'}, 4.0)
+        self.assertIsNone(link.wake_problem, 'only the reasons the desktop app knows')
+        link.heard({'olay': 'bitti'}, 5.0)
+        self.assertEqual((link.wake, link.wake_problem, link.wake_message), (None, None, ''), 'a new helper says it anew')
+        link.progress = (10, 150)
+        self.assertTrue(link.heard({'olay': 'denetci', 'hazir': True}, 6.0), 'the checker fetched: no bar left behind')
+        self.assertIsNone(link.progress)
+
     def test_a_model_being_fetched_is_said_as_it_comes_not_one_line_for_minutes(self):
         progress = Path(self.tmp.name) / ses.PROGRESS_FILE
         said = []
@@ -426,13 +468,16 @@ class SetupTest(unittest.TestCase):
 
     def test_the_plan_picks_a_python_with_wheels_and_adds_cuda_only_with_an_nvidia_card(self):
         calls = []
+        python313 = Path(self.tmp.name) / 'Python313' / 'python.exe'
+        python313.parent.mkdir()
+        python313.write_bytes(b'')
 
         def run(command, **_options):
             calls.append(command)
             if command[:2] == ['py', '-3.12']:
                 return subprocess.CompletedProcess(command, 1, '', 'not installed')
             if command[:2] == ['py', '-3.13']:
-                return subprocess.CompletedProcess(command, 0, 'C:\\Python313\\python.exe\n', '')
+                return subprocess.CompletedProcess(command, 0, str(python313) + '\n', '')
             if command[0] == 'nvidia-smi':
                 return subprocess.CompletedProcess(command, 0, 'GPU 0: RTX', '')
             return subprocess.CompletedProcess(command, 1, '', '')
@@ -440,7 +485,7 @@ class SetupTest(unittest.TestCase):
         found = {'py': 'C:\\Windows\\py.exe', 'nvidia-smi': 'C:\\nvidia-smi.exe'}
         plan = ses.install_plan(self.state, which=found.get, run=run)
         if os.name == 'nt':
-            self.assertEqual(plan['python'], 'C:\\Python313\\python.exe', '3.12 missing, 3.13 next')
+            self.assertEqual(plan['python'], str(python313), '3.12 missing, 3.13 next')
         self.assertTrue(plan['ekran_karti'])
         self.assertIn('nvidia-cublas-cu12', plan['paketler'])
         self.assertTrue(plan['klasor'].endswith(ses.SES_DIR), 'everything under state/ses, outside the vault')
@@ -467,8 +512,8 @@ class SetupTest(unittest.TestCase):
         (system / 'System32' / 'vulkan-1.dll').write_bytes(b'')
         self.assertEqual(ses.engine_for(which={}.get, run=run, system=system), 'vulkan')
         plan = ses.install_plan(self.state, which={}.get, run=run, system=system)
-        self.assertEqual(plan['paketler'], list(ses.BASE_PACKAGES) + list(ses.DECODE_PACKAGES),
-                         'whisper.cpp writes: no faster-whisper, no CUDA; PyAV only to open a recorded file')
+        self.assertEqual(plan['paketler'], list(ses.FASTER_PACKAGES) + list(ses.BASE_PACKAGES) + list(ses.DECODE_PACKAGES),
+                         'whisper.cpp writes, faster-whisper only where the card will not start; no CUDA')
         cards[:] = ['Intel(R) Arc(TM) A770 Graphics']
         self.assertEqual(ses.engine_for(which={}.get, run=run, system=system), 'vulkan')
         cards[:] = ['Intel(R) UHD Graphics 770', 'Intel(R) Iris(R) Xe Graphics']
@@ -512,7 +557,7 @@ class SetupTest(unittest.TestCase):
             copy.write_bytes(archive.read_bytes())
             return copy
 
-        result = ses.install(self.state, say=said.append, run=run, download=download, which={}.get)
+        result = ses.install(self.state, say=said.append, run=run, download=download, which={}.get, popen=popen_from(run))
         self.assertEqual(result['model'], 'large-v3-turbo (işlemci)')
         self.assertTrue(ses.installed(self.state))
         self.assertTrue((ses.ses_dir(self.state) / ses.VOSK_DIR / 'am/final.mdl').is_file(), 'the archive’s top folder is the model folder')
@@ -549,10 +594,11 @@ class SetupTest(unittest.TestCase):
             Path(target).write_bytes(build.read_bytes() if url == ses.VULKAN_BUILD['url'] else b'ggml')
             return target
 
-        result = ses.install(self.state, say=said.append, run=run, download=None, which={}.get, download_checked=download_checked)
+        result = ses.install(self.state, say=said.append, run=run, download=None, which={}.get, download_checked=download_checked,
+                             popen=popen_from(run))
         return result, next(c for c in commands if 'pip' in c), said
 
-    def test_with_whisper_cpp_in_place_the_vulkan_install_fetches_its_model_by_digest_and_no_faster_whisper(self):
+    def test_with_whisper_cpp_in_place_the_vulkan_install_fetches_its_model_by_digest(self):
         exe = ses.server_exe(self.state)
         exe.parent.mkdir(parents=True)
         exe.write_bytes(b'MZ')  # a build put there by hand, as before the pre-release is published
@@ -560,7 +606,8 @@ class SetupTest(unittest.TestCase):
         result, pip, _said = self.vulkan_install(fetched)
         self.assertEqual((result['motor'], result['model']), ('vulkan', 'large-v3-turbo (vulkan)'), 'the trial load ran on Vulkan')
         self.assertEqual(fetched, [(ses.GGML_MODEL['url'], ses.GGML_MODEL['sha256'])])
-        self.assertNotIn('faster-whisper>=1.2', pip)
+        self.assertIn('faster-whisper>=1.2', pip, 'a card that will not start leaves the processor\'s quick model writing, '
+                                                  'not whisper.cpp\'s large-v3-turbo on the processor')
         self.assertIn('vosk>=0.3.45', pip)
         self.assertEqual(ses.engine_in_use(self.state), 'vulkan')
 
@@ -598,7 +645,7 @@ class SetupTest(unittest.TestCase):
             return subprocess.CompletedProcess(command, 1 if failed else 0, '', 'CUDA failed' if failed else '')
 
         with self.assertRaises(RuntimeError):
-            ses.install(self.state, say=lambda _text: None, run=run, which={}.get, system=self.tmp.name)
+            ses.install(self.state, say=lambda _text: None, run=run, which={}.get, system=self.tmp.name, popen=popen_from(run))
         self.assertEqual((folder / ses.MARKER).read_text(encoding='utf-8'), before)
 
     def test_a_download_whose_digest_does_not_match_never_takes_the_name(self):
@@ -645,7 +692,8 @@ class SetupTest(unittest.TestCase):
 
         out = io.StringIO()
         from contextlib import redirect_stdout
-        with mock.patch.object(ses, 'install', install), mock.patch.object(ses, 'restart_listener', lambda _state: True), redirect_stdout(out):
+        with mock.patch.object(ses, 'install', install), mock.patch.object(ses, 'restart_listener', lambda _state, wait=0: True), \
+                redirect_stdout(out):
             ses.main(['kur', '--json'], state=self.state)
         lines = [json.loads(line) for line in out.getvalue().splitlines()]
         self.assertEqual(lines[:2], [{'adim': 'Motor: işlemci'}, {'adim': '%50 (800 / 1600 MB)'}])
@@ -673,6 +721,489 @@ class SetupTest(unittest.TestCase):
         with redirect_stdout(out):
             ses.main(['durum', '--json'], state=self.state)
         self.assertFalse(json.loads(out.getvalue())['kurulu'])
+
+
+class InstallRobustnessTest(unittest.TestCase):
+    """What a real install meets: a Turkish user name, a broken venv, a slow card, no network."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-kurulum-')
+        self.addCleanup(self.tmp.cleanup)
+        self.state = Path(self.tmp.name) / 'state'
+
+    def test_a_child_python_is_read_as_utf8_whatever_the_locale_says(self):
+        # The desktop app starts the engine with PYTHONIOENCODING=utf-8, which the `py` probe
+        # inherited; read with the code page, "C:\Users\Gündüz" came back garbled and "Şule" not at all.
+        path = 'C:\\Users\\Şule Gündüz\\AppData\\Local\\Programs\\Python\\Python312\\python.exe'
+        with mock.patch.dict(os.environ, {'PYTHONIOENCODING': 'latin-1'}):
+            done = ses._run([sys.executable, '-c', 'import sys; print(sys.argv[1])', path], timeout=60)
+        self.assertEqual((done.returncode, done.stdout.strip()), (0, path))
+        seen = {}
+
+        def run(command, **options):
+            seen.update(options)
+            return subprocess.CompletedProcess(command, 0, '', '')
+        ses._run(['py', '-3.12', '-c', 'pass'], run=run)
+        self.assertEqual((seen['encoding'], seen['errors'], seen['env']['PYTHONIOENCODING']), ('utf-8', 'replace', 'utf-8'))
+
+    @unittest.skipUnless(os.name == 'nt', 'the py launcher is asked only on Windows')
+    def test_a_python_path_that_is_not_there_is_not_taken(self):
+        def run(command, **_options):
+            return subprocess.CompletedProcess(command, 0, 'C:\\Users\\GÃ¼ndÃ¼z\\python.exe\n', '')
+        self.assertEqual(ses.python_for_env(which={'py': 'C:\\Windows\\py.exe'}.get, run=run), sys.executable)
+
+    def test_settings_written_whole_before_keep_no_old_default_and_a_choice_made_stays(self):
+        # Every earlier version wrote all its defaults: cpu_model large-v3-turbo kept the processor
+        # at 15-30 seconds a sentence after `small` became the default.
+        folder = ses.ses_dir(self.state)
+        folder.mkdir(parents=True)
+        old = dict(ses.DEFAULTS, cpu_model='large-v3-turbo', uyandirma=True)
+        (folder / ses.CONFIG).write_text(json.dumps(old, ensure_ascii=False), encoding='utf-8')
+        config = ses.load_config(self.state)
+        self.assertEqual((config['cpu_model'], config['uyandirma']), ('small', True))
+        written = json.loads((folder / ses.CONFIG).read_text(encoding='utf-8'))
+        self.assertEqual(written, {'surum': ses.CONFIG_VERSION, 'uyandirma': True}, 'only what differs from the defaults')
+        out = io.StringIO()
+        from contextlib import redirect_stdout
+        with redirect_stdout(out), mock.patch.object(ses, 'restart_listener', return_value=False):
+            ses.main(['ayar', '--islemci-modeli', 'large-v3-turbo', '--json'], state=self.state)
+        self.assertEqual(ses.load_config(self.state)['cpu_model'], 'large-v3-turbo', 'chosen now: it stays')
+        self.assertEqual(json.loads((folder / ses.CONFIG).read_text(encoding='utf-8'))['cpu_model'], 'large-v3-turbo')
+        commands = dict(ses.DEFAULTS['komutlar'], kaydet=['tamam'])
+        ses.save_config(self.state, dict(ses.load_config(self.state), komutlar=commands))
+        self.assertEqual(json.loads((folder / ses.CONFIG).read_text(encoding='utf-8'))['komutlar'], {'kaydet': ['tamam']})
+        self.assertEqual(ses.load_config(self.state)['komutlar'], commands)
+
+    def run_install(self, run, **options):
+        said = []
+        (ses.ses_dir(self.state) / ses.VOSK_DIR).mkdir(parents=True, exist_ok=True)  # the wake model is not these tests'
+        result = ses.install(self.state, say=said.append, run=run, which={}.get, system=self.tmp.name, popen=popen_from(run), **options)
+        return result, said
+
+    def test_a_venv_without_a_working_pip_is_built_again_not_reused(self):
+        python = ses.venv_python(self.state)
+        python.parent.mkdir(parents=True)
+        python.write_text('')  # ensurepip failed, or `kaldir` deleted all but the running python.exe
+        commands = []
+
+        def run(command, **_options):
+            commands.append(command)
+            if command[1:4] == ['-m', 'pip', '--version']:
+                return subprocess.CompletedProcess(command, 1, '', 'No module named pip')
+            if '--indir' in command:
+                return subprocess.CompletedProcess(command, 0, 'small (işlemci)\n', '')
+            return subprocess.CompletedProcess(command, 0, '', '')
+        self.run_install(run)
+        venv = next(command for command in commands if 'venv' in command)
+        self.assertIn('--clear', venv, 'the broken one is made anew')
+        self.assertLess(commands.index(venv), next(i for i, c in enumerate(commands) if 'install' in c), 'before pip')
+
+    def test_a_working_venv_is_kept(self):
+        python = ses.venv_python(self.state)
+        python.parent.mkdir(parents=True)
+        python.write_text('')
+        commands = []
+
+        def run(command, **_options):
+            commands.append(command)
+            return subprocess.CompletedProcess(command, 0, 'small (işlemci)\n' if '--indir' in command else '', '')
+        self.run_install(run)
+        self.assertFalse([command for command in commands if 'venv' in command])
+
+    def test_a_card_slower_than_the_processor_is_not_kept(self):
+        # A Radeon inside a laptop's processor wrote large-v3-turbo seconds a check: the processor's
+        # quick model is faster there, and `kur` sets it up instead.
+        ses.server_exe(self.state).parent.mkdir(parents=True)
+        ses.server_exe(self.state).write_bytes(b'MZ')
+        trials = []
+
+        offline = []
+
+        def run(command, **_options):
+            if '--indir' in command:
+                engine = json.loads((ses.ses_dir(self.state) / ses.MARKER).read_text(encoding='utf-8'))['motor']
+                trials.append(engine)
+                if engine == 'islemci' and offline:
+                    return subprocess.CompletedProcess(command, 1, '', 'LocalEntryNotFoundError: small')
+                out = '{"sure_sn": 3.4}\nlarge-v3-turbo (ekran kartı, Vulkan)\n' if engine == 'vulkan' else 'small (işlemci)\n'
+                return subprocess.CompletedProcess(command, 0, out, '')
+            if '-m' in command and 'venv' in command:
+                ses.venv_python(self.state).parent.mkdir(parents=True, exist_ok=True)
+                ses.venv_python(self.state).write_text('')
+            return subprocess.CompletedProcess(command, 0, '', '')
+
+        def download_checked(url, target, sha256, say=print):
+            Path(target).parent.mkdir(parents=True, exist_ok=True)
+            Path(target).write_bytes(b'ggml')
+            return target
+        with mock.patch.object(ses, 'engine_for', lambda *_a, **_k: 'vulkan'):
+            result, said = self.run_install(run, download_checked=download_checked)
+        self.assertEqual(trials, ['vulkan', 'islemci'])
+        self.assertEqual((result['motor'], result['model'], result['ekran_karti']), ('islemci', 'small (işlemci)', False))
+        self.assertEqual(json.loads((ses.ses_dir(self.state) / ses.MARKER).read_text(encoding='utf-8'))['motor'], 'islemci')
+        self.assertTrue(any('yavaş kaldı (3,4 sn)' in line for line in said), said)
+        # The processor's models cannot be had (no network for them): the slow card that works stays.
+        (ses.ses_dir(self.state) / ses.MARKER).unlink()
+        trials.clear()
+        offline.append(1)
+        with mock.patch.object(ses, 'engine_for', lambda *_a, **_k: 'vulkan'):
+            result, said = self.run_install(run, download_checked=download_checked)
+        self.assertEqual(trials, ['vulkan', 'islemci'])
+        self.assertEqual((result['motor'], result['ekran_karti']), ('vulkan', True))
+        marker = json.loads((ses.ses_dir(self.state) / ses.MARKER).read_text(encoding='utf-8'))
+        self.assertEqual((marker['motor'], marker['model']), ('vulkan', 'large-v3-turbo (ekran kartı, Vulkan)'))
+        self.assertTrue(any('ekran kartı kalıyor' in line for line in said), said)
+
+    def test_a_card_that_would_not_start_at_install_leaves_the_processor_set_up(self):
+        # A GTX 1050 or an MX250: CUDA fell back to the processor at every start, the settings said CUDA.
+        trials = []
+
+        def run(command, **_options):
+            if '--indir' in command:
+                trials.append(json.loads((ses.ses_dir(self.state) / ses.MARKER).read_text(encoding='utf-8'))['motor'])
+                return subprocess.CompletedProcess(command, 0, 'small (işlemci)\n', '')
+            if command[0] == 'nvidia-smi':
+                return subprocess.CompletedProcess(command, 0, 'GPU 0: GTX 1050', '')
+            if '-m' in command and 'venv' in command:
+                ses.venv_python(self.state).parent.mkdir(parents=True, exist_ok=True)
+                ses.venv_python(self.state).write_text('')
+            return subprocess.CompletedProcess(command, 0, '', '')
+        said = []
+        (ses.ses_dir(self.state) / ses.VOSK_DIR).mkdir(parents=True)
+        result = ses.install(self.state, say=said.append, run=run, which={'nvidia-smi': 'nvidia-smi'}.get, system=self.tmp.name,
+                             popen=popen_from(run))
+        self.assertEqual((trials, result['motor']), (['cuda', 'islemci'], 'islemci'))
+        # Chosen by hand, the engine stays what was chosen.
+        trials.clear()
+        ses.save_config(self.state, dict(ses.load_config(self.state), motor='cuda'))
+        result = ses.install(self.state, say=said.append, run=run, which={'nvidia-smi': 'nvidia-smi'}.get, system=self.tmp.name,
+                             popen=popen_from(run))
+        self.assertEqual((trials, result['motor']), (['cuda'], 'cuda'))
+
+    def test_the_processors_cores_are_kept_and_its_threads_not_halved_on_a_small_one(self):
+        with mock.patch.object(ses.os, 'cpu_count', lambda: 2):
+            self.assertEqual(ses.cpu_threads(), 2, 'a 2-core Celeron: both cores, not one')
+        with mock.patch.object(ses.os, 'cpu_count', lambda: 4):
+            self.assertEqual(ses.cpu_threads(), 4)
+        with mock.patch.object(ses.os, 'cpu_count', lambda: 12):
+            self.assertEqual(ses.cpu_threads(), 6, 'six cores, two threads each')
+        with mock.patch.object(ses.os, 'cpu_count', lambda: 32):
+            self.assertEqual(ses.cpu_threads(), 8)
+        folder = ses.ses_dir(self.state)
+        folder.mkdir(parents=True)
+        (folder / ses.MARKER).write_text(json.dumps({'motor': 'islemci', 'cekirdek': 3}), encoding='utf-8')
+        self.assertEqual(ses.cpu_threads(self.state), 3, 'as `kur` found them')
+
+        def run(command, **_options):
+            if '--indir' in command:
+                return subprocess.CompletedProcess(command, 0, 'small (işlemci)\n', '')
+            if '-m' in command and 'venv' in command:
+                ses.venv_python(self.state).parent.mkdir(parents=True, exist_ok=True)
+                ses.venv_python(self.state).write_text('')
+            return subprocess.CompletedProcess(command, 0, '', '')
+        with mock.patch.object(ses, 'physical_cores', lambda _run: 4):
+            self.run_install(run)
+        self.assertEqual(json.loads((folder / ses.MARKER).read_text(encoding='utf-8'))['cekirdek'], 4)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows says its cores through PowerShell')
+    def test_windows_says_its_physical_cores(self):
+        run = lambda command, **_options: subprocess.CompletedProcess(command, 0, '4\r\n', '')
+        self.assertEqual(ses.physical_cores(run), 4)
+        self.assertIsNone(ses.physical_cores(lambda command, **_options: subprocess.CompletedProcess(command, 1, '', 'x')))
+
+    def test_pips_downloads_are_said_as_they_come(self):
+        self.assertEqual(ses.pip_step('Collecting faster-whisper>=1.2'), None)
+        self.assertEqual(ses.pip_step('  Downloading nvidia_cudnn_cu12-9.1.0.70-py3-none-win_amd64.whl (679.1 MB)\n'),
+                         '  İniyor: nvidia_cudnn_cu12-9.1.0.70-py3-none-win_amd64.whl (679.1 MB)')
+        self.assertIsNone(ses.pip_step('  Downloading numpy-2.1.0-cp312-cp312-win_amd64.whl.metadata (59 kB)'))
+        self.assertEqual(ses.pip_step('Installing collected packages: numpy, av, faster-whisper'),
+                         '  Kuruluyor: numpy, av, faster-whisper')
+        lines = ['Collecting numpy\n', '  Downloading numpy-2.1.0-cp312-cp312-win_amd64.whl (12.6 MB)\n',
+                 'Installing collected packages: numpy\n', 'Successfully installed numpy-2.1.0\n']
+
+        def popen(command, **options):
+            self.assertEqual((options['stderr'], options['env']['PYTHONIOENCODING']), (subprocess.STDOUT, 'utf-8'))
+            return types.SimpleNamespace(stdout=iter(lines), wait=lambda timeout=None: 0, kill=lambda: None)
+        said = []
+        code, output = ses._streamed(['pip'], said.append, 60, popen)
+        self.assertEqual((code, said), (0, ['  İniyor: numpy-2.1.0-cp312-cp312-win_amd64.whl (12.6 MB)', '  Kuruluyor: numpy']))
+        self.assertIn('Successfully installed', output)
+        killed = []
+
+        def stuck(command, **_options):
+            def wait(timeout=None):
+                if timeout is not None:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                return -9
+            return types.SimpleNamespace(stdout=iter([]), wait=wait, kill=lambda: killed.append(1))
+        with self.assertRaises(subprocess.TimeoutExpired):
+            ses._streamed(['pip'], said.append, 1, stuck)
+        self.assertEqual(killed, [1], 'stopped at its deadline')
+
+    def test_a_failed_setup_is_one_turkish_sentence_with_a_code_and_the_rest_in_its_log(self):
+        from urllib.error import URLError
+
+        def error(exc):
+            try:
+                raise exc
+            except Exception as raised:
+                return ses.setup_error(raised, self.state)
+        offline = error(RuntimeError('Paketler yüklenemedi: WARNING: Retrying (Retry(total=4)) after connection broken by '
+                                     "'NewConnectionError(Failed to establish a new connection: [Errno 11001] getaddrinfo failed)'\n"
+                                     'ERROR: No matching distribution found for faster-whisper>=1.2'))
+        self.assertEqual(offline.code, 'voice_network')
+        self.assertIn('internete bağlanılamadı', str(offline))
+        self.assertNotIn('ERROR', str(offline))
+        self.assertEqual(error(URLError('[Errno 11001] getaddrinfo failed')).code, 'voice_network')
+        self.assertEqual(error(subprocess.TimeoutExpired(['python', '--indir'], 7200)).code, 'voice_network')
+        hub = error(RuntimeError('Whisper modeli hazırlanamadı: Traceback ...\nhuggingface_hub.errors.LocalEntryNotFoundError: '
+                                 'An error happened while trying to locate the files on the Hub'))
+        self.assertEqual(hub.code, 'voice_network')
+        full = error(OSError(28, 'No space left on device'))
+        self.assertEqual(full.code, 'voice_disk_full')
+        self.assertIn('diskte yer kalmadı', str(full))
+        self.assertEqual(error(RuntimeError('Paketler yüklenemedi: OSError: [Errno 28] No space left on device')).code, 'voice_disk_full')
+        wheels = error(RuntimeError('Paketler yüklenemedi: ERROR: No matching distribution found for ctranslate2'))
+        self.assertEqual(wheels.code, 'voice_failed')
+        self.assertIn('Python 3.10-3.13', str(wheels))
+        other = error(RuntimeError('Sanal ortam kurulamadı: Error: [WinError 5] Access is denied'))
+        self.assertEqual(other.code, 'voice_failed')
+        self.assertEqual(str(other), 'Sesle yazma kurulamadı: sanal ortam kurulamadı; ayrıntılar %s dosyasında.'
+                         % (ses.ses_dir(self.state) / ses.SETUP_LOG))
+        self.assertEqual(error(subprocess.TimeoutExpired(['python', '-m', 'venv', 'x'], 600)).code, 'voice_failed')
+        log = (ses.ses_dir(self.state) / ses.SETUP_LOG).read_text(encoding='utf-8')
+        self.assertIn('getaddrinfo failed', log, 'the whole of it kept for whoever helps')
+        self.assertIn('Access is denied', log)
+
+    def test_kur_stops_the_listener_for_the_install_and_says_whether_one_runs_after(self):
+        order = []
+
+        def install(_state, say):
+            order.append('kur')
+            return {'status': 'kuruldu', 'motor': 'islemci'}
+
+        def restart(_state, wait=0):
+            order.append(('baslat', wait))
+            return False
+        out = io.StringIO()
+        from contextlib import redirect_stdout
+        with mock.patch.object(ses, 'install', install), mock.patch.object(ses, 'stop_listener', lambda: order.append('durdur')), \
+                mock.patch.object(ses, 'restart_listener', restart), redirect_stdout(out):
+            ses.main(['kur', '--json'], state=self.state)
+        self.assertEqual(order, ['durdur', 'kur', ('baslat', ses.LISTENER_WAIT_SN)])
+        self.assertIs(json.loads(out.getvalue().splitlines()[-1])['dinleyici'], False, 'no listener runs: said, not hidden')
+
+        def broken(_state, say):
+            order.append('kur')
+            raise RuntimeError('Paketler yüklenemedi: ERROR: Could not install packages due to an OSError: [Errno 28] No space left')
+        order.clear()
+        with mock.patch.object(ses, 'install', broken), mock.patch.object(ses, 'stop_listener', lambda: order.append('durdur')), \
+                mock.patch.object(ses, 'restart_listener', restart), redirect_stdout(io.StringIO()):
+            with self.assertRaises(ses.SetupError) as raised:
+                ses.main(['kur', '--json'], state=self.state)
+        self.assertEqual(raised.exception.code, 'voice_disk_full')
+        self.assertEqual(order, ['durdur', 'kur', ('baslat', ses.LISTENER_WAIT_SN)], 'the listener comes back after a failed install too')
+
+    def restart(self, words, running=True):
+        """restart_listener(wait) with the listener's words (dinleyici.json) coming one a look, its
+        Startup shortcut there, a clock that moves a second a look: (what it said, how often it looked)."""
+        word_file = Path(self.tmp.name) / 'dinleyici.json'
+        startup = Path(self.tmp.name) / 'Pyn Yakala.lnk'
+        startup.write_text('lnk')
+        words, looks, clock = iter(words), [], iter(range(10 ** 6))
+        me, real, rest = threading.get_ident(), time.monotonic, time.sleep
+
+        def tick():  # this thread's clock only: another test's thread waiting on a queue keeps the real one
+            return float(next(clock)) if threading.get_ident() == me else real()
+
+        def look(seconds):
+            if threading.get_ident() != me:
+                return rest(seconds)
+            looks.append(1)
+            word = next(words, None)
+            if word is not None:
+                word_file.write_text(json.dumps(dict(word, at=time.time() + 60)), encoding='utf-8')
+        stand_in = types.SimpleNamespace(stop_windows_listener=lambda: True, windows_listener_running=lambda: running)
+        with mock.patch.object(ses, '_listener_may_restart', lambda: True), mock.patch.object(ses, '_startup_shortcut', lambda: startup), \
+                mock.patch.object(ses, 'listener_file', lambda: word_file), mock.patch.dict(sys.modules, {'beyin_v3_yakala': stand_in}), \
+                mock.patch.object(ses.subprocess, 'Popen', lambda *_a, **_k: look(0)), \
+                mock.patch('time.monotonic', tick), mock.patch('time.sleep', look):
+            said = ses.restart_listener(self.state, wait=ses.LISTENER_WAIT_SN)
+        return said, len(looks) - 1
+
+    def test_kur_says_a_listener_runs_only_once_its_key_is_its_own(self):
+        # Before the key is known the listener says nothing of it: its first word is not taken for a working one.
+        self.assertEqual(self.restart([{'ses': 'yok'}, {'ses': 'yok'}, {'ses': 'yok', 'kisayol': 'tamam'}]), (True, 2))
+        self.assertEqual(self.restart([{'ses': 'yok', 'kisayol': 'mesgul'}], running=False), (False, 0),
+                         'it left over a key another app holds: said at once')
+        said, looks = self.restart([{'ses': 'yok', 'kisayol': 'mesgul'}])
+        self.assertEqual((said, looks < 5), (True, True), 'one that stays without the key (for the voice) runs')
+        said, looks = self.restart([{'ses': 'yok'}])
+        self.assertEqual((said, looks >= ses.LISTENER_WAIT_SN - 2), (False, True), 'never heard from: not running')
+        self.assertEqual(self.restart([{'ses': 'kapali', 'kisayol': 'tamam'}])[0], False, 'the one asked to leave is not the new one')
+        self.assertEqual(self.restart([{'ses': 'yok', 'kisayol': 'tamam'}], running=False)[0], False, 'said, then gone')
+
+    def test_kaldir_says_what_it_could_not_delete(self):
+        folder = ses.ses_dir(self.state)
+        (folder / 'venv').mkdir(parents=True)
+        (folder / 'venv' / 'python.exe').write_text('')
+        (folder / 'isci.log').write_text('')
+
+        def in_use(path, ignore_errors=False):
+            for one in Path(path).rglob('*'):
+                if one.is_file() and one.name != 'python.exe':
+                    one.unlink()
+        with mock.patch.object(ses.shutil, 'rmtree', in_use):
+            result = ses.uninstall(self.state)
+        self.assertEqual((result['status'], result['kalan']), ('yarim', [str(Path('venv') / 'python.exe')]))
+        self.assertIn('tam kaldırılamadı', ses.human(result, 'kaldir'))
+        self.assertEqual(ses.uninstall(self.state)['status'], 'kaldirildi')
+        self.assertEqual(ses.uninstall(self.state)['status'], 'zaten-yok')
+
+    def test_a_dropped_download_goes_on_from_where_it_stopped(self):
+        import hashlib
+        import http.client
+        data = os.urandom(3 << 20)
+        asked = []
+
+        class Response(io.BytesIO):
+            def __init__(self, body, status, length, cut=None):
+                super().__init__(body)
+                self.status, self.headers, self.cut = status, {'Content-Length': str(length)}, cut
+
+            def read(self, size=-1):
+                if self.cut is not None and self.tell() >= self.cut:
+                    raise http.client.IncompleteRead(b'')
+                return super().read(min(size, self.cut - self.tell()) if self.cut is not None else size)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+        def urlopen(request, timeout):
+            asked.append(request.get_header('Range'))
+            if len(asked) == 1:
+                return Response(data, 200, len(data), cut=1 << 20)  # the connection drops after 1 MB
+            start = int(request.get_header('Range').split('=')[1].rstrip('-'))
+            return Response(data[start:], 206, len(data) - start)
+        paused, said = [], []
+        target = Path(self.tmp.name) / 'ggml.bin'
+        with mock.patch('urllib.request.urlopen', urlopen):
+            ses._download_checked('https://example.invalid/ggml.bin', target, hashlib.sha256(data).hexdigest(), said.append,
+                                  pause=paused.append)
+        self.assertEqual(asked, [None, 'bytes=%d-' % (1 << 20)], 'asked again from where it stopped')
+        self.assertEqual(target.read_bytes(), data)
+        self.assertEqual(len(paused), 1)
+        self.assertTrue(any('kaldığı yerden' in line for line in said))
+        self.assertFalse(target.with_name('ggml.bin.part').exists())
+
+    def test_the_vulkan_build_is_pinned_to_a_tag_the_workflow_never_replaces(self):
+        workflow = (ROOT / '.github/workflows/whisper-vulkan.yml').read_text(encoding='utf-8')
+        self.assertNotIn('--clobber', workflow, 'a published build is never replaced: its SHA-256 is pinned here')
+        self.assertIn("WHISPER_VERSION: '%s'" % ses.VULKAN_BUILD['surum'], workflow, 'the version pinned is the one the workflow builds')
+        self.assertIn('tag="whisper-vulkan-${WHISPER_VERSION}-vk${VULKAN_SDK_VERSION}"', workflow)
+        self.assertRegex(ses.VULKAN_BUILD['url'], r'^https://github\.com/GunduzTolga/Cortex/releases/download/whisper-vulkan-%s(-vk[0-9.]+)?/'
+                         r'whisper-vulkan-win-x64\.zip$' % re.escape(ses.VULKAN_BUILD['surum']))
+        self.assertRegex(ses.VULKAN_BUILD['sha256'], r'^[0-9a-f]{64}$')
+
+
+class VoiceHomeTest(unittest.TestCase):
+    """One voice folder for the person, whichever vault is open (beside every vault's state)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-ev-')
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name) / 'beyin-v3'
+        patcher = mock.patch.object(ses, 'user_base', lambda: self.base)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop(ses.SES_ENV, None)
+        self.first, self.second = self.base / ('a' * 16), self.base / ('b' * 16)
+
+    def put_install(self, folder):
+        python = folder / 'venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+        python.parent.mkdir(parents=True)
+        python.write_text('')
+        (folder / ses.MARKER).write_text(json.dumps({'motor': 'islemci', 'model': 'small (işlemci)'}), encoding='utf-8')
+        (folder / ses.CONFIG).write_text(json.dumps({'surum': 2, 'uyandirma': True}), encoding='utf-8')
+        (folder / 'hf').mkdir()
+        (folder / 'hf' / 'model.bin').write_bytes(b'model')
+
+    def test_every_vault_sees_the_one_install(self):
+        home = self.base / ses.SES_DIR
+        self.assertEqual(ses.ses_dir(self.first), home)
+        self.put_install(home)
+        for state in (self.first, self.second):
+            self.assertTrue(ses.installed(state))
+            self.assertTrue(ses.status(state)['kurulu'], 'switching vaults: still set up, nothing downloaded again')
+        self.assertEqual(ses.worker_env(self.second)['HF_HOME'], str(home / 'hf'))
+
+    def test_an_install_in_a_vaults_own_state_moves_to_the_persons_folder_once(self):
+        own = self.first / ses.SES_DIR
+        self.put_install(own)
+        home = self.base / ses.SES_DIR
+        home.mkdir(parents=True)
+        (home / ses.CONFIG).write_text('{"surum": 2}', encoding='utf-8')  # a setting written before, no install
+        self.assertEqual(ses.ses_dir(self.first), home)
+        self.assertFalse(own.exists(), 'moved, not copied: gigabytes are not kept twice')
+        self.assertEqual((home / 'hf' / 'model.bin').read_bytes(), b'model')
+        self.assertTrue(ses.load_config(self.second)['uyandirma'], 'its settings came with it')
+        self.assertFalse(self.base.joinpath('ses.onceki').exists())
+
+    def test_another_vaults_install_from_before_is_the_persons_too(self):
+        # The vault opened first after the update was not the one voice was set up in.
+        self.put_install(self.first / ses.SES_DIR)
+        (self.base / 'yabanci' / ses.SES_DIR).mkdir(parents=True)  # not a vault's state: never looked into
+        self.assertTrue(ses.installed(self.second))
+        self.assertEqual(ses.ses_dir(self.second), self.base / ses.SES_DIR)
+        self.assertFalse((self.first / ses.SES_DIR).exists())
+        self.assertTrue(ses.installed(self.first))
+
+    def test_an_install_that_cannot_move_is_used_where_it_is_and_not_tried_again_and_again(self):
+        own = self.second / ses.SES_DIR
+        self.put_install(own)
+        tried = []
+
+        def replace(source, target):
+            tried.append(source)
+            raise OSError(17, 'The system cannot move the file to a different disk drive')
+        with mock.patch.object(ses.os, 'replace', replace):
+            self.assertEqual(ses.ses_dir(self.second), own)
+            self.assertEqual(ses.ses_dir(self.second), own)
+        self.assertEqual(len(tried), 1, 'once in this process')
+        self.assertTrue(ses.installed(self.second), 'used where it is, never downloaded again')
+
+    def test_a_state_of_its_own_keeps_its_voice_and_the_variable_names_another_folder(self):
+        elsewhere = Path(self.tmp.name) / 'baska' / 'state'
+        self.assertEqual(ses.ses_dir(elsewhere), elsewhere / ses.SES_DIR)
+        chosen = Path(self.tmp.name) / 'secilen'
+        os.environ[ses.SES_ENV] = str(chosen)
+        self.assertEqual(ses.ses_dir(elsewhere), chosen)
+        self.assertEqual(ses.ses_dir(self.first), chosen)
+
+
+class EntryErrorTest(unittest.TestCase):
+    def test_beyin_py_says_a_failed_setup_with_its_code(self):
+        from v3_package_helpers import install, isolated_env, run_python
+        with tempfile.TemporaryDirectory(prefix='v3-ses-giris-') as tmp:
+            root = Path(tmp)
+            vault, state = root / 'vault', root / 'state'
+            vault.mkdir()
+            env = isolated_env(root / 'home')
+            installed = install(vault, state, env)
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            blocked = root / 'dosya'
+            blocked.write_text('')  # the voice folder's name taken by a file: the install cannot begin
+            done = run_python(vault / 'beyin.py', ['ses', 'kur', '--json'], vault, dict(env, BEYIN_SES_DIR=str(blocked)))
+            self.assertEqual(done.returncode, 1, done.stderr)
+            error = json.loads(done.stderr.decode('utf-8').strip().splitlines()[-1])
+            self.assertEqual((error['error'], error['code']), ('SetupError', 'voice_failed'))
+            self.assertTrue(error['message'].startswith('Sesle yazma kurulamadı'), error['message'])
 
 
 FAKE_HELPER = r'''
@@ -1212,6 +1743,83 @@ class VulkanServerTest(unittest.TestCase):
         self.assertIn('-dev', first)
         self.assertIn('-ng', second)
 
+    def test_a_card_that_fails_leaves_the_processors_quick_model_writing(self):
+        # whisper.cpp's large-v3-turbo on the processor took 15-30 seconds a sentence.
+        from contextlib import redirect_stderr
+        stand_in = self.stand_in('kart-yok')
+        self.helper.ses = types.SimpleNamespace(
+            engine_in_use=lambda _state, _config: 'vulkan', server_exe=lambda _state: stand_in,
+            ggml_model=lambda _state: self.folder / 'ggml-large-v3-turbo.bin', ses_dir=lambda _state: self.folder,
+            GGML_MODEL=ses.GGML_MODEL, CPU_MODELS=ses.CPU_MODELS)
+        opened = []
+        self.helper._open = lambda name, device, compute, report=None: opened.append((name, device, compute)) or 'yazi'
+        with redirect_stderr(io.StringIO()):
+            model, what = self.helper.load_model(self.folder, dict(ses.DEFAULTS))
+        self.assertEqual((model, what, opened), ('yazi', 'small (işlemci)', [('small', 'cpu', 'int8')]))
+        self.assertEqual(len([entry for entry in self.seen() if 'argv' in entry]), 1, 'whisper.cpp not started on the processor')
+
+    def test_a_cards_speed_is_measured_on_the_whole_window(self):
+        if importlib.util.find_spec('numpy') is None:
+            self.skipTest('numpy yok')
+        asked = []
+
+        class Model:
+            def transcribe(self, audio, **options):
+                asked.append((len(audio), options))
+                return iter([]), None
+        self.assertGreaterEqual(self.helper.card_seconds(Model(), dict(ses.DEFAULTS)), 0.0)
+        self.assertEqual(asked[0][0], 16000)
+        self.assertNotIn('vad_filter', asked[0][1], 'silence skipped by voice detection would measure nothing')
+
+    def test_the_card_computes_as_it_can(self):
+        # Asked for float16, a GTX 10xx or an MX150 refused, and the processor wrote after 3 GB of downloads.
+        for kinds, expected in ((['float32', 'int8', 'int8_float32', 'float16', 'int8_float16'], 'float16'),
+                                (['float32', 'int8', 'int8_float32'], 'int8_float32'), (['float32'], 'float32')):
+            fake = types.SimpleNamespace(get_supported_compute_types=lambda _device, kinds=kinds: set(kinds))
+            with mock.patch.dict(sys.modules, {'ctranslate2': fake}):
+                self.assertEqual(self.helper._cuda_compute(), expected, kinds)
+
+    def test_a_model_on_disk_that_will_not_load_is_not_fetched_again(self):
+        fetched, asked = [], []
+
+        class WhisperModel:
+            def __init__(self, path, **options):
+                asked.append((path, options['compute_type']))
+                raise ValueError('Requested float16 compute type, but the target device or backend do not support efficient '
+                                 'float16 computation.')
+        utils = types.SimpleNamespace(download_model=lambda _name, local_files_only=False: str(self.folder / 'snapshot'), _MODELS={})
+        faster = types.SimpleNamespace(WhisperModel=WhisperModel, utils=utils)
+        self.helper._fetch = lambda name, _report: fetched.append(name)
+        with mock.patch.dict(sys.modules, {'faster_whisper': faster, 'faster_whisper.utils': utils}):
+            with self.assertRaises(ValueError):
+                self.helper._open('large-v3-turbo', 'cuda', 'float16', lambda _done, _total: None)
+        self.assertEqual((fetched, asked), ([], [(str(self.folder / 'snapshot'), 'float16')]))
+
+    def test_a_chosen_model_that_cannot_be_had_leaves_one_on_disk_writing(self):
+        def opened(name, device, compute, report=None):
+            if name == 'large-v3-turbo':
+                raise OSError('no network')
+            return 'kucuk'
+        self.helper._open = opened
+        self.helper._on_disk = lambda name: '/hf/small' if name == 'small' else None
+        self.helper.log = lambda _text: None
+        config = dict(ses.DEFAULTS, cpu_model='large-v3-turbo')
+        self.assertEqual(self.helper._processor_model(config, None), ('kucuk', 'small (işlemci)'), 'says which one writes')
+        self.helper._on_disk = lambda name: None
+        with self.assertRaises(OSError):
+            self.helper._processor_model(config, None)
+
+    def test_a_model_under_a_turkish_user_name_is_opened_by_a_plain_path(self):
+        # Kaldi and whisper.cpp open files by the ANSI code page's narrow paths: no "Ş" there.
+        home = self.folder / 'Şule' / 'ses'
+        (home / 'vosk-tr').mkdir(parents=True)
+        here = os.getcwd()
+        os.chdir(home)
+        self.addCleanup(os.chdir, here)
+        self.assertEqual(self.helper._here(home / 'vosk-tr'), 'vosk-tr')
+        self.assertEqual(self.helper._here(self.folder / 'model.bin'), str(self.folder / 'model.bin'), 'a plain path as it is')
+        self.assertEqual(self.helper._here(self.folder / 'Şule' / 'baska'), str(self.folder / 'Şule' / 'baska'), 'not under it')
+
 
 class Sound:
     """A piece of recorded sound, by name: what the stand-in Whisper is asked to write."""
@@ -1234,10 +1842,15 @@ class FakeRecorder:
     def _sentence(self):
         self.spoke, self.started, self.last_voice = False, self.clock.t, self.clock.t
 
-    def start(self, on_chunk=None):
-        self.stream, self.said = 'open', []
+    def start(self, on_chunk=None, held=False):
+        self.stream, self.said, self.held_since = 'open', [], None
         self.starts += 1
         self._sentence()
+
+    def go_on(self, before=None):
+        # The sound before the stream opened (the wake listener's last moment) comes first.
+        if before is not None and before.name:
+            self.said.insert(0, before.name)
 
     def speak(self, name):
         self.said.append(name)
@@ -1263,13 +1876,14 @@ class FakeWake:
     def __init__(self):
         self.running, self.verdicts, self.text, self.starts = False, [], '', 0
         self.fail, self.stall, self.last_sound = 0, False, 0.0
+        self.sounded, self.silent = False, False
 
     def start(self):
         self.starts += 1
         if self.fail:
             self.fail -= 1
             raise OSError('Error opening InputStream: Invalid device')
-        self.running = True
+        self.running, self.sounded = True, not self.silent
 
     def stalled(self, _moment):
         return self.stall
@@ -1283,7 +1897,7 @@ class FakeWake:
             return self.verdicts.pop(0)
         return None
 
-    def clip(self):
+    def clip(self, until=None):
         return Sound('once')
 
 
@@ -1313,6 +1927,7 @@ class ServeTest(unittest.TestCase):
                             ('load_model', lambda _state, _config, _report=None: ('model', 'sahte')), ('release', lambda _model: None),
                             ('transcribe', transcribe), ('_device_name', lambda _config: 'Mikrofon'),
                             ('join_audio', lambda *parts: Sound('+'.join(part.name for part in parts if part.name))),
+                            ('split_clip', lambda clip: (clip, Sound(''))),
                             ('out', lambda **event: self.events.put(event)), ('log', lambda text: None if text.startswith('süre:') else self.logged.append(text)),
                             ('_refresh_audio', lambda: self.refreshed.append(1) or True),
                             ('now', lambda: self.clock.t)):
@@ -1563,6 +2178,7 @@ class ServeTest(unittest.TestCase):
         inner = self.helper.transcribe
         self.helper.transcribe = lambda model, audio, config, lock: used.append(model) or inner(model, audio, config, lock)
         self.serve(uyandirma=True)
+        self.until('denetci', hazir=True)  # loaded after the model: dictation does not wait for it
         self.assertEqual(opened, [(ses.CHECK_MODEL, 'cpu', 'int8')])
         self.written.update({'once+al': 'Payn, not al.', 'al+yarin': 'Al. Yarın toplantı var.'})
         self.wake.verdicts = ['aday']
@@ -1610,7 +2226,8 @@ class ServeTest(unittest.TestCase):
         self.assertEqual(helper.checker_for(dict(ses.DEFAULTS), 'small (işlemci)'), 'denetci')
         self.assertEqual(helper.checker_for(dict(ses.DEFAULTS, cpu_model='large-v3-turbo'), 'large-v3-turbo (işlemci)'), 'denetci')
         self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS), 'large-v3-turbo (ekran kartı, CUDA)'), 'a card is quick enough')
-        self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS), 'large-v3-turbo (işlemci, whisper.cpp)'), 'no faster-whisper there')
+        self.assertEqual(helper.checker_for(dict(ses.DEFAULTS), 'large-v3-turbo (işlemci, whisper.cpp)'), 'denetci',
+                         'whisper.cpp writing on the processor is as slow there: checked by the small model where it can be had')
         self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS, cpu_model='base'), 'base (işlemci)'), 'it checks itself')
 
         def offline(*_args):
@@ -1656,6 +2273,120 @@ class ServeTest(unittest.TestCase):
         self.assertEqual(self.recorder.starts, 1, 'the same recording')
         self.pause(ses.WAKE_AFTER_SN)
         self.assertFalse([e for e in self.quiet() if e['olay'] == 'uyandi'])
+
+    def collect_until(self, kind, wait=5.0, **fields):
+        """Every event until one of `kind` (with `fields`), that one too."""
+        seen, deadline = [], time.monotonic() + wait
+        while time.monotonic() < deadline:
+            try:
+                event = self.events.get(timeout=0.02)
+            except queue.Empty:
+                continue
+            seen.append(event)
+            if event.get('olay') == kind and all(event.get(k) == v for k, v in fields.items()):
+                return seen
+        self.fail('no %s %s; saw %s' % (kind, fields, seen))
+
+    def test_a_wake_model_that_will_not_load_is_said_once_and_not_tried_again_and_again(self):
+        # Seen as silence: "Hey Pyn" never worked, the tray said the microphone listened, and
+        # isci.log blamed the microphone every minute.
+        built = []
+
+        def broken(_state, _config):
+            built.append(1)
+            raise OSError('Failed to create a model')
+        self.helper.Wake = broken
+        self.serve(uyandirma=True)
+        event = self.until('uyandirma', durum='sorun')
+        self.assertEqual(event['neden'], 'model')
+        self.assertIn('uyandırma modeli açılamadı', event['mesaj'])
+        self.assertIn('model açılamadı', self.logged[-1])
+        self.pause(120)
+        time.sleep(0.3)
+        self.assertEqual(len(built), 1, 'its folder does not mend itself: not tried every minute')
+        self.send('uyandirma', acik=False)
+        self.until('uyandirma', durum='kapali')
+        self.send('uyandirma', acik=True)
+        self.assertTrue(self.wait_for(lambda: len(built) == 2), 'switched off and on: tried anew')
+
+    def test_a_microphone_that_will_not_open_is_said_once_and_so_is_its_recovery(self):
+        self.wake.fail = 2
+        self.serve(uyandirma=True)
+        seen = self.collect_until('uyandirma', durum='sorun')
+        self.assertEqual((seen[-1]['neden'], 'mikrofon açılamadı' in seen[-1]['mesaj']), ('mikrofon', True))
+        self.pause(5)
+        self.assertTrue(self.wait_for(lambda: self.wake.starts == 2))
+        self.pause(10)
+        seen = self.collect_until('uyandirma', durum='dinliyor')
+        self.assertEqual([e for e in seen if e['olay'] == 'uyandirma'], [seen[-1]], 'the second failure is not news')
+        self.assertEqual([e for e in self.quiet(0.3) if e['olay'] == 'uyandirma'], [], 'each change once')
+
+    def test_a_microphone_windows_gives_only_silence_says_where_to_allow_it(self):
+        self.serve(uyandirma=True)
+        self.until('uyandirma', durum='dinliyor')
+        self.wake.stall = 'sessiz'
+        event = self.until('uyandirma', durum='sorun')
+        self.assertEqual(event['neden'], 'sessiz')
+        self.assertIn('Gizlilik', event['mesaj'])
+        self.assertIn('yalnız sessizlik', self.logged[-1])
+
+    def test_a_microphone_that_never_heard_is_not_said_to_listen(self):
+        self.wake.silent = True  # exact zeros from the start: Windows keeps desktop apps from the microphone
+        self.serve(uyandirma=True)
+        self.assertTrue(self.wait_for(lambda: self.wake.running))
+        self.assertEqual([e for e in self.quiet(0.4) if e['olay'] == 'uyandirma'], [], 'not "dinliyor" before it hears')
+
+    def test_listening_let_go_is_said(self):
+        self.serve(uyandirma=True)
+        self.until('uyandirma', durum='dinliyor')
+        self.send('uyandirma', acik=False)
+        self.until('uyandirma', durum='kapali')
+        self.assertTrue(self.wait_for(lambda: not self.wake.running))
+
+    def test_words_said_straight_after_the_phrase_begin_the_dictation(self):
+        # "Pyn, not al yarın saat üçte dişçi" in one breath lost "yarın" between the two streams.
+        order = []
+        start, stop = self.recorder.start, self.wake.stop
+        self.recorder.start = lambda *args, **options: (order.append('kayit'), start(*args, **options))[1]
+        self.wake.stop = lambda: (order.append('uyandirma bitti'), stop())[1]
+        self.helper.split_clip = lambda clip: (Sound('once'), Sound('sonu'))
+        self.serve(uyandirma=True)
+        self.written.update({'once+sonu+al': 'Pyn, not al, yarın', 'sonu+al+saat': 'Not al, yarın saat üçte dişçi.'})
+        self.wake.verdicts = ['aday']
+        self.until_recording()
+        self.assertEqual(order[-2:], ['kayit', 'uyandirma bitti'], 'the dictation records before the wake listener lets go')
+        self.recorder.speak('al')
+        self.pause(ses.WAKE_AFTER_SN)
+        self.until('uyandi')
+        self.assertEqual(self.asked[0], 'once+sonu+al', 'the check hears it all once, in order')
+        self.recorder.speak('saat')
+        self.pause()
+        self.assertEqual(self.until('metin')['metin'], 'yarın saat üçte dişçi.')
+        self.assertEqual(self.asked[1], 'sonu+al+saat', 'the wake listener\'s last moment is the dictation\'s start')
+
+    def test_with_the_microphones_changed_the_wake_listener_lets_go_before_the_dictation_opens(self):
+        mics, order = ['dahili'], []
+        self.helper._inputs_now = lambda: tuple(mics)
+        start, stop = self.recorder.start, self.wake.stop
+        self.recorder.start = lambda *args, **options: (order.append('kayit'), start(*args, **options))[1]
+        self.wake.stop = lambda: (order.append('uyandirma bitti'), stop())[1]
+        self.serve(uyandirma=True)
+        self.assertTrue(self.wait_for(lambda: self.wake.running))
+        mics[:] = ['hyperx']
+        self.wake.verdicts = ['aday']
+        self.until_recording()
+        self.assertEqual(order[-2:], ['uyandirma bitti', 'kayit'], 'no stream may be open while the devices are listed anew')
+        self.assertEqual(len(self.refreshed), 1)
+
+    def test_dictation_is_ready_before_the_wake_phrases_checker_is_loaded(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        self.helper.load_model = lambda _state, _config, _report=None: ('yazi-modeli', 'small (işlemci)')
+        self.helper._open = lambda name, device, compute, _report=None: release.wait(5) and 'denetci'
+        self.serve()  # 'hazir' while the checker still loads
+        self.assertEqual([e for e in self.quiet(0.2) if e['olay'] == 'denetci'], [])
+        release.set()
+        self.until('denetci', hazir=True)
 
 
 class RecorderTest(unittest.TestCase):
@@ -1770,6 +2501,73 @@ class RecorderTest(unittest.TestCase):
         self.feed(0.5, False)
         self.assertFalse(recorder.spoke)
         self.assertAlmostEqual(len(recorder.stop()) / 16000, 1.02, places=1)
+
+    def test_a_held_stream_records_from_the_sound_before_it_in_order(self):
+        recorder = self.helper.Recorder(dict(ses.DEFAULTS))
+        recorder.start(held=True)
+        self.feed(0.5, True)  # said while the wake listener still had the microphone too
+        self.assertEqual(len(recorder.peek()), 0, 'held until the sound before it is given')
+        before = self.np.full(int(0.8 * 16000), 0.0005, dtype='float32')
+        before[int(0.4 * 16000)::2], before[int(0.4 * 16000) + 1::2] = 0.1, -0.1
+        recorder.go_on(before)
+        audio = recorder.peek()
+        self.assertEqual(len(audio), len(before) + 50 * 160)
+        self.assertTrue(self.np.array_equal(audio[:len(before)], before), 'the sound before it first')
+        self.assertTrue(recorder.spoke, 'speech in it counts as speech')
+        self.feed(0.2, True)
+        self.assertEqual(len(recorder.peek()), len(before) + 70 * 160, 'then it records as it comes')
+        sentence = recorder.cut()
+        self.assertGreater(len(sentence), 0.9 * 16000, 'its speech kept from where it began, before the stream opened')
+        head, tail = self.helper.split_clip(self.np.zeros(4 * 16000, dtype='float32'))
+        self.assertEqual((len(head), len(tail)), (int(3.2 * 16000), int(0.8 * 16000)))
+        head, tail = self.helper.split_clip(self.np.zeros(100, dtype='float32'))
+        self.assertEqual((len(head), len(tail)), (0, 100))
+
+    def test_the_wake_listener_says_how_its_microphone_went_quiet(self):
+        vosk = types.SimpleNamespace(KaldiRecognizer=lambda *_a: types.SimpleNamespace(Reset=lambda: None), Model=lambda _path: None,
+                                     SetLogLevel=lambda _level: None)
+        with mock.patch.dict(sys.modules, {'vosk': vosk}):
+            wake = self.helper.Wake(Path(self.tmp.name) / 'state', dict(ses.DEFAULTS))
+        wake.start()
+        self.feed(10.0, False)
+        self.assertEqual((wake.stalled(self.clock.t), wake.sounded), (None, True), 'a room is never exact zeros')
+        stream = self.streams[-1]
+        for _ in range(3100):  # 31 seconds of exact zeros: Windows' privacy setting gives desktop apps nothing else
+            stream.callback(self.np.zeros((160, 1), dtype='float32'), 160, None, None)
+            self.clock.t += 0.01
+        self.assertEqual(wake.stalled(self.clock.t), 'sessiz')
+        self.clock.t += 6  # and nothing at all: the device went away
+        self.assertEqual(wake.stalled(self.clock.t), 'mikrofon')
+        wake.stop()
+
+    def test_a_dictation_opened_on_the_phrase_has_each_moment_once(self):
+        # Both streams hear the moments between the dictation's opening and the wake listener's
+        # letting go: taken from both, a syllable was said twice.
+        vosk = types.SimpleNamespace(KaldiRecognizer=lambda *_a: types.SimpleNamespace(Reset=lambda: None), Model=lambda _path: None,
+                                     SetLogLevel=lambda _level: None)
+        with mock.patch.dict(sys.modules, {'vosk': vosk}):
+            wake = self.helper.Wake(Path(self.tmp.name) / 'state', dict(ses.DEFAULTS))
+        wake.start()
+        listening, numbers = self.streams[-1], iter(range(1, 10 ** 6))
+
+        def moment(*streams):  # ten milliseconds, numbered, into each stream open then
+            block = self.np.full((160, 1), next(numbers) * 1e-4, dtype='float32')
+            for stream in streams:
+                stream.callback(block, 160, None, None)
+            self.clock.t += 0.01
+        for _ in range(100):
+            moment(listening)
+        recorder = self.helper.Recorder(dict(ses.DEFAULTS))
+        recorder.start(held=True)
+        for _ in range(20):
+            moment(listening, self.streams[-1])
+        wake.stop()
+        for _ in range(10):
+            moment(self.streams[-1])
+        head, before = self.helper.split_clip(wake.clip(until=recorder.held_since))
+        recorder.go_on(before)
+        heard = self.np.concatenate([head, recorder.peek()])[::160]
+        self.assertEqual([int(round(value * 1e4)) for value in heard], list(range(1, 131)), 'each moment once, in order')
 
 
 class HelperModuleTest(unittest.TestCase):

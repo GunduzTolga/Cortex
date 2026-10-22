@@ -2047,7 +2047,7 @@ def spoken_commands_line(commands):
 
 
 def _spoken_commands(state):
-    """The voice commands as set in state/ses (beyin_v3_ses), their defaults where it cannot say."""
+    """The voice commands as set in the voice folder (beyin_v3_ses), their defaults where it cannot say."""
     try:
         import beyin_v3_ses as ses
     except Exception:
@@ -2088,6 +2088,10 @@ class VoiceLink:
         self.wait = self.FIRST_WAIT
         # A model being fetched: (MB come, MB in all), for the settings' bar and the window to show.
         self.progress = None
+        # The wake listener as the helper last said it ('uyandirma'): 'dinliyor' while it really
+        # hears, 'sorun' with why ('mikrofon', 'sessiz', 'model') and a sentence, 'kapali'; None
+        # until it says.
+        self.wake, self.wake_problem, self.wake_message = None, None, ''
 
     def heard(self, event, moment):
         """An event from the helper, kept; True when what the link says has changed."""
@@ -2095,6 +2099,16 @@ class VoiceLink:
         if kind == 'indiriliyor':
             progress = (int(event.get('mb') or 0), int(event.get('toplam') or 0))
             changed, self.progress = progress != self.progress, progress
+            return changed
+        if kind == 'denetci':  # the wake phrase's checker, fetched after the model: nothing more comes
+            changed, self.progress = self.progress is not None, None
+            return changed
+        if kind == 'uyandirma':
+            durum = event.get('durum') if event.get('durum') in ('dinliyor', 'sorun', 'kapali') else None
+            problem = event.get('neden') if durum == 'sorun' and event.get('neden') in ('mikrofon', 'sessiz', 'model') else None
+            message = str(event.get('mesaj') or '')[:200] if durum == 'sorun' else ''
+            changed = (durum, problem, message) != (self.wake, self.wake_problem, self.wake_message)
+            self.wake, self.wake_problem, self.wake_message = durum, problem, message
             return changed
         if kind == 'hazir':
             self.ready, self.what, self.error, self.wait, self.progress = True, event.get('aciklama') or '', '', self.FIRST_WAIT, None
@@ -2106,10 +2120,15 @@ class VoiceLink:
         if kind == 'bitti':
             self.ready = False
             self.error = self.error or 'Ses yardımcısı kapandı'
+            self.wake, self.wake_problem, self.wake_message = None, None, ''  # a new helper says it anew
             if self.start is not None and self.retry_at is None:
                 self.retry_at, self.wait = moment + self.wait, min(self.LONGEST_WAIT, self.wait * 2)
             return True
         return False
+
+    def listens(self):
+        """Whether the wake listener really listens now: the model ready and its microphone heard."""
+        return self.ready and self.wake == 'dinliyor'
 
     def revive(self, moment):
         """A stopped helper started again once its wait is over; True when that was tried. One that
@@ -3229,15 +3248,24 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
     except Exception:
         link = None
 
+    # Whether the key is this listener's, once RegisterHotKey has answered (`kisayol`): 'tamam', or
+    # 'mesgul' when another app holds it. Not said before that.
+    key = {}
+
     def say_voice():
-        """The desktop app told how the voice is (beyin_v3_ses.say_listener): loading, ready, failed."""
+        """The desktop app told how the voice is (beyin_v3_ses.say_listener): loading, ready, failed;
+        whether the wake phrase is really listened for, or why not; whether the key is this
+        listener's or another app's."""
         try:
             if link is None:
-                ses.say_listener(ses='yok')
+                ses.say_listener(ses='yok', uyandirma=False, uyandirma_sorun=None, uyandirma_mesaj='', **key)
             else:
                 mb, total = link.progress or (None, None)
+                wake = bool(voice_config.get('wake'))
                 ses.say_listener(ses=link.word(), model=link.what, mesaj=link.error, mb=mb, toplam=total,
-                                 uyandirma=bool(link.ready and voice_config.get('wake')))
+                                 uyandirma=wake and link.listens(),
+                                 uyandirma_sorun=link.wake_problem if wake else None,
+                                 uyandirma_mesaj=link.wake_message if wake else '', **key)
         except Exception:
             pass
     say_voice()
@@ -3266,6 +3294,8 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
     started.wait(10)
     ok = ready.get('ok', False)
     _write_listener_state(state, kisayol_calisiyor=ok, tid=ready.get('tid'), at=time_now())
+    key['kisayol'] = 'tamam' if ok else 'mesgul'
+    say_voice()  # whether the key is ours, now that it is known
     if not ok:
         root.destroy()
         kernel32.CloseHandle(lock)
@@ -3732,7 +3762,7 @@ def install(vault, state, hotkey=True, spec=None):
     if hotkey and os.name == 'nt':
         # Started only now, after the key is saved: the listener reads it from the state above.
         done['dinleyici'] = _start_windows_listener(target, script, vault, state, programs, icon)
-        if not done['dinleyici']:
+        if done['dinleyici'] is False:
             _windows_shortcut(*start_menu, win_value, icon)  # Explorer's slower key, but a working one
     done['araclar'] = {name: bool(path) for name, path in tools().items()}
     return done
@@ -3742,7 +3772,8 @@ STARTUP_NAME = 'Pyn Yakala.lnk'
 
 
 def _start_windows_listener(target, script, vault, state, programs, icon):
-    """Start the resident listener with Windows and right now; True once it holds the key."""
+    """Start the resident listener with Windows and right now: True once it holds the key, False
+    when it found the key another app's, None when it has not said yet (a slow first start)."""
     startup = programs / 'Startup' / STARTUP_NAME
     if os.environ.get('BEYIN_V3_NO_SPAWN') == '1':
         startup.unlink(missing_ok=True)
@@ -3760,11 +3791,17 @@ def _start_windows_listener(target, script, vault, state, programs, icon):
         if info.get('at', 0) >= before - 1 and 'kisayol_calisiyor' in info:
             if info['kisayol_calisiyor']:
                 return True
-            break
+            # The key is another app's: no listener can hold it here (this one has left already).
+            startup.unlink(missing_ok=True)
+            stop_windows_listener()
+            return False
         time.sleep(0.1)
-    startup.unlink(missing_ok=True)
-    stop_windows_listener()
-    return False
+    # Not heard from yet. pythonw, Tk and the fonts on a fresh laptop, the virus scanner reading
+    # each file, took longer than this, and the listener was stopped and its Startup shortcut
+    # removed: nothing listened, then or after a restart, and nothing said so. It is left to come
+    # up and to start with Windows; the Start-menu entry gets no key meanwhile (Explorer and the
+    # listener cannot both own it). Where it never comes up the desktop app says no listener runs.
+    return None
 
 
 def uninstall(vault, state):
@@ -3878,6 +3915,9 @@ def human(result, command):
             lines.append('Pencere aninda acilir: dinleyici calisiyor ve Windows acilisinda kendiliginden baslar.')
         elif result.get('dinleyici') is False:
             lines.append('Dinleyici baslamadi; kisayol Baslat menusu uzerinden (daha yavas) calisir.')
+        elif 'dinleyici' in result:
+            lines.append('Dinleyici aciliyor (ilk acilis yavas olabilir); Windows acilisinda da kendiliginden baslar. '
+                         'Kisayol birkac saniye icinde de calismazsa: beyin.py yakala kur')
         if command == 'kisayol':
             return '\n'.join(lines)
         if result.get('gonder_menusu'):

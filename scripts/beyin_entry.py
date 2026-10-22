@@ -660,7 +660,7 @@ def main(argv=None):
             import beyin_v3_yakala as yakala
             return yakala.main((['--json'] if force_json else []) + argv[1:], vault=vault, state=state)
         if argv and argv[0] == 'ses':
-            # Optional voice typing for yakala: its own environment under state/ses, its own CLI.
+            # Optional voice typing for yakala: its own environment in the person's voice folder, its own CLI.
             import beyin_v3_ses as ses
             return ses.main(argv[1:], vault=vault, state=state)
         if argv and argv[0] == 'telegram':
@@ -729,6 +729,10 @@ def main(argv=None):
         return code
     except Exception as exc:
         error = {'error': type(exc).__name__, 'message': str(exc)}
+        # A failure that names itself (voice_network, updater_busy...): the desktop app says it in
+        # the person's language and, where it can, offers what to do.
+        if isinstance(getattr(exc, 'code', None), str):
+            error['code'] = exc.code
         print(human_result(error, command, installed_version) if human else json.dumps(error, ensure_ascii=True), file=sys.stderr)
         return 1
 

@@ -391,6 +391,48 @@ class ListenerRestartTest(unittest.TestCase):
             os.utime(voice, (stamps[voice] + 5, stamps[voice] + 5))
             self.assertNotEqual(yakala._own_modules(script, list(stamps)), stamps, 'the voice module changed: restart')
 
+    def start_listener(self, reports):
+        """_start_windows_listener with the listener's reports (its state file, a report a look) and
+        a clock that moves a second a look: (what it returned, what it did to the shortcut and the
+        listener)."""
+        import threading
+        import time
+        done = {'stopped': 0}
+        clock = iter(range(10 ** 6))
+        me, real = threading.get_ident(), time.monotonic
+
+        def tick():  # this thread's clock only
+            return float(next(clock)) if threading.get_ident() == me else real()
+        with tempfile.TemporaryDirectory(prefix='v3-dinleyici-baslat-') as tmp:
+            programs = Path(tmp)
+            (programs / 'Startup').mkdir()
+
+            def stop(*_args, **_kwargs):
+                done['stopped'] += 1
+                return True
+            env = {key: value for key, value in os.environ.items() if key != 'BEYIN_V3_NO_SPAWN'}
+            with patch.dict(os.environ, env, clear=True), \
+                    patch.object(yakala, '_windows_shortcut', lambda path, *_a, **_k: Path(path).write_text('lnk')), \
+                    patch.object(yakala.subprocess, 'Popen', lambda *_a, **_k: None), \
+                    patch.object(yakala, 'stop_windows_listener', stop), patch.object(yakala, 'time_now', lambda: 100.0), \
+                    patch.object(yakala, '_listener_state', lambda _state: next(reports, {})), \
+                    patch('time.monotonic', tick), patch('time.sleep', lambda _s: None):
+                result = yakala._start_windows_listener(Path('pythonw.exe'), Path('yakala.py'), Path(tmp), Path(tmp), programs, None)
+            done['startup_kept'] = (programs / 'Startup' / yakala.STARTUP_NAME).exists()
+        return result, done
+
+    def test_a_listener_slow_to_start_is_left_to_start_and_one_whose_key_is_taken_is_not(self):
+        # A fresh laptop with the virus scanner reading every file took longer than the wait: the
+        # listener was stopped and its Startup shortcut removed, and nothing listened, ever.
+        result, done = self.start_listener(iter([]))
+        self.assertIsNone(result, 'not known yet: not called failed')
+        self.assertEqual((done['startup_kept'], done['stopped']), (True, 0), 'left to come up, and to start with Windows')
+        result, done = self.start_listener(iter([{}, {'at': 101.0, 'kisayol_calisiyor': True}]))
+        self.assertEqual((result, done['startup_kept'], done['stopped']), (True, True, 0))
+        result, done = self.start_listener(iter([{'at': 101.0, 'kisayol_calisiyor': False}]))
+        self.assertEqual((result, done['startup_kept'], done['stopped']), (False, False, 1), 'another app holds the key')
+        self.assertIn('Dinleyici aciliyor', yakala.human({'status': 'kuruldu', 'dinleyici': None, 'web_clipper_sablonu': 'x'}, 'kur'))
+
 
 class HotkeyMoveTest(unittest.TestCase):
     def test_the_old_default_moves_to_ctrl_alt_c_once_and_a_chosen_key_stays(self):
