@@ -55,13 +55,15 @@ function copyText(text: string): void {
  * Text that could not be saved over its note - the note changed on disk
  * meanwhile, or is gone from where it was - kept as a note of its own beside
  * it (`conflictName`), or at the vault's top when its folder is gone too, and
- * the person told which, with the way to it. Where nothing can be written,
- * the toast stays and holds the text, to be copied.
+ * the person told which, with the way to it. Where nothing can be written -
+ * nor anything should be, as when another vault is open now and the note's
+ * path names a note of that one (`here` false) - the toast stays and holds
+ * the text, to be copied.
  */
-async function keepAside(path: string, text: string, why: string): Promise<void> {
+async function keepAside(path: string, text: string, why: string, here = true): Promise<void> {
   const toast = useApp.getState().toast;
   const name = conflictName(noteTitle(path), say('notes.aside.word'), new Date());
-  for (const folder of new Set([folderOf(path), ''])) {
+  for (const folder of here ? new Set([folderOf(path), '']) : []) {
     try {
       const made = await window.cortex.notes.create(folder, name, { text, unique: true });
       void useNotes.getState().refresh();
@@ -132,12 +134,14 @@ export function NotePane({ path }: { path: string }) {
   /*
     What the callbacks that outlive a render read: the note as last read or
     saved, the text as typed, the save in flight and the one asked for while it
-    ran, whether the pane is still on screen, and the text last kept aside.
+    ran, whether the pane is still on screen, the text last kept aside, and the
+    vault the note was read from (the screen keys the pane by it, NotesView.tsx).
   */
   const current = useRef({
     path,
     text,
     doc,
+    vaultSeq: useApp.getState().vaultSeq,
     running: null as Promise<string | null> | null,
     queued: null as string | true | null,
     mounted: true,
@@ -208,6 +212,14 @@ export function NotePane({ path }: { path: string }) {
         const { path: at, text: now, doc: was } = current.current;
         if (!was || was.text === null || was.hash === null || was.readOnly) return null;
         if (now === was.text && !over) return null;
+        /*
+          Another vault chosen since the note was read: its path now names a
+          note of that one, which this text is not saved over. Choosing it saved
+          the note first (store/app.ts, `chooseVault`); this is what a save
+          still to come, from the pane going, would have written there - over a
+          copy of the vault, say, where the same note is the same version.
+        */
+        if (useApp.getState().vaultSeq !== current.current.vaultSeq) return say('notes.aside.otherVault');
         setSaving('saving');
         try {
           const saved = await window.cortex.notes.save(at, now, over ?? was.hash);
@@ -274,7 +286,7 @@ export function NotePane({ path }: { path: string }) {
     const { text: now, doc: was } = current.current;
     if (why === null || !was || was.text === null || now === was.text || now === current.current.keptAside) return;
     current.current.keptAside = now;
-    await keepAside(path, now, why);
+    await keepAside(path, now, why, useApp.getState().vaultSeq === current.current.vaultSeq);
   }, [path, save]);
 
   // Asked of the note by a delete, another vault and the window going away (openNotes.ts); left when the pane goes.

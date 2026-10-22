@@ -96,6 +96,7 @@ write('Drafts/E2E Mixed.md', 'one\r\ntwo\nthree\n');
 write('Drafts/İstanbul Gezisi.md', '# İstanbul Gezisi\n\n## Işık\nGün ışığı.\n');
 write('Drafts/E2E Embeds.md', '# Embeds\n\n![[İstanbul Gezisi#ışık]]\n');
 write('Drafts/E2E Closing.md', '# Closing\n\nStart');
+write('Drafts/E2E Switch.md', '# Switch\n\nbase');
 const receiptBefore = fs.readFileSync(vaultNote(receipt), 'utf8');
 
 /*
@@ -495,6 +496,8 @@ const callsOf = (channel) => app.evaluate((_electron, channel) => globalThis.cor
 const openNote = async (name, at) => {
   await page.keyboard.press('Control+o');
   await notesView.locator('[data-notes-switcher-input]').fill(name);
+  // Enter once the note is the one offered first: pressed before, it chose nothing and left the switcher over the page.
+  await shownSoon(notesView.locator(`[data-switch-at="0"][data-switch-path="${at}"]`), 5_000);
   await page.keyboard.press('Enter');
   return shownSoon(notesView.locator(`[data-note-pane="${at}"]`));
 };
@@ -1197,10 +1200,70 @@ const unexpected = consoleErrors.filter((text) => !text.includes('https://exampl
 check('the window logged no errors but the refusals asked for', unexpected.length === 0 && consoleErrors.length >= 2);
 if (unexpected.length) console.log(unexpected.map((e) => `       ${e}`).join('\n'));
 
-// Quit a moment after the last key: what was typed is saved before the window goes (electron/main.ts, desktop-ui-8).
 await page.locator('[data-app-view="notes"]').click();
 const notesAgain = page.locator('[data-notes-view]');
 await notesAgain.waitFor();
+
+/*
+  Another vault chosen while the note open is in conflict (src/notes/NotePane.tsx):
+  what was typed is kept beside the note in the vault it was read from, and the
+  pane left writes nothing into the vault chosen - here a copy of this one, its
+  note at the same path as this one was read, which a save over that version
+  would have gone through.
+*/
+const otherVault = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-other-')));
+fs.mkdirSync(path.join(otherVault, 'Drafts'));
+fs.writeFileSync(path.join(otherVault, 'Drafts', 'E2E Switch.md'), '# Switch\n\nbase');
+const chooseVaultTo = async (dir) => {
+  await app.evaluate(({ dialog }, dir) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
+  }, dir);
+  await page.locator('[data-settings-open]').click();
+  await page.locator('[data-settings-vault-change]').click();
+  const named = await page
+    .waitForFunction((name) => document.querySelector('[data-settings-vault]')?.textContent === name, path.basename(dir), { timeout: 10_000 })
+    .then(() => true, () => false);
+  await page.keyboard.press('Escape');
+  return named;
+};
+await page.keyboard.press('Control+o');
+await notesAgain.locator('[data-notes-switcher-input]').fill('E2E Switch');
+await page.keyboard.press('Enter');
+await shownSoon(notesAgain.locator('[data-note-pane="Drafts/E2E Switch.md"]'));
+if ((await notesAgain.locator('[data-note-mode="edit"]').getAttribute('aria-pressed')) !== 'true') await notesAgain.locator('[data-note-mode="edit"]').click();
+await notesAgain.locator('.cm-content').click();
+await page.keyboard.press('Control+End');
+await page.keyboard.type(' mine');
+fs.writeFileSync(vaultNote('Drafts/E2E Switch.md'), '# Switch\n\nfrom outside');
+const switchConflict = await shownSoon(notesAgain.locator('[data-note-banner="conflict"]'));
+const counted = (await holdChannel('notes:save')) && (await holdChannel('notes:read'));
+const switched = await chooseVaultTo(otherVault);
+/*
+  The pane left goes before the one for the vault chosen reads its note, and
+  the window's calls reach the main process in order: once that read is asked,
+  a save from the pane left would have been asked too. The one save counted is
+  the one made before the vault was chosen.
+*/
+for (const end = Date.now() + 8_000; Date.now() < end && (await callsOf('notes:read')) === 0; ) await new Promise((done) => setTimeout(done, 100));
+check(
+  'another vault chosen while a note is in conflict: what was typed is kept beside it in the vault it was read from, and nothing is written into the vault chosen',
+  switchConflict &&
+    counted &&
+    switched &&
+    (await callsOf('notes:read')) >= 1 &&
+    (await callsOf('notes:save')) === 1 &&
+    fs.readFileSync(path.join(otherVault, 'Drafts', 'E2E Switch.md'), 'utf8') === '# Switch\n\nbase' &&
+    Boolean(keptAside('E2E Switch')) &&
+    fs.readFileSync(draft(keptAside('E2E Switch') ?? 'none'), 'utf8') === '# Switch\n\nbase mine' &&
+    fs.readFileSync(vaultNote('Drafts/E2E Switch.md'), 'utf8') === '# Switch\n\nfrom outside',
+);
+await releaseChannel('notes:save');
+await releaseChannel('notes:read');
+check('and the vault left, chosen again, is open again', await chooseVaultTo(vaultDir));
+await clearToasts();
+fs.rmSync(otherVault, { recursive: true, force: true });
+
+// Quit a moment after the last key: what was typed is saved before the window goes (electron/main.ts, desktop-ui-8).
 await page.keyboard.press('Control+o');
 await notesAgain.locator('[data-notes-switcher-input]').fill('E2E Closing');
 await page.keyboard.press('Enter');

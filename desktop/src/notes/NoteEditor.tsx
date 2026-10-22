@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Annotation, Compartment, EditorSelection, EditorState } from '@codemirror/state';
 import {
   Decoration,
@@ -193,8 +193,9 @@ export const NoteEditor = forwardRef<
   const latest = useRef({ onChange, onSave, onOpenLink, choices, hooks });
   latest.current = { onChange, onSave, onOpenLink, choices, hooks };
   const previewOf = (on: boolean) => (on ? livePreview(() => latest.current.hooks) : []);
-  // The line break the note is written with, as last read: what it is given back with.
-  const eol = useRef(lineBreakOf(value));
+  // The line break the note is written with, as last read: what it is given back with. Counted once here, not at every render.
+  const [firstBreak] = useState(() => lineBreakOf(value));
+  const eol = useRef(firstBreak);
 
   useImperativeHandle(ref, () => ({
     topLine() {

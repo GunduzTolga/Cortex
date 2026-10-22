@@ -22,6 +22,16 @@ test('a note is given back with the line break it is mostly written with', () =>
   assert.equal(lineBreakOf('a\r\nb\nc\nd'), '\n');
 });
 
+test('the line breaks are counted where they stand: a \\r alone is neither kind, and a long note is counted whole', () => {
+  assert.equal(lineBreakOf('\n'), '\n');
+  assert.equal(lineBreakOf('\r\n'), '\r\n');
+  assert.equal(lineBreakOf('a\r\n\nb\r\n'), '\r\n', 'two of one, one of the other');
+  assert.equal(lineBreakOf('a\r\r\nb'), '\r\n');
+  assert.equal(lineBreakOf('a\rb\rc\nd'), '\n');
+  const long = Array.from({ length: 50_000 }, (_, at) => `line ${at}`);
+  assert.equal(lineBreakOf(`${long.join('\r\n')}\n${long.slice(0, 100).join('\n')}`), '\r\n');
+});
+
 test('a Windows note opened is what the editor holds: nothing to put back, nothing to save', () => {
   const note = '# Plan\r\n\r\n- [ ] first\r\n- [x] second\r\n';
   const state = editorOf(note);

@@ -453,6 +453,7 @@ export const en = {
   'notes.aside.kept': 'What you wrote is kept in a note of its own',
   'notes.aside.where': 'Kept in: {name}',
   'notes.aside.changed': 'The note changed somewhere else while you were writing it, so it was not written over.',
+  'notes.aside.otherVault': 'Another vault was opened before it was saved, and nothing is written into that one in its place.',
   'notes.aside.open': 'Open',
   'notes.aside.none': 'What you wrote in {name} could not be saved anywhere',
   'notes.aside.copy': 'Copy the text',

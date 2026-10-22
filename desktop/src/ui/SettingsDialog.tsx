@@ -44,7 +44,7 @@ export function SettingsDialog() {
               <span className="min-w-0 truncate text-[12px] text-zinc-500" data-settings-vault>
                 {vault.name}
               </span>
-              <Button tone="ghost" className="h-8 shrink-0" onClick={() => void useApp.getState().chooseVault(t('app.vault.failed'))}>
+              <Button tone="ghost" className="h-8 shrink-0" onClick={() => void useApp.getState().chooseVault(t('app.vault.failed'))} data-settings-vault-change>
                 <FolderOpen size={13} />
                 {t('settings.vault.change')}
               </Button>

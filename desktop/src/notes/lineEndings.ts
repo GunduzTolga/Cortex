@@ -12,10 +12,18 @@ import type { Text } from '@codemirror/state';
 
 export type LineBreak = '\r\n' | '\n';
 
-/** The line break a text is mostly written with; `\n` for one with none, or as many of each. */
+/**
+ * The line break a text is mostly written with; `\n` for one with none, or as
+ * many of each. Counted in place, nothing cut out of it: it is asked at every
+ * key, of a note that can be megabytes long.
+ */
 export function lineBreakOf(text: string): LineBreak {
-  const crlf = text.split('\r\n').length - 1;
-  const lf = text.split('\n').length - 1 - crlf;
+  let crlf = 0;
+  let lf = 0;
+  for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) {
+    if (at > 0 && text.charCodeAt(at - 1) === 13) crlf += 1;
+    else lf += 1;
+  }
   return crlf > lf ? '\r\n' : '\n';
 }
 
@@ -23,4 +31,4 @@ export function lineBreakOf(text: string): LineBreak {
 export const textWith = (doc: Text, eol: LineBreak): string => doc.sliceString(0, doc.length, eol);
 
 /** Whether the editor already holds this text, whatever line breaks either is written with. */
-export const holds = (doc: Text, text: string): boolean => doc.toString() === text.replace(/\r\n?/g, '\n');
+export const holds = (doc: Text, text: string): boolean => doc.toString() === (text.includes('\r') ? text.replace(/\r\n?/g, '\n') : text);
