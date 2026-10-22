@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { messageOf } from '@shared/ipcError';
-import type { SetupJob, SetupPush, SetupStatus, VoicePatch } from '@shared/setup';
+import type { ListenerWord, SetupJob, SetupPush, SetupStatus, VoicePatch } from '@shared/setup';
 import { translate } from '../i18n';
 import { useApp } from './app';
 import { useConsent } from './consent';
@@ -17,6 +17,8 @@ interface SetupState {
   /** The job going on and the last of what it said; a download's percent replaces the one before it. */
   steps: { job: SetupJob; lines: string[] } | null;
   error: { job: SetupJob; text: string } | null;
+  /** How the voice helper is: fetching a model (how far), loading, ready, failed; null without a listener running. */
+  helper: ListenerWord | null;
   refresh(): Promise<void>;
   run(job: SetupJob): Promise<void>;
   voice(patch: VoicePatch): Promise<void>;
@@ -37,6 +39,7 @@ export const useSetup = create<SetupState>((set, get) => {
     if (listening) return;
     listening = true;
     window.cortex.on.voiceStatus((voice) => set((state) => (state.status ? { status: { ...state.status, voice } } : {})));
+    window.cortex.on.voiceHelper((helper) => set({ helper }));
     window.cortex.on.setup((push: SetupPush) => {
       if ('step' in push) {
         const before = get().steps;
@@ -58,11 +61,13 @@ export const useSetup = create<SetupState>((set, get) => {
     status: null,
     steps: null,
     error: null,
+    helper: null,
 
     async refresh() {
       listen();
       try {
-        set({ status: await window.cortex.setup.status() });
+        const [status, helper] = await Promise.all([window.cortex.setup.status(), window.cortex.setup.helper()]);
+        set({ status, helper });
       } catch (err) {
         set({ error: { job: 'engine', text: messageOf(err) } });
       }

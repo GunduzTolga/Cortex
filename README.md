@@ -199,7 +199,7 @@ Kendin derlemek ve ayrıntılar için: [desktop/README.md](desktop/README.md).
   - NVIDIA kartlarda CUDA, AMD Radeon ve Intel Arc kartlarda Vulkan (whisper.cpp) ile ekran kartında çalışır; ikisi de yoksa işlemcide çalışır.
   - İşlemcide hızlı `small` modeli yazar; "Hey Pyn"i küçük ayrı bir model doğrular, böylece pencere hemen açılır.
   - Daha doğru ama işlemcide yavaş modeli Ayarlar → Sesle yazma → **Yazı modeli**'nden seçebilirsin.
-  - Ses modeli yüklenirken sağ alttaki simge "Ses hazırlanıyor…" der. Hazırlık uzun sürerse bildirim gelir; hazır olunca "Pyn hazır" der. Kablosuz kulaklık sonradan bağlansa ya da Windows'un varsayılan mikrofonu değişse de dinleyici yeni mikrofona kendiliğinden geçer.
+  - Uygulama hemen açılır, ses arka planda hazırlanır. Ayarlar → Sesle yazma'daki çubuk modelin ne kadarının indiğini ya da yüklendiğini gösterir. Sağ alttaki simge de "Ses hazırlanıyor…" der. Hazırlık uzun sürerse bildirim gelir; hazır olunca "Pyn hazır" der. Kablosuz kulaklık sonradan bağlansa ya da Windows'un varsayılan mikrofonu değişse de dinleyici yeni mikrofona kendiliğinden geçer.
 
 [Ayrıntılar](docs/v3/YAKALA.md#sesle-yazma-windows-isteğe-bağlı)
 

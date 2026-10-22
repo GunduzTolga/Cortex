@@ -333,6 +333,12 @@ class SetupTest(unittest.TestCase):
             link.heard({'olay': 'bitti'}, 0.0)
             link.revive(10 ** 6)
         self.assertEqual(link.wait, link.LONGEST_WAIT, 'never longer than five minutes')
+        # A model being fetched is carried, for the settings' bar; ready, it is gone.
+        self.assertTrue(link.heard({'olay': 'indiriliyor', 'mb': 120, 'toplam': 484}, 240.0))
+        self.assertFalse(link.heard({'olay': 'indiriliyor', 'mb': 120, 'toplam': 484}, 241.0), 'the same, nothing new')
+        self.assertEqual(link.progress, (120, 484))
+        link.heard({'olay': 'hazir', 'aciklama': 'small (işlemci)'}, 250.0)
+        self.assertIsNone(link.progress)
         alone = yakala.VoiceLink(worker)
         alone.heard({'olay': 'bitti'}, 0.0)
         self.assertFalse(alone.revive(10 ** 6), 'a link that cannot start a helper does not try')
@@ -344,6 +350,19 @@ class SetupTest(unittest.TestCase):
         self.assertTrue(broken.revive(10.0), 'tried, and the listener goes on')
         self.assertEqual((broken.word(), broken.retry_at), ('hata', 30.0), 'tried again later')
         self.assertIn('venv yok', broken.error)
+
+    def test_a_model_being_fetched_is_said_as_it_comes_not_one_line_for_minutes(self):
+        progress = Path(self.tmp.name) / ses.PROGRESS_FILE
+        said = []
+        with ses.relayed_progress(progress, said.append, every=0.02):
+            for done in (0, 120, 242, 242, 484):
+                progress.write_text(json.dumps({'mb': done, 'toplam': 484}), encoding='utf-8')
+                time.sleep(0.08)
+        self.assertEqual(said, ['  %0 (0 / 484 MB)', '  %24 (120 / 484 MB)', '  %50 (242 / 484 MB)', '  %100 (484 / 484 MB)'], 'each new percent once')
+        progress.write_text('{', encoding='utf-8')
+        with ses.relayed_progress(progress, said.append, every=0.02):
+            time.sleep(0.08)
+        self.assertEqual(len(said), 4, 'a half-written file says nothing')
 
     def test_the_processor_writes_with_a_quick_model_and_says_what_it_downloads(self):
         self.assertEqual(ses.DEFAULTS['cpu_model'], 'small', 'large-v3-turbo took half a minute a sentence on a laptop')
@@ -1280,7 +1299,7 @@ class ServeTest(unittest.TestCase):
             return self.written.get(audio.name, '')
 
         for name, value in (('Recorder', lambda _config: self.recorder), ('Wake', lambda _state, _config: self.wake),
-                            ('load_model', lambda _state, _config: ('model', 'sahte')), ('release', lambda _model: None),
+                            ('load_model', lambda _state, _config, _report=None: ('model', 'sahte')), ('release', lambda _model: None),
                             ('transcribe', transcribe), ('_device_name', lambda _config: 'Mikrofon'),
                             ('join_audio', lambda *parts: Sound('+'.join(part.name for part in parts if part.name))),
                             ('out', lambda **event: self.events.put(event)), ('log', lambda text: None if text.startswith('süre:') else self.logged.append(text)),
@@ -1528,8 +1547,8 @@ class ServeTest(unittest.TestCase):
         # 21 October: on an Intel laptop's processor the dictation's model took half a minute a
         # check, and "Hey Pyn" opened the window that late. The dictation keeps its own model.
         opened, used = [], []
-        self.helper.load_model = lambda _state, _config: ('yazi-modeli', 'small (işlemci)')
-        self.helper._open = lambda name, device, compute: opened.append((name, device, compute)) or 'denetci'
+        self.helper.load_model = lambda _state, _config, _report=None: ('yazi-modeli', 'small (işlemci)')
+        self.helper._open = lambda name, device, compute, _report=None: opened.append((name, device, compute)) or 'denetci'
         inner = self.helper.transcribe
         self.helper.transcribe = lambda model, audio, config, lock: used.append(model) or inner(model, audio, config, lock)
         self.serve(uyandirma=True)
@@ -1545,9 +1564,31 @@ class ServeTest(unittest.TestCase):
         self.assertEqual(self.until('metin')['metin'], 'Yarın toplantı var.')
         self.assertEqual(used, ['denetci', 'yazi-modeli'], 'the check by the small model, the sentence by the dictation\'s')
 
+    def test_a_first_download_says_how_much_of_the_model_has_come(self):
+        # What arrives in Hugging Face's folder is counted every second, against what the Hub says it weighs.
+        hub = Path(self.tmp.name) / 'hf'
+        blobs = hub / 'hub' / 'models--Systran--faster-whisper-small' / 'blobs'
+        reported = []
+
+        def download_model(name):
+            blobs.mkdir(parents=True, exist_ok=True)
+            (blobs / 'a.incomplete').write_bytes(b'x' * 300)
+            time.sleep(1.3)
+            (blobs / 'a.incomplete').write_bytes(b'x' * 600)
+            time.sleep(1.2)
+            return str(hub / 'snapshot')
+        utils = types.SimpleNamespace(_MODELS={'small': 'Systran/faster-whisper-small'}, download_model=download_model)
+        self.helper._model_size = lambda repo, name: 500
+        with mock.patch.dict(sys.modules, {'faster_whisper': types.SimpleNamespace(utils=utils), 'faster_whisper.utils': utils}), \
+                mock.patch.dict(os.environ, {'HF_HOME': str(hub)}):
+            path = self.helper._fetch('small', lambda done, total: reported.append((done, total)))
+        self.assertEqual(path, str(hub / 'snapshot'))
+        self.assertIn((300, 500), reported)
+        self.assertIn((500, 500), reported, 'never more than all of it')
+
     def test_the_wake_checker_is_only_for_the_processor_and_not_needed_by_a_quick_model(self):
         helper = self.helper
-        helper._open = lambda name, device, compute: 'denetci'
+        helper._open = lambda name, device, compute, _report=None: 'denetci'
         self.assertEqual(helper.checker_for(dict(ses.DEFAULTS), 'small (işlemci)'), 'denetci')
         self.assertEqual(helper.checker_for(dict(ses.DEFAULTS, cpu_model='large-v3-turbo'), 'large-v3-turbo (işlemci)'), 'denetci')
         self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS), 'large-v3-turbo (ekran kartı, CUDA)'), 'a card is quick enough')

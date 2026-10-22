@@ -105,8 +105,32 @@ export interface SetupStatus {
 /** How a job goes: a step as the engine says it, then its end. */
 export type SetupPush = { job: SetupJob; step: string } | { job: SetupJob; done: true; ok: boolean; error?: string };
 
+/** How far a download step has come, in percent ("%40 (650 / 1624 MB)", or "40% (…)" in English); null for any other step. */
+export function percentOfStep(line: string): number | null {
+  const found = /^%?(\d+)%? \(\d+ \/ \d+ MB\)$/.exec(line.trim());
+  return found ? Math.min(100, Number(found[1])) : null;
+}
+
+/** How yakala's listener says its voice helper is (beyin_v3_ses.say_listener): loading - fetching a model, with how much has come - ready, or failed. */
+export type HelperState = 'yok' | 'yukleniyor' | 'hazir' | 'hata' | 'kapali';
+
+export interface ListenerWord {
+  ses: HelperState;
+  /** The model it writes with, once ready ("small (işlemci)"). */
+  model: string;
+  /** Why it failed, while it is being started again. */
+  mesaj: string;
+  /** Whether it listens for the wake phrase now. */
+  uyandirma: boolean;
+  /** A model being fetched: MB come, and MB in all; null when none is. */
+  mb: number | null;
+  toplam: number | null;
+}
+
 export interface SetupApi {
   status(): Promise<SetupStatus>;
+  /** How the voice helper is now (the settings' bar); null without a listener running. */
+  helper(): Promise<ListenerWord | null>;
   /** The Python that came with the app installed for this user (Windows): quietly, without asking for an administrator. */
   installPython(): Promise<SetupStatus>;
   /** The vault's engine installed, or updated, from the package that came with the app. */

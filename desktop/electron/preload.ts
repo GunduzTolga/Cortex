@@ -92,6 +92,7 @@ const api: CortexApi = {
     installEngine: () => invoke('setup:installEngine'),
     installVoice: () => invoke('setup:installVoice'),
     voice: (patch) => invoke('setup:voice', patch),
+    helper: () => invoke('setup:helper'),
   },
   on: {
     notesChanged: (handler) => subscribe('notes:changed', handler),
@@ -99,6 +100,7 @@ const api: CortexApi = {
     authChanged: (handler) => subscribe('chat:authChanged', handler),
     setup: (handler) => listen('setup:event', handler),
     voiceStatus: (handler) => listen('setup:voice', handler),
+    voiceHelper: (handler) => listen('setup:helper', handler),
     openSettings: (handler) => subscribe('app:openSettings', handler),
     askWake: (handler) => subscribe('app:askWake', handler),
   },

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Download, Mic, RefreshCw, RotateCcw } from 'lucide-react';
-import { COMMAND_WORDS, CPU_MODELS, VOICE_COMMANDS, WAKE_PHRASES, wakePhraseLabel } from '@shared/setup';
+import { Check, Download, Mic, RefreshCw, RotateCcw } from 'lucide-react';
+import { COMMAND_WORDS, CPU_MODELS, VOICE_COMMANDS, WAKE_PHRASES, percentOfStep, wakePhraseLabel } from '@shared/setup';
 import type { CpuModel, SetupJob, SetupStatus, VoiceCommands, WakePhrase } from '@shared/setup';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
@@ -30,15 +30,33 @@ function Note({ children, tone = 'muted', data }: { children: React.ReactNode; t
   );
 }
 
-/** What a job said last, its spinner beside it. */
+/** A bar: how far, or, without a percent, that something is going on. */
+export function Bar({ percent }: { percent: number | null }) {
+  return (
+    <div
+      className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-200"
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={percent ?? undefined}
+      data-setup-bar={percent ?? 'busy'}
+    >
+      <div className={`h-full rounded-full bg-darkDelegation transition-[width] duration-500 ${percent === null ? 'w-1/3 animate-pulse' : ''}`} style={percent === null ? undefined : { width: `${percent}%` }} />
+    </div>
+  );
+}
+
+/** What a job said last, its spinner beside it; a download's percent as a bar. */
 export function Progress({ job, lines }: { job: SetupJob; lines: string[] }) {
   const t = useT();
+  const last = lines.length ? percentOfStep(lines[lines.length - 1]) : null;
   return (
     <div className="mx-3 mt-2 rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-2" data-setup-progress={job}>
       <div className="flex items-center gap-2 text-[12px] font-semibold text-darkDelegation">
         <Spinner size={12} label={t('setup.working')} />
         {t(job === 'python' ? 'setup.python.working' : job === 'engine' ? 'setup.engine.working' : 'setup.voice.working')}
       </div>
+      <Bar percent={last} />
       {lines.length ? (
         <ul className="mt-1.5 space-y-0.5 font-mono text-[11px] text-zinc-500">
           {lines.map((line, i) => (
@@ -155,6 +173,43 @@ function VoiceCommandsBlock({ commands, busy }: { commands: VoiceCommands; busy:
   );
 }
 
+/**
+ * The voice getting ready, as yakala's listener says it: a model being fetched (how far), loading,
+ * ready, or failed and tried again. The app opens at once while this goes on in the background:
+ * here it is seen, not a voice that seems not to work.
+ */
+export function VoiceHelperBar() {
+  const t = useT();
+  const helper = useSetup((s) => s.helper);
+  if (!helper || helper.ses === 'yok' || helper.ses === 'kapali') return null;
+  if (helper.ses === 'hazir') {
+    return (
+      <p className="mx-3 mt-1 flex items-center gap-1.5 text-[12px] font-semibold text-good" data-setup-voice-helper="hazir">
+        <Check size={13} strokeWidth={3} />
+        {helper.model ? t('setup.voice.helper.ready', { model: helper.model }) : t('setup.voice.helper.readyBare')}
+      </p>
+    );
+  }
+  if (helper.ses === 'hata') {
+    return (
+      <div className="mt-1" data-setup-voice-helper="hata">
+        <Note tone="error">{t('setup.voice.helper.error', { message: helper.mesaj })}</Note>
+      </div>
+    );
+  }
+  const percent = helper.mb !== null && helper.toplam ? Math.min(100, Math.floor((helper.mb * 100) / helper.toplam)) : null;
+  return (
+    <div className="mx-3 mt-2 rounded-xl border border-gold/50 bg-gold/10 px-3 py-2.5" data-setup-voice-helper="yukleniyor">
+      <div className="flex items-center gap-2 text-[12px] font-semibold text-darkDelegation">
+        <Spinner size={12} label={t('setup.working')} />
+        {percent !== null ? t('setup.voice.helper.downloading', { mb: helper.mb ?? 0, total: helper.toplam ?? 0, percent }) : t('setup.voice.helper.loading')}
+      </div>
+      <Bar percent={percent} />
+      <p className="mt-1.5 text-[11.5px] leading-relaxed text-zinc-500">{t('setup.voice.helper.hint')}</p>
+    </div>
+  );
+}
+
 function VoiceSection({ status }: { status: SetupStatus }) {
   const t = useT();
   const english = useLanguage() === 'en';
@@ -174,6 +229,7 @@ function VoiceSection({ status }: { status: SetupStatus }) {
         status.job === 'voice' ? null : <Note data="old-engine">{t('setup.voice.oldEngine')}</Note>
       ) : voice.installed ? (
         <>
+          {voice.on ? <VoiceHelperBar /> : null}
           <Switch checked={voice.on} onChange={(on) => void set({ on })} label={t('setup.voice.on')} hint={t('setup.voice.on.hint')} data-setup-voice-on />
           <Switch checked={voice.auto} onChange={(auto) => void set({ auto })} label={t('setup.voice.auto')} hint={t('setup.voice.auto.hint')} data-setup-voice-auto />
           <Switch

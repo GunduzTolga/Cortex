@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { HelperState, ListenerWord } from '../../shared/setup';
 import { readSettings } from './settings';
 
 /**
@@ -70,17 +71,7 @@ export function stopMicrophoneWord(): void {
 }
 
 /** How the listener's voice helper is, as the listener says it (beyin_v3_ses.say_listener). */
-export type HelperState = 'yok' | 'yukleniyor' | 'hazir' | 'hata' | 'kapali';
-
-export interface ListenerWord {
-  ses: HelperState;
-  /** The model it writes with, once ready ("small (işlemci)"). */
-  model: string;
-  /** Why it failed, while it is being started again. */
-  mesaj: string;
-  /** Whether it listens for the wake phrase now. */
-  uyandirma: boolean;
-}
+export type { HelperState, ListenerWord } from '../../shared/setup';
 
 const HELPER_STATES: readonly HelperState[] = ['yok', 'yukleniyor', 'hazir', 'hata', 'kapali'];
 
@@ -108,10 +99,14 @@ export function readListener(file: string = listenerFile(), alive: (pid: number)
   }
   if (!said || typeof said !== 'object' || !HELPER_STATES.includes(said.ses as HelperState)) return null;
   if (typeof said.pid !== 'number' || !alive(said.pid)) return null;
+  const megabytes = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : null);
+  const total = megabytes(said.toplam);
   return {
     ses: said.ses as HelperState,
     model: typeof said.model === 'string' ? said.model.slice(0, 120) : '',
     mesaj: typeof said.mesaj === 'string' ? said.mesaj.slice(0, 200) : '',
     uyandirma: said.uyandirma === true,
+    mb: total ? megabytes(said.mb) : null,
+    toplam: total || null,
   };
 }

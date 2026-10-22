@@ -10,7 +10,7 @@ import { useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 import { useSetup } from '../store/setup';
 import { LanguageSwitch } from '../ui/LanguageSwitch';
-import { Progress } from '../ui/SetupSections';
+import { Progress, VoiceHelperBar } from '../ui/SetupSections';
 import { Button, Switch, inputClass } from '../ui/ui';
 
 /**
@@ -484,6 +484,8 @@ function VoiceStep({ status }: { status: SetupStatus | null }) {
       ) : voice?.installed ? (
         <>
           <Done>{t('onboarding.voice.ready')}</Done>
+          {/* Set up is not ready: its model loads, the first time downloads, while the app is already open. */}
+          <VoiceHelperBar />
           {/* The always-listening mode chosen here, where it is explained: not found later in the settings. */}
           <div className="mt-4 rounded-xl border border-darkDelegation/15 bg-white py-1">
             <Switch checked={voice.wake && wakeConsent} onChange={(wake) => void useSetup.getState().voice({ wake })} label={t('setup.voice.wake')} hint={t('setup.voice.wake.hint')} data-onboarding-voice-wake />

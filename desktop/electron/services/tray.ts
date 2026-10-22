@@ -77,10 +77,13 @@ export function trayItems(voice: VoiceStatus | null, english: boolean, busy: boo
   ];
 }
 
-/** What the icon says when the pointer rests on it. */
-export function trayTooltip(voice: VoiceStatus | null, english: boolean, helper: HelperState | null = null): string {
+/** What the icon says when the pointer rests on it; `percent`, how much of a model being fetched has come. */
+export function trayTooltip(voice: VoiceStatus | null, english: boolean, helper: HelperState | null = null, percent: number | null = null): string {
   const phrase = wakePhraseLabel(voice?.wakePhrase, english);
-  if (voice?.installed && voice.on && helper === 'yukleniyor') return english ? 'Cortex · voice is getting ready…' : 'Cortex · Pyn hazırlanıyor…';
+  if (voice?.installed && voice.on && helper === 'yukleniyor') {
+    const far = percent === null ? '' : english ? ` ${percent}%` : ` %${percent}`;
+    return english ? `Cortex · voice is getting ready…${far}` : `Cortex · Pyn hazırlanıyor…${far}`;
+  }
   if (listensAlways(voice)) return english ? `Cortex · the microphone listens for ${phrase}` : `Cortex · mikrofon ${phrase} için dinliyor`;
   return english ? 'Cortex · the microphone is off' : 'Cortex · mikrofon kapalı';
 }
@@ -153,8 +156,24 @@ export function listeningNow(): boolean {
 function show(): void {
   if (!tray) return;
   tray.setImage(trayPicture(listeningNow()));
-  tray.setToolTip(trayTooltip(lived(voice), english(), helper?.ses ?? null));
+  tray.setToolTip(trayTooltip(lived(voice), english(), helper?.ses ?? null, percentOf(helper)));
 }
+
+/** How much of a model being fetched has come, in percent; null when none is. */
+export function percentOf(word: ListenerWord | null): number | null {
+  return word?.mb !== null && word?.mb !== undefined && word.toplam ? Math.min(100, Math.floor((word.mb * 100) / word.toplam)) : null;
+}
+
+const helperListeners = new Set<(word: ListenerWord | null) => void>();
+
+/** Who is told every change of the voice helper's word (the settings' bar, through the window). */
+export function onHelperChange(listener: (word: ListenerWord | null) => void): () => void {
+  helperListeners.add(listener);
+  return () => helperListeners.delete(listener);
+}
+
+/** The voice helper's word as last read. */
+export const currentHelper = (): ListenerWord | null => helper;
 
 /** What the listener said of its voice last, read every two seconds while the icon is there (services/microphone.ts). */
 let helper: ListenerWord | null = null;
@@ -194,7 +213,13 @@ function listenToHelper(): void {
   const next = readListener();
   const before = helper;
   helper = next;
-  if (before?.ses === next?.ses && before?.uyandirma === next?.uyandirma) return;
+  if (JSON.stringify(before) === JSON.stringify(next)) return;
+  for (const listener of helperListeners) listener(next);
+  // How much has come changes every second while a model is fetched: the tooltip follows, nothing more is said.
+  if (before?.ses === next?.ses && before?.uyandirma === next?.uyandirma) {
+    show();
+    return;
+  }
   const phrase = wakePhraseLabel(voice?.wakePhrase, english());
   if (next?.ses === 'yukleniyor' && before?.ses !== 'yukleniyor') {
     // Said only when it takes longer than a moment: a card loads in a few seconds, and nothing need be said.

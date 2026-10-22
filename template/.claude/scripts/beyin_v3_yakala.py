@@ -2086,12 +2086,18 @@ class VoiceLink:
         self.error = ''
         self.retry_at = None
         self.wait = self.FIRST_WAIT
+        # A model being fetched: (MB come, MB in all), for the settings' bar and the window to show.
+        self.progress = None
 
     def heard(self, event, moment):
         """An event from the helper, kept; True when what the link says has changed."""
         kind = event.get('olay')
+        if kind == 'indiriliyor':
+            progress = (int(event.get('mb') or 0), int(event.get('toplam') or 0))
+            changed, self.progress = progress != self.progress, progress
+            return changed
         if kind == 'hazir':
-            self.ready, self.what, self.error, self.wait = True, event.get('aciklama') or '', '', self.FIRST_WAIT
+            self.ready, self.what, self.error, self.wait, self.progress = True, event.get('aciklama') or '', '', self.FIRST_WAIT, None
             return True
         if kind == 'hata' and event.get('neden') == 'model':
             self.ready, self.error = False, str(event.get('mesaj') or 'model açılamadı')[:200]
@@ -2110,7 +2116,7 @@ class VoiceLink:
         cannot even be started (its environment gone) is tried again later: the listener goes on."""
         if self.retry_at is None or moment < self.retry_at:
             return False
-        self.retry_at, self.ready = None, False
+        self.retry_at, self.ready, self.progress = None, False, None
         try:
             self.worker = self.start()
         except Exception as exc:
@@ -2488,6 +2494,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             text = message or {
                 # A helper being started again after its model would not load says so, not "loading" for ever.
                 'yok': ('Ses açılamadı, yeniden deneniyor: ' + voice.error) if getattr(voice, 'error', '')
+                       else ('Ses modeli indiriliyor: %d / %d MB' % voice.progress) if getattr(voice, 'progress', None)
                        else 'Ses hazırlanıyor… birazdan konuşabilirsin',
                 'bekliyor': '● Dinliyorum' + device,
                 'dinliyor': '● Dinliyorum' + device,
@@ -2600,6 +2607,10 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         def voice_event(event):
             kind = event.get('olay')
             last = event.get('son', True)
+            if kind == 'indiriliyor':
+                if voice_mode['now'] == 'yok':
+                    voice_set('yok')  # how much of the model has come, as it comes
+                return
             if pending['drop']:
                 # Let go for typing: what was said before still goes in, as words only; the
                 # helper's last word about that recording changes nothing.
@@ -3224,7 +3235,8 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
             if link is None:
                 ses.say_listener(ses='yok')
             else:
-                ses.say_listener(ses=link.word(), model=link.what, mesaj=link.error,
+                mb, total = link.progress or (None, None)
+                ses.say_listener(ses=link.word(), model=link.what, mesaj=link.error, mb=mb, toplam=total,
                                  uyandirma=bool(link.ready and voice_config.get('wake')))
         except Exception:
             pass

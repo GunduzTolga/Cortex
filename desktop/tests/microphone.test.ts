@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { BEAT_EVERY, type HelperState, type ListenerWord, listenerFile, microphoneFile, microphoneWord, readListener } from '../electron/services/microphone';
-import { helperTurn, trayItems, trayTooltip } from '../electron/services/tray';
+import { helperTurn, percentOf, trayItems, trayTooltip } from '../electron/services/tray';
+import { percentOfStep } from '../shared/setup';
 
 /**
  * The microphone listens all the time only while Cortex runs and the person
@@ -59,10 +60,15 @@ test('the listener’s word on its voice is read only from a listener that runs'
   try {
     assert.equal(readListener(file), null, 'no listener: nothing said');
     fs.writeFileSync(file, JSON.stringify({ surum: 1, pid: process.pid, at: 1, ses: 'yukleniyor', model: '', mesaj: '', uyandirma: false }));
-    assert.deepEqual(readListener(file), { ses: 'yukleniyor', model: '', mesaj: '', uyandirma: false });
+    assert.deepEqual(readListener(file), { ses: 'yukleniyor', model: '', mesaj: '', uyandirma: false, mb: null, toplam: null });
+    // A model being fetched: how much has come, for the settings' bar.
+    fs.writeFileSync(file, JSON.stringify({ surum: 1, pid: process.pid, at: 1, ses: 'yukleniyor', mb: 120, toplam: 484 }));
+    assert.deepEqual(readListener(file), { ses: 'yukleniyor', model: '', mesaj: '', uyandirma: false, mb: 120, toplam: 484 });
+    fs.writeFileSync(file, JSON.stringify({ surum: 1, pid: process.pid, at: 1, ses: 'yukleniyor', mb: 120, toplam: 0 }));
+    assert.equal(readListener(file)?.mb, null, 'nothing in all is no progress');
     fs.writeFileSync(file, JSON.stringify({ surum: 1, pid: 424242, at: 1, ses: 'hazir', model: 'small (işlemci)', uyandirma: true }));
     assert.equal(readListener(file, () => false), null, 'a listener that died without a word is none');
-    assert.deepEqual(readListener(file, () => true), { ses: 'hazir', model: 'small (işlemci)', mesaj: '', uyandirma: true });
+    assert.deepEqual(readListener(file, () => true), { ses: 'hazir', model: 'small (işlemci)', mesaj: '', uyandirma: true, mb: null, toplam: null });
     for (const broken of ['{', '[]', JSON.stringify({ pid: process.pid, ses: 'belki' }), JSON.stringify({ pid: 'x', ses: 'hazir' })]) {
       fs.writeFileSync(file, broken);
       assert.equal(readListener(file), null, broken);
@@ -74,7 +80,7 @@ test('the listener’s word on its voice is read only from a listener that runs'
 });
 
 test('a slow load is said, and so is its end; a quick one says nothing; a failure says why', () => {
-  const word = (ses: HelperState, more: Partial<ListenerWord> = {}): ListenerWord => ({ ses, model: '', mesaj: '', uyandirma: false, ...more });
+  const word = (ses: HelperState, more: Partial<ListenerWord> = {}): ListenerWord => ({ ses, model: '', mesaj: '', uyandirma: false, mb: null, toplam: null, ...more });
   const phrase = '“Hey Pyn”';
   assert.equal(helperTurn(word('yukleniyor'), word('hazir'), false, phrase, false), null, 'quick: nothing was said, nothing to end');
   assert.deepEqual(helperTurn(word('yukleniyor'), word('hazir', { uyandirma: true }), false, phrase, true), {
@@ -99,4 +105,17 @@ test('the icon’s menu says the voice is getting ready, or could not start, ins
   assert.equal(trayItems(voice, false, false, true, 'hazir')[0].label, 'Mikrofon dinliyor: “Hey Pyn”');
   assert.equal(trayItems(voice, false, false, true)[0].label, 'Mikrofon dinliyor: “Hey Pyn”', 'an engine that says nothing: as before');
   assert.equal(trayTooltip(voice, false, 'yukleniyor'), 'Cortex · Pyn hazırlanıyor…');
+  assert.equal(trayTooltip(voice, false, 'yukleniyor', 40), 'Cortex · Pyn hazırlanıyor… %40', 'how much of the model has come');
+  assert.equal(trayTooltip(voice, true, 'yukleniyor', 40), 'Cortex · voice is getting ready… 40%');
+});
+
+test('how far a download is: from the listener’s word, and from a setup step’s line, for the bars', () => {
+  const word = (more: Partial<ListenerWord>): ListenerWord => ({ ses: 'yukleniyor', model: '', mesaj: '', uyandirma: false, mb: null, toplam: null, ...more });
+  assert.equal(percentOf(word({ mb: 121, toplam: 484 })), 25);
+  assert.equal(percentOf(word({ mb: 500, toplam: 484 })), 100, 'never past all of it');
+  assert.equal(percentOf(word({})), null, 'not downloading');
+  assert.equal(percentOf(null), null);
+  assert.equal(percentOfStep('  %40 (650 / 1624 MB)'), 40);
+  assert.equal(percentOfStep('40% (650 / 1624 MB)'), 40, 'in English');
+  assert.equal(percentOfStep('Paketler yükleniyor…'), null);
 });

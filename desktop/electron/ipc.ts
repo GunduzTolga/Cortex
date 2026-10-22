@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'el
 import type { BootstrapPayload, WindowSettings } from '../shared/api';
 import { readSettings, settingsUnreadable, tidyName, updateSettings } from './services/settings';
 import { sayMicrophone } from './services/microphone';
-import { startWithWindows, trayChanged } from './services/tray';
+import { currentHelper, onHelperChange, startWithWindows, trayChanged } from './services/tray';
 import { setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
@@ -169,6 +169,9 @@ export function registerIpc(): void {
   setup.onSetupPush((payload) => broadcast('setup:event', payload));
   // Switched from the notification-area icon: the settings, open or not, show the voice as it is now.
   setup.onVoiceStatus((voice) => broadcast('setup:voice', voice));
+  // The voice helper fetching a model, loading it, ready or failed: the settings' bar follows.
+  onHelperChange((word) => broadcast('setup:helper', word));
+  handle('setup:helper', () => currentHelper());
   handle('setup:status', () => setup.setupStatus());
   // What was set up is taken up now, not at the next start: the Telegram listener starts (or starts
   // again on the new engine), and the chats' CLIs take the engine's new hooks at their next message.

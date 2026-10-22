@@ -158,7 +158,8 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
   - Daha doğru ama işlemcide yavaş modeli seçmek için: Ayarlar → Sesle yazma → Yazı modeli → **En doğru**, ya da `beyin.py ses ayar --islemci-modeli large-v3-turbo`.
 - **Hazırlık süresi:**
   - Model, yakala dinleyicisi başlarken yüklenir. İşlemcide bu birkaç saniyeden yarım dakikaya kadar sürebilir.
-  - Masaüstü uygulaması bu sırada sağ alttaki simgede "Ses hazırlanıyor…" der. Hazırlık uzarsa bildirim gönderir, hazır olunca "Pyn hazır" der.
+  - Masaüstü uygulaması bu sırada Ayarlar → Sesle yazma'da bir çubuk gösterir (model iniyorsa ne kadarının indiği). Sağ alttaki simgede "Ses hazırlanıyor…" der. Hazırlık uzarsa bildirim gönderir, hazır olunca "Pyn hazır" der.
+  - `ses kur` Whisper modelinin inişini yüzdeyle söyler.
   - Dinleyici durumunu `%LOCALAPPDATA%\beyin-v3\dinleyici.json` dosyasına yazar.
   - Model yüklenemezse (ilk inişte internet yoksa gibi) ses yardımcısı 10 saniye sonra yeniden denenir; bekleme her seferinde iki katına çıkar, en çok beş dakika olur.
   - Yükleme ve yazma süreleri `state/ses/isci.log` dosyasına yazılır (söylenenler yazılmaz).

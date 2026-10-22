@@ -2,7 +2,7 @@ import type { ChatApi, ChatPush } from './chat';
 import type { AppLanguage } from './language';
 import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
 import type { OfficeApi } from './office';
-import type { SetupApi, SetupPush, VoiceStatus } from './setup';
+import type { ListenerWord, SetupApi, SetupPush, VoiceStatus } from './setup';
 import type { TelegramApi } from './telegram';
 
 /**
@@ -106,6 +106,8 @@ export interface CortexApi {
     setup(handler: (push: SetupPush) => void): () => void;
     /** The voice status read anew (the notification-area icon switched it): the settings show it as it is. */
     voiceStatus(handler: (voice: VoiceStatus | null) => void): () => void;
+    /** The voice helper's word changed: fetching a model (how far), loading, ready, failed. */
+    voiceHelper(handler: (word: ListenerWord | null) => void): () => void;
     /** The notification-area icon's "Ayarlar": open the settings. */
     openSettings(handler: () => void): () => void;
     /** The notification-area icon's "listen all the time", asked of a person who has not allowed it yet: the window asks. */

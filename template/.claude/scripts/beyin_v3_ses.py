@@ -21,6 +21,7 @@ under state/ses, outside the vault, so a synced vault never carries gigabytes of
 machine's packages to another.
 """
 import argparse
+import contextlib
 import difflib
 import json
 import os
@@ -116,6 +117,8 @@ WAKE_AFTER_SN = 0.6
 CPU_MODELS = ('small', 'large-v3-turbo')
 CHECK_MODEL = 'base'
 QUICK_MODELS = ('tiny', 'tiny.en', 'base', 'base.en')
+# While `ses kur` fetches a model, how far it has come ({"mb": …, "toplam": …}), for its steps to say.
+PROGRESS_FILE = 'indirme.json'
 # What each model downloads the first time, in GB (faster-whisper's CTranslate2 conversions).
 DOWNLOAD_GB = {'large-v3-turbo': 1.6, 'large-v3': 3.1, 'medium': 1.5, 'small': 0.5, 'base': 0.15, 'tiny': 0.08}
 
@@ -793,6 +796,33 @@ def _vulkan_ready(state, say, download_checked):
     return True
 
 
+@contextlib.contextmanager
+def relayed_progress(path, say, every=1.0):
+    """While the helper fetches a model, how far it has come said as a step ("  %40 (210 / 484 MB)"),
+    from the file it writes (PROGRESS_FILE): a first download was minutes of one unchanging line."""
+    stop = threading.Event()
+
+    def watch():
+        told = None
+        while not stop.wait(every):
+            try:
+                said = json.loads(Path(path).read_text(encoding='utf-8'))
+                done, total = int(said['mb']), int(said['toplam'])
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            percent = min(100, done * 100 // total) if total > 0 else 0
+            if percent != told:
+                told = percent
+                say('  %%%d (%d / %d MB)' % (percent, done, total))
+    thread = threading.Thread(target=watch, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(every * 2)
+
+
 def install(state, say=print, run=subprocess.run, download=_download, which=shutil.which, download_checked=_download_checked, system=None):
     """Build the environment, install the packages, fetch the models. Each step says what it does."""
     plan = install_plan(state, which, run, system)
@@ -832,8 +862,9 @@ def install(state, say=print, run=subprocess.run, download=_download, which=shut
     (folder / MARKER).write_text(json.dumps(marker, ensure_ascii=False) + '\n', encoding='utf-8')
     say('Whisper modeli hazırlanıyor' + (' (ilk seferde yaklaşık %s GB iner)…' % download_size(plan['motor'], load_config(state))
                                          if plan['motor'] != 'vulkan' else '…'))
-    done = run(worker_command(state, '--indir'), capture_output=True, text=True, encoding='utf-8', errors='replace',
-               timeout=7200, env=worker_env(state), creationflags=NO_WINDOW)
+    with relayed_progress(folder / PROGRESS_FILE, say):
+        done = run(worker_command(state, '--indir'), capture_output=True, text=True, encoding='utf-8', errors='replace',
+                   timeout=7200, env=worker_env(state), creationflags=NO_WINDOW)
     if done.returncode:
         if previous is None:
             (folder / MARKER).unlink(missing_ok=True)
@@ -1235,14 +1266,53 @@ def _cuda_dirs():
                 os.environ['PATH'] = str(binary) + os.pathsep + os.environ.get('PATH', '')
 
 
-def _open(name, device, compute):
-    """From disk without the network when it is there; else fetched once."""
+def _model_size(repo, name):
+    """What a model's files weigh, in bytes: as the Hub says, else about (ses.DOWNLOAD_GB)."""
+    import fnmatch
+    wanted = ('config.json', 'preprocessor_config.json', 'model.bin', 'tokenizer.json', 'vocabulary.*')
+    try:
+        import huggingface_hub
+        info = huggingface_hub.HfApi().model_info(repo, files_metadata=True)
+        size = sum(one.size or 0 for one in info.siblings if any(fnmatch.fnmatch(one.rfilename, w) for w in wanted))
+        if size:
+            return size
+    except Exception:
+        pass
+    return int(ses.DOWNLOAD_GB.get(name, 1.0) * 1e9)
+
+
+def _fetch(name, report):
+    """A model fetched once, with how far it has come said every second (`report(done, total)`, bytes):
+    a first download is hundreds of megabytes, and the person sees it come, not a silence."""
+    from faster_whisper.utils import _MODELS, download_model
+    repo = name if '/' in name else _MODELS.get(name, name)
+    total = _model_size(repo, name)
+    folder = Path(os.environ.get('HF_HOME') or Path.home() / '.cache' / 'huggingface') / 'hub' / ('models--' + repo.replace('/', '--'))
+    done = threading.Event()
+
+    def watch():
+        while not done.wait(1.0):
+            try:
+                size = sum(one.stat().st_size for one in folder.rglob('*') if one.is_file() and not one.is_symlink())
+            except OSError:
+                continue
+            report(min(size, total), total)
+    threading.Thread(target=watch, daemon=True).start()
+    try:
+        return download_model(name)
+    finally:
+        done.set()
+
+
+def _open(name, device, compute, report=None):
+    """From disk without the network when it is there; else fetched once, saying how far it has come."""
     from faster_whisper import WhisperModel
     threads = max(1, min(8, (os.cpu_count() or 4) // 2))
     try:
         return WhisperModel(name, device=device, compute_type=compute, cpu_threads=threads, local_files_only=True)
     except Exception:
-        return WhisperModel(name, device=device, compute_type=compute, cpu_threads=threads)
+        path = _fetch(name, report) if report is not None else name
+        return WhisperModel(path, device=device, compute_type=compute, cpu_threads=threads)
 
 
 def _tie(process):
@@ -1373,7 +1443,7 @@ def _silence():
     return np.zeros(RATE, dtype='float32')
 
 
-def load_model(state, config):
+def load_model(state, config, report=None):
     """(model, what it is), on the engine `ses kur` set up; a failed card says why on stderr (isci.log)."""
     engine = ses.engine_in_use(state, config)
     if engine == 'vulkan':
@@ -1388,22 +1458,22 @@ def load_model(state, config):
     if engine == 'cuda':
         try:
             _cuda_dirs()
-            model = _open(config['model'], 'cuda', 'float16')
+            model = _open(config['model'], 'cuda', 'float16', report)
             list(model.transcribe(_silence(), language=config['dil'])[0])  # CUDA loads on first use
             return model, config['model'] + ' (ekran kartı, CUDA)'
         except Exception as exc:
             print('CUDA açılamadı, işlemciye geçiliyor: ' + str(exc)[:400], file=sys.stderr, flush=True)
-    return _open(config['cpu_model'], 'cpu', 'int8'), config['cpu_model'] + ' (işlemci)'
+    return _open(config['cpu_model'], 'cpu', 'int8', report), config['cpu_model'] + ' (işlemci)'
 
 
-def checker_for(config, what):
+def checker_for(config, what, report=None):
     """On the processor, the model that checks the wake phrase (ses.CHECK_MODEL): the dictation's
     took 15-30 seconds a check on a laptop, and the window opened that late. None on a card, for
     a model quick enough to check it itself, or where it cannot be had (the dictation's checks)."""
     if not what.endswith('(işlemci)') or config.get('cpu_model') in ses.QUICK_MODELS:
         return None
     try:
-        return _open(ses.CHECK_MODEL, 'cpu', 'int8')
+        return _open(ses.CHECK_MODEL, 'cpu', 'int8', report)
     except Exception as exc:
         log('uyandırma: %s açılamadı, yazı modeli doğrulayacak (%s)' % (ses.CHECK_MODEL, str(exc)[:200]))
         return None
@@ -1818,11 +1888,15 @@ def serve(state, config, lines=None):
     loaded, lock = {}, threading.Lock()
     jobs, written = queue.Queue(), queue.Queue()
 
+    def downloading(done, total):
+        """A model being fetched: how far, for the listener to show (`indiriliyor`)."""
+        out(olay='indiriliyor', mb=done >> 20, toplam=total >> 20)
+
     def load():
         try:
             started = now()
-            loaded['model'], what = load_model(state, config)
-            checker = checker_for(config, what)
+            loaded['model'], what = load_model(state, config, downloading)
+            checker = checker_for(config, what, downloading)
             if checker is not None:
                 loaded['checker'] = checker
             # How long it took, for a slow machine to be seen in isci.log (never what is said).
@@ -2130,8 +2204,19 @@ def main(argv=None):
     state = Path(args.state)
     config = ses.load_config(state)
     if args.indir:
-        model, what = load_model(state, config)
-        checker_for(config, what)  # fetched now, with the model, not when the listener first starts
+        progress = ses.ses_dir(state) / ses.PROGRESS_FILE
+
+        def downloading(done, total):
+            # For `kur`, which reads it while this runs (its steps say "%40 (210 / 484 MB)").
+            try:
+                progress.write_text(json.dumps({'mb': done >> 20, 'toplam': total >> 20}), encoding='utf-8')
+            except OSError:
+                pass
+        try:
+            model, what = load_model(state, config, downloading)
+            checker_for(config, what, downloading)  # fetched now, with the model, not when the listener first starts
+        finally:
+            progress.unlink(missing_ok=True)
         release(model)
         print(what, flush=True)
         return 0
