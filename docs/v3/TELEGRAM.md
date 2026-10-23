@@ -16,16 +16,20 @@ ya da düzenlenmez; asistanın kartları sonra okuyup işler, tıpkı `Ctrl+Alt+
 
 Bot artık yalnız o sohbeti dinler. Botu bulan başka biri ona yazsa da cevap almaz ve yazdığı hiçbir
 yere kaydedilmez. Kod 20 kez yanlış denenirse kullanılamaz olur; yenisi için `telegram kur --yeniden-esle`
-(masaüstünde **Başka bir telefonla eşleştir**). Yalnız koda benzeyen denemeler sayılır (`/start …` ya da
-kodun harflerinden tek bir sözcük): eşleşmeden önce bota yazdığın notlar kodu harcamaz, eşleşince
-gelen kutusuna gelir ve bot "Eşleşmeden önce gönderdiğin N mesajı aldım ✓" der.
+(masaüstünde **Bağlantıyı kaldır**, sonra yeniden **Bağla**). Yalnız koda benzeyen denemeler sayılır
+(`/start …` ya da kodun harflerinden tek bir sözcük): eşleşmeden önce bota yazdığın notlar kodu harcamaz,
+eşleşince gelen kutusuna gelir ve bot "Eşleşmeden önce gönderdiğin N mesajı aldım ✓" der. O notlardan
+yalnız kodu yazma denemen sayılanlar (`/start …`, ya da büyük harfle ya da rakamla yazılmış tek sözcük)
+alınmaz; "market" gibi tek sözcüklük bir not gelir.
 
 Masaüstünde **Başka bir telefonla eşleştir** dinleyiciyi durdurup yeni bağlantıyı verir, sonra yeniden
-başlatır. Terminalden `kur --yeniden-esle` dinleyici çalışırken yapılmaz: dinleyici her turda okuduğu
+başlatır. Terminalden `kur --yeniden-esle`, başka bir botun anahtarıyla `kur`, ya da telefon eşleşmemişken
+`kur` (her seferinde yeni bir kod verir) dinleyici çalışırken yapılmaz: dinleyici her turda okuduğu
 eşleşmeyi geri yazar ve yeni bağlantıyı bozardı; önce dinleyiciyi kapat.
 
 Telegram anahtarı geçersiz derse (BotFather'da `/revoke`) aynı botun yeni anahtarını Ayarlar → Telegram'a
-yapıştırman yeter: eşleşme korunur, telefonu yeniden eşleştirmen gerekmez.
+yapıştırman yeter: eşleşme korunur, telefonu yeniden eşleştirmen gerekmez. Anahtar reddedildiği an
+alınmakta olan mesajlar (kaçanlar, bir dosya) kaybolmaz; yeni anahtarla gelir.
 
 Cortex için ayrı bir bot aç. Başka bir yerde (webhook ile) kullanılan bir bot kabul edilmez, çünkü
 Telegram bir botun mesajlarını tek bir alıcıya verir.

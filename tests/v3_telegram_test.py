@@ -282,6 +282,12 @@ class TelegramTest(unittest.TestCase):
         self.assertTrue(telegram.status(self.state)['eslesti'])
         again = telegram.setup(self.state, again=True, bot=self.fake)
         self.assertEqual((again['eslesti'], bool(again['baglanti'])), (False, True))
+        # No phone paired: the same bot's key given again hands out a new code, which a listener would undo as well.
+        with held_elsewhere(self.state):
+            with self.assertRaises(telegram.Refusal) as refused:
+                telegram.setup(self.state, bot=self.fake)
+            self.assertEqual(refused.exception.code, 'calisiyor')
+        self.assertEqual(telegram.status(self.state)['baglanti'], again['baglanti'], 'the link handed out still holds')
 
     def test_a_new_key_for_the_same_bot_keeps_the_pairing_and_ends_the_old_refusal(self):
         # /revoke in BotFather: the old key stops the listener, a new one of the same bot is given in the settings.
@@ -370,6 +376,32 @@ class TelegramTest(unittest.TestCase):
         self.poll()
         self.assertEqual(sorted(card['meta']['telegram_mesaj'] for card in self.cards()),
                          sorted(str(note['message_id']) for note in notes))
+
+    def test_pairing_is_said_once_when_telegram_keeps_the_notes_before_it_waiting(self):
+        telegram.setup(self.state, bot=self.fake)
+        code = telegram.load(self.state)['eslesme_kodu']
+        notes = [self.fake.say(PERSON, text='Bekleyen not %d' % number) for number in range(3)]
+        self.fake.say(PERSON, text='/start ' + code)
+        self.offline_at('forwardMessage', 1, telegram.TelegramError(502, 'Bad Gateway'))
+        with self.assertRaises(telegram.TelegramError):
+            self.poll()
+        self.poll()
+        answers = self.answers()
+        self.assertEqual(sum(text.startswith('Eşleştik') for text in answers), 1, answers)
+        self.assertIn('Eşleşmeden önce gönderdiğin 3 mesajı aldım ✓', answers)
+        self.assertEqual(self.numbers(), [note['message_id'] for note in notes])
+
+    def test_one_word_notes_before_pairing_are_kept_and_tries_at_the_code_are_not(self):
+        # "market" is made of the code's letters, as many one-word notes are: only a word typed as the code is shown
+        # (capitals, or with a digit) is taken for a try at it.
+        telegram.setup(self.state, bot=self.fake)
+        code = telegram.load(self.state)['eslesme_kodu']
+        kept = [self.fake.say(PERSON, text=word) for word in ('market', 'yumurta')]
+        for word in ('ABCDEFGH', 'abcd2345'):
+            self.fake.say(PERSON, text=word)
+        self.fake.say(PERSON, text='/start ' + code)
+        self.poll()
+        self.assertEqual(self.numbers(), [note['message_id'] for note in kept])
 
     # -------------------------------------------------------------- capture
     def test_a_text_becomes_a_card_and_the_bot_says_so_quietly(self):
@@ -662,6 +694,47 @@ class TelegramTest(unittest.TestCase):
         self.poll()
         self.assertEqual(len(self.cards()), 4)
         self.assertFalse(any('alamadım' in text for text in self.answers()), self.answers())
+
+    def test_a_key_revoked_on_the_way_leaves_what_was_not_fetched_for_the_new_key(self):
+        # /revoke in BotFather while a gap or a file is fetched: the listener stops on it, and nothing is taken as done.
+        # Taken as Telegram's answer about the message, the rest of the gap was never fetched and the file never came.
+        self.paired()
+        missed = self.missed(4)
+        last = self.fake.say(PERSON, text='yeni')
+        real = self.fake.call
+
+        def revoked_at(method, nth):
+            seen = {'n': 0}
+
+            def call(name, **params):
+                if name == method:
+                    seen['n'] += 1
+                    if seen['n'] >= nth:
+                        raise telegram.TelegramError(401, 'Unauthorized')
+                return real(name, **params)
+            return call
+
+        def listen():
+            # A few rounds at most: a listener that does not stop on the key goes on asking, and says 'durdu' here.
+            rounds = len(self.fake.methods('getUpdates')) + 3
+            return telegram.listen(self.vault, self.state, bot=self.fake, stop=lambda: len(self.fake.methods('getUpdates')) >= rounds,
+                                   sleep=lambda _s: None, transcribe=self.transcribe, now=lambda: float(self.fake.clock))['status']
+        self.fake.call = revoked_at('forwardMessage', 2)
+        self.assertEqual(listen(), 'anahtar_gecersiz')
+        self.assertEqual(self.numbers(), [missed[0]['message_id']])
+        self.fake.call = real  # the new key of the same bot
+        self.poll()
+        self.assertEqual(self.numbers(), [m['message_id'] for m in missed] + [last['message_id']])
+        self.assertFalse(any('alamadım' in text for text in self.answers()), self.answers())
+        document = self.fake.say(PERSON, document=dict(self.fake.file('d', b'pdf'), file_name='fatura.pdf'))
+        self.fake.call = revoked_at('getFile', 1)
+        self.assertEqual(listen(), 'anahtar_gecersiz')
+        self.assertNotIn(document['message_id'], self.numbers())
+        self.fake.call = real
+        self.poll()
+        card = next(card for card in self.cards() if card['meta']['telegram_mesaj'] == str(document['message_id']))
+        self.assertNotIn('vermedi', card['body'])
+        self.assertEqual(self.answers()[-1], '✓ Gelen kutusuna eklendi')
 
     def test_the_look_at_start_cut_short_is_finished_at_the_next_start(self):
         self.paired()

@@ -283,11 +283,12 @@ def setup(state, token=None, keep_token=False, again=False, bot=None, env=None):
         raise Refusal('Bu bot başka bir yere bağlı (webhook). Cortex için @BotFather\'dan ayrı bir bot aç.', 'webhook')
     data = load(state)
     same_bot = (data.get('bot') or {}).get('id') == me.get('id')
+    if (not same_bot or again or not data.get('sohbet')) and running(state):
+        # A running listener writes back the state it read at the start of its round, within the 50 seconds it
+        # waits for messages: a new pairing link (a new code is handed out whenever no phone is paired) would be
+        # undone and the phone's /start taken for a stranger's.
+        raise Refusal('Telegram dinleyicisi çalışıyor; önce onu kapat (masaüstünde Telegram\'ı kapat).', 'calisiyor')
     if not same_bot or again:
-        if running(state):
-            # A running listener writes back the state it read at the start of its round, within the 50 seconds it
-            # waits for messages: the new pairing link would be undone and the new phone taken for a stranger.
-            raise Refusal('Telegram dinleyicisi çalışıyor; önce onu kapat (masaüstünde Telegram\'ı kapat).', 'calisiyor')
         data = {'schema': 1}
     # A key given anew (the old one revoked in BotFather) ends what the old one's refusal said.
     for key in ('son_hata', 'son_hata_kod', 'son_hata_zaman'):
@@ -532,7 +533,13 @@ class Context:
     def refused(self, what, exc):
         """Whether Telegram's error on `what` (one file, one forward) is its answer, so the message goes on without
         it: a refusal is; a passing failure is not, until it has gone on for GIVE_UP_SN. Otherwise the caller
-        raises it and the round is tried again, the message taken again from the start."""
+        raises it and the round is tried again, the message taken again from the start.
+
+        A key Telegram no longer takes (401, /revoke in BotFather) is no answer about this message: the
+        listener stops on it (`listen`) and the message waits for the new key. Taken as one, a recovery
+        under way marked the rest of its gap done, nothing fetched and nobody told."""
+        if exc.code == 401:
+            return False
         if not _transient(exc):
             return True
         since = self.failing.setdefault(what, self.now())
@@ -696,6 +703,14 @@ def _command(message):
     return command if command in ('start', 'yardim', 'help') else None
 
 
+def _code_try(text):
+    """Whether a note from before pairing was the person's try at the code, typed as the code is shown: one word of
+    its letters in capitals, or with one of its digits. A word such as "market" or "yumurta" is a note and is kept;
+    it still counts as a guess while nothing is paired (`try_pair`), where a stranger's guesses are what matter."""
+    text = (text or '').strip()
+    return bool(CODE_SHAPE.match(text.upper()) and (text.isupper() or any(char.isdigit() for char in text)))
+
+
 def _answer(result):
     if not result:
         return None
@@ -771,6 +786,9 @@ def try_pair(context, message):
     if isinstance(lowest, int) and isinstance(message.get('message_id'), int) and lowest < message['message_id']:
         context.data['eslesme_oncesi'] = [lowest, message['message_id'] - 1]
     _remember(context.data, 'islenen', message.get('message_id'))
+    # Written down before the answer and before the notes from before pairing are fetched: cut short there (Telegram
+    # busy, the app quit), the next round paired the phone again and said "Eşleştik" once more each time.
+    context.save()
     context.send('Eşleştik ✓ ' + HELP, reply_to=message.get('message_id'))
     return True
 
@@ -916,7 +934,7 @@ def recover(context, low, high, newest=None, pairing=False):
             context.call('deleteMessage', chat_id=chat, message_id=copy['message_id'])
         except (TelegramError, OSError, KeyError, TypeError):
             pass
-        if not isinstance(copy, dict) or _command(copy) or (pairing and CODE_SHAPE.match((copy.get('text') or '').strip().upper())):
+        if not isinstance(copy, dict) or _command(copy) or (pairing and _code_try(copy.get('text'))):
             # Nothing to keep: a command, or (before pairing) a try at the code.
             waiting.append(number)
             if not album:
