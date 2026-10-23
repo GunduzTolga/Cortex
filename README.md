@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.32" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.32-E8B23A">
+  <img alt="Sürüm 1.0.33" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.33-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
@@ -370,6 +370,7 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.33](docs/v3/releases/1.0.33.md) | Baştan sona incelemenin düzeltmeleri: not yazarken harfler silinmiyor, çakışmada yazılan kaybolmuyor; Enter Pyn'in izin kartını habersiz onaylamıyor, Codex'te Reddet izin vermiyor, Pyn kasada yalnız Markdown notlarına sormadan yazar. Türkçe kullanıcı adlarında ses kuruluyor, eski kurulumlar da işlemcide hızlı modele geçiyor, ses kullanıcı başına tek klasörde. Yakala tek hatada ölmüyor, panodan eski metni ve parolaları almıyor, kasa değişince yeni kasaya geçiyor. Kopya bir not hafızayı kapatmıyor, "ne kadar / ne zaman" soruları notu buluyor, büyük kasalar hızlı. Python sürümü sınanıyor, taşınan kasa yerine bağlanıyor, hatalar tek cümle. Telegram'da kaçan mesajlar kaybolmuyor, kasa değişince bağlantı kopmuyor. |
 | [1.0.32](docs/v3/releases/1.0.32.md) | Ekran kartı olmayan bilgisayarlarda (Intel laptop) "Hey Pyn" yarım dakika geç açılıyordu: işlemcide hızlı model ve ayrı bir uyandırma doğrulayıcısı; ses hazırlanırken ve hazır olunca bildirim; yüklenemeyen ses kendiliğinden yeniden denenir. Kasa, anahtar, giriş, motor güncellemesi, Python ve Telegram değişiklikleri uygulamayı yeniden açmadan geçerli. Mikrofon izin ister: sesle yazma kurulmadan ve **Sürekli dinle** açılmadan önce sorulur; sürekli dinleme yalnız Cortex çalışırken olur, Çık'a basınca mikrofon kapanır. Pyn sohbetinde Claude Code kasadaki notlara (Core.md dahil) sormadan yazar; başka adımlar izin kartıyla sorulur. İlk kurulumda Claude Code yoksa uygulamadan kurulup giriş yapılır; sonradan kurulan araç ya da yapılan giriş, uygulamayı yeniden açmadan görünür. |
 | [1.0.31](docs/v3/releases/1.0.31.md) | Hafıza: "dün", "geçen cuma", "12 Ekim" diye sorunca o günün günlüğü gelir; hiçbir not cevap vermezse günlüklere bakılır; para/ücret, crash/çökme gibi eşanlamlılar tutar. Öncülün 3.12 Türkçe kök bulması (kurulmalı/kuruldu, şehri/şehir) ve açılışta kişi notları. Türkçe hafıza ölçümü eklendi. |
 | [1.0.30](docs/v3/releases/1.0.30.md) | Türkçe sesli komutlar daha iyi tutuyor: AMD ve Intel kartlarda Whisper en iyi beş tahmini tartıyor (NVIDIA'daki gibi); "kayd et", "son kelime sil" gibi biraz farklı yazılan komutlar da tutuyor. |
