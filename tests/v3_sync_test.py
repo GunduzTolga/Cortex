@@ -779,8 +779,9 @@ class SourceSyncTest(unittest.TestCase):
                 self.assertEqual(self.records(), [])
             with self.subTest(header=header, gate=False):
                 # Without one the note is indexed by its text alone: no partly read key is kept.
+                # LF on every system: Windows' text mode would write CRLF, which the body keeps as written.
                 source.write_text('---\nid: unsupported\ntitle: Nebula\n' + header + '\n---\n' + body,
-                                  encoding='utf-8')
+                                  encoding='utf-8', newline='\n')
                 report = self.engine.sync()
                 self.assertEqual(report['status'], 'succeeded', report)
                 self.assertEqual(report['warnings'], [])

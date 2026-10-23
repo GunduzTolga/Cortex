@@ -4,6 +4,7 @@ Moved - OneDrive taking Documents over, a rename - every hook failed (exit 2 blo
 doctor, sync and hook-reconcile all said "runtime belongs to another vault" with no command to mend
 it (hooks-clients-2, hooks-clients-M1). A copy must not share its original's runtime.
 """
+import base64
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import re
 import tempfile
 import unittest
 
@@ -55,8 +57,17 @@ class RelocateTest(unittest.TestCase):
             db.close()
 
     def hook(self, vault, event='UserPromptSubmit'):
+        """The hook's command as its shell reads it: a Windows -EncodedCommand decoded, with PowerShell's
+        doubled quotes inside a literal ('' and the typographic ones, ps_literal) read back as one."""
         settings = json.loads((vault / '.claude/settings.local.json').read_text(encoding='utf-8'))
-        return settings['hooks'][event][0]['hooks'][0]['command']
+        command = settings['hooks'][event][0]['hooks'][0]['command']
+        match = re.search(r'-EncodedCommand\s+([A-Za-z0-9+/=]+)', command, re.IGNORECASE)
+        if not match:
+            return command
+        script = base64.b64decode(match.group(1)).decode('utf-16le')
+        for quote in "'\u2018\u2019\u201a\u201b":
+            script = script.replace(quote * 2, quote)
+        return script
 
     def test_a_vault_already_bound_here_is_unchanged_and_nothing_is_written(self):
         before_vault, before_state = snapshot(self.vault), snapshot(self.state)

@@ -1,4 +1,5 @@
 """Tests-first offline semver package update and recovery contract."""
+import base64
 import hashlib
 import importlib.util
 import json
@@ -6,6 +7,7 @@ import os
 import shutil
 import stat
 from pathlib import Path
+import re
 import sys
 import tempfile
 import time
@@ -17,6 +19,13 @@ from concurrent.futures import ThreadPoolExecutor
 from v3_package_helpers import ROOT, build_package, clean_environ, install, isolated_env, rewrite_zip, snapshot, run_python
 
 MODULE = ROOT / 'template/.claude/scripts/beyin_v3_update.py'
+
+
+def hook_text(hooks):
+    """Hook commands as their shells read them: a Windows -EncodedCommand decoded beside the JSON it sits in."""
+    text = json.dumps(hooks)
+    scripts = [base64.b64decode(found).decode('utf-16le') for found in re.findall(r'-EncodedCommand\s+([A-Za-z0-9+/=]+)', text, re.I)]
+    return '\n'.join([text] + scripts)
 
 
 def load_updater():
@@ -708,7 +717,7 @@ class OfflineUpdateTest(unittest.TestCase):
         self.assertEqual(self.version(), '3.0.1')
         merged = json.loads(config.read_text(encoding='utf-8'))
         self.assertIn('Bash(git status:*)', merged['permissions']['allow'])
-        self.assertIn('beyin_v3_hook.py', json.dumps(merged['hooks']))
+        self.assertIn('beyin_v3_hook.py', hook_text(merged['hooks']))
         self.assertIn('Kesintiden sonra eklenen satır.', agents.read_text(encoding='utf-8'))
         record = json.loads((self.state / 'v3-install.json').read_text(encoding='utf-8'))['files']
         for path in (config, agents):
@@ -817,7 +826,7 @@ class OfflineUpdateTest(unittest.TestCase):
         self.assertEqual(result['status'], 'recovered')
         data = json.loads(config.read_text(encoding='utf-8'))
         self.assertEqual(data['permissions'], granted['permissions'])
-        self.assertIn('beyin_v3_hook.py', json.dumps(data['hooks']))
+        self.assertIn('beyin_v3_hook.py', hook_text(data['hooks']))
         text = agents.read_text(encoding='utf-8')
         self.assertTrue(text.startswith('# Kendi talimatlarım\n\n<!-- beyin-v3:start -->'), text[:80])
         # Taking the install back leaves both files as their writers left them.
