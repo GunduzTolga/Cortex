@@ -119,7 +119,10 @@ class OMPHarnessTest(unittest.TestCase):
                               input=json.dumps(payload), capture_output=True, text=True, encoding='utf-8')
 
     def drive(self, cwd=None):
-        env = inherited_env(PLUGIN_PATH=str(self.hook_file), OMP_CWD=str(cwd or self.vault),
+        # os.environ is already this test's own (setUp). Filtered again, it lost BEYIN_V3_NO_SPAWN
+        # wherever the suite inherited the same value (CI sets it): the hook then started the
+        # engine in the background, still writing to the state as the test removed it.
+        env = dict(os.environ, PLUGIN_PATH=str(self.hook_file), OMP_CWD=str(cwd or self.vault),
                    OMP_OUTSIDE=str(Path(self.temp.name) / 'elsewhere'))
         result = subprocess.run([BUN, 'run', str(self.driver)], env=env,
                                 capture_output=True, text=True, encoding='utf-8', cwd=self.vault)

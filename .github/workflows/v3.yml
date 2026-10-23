@@ -68,6 +68,8 @@ jobs:
         # On Ubuntu every test file in a process of its own, one per core: a file that passes only
         # beside the others fails there, as it does run alone (tests-ci-3), and the run takes a
         # fraction of the time (tests-ci-4). macOS and Windows keep one process, as they always ran.
-        run: python scripts/run_v3_tests.py ${{ matrix.os == 'ubuntu-latest' && '--each --jobs 0' || '' }} --hang-after ${{ matrix.os == 'windows-latest' && 3000 || 1500 }}
+        # There the limit holds for each file, and a file can start minutes into the run: 15 minutes,
+        # several times the longest file, so one started last still says where it hung within the 30.
+        run: python scripts/run_v3_tests.py ${{ matrix.os == 'ubuntu-latest' && '--each --jobs 0' || '' }} --hang-after ${{ matrix.os == 'windows-latest' && 3000 || matrix.os == 'ubuntu-latest' && 900 || 1500 }}
       - name: Frozen development and holdout retrieval gates
         run: python scripts/evaluate_v3.py

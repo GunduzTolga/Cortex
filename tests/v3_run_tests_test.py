@@ -59,7 +59,9 @@ class RunnerTest(unittest.TestCase):
     def run_suite(self, *args):
         result = subprocess.run([sys.executable, str(RUNNER), *args], cwd=self.folder, capture_output=True,
                                 env=inherited_env(PYTHONDONTWRITEBYTECODE='1', PYTHONIOENCODING='utf-8'), timeout=120)
-        return result.returncode, result.stdout.decode('utf-8', errors='replace') + result.stderr.decode('utf-8', errors='replace')
+        said = result.stdout.decode('utf-8', errors='replace') + result.stderr.decode('utf-8', errors='replace')
+        # On Windows a printed line ends in \r\n on a pipe, and the lines below are matched to their end.
+        return result.returncode, said.replace('\r\n', '\n')
 
     def test_one_process_lets_a_file_lean_on_another(self):
         code, said = self.run_suite()

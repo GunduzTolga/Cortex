@@ -74,7 +74,8 @@ def each(args):
             output, code = done.stdout, done.returncode
         except subprocess.TimeoutExpired as exc:
             output, code = (exc.stdout or b'') + b'\n[stopped: still running two minutes after --hang-after]\n', None
-        return path, code, output.decode('utf-8', errors='replace'), time.monotonic() - begun
+        # Windows' Python ends its lines with \r\n on a pipe; printed again here they would end in \r\r\n.
+        return path, code, output.decode('utf-8', errors='replace').replace('\r\n', '\n'), time.monotonic() - begun
 
     begun = time.monotonic()
     total = {'tests': 0, 'failures': 0, 'errors': 0, 'skipped': 0}
