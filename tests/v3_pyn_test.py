@@ -330,6 +330,38 @@ class PynShellTest(unittest.TestCase):
         pyn.uninstall_shell([], cmd=bin_dir)
         self.assertEqual((bin_dir / 'pyn.cmd').read_bytes(), b'@echo off\r\necho baska\r\n')
 
+    def test_with_pyn_cmd_on_path_the_powershell_profile_is_left_alone(self):
+        # Windows' default Restricted policy refuses any profile script, with an error in every new PowerShell window;
+        # PowerShell finds pyn.cmd on PATH anyway.
+        bin_dir = self.root / 'WindowsApps'
+        bin_dir.mkdir()
+        own = self.root / 'WindowsPowerShell/Microsoft.PowerShell_profile.ps1'
+        mine = self.root / 'PowerShell/Microsoft.PowerShell_profile.ps1'
+        own.parent.mkdir()
+        mine.parent.mkdir()
+        vault = self.root / 'Pyn Kasası'
+        # An earlier `pyn kur` wrote the block, into a profile of its own and one the person keeps.
+        pyn.install_shell(vault, [own], python='C:/Python/python.exe', windows=True)
+        mine.write_text('Set-Alias ll Get-ChildItem\n', encoding='utf-8')
+        pyn.install_shell(vault, [mine], python='C:/Python/python.exe', windows=True)
+        result = pyn.install_shell(vault, [own, mine], python='C:/Python/python.exe', windows=True, cmd=bin_dir)
+        self.assertTrue((bin_dir / 'pyn.cmd').is_file())
+        self.assertFalse(own.exists(), 'a profile only the block was in goes: even an empty one is refused')
+        self.assertEqual(mine.read_text(encoding='utf-8-sig'), 'Set-Alias ll Get-ChildItem\n')
+        self.assertEqual(result['profil'], [])
+        # Again: nothing written, no profile made.
+        self.assertEqual(pyn.install_shell(vault, [own, mine], python='C:/Python/python.exe', windows=True, cmd=bin_dir)['yazilan'], [])
+        self.assertFalse(own.exists())
+        self.assertEqual(pyn.uninstall_shell([own, mine], cmd=bin_dir)['status'], 'kaldirildi')
+        self.assertFalse((bin_dir / 'pyn.cmd').exists())
+        # Someone else's pyn.cmd: the profile is the way `pyn` is found.
+        (bin_dir / 'pyn.cmd').write_bytes(b'@echo off\r\necho baska\r\n')
+        pyn.install_shell(vault, [own], python='C:/Python/python.exe', windows=True, cmd=bin_dir)
+        self.assertIn(pyn.BEGIN, own.read_text(encoding='utf-8-sig'))
+        self.assertEqual(pyn.uninstall_shell([own], cmd=bin_dir)['status'], 'kaldirildi')
+        self.assertFalse(own.exists())
+        self.assertEqual((bin_dir / 'pyn.cmd').read_bytes(), b'@echo off\r\necho baska\r\n')
+
     def test_pyn_cmd_goes_only_to_windowsapps_already_on_path(self):
         apps = self.root / 'Microsoft' / 'WindowsApps'
         apps.mkdir(parents=True)
