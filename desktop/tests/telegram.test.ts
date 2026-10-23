@@ -12,16 +12,21 @@ import {
   engineSentence,
   pairTelegramAgain,
   restartDelay,
+  restartTelegram,
   stopTelegram,
+  telegramFolder,
+  telegramListener,
   telegramOf,
   telegramStatus,
 } from '../electron/services/telegram';
+import { TELEGRAM_ERRORS, TELEGRAM_SENTENCES, telegramErrorOf } from '../shared/telegram';
 
 /**
  * Notes from the phone through Telegram (electron/services/telegram.ts): the
  * key checked by the vault's engine and kept encrypted, the listener started
  * with it and stopped, the engine's status read for the window. The engine is
- * stood in for by a small beyin.py that answers `telegram` as the real one does.
+ * stood in for by a small beyin.py that answers `telegram` as the real one does,
+ * keeping what it knows of the bot where the app names (BEYIN_TELEGRAM_DIR).
  */
 
 const KEY = `123456789:${'A'.repeat(35)}`;
@@ -31,10 +36,27 @@ const STAND_IN = String.raw`import json, os, sys, time
 here = os.path.dirname(os.path.abspath(__file__))
 args = [one for one in sys.argv[1:] if one != '--json']
 key = os.environ.get('BEYIN_TELEGRAM_TOKEN', '')
+folder = os.environ.get('BEYIN_TELEGRAM_DIR') or here
+os.makedirs(folder, exist_ok=True)
 with open(os.path.join(here, 'istenen.log'), 'a', encoding='utf-8') as log:
     log.write(' '.join(args) + (' +anahtar' if key == '123456789:' + 'A' * 35 else ' -anahtar' if not key else ' ?anahtar') + '\n')
-kept = os.path.join(here, 'tg.json')
-seen = json.load(open(kept, encoding='utf-8')) if os.path.exists(kept) else {'bot': None, 'eslesti': False}
+with open(os.path.join(here, 'klasor.log'), 'a', encoding='utf-8') as log:
+    log.write(os.environ.get('BEYIN_TELEGRAM_DIR', '-') + '\n')
+kept = os.path.join(folder, 'tg.json')
+def load():
+    # The listener writes this file while a command reads it (emptied, then written): read again while it is half
+    # written, which the real engine's whole writes never show. Read empty, "durum" failed and the status said unpaired.
+    for attempt in range(200):
+        try:
+            with open(kept, encoding='utf-8') as one:
+                return json.load(one)
+        except FileNotFoundError:
+            return {'bot': None, 'eslesti': False}
+        except ValueError:
+            if attempt == 199:
+                raise
+            time.sleep(0.01)
+seen = load()
 def keep():
     json.dump(seen, open(kept, 'w', encoding='utf-8'))
 def status():
@@ -52,17 +74,27 @@ elif args[:2] == ['telegram', 'kur']:
     seen['bot'] = 'pyn_bot'
     if '--yeniden-esle' in args:
         seen['eslesti'] = False
+        open(os.path.join(here, 'kur.zaman'), 'w').write(repr(time.time()))
     keep()
     print(json.dumps(dict(status(), status='kuruldu')))
 elif args[:2] == ['telegram', 'dinle']:
+    if not seen['bot']:
+        # Not set up: an engine from before the status says so on stderr, as Python's error, one from after in its result.
+        if os.path.exists(os.path.join(here, 'eski-motor')):
+            print(json.dumps({'error': 'ValueError', 'message': 'Telegram kurulmamış. Önce: beyin.py telegram kur'}), file=sys.stderr)
+            sys.exit(1)
+        print(json.dumps({'status': 'kurulmamis'}))
+        sys.exit(3)
     open(os.path.join(here, 'dinle.pid'), 'w').write(str(os.getpid()))
     seen['eslesti'] = True
     keep()
     for beat in range(300):  # a heartbeat while it runs: stopped, it stops
         open(os.path.join(here, 'dinle.nabiz'), 'w').write(str(beat))
+        open(os.path.join(here, 'nabiz-%d' % os.getpid()), 'w').write(repr(time.time()))
         time.sleep(0.1)
 elif args[:2] == ['telegram', 'kaldir']:
-    os.remove(kept)
+    if os.path.exists(kept):
+        os.remove(kept)
     print(json.dumps({'status': 'kaldirildi'}))
 else:
     print('bilinmeyen komut', file=sys.stderr)
@@ -123,16 +155,60 @@ async function until(check: () => boolean, ms = 10_000): Promise<void> {
 test('the engine’s status as the window holds it; an engine without Telegram is said to be one', () => {
   assert.deepEqual(
     telegramOf({ bot: 'pyn_bot', eslesti: false, baglanti: 'https://t.me/pyn_bot?start=K', kod: 'K', calisiyor: true, son_hata: '', yakalanan: 2, sesli_not: false }, true),
-    { key: true, supported: true, bot: 'pyn_bot', paired: false, person: null, link: 'https://t.me/pyn_bot?start=K', code: 'K', listening: true, error: null, captured: 2, voiceNotes: false },
+    { key: true, supported: true, bot: 'pyn_bot', paired: false, person: null, link: 'https://t.me/pyn_bot?start=K', code: 'K', listening: true, error: null, errorCode: null, captured: 2, voiceNotes: false },
   );
   const none = telegramOf(null, false);
   assert.equal(none.supported, false);
   assert.equal(none.bot, null);
 });
 
-test('what the engine refused with is its own sentence, not its JSON', () => {
+test('what went wrong is said in the window’s language: by the engine’s code, or by an older engine’s words (pyn-telegram-jev-8)', () => {
+  const refused = { bot: 'pyn_bot', eslesti: true, son_hata: "Telegram anahtarı geçersiz; Ayarlar → Telegram'dan yeniden gir.", son_hata_kod: 'anahtar_gecersiz' };
+  assert.deepEqual([telegramOf(refused, true, 'tr').error, telegramOf(refused, true, 'tr').errorCode], [refused.son_hata, 'anahtar_gecersiz'], 'a Turkish window keeps the engine’s own sentence');
+  assert.equal(telegramOf(refused, true, 'en').error, TELEGRAM_SENTENCES.anahtar_gecersiz.en);
+  // An engine from before the codes: known by its words.
+  const older = { bot: 'pyn_bot', eslesti: true, son_hata: 'Bağlantı yok: timed out' };
+  assert.deepEqual([telegramOf(older, true, 'en').errorCode, telegramOf(older, true, 'en').error], ['baglanti', TELEGRAM_SENTENCES.baglanti.en]);
+  assert.equal(telegramOf(older, true, 'tr').error, 'Bağlantı yok: timed out');
+  assert.equal(telegramErrorOf('Bu bot başka bir yerde de dinleniyor; Cortex için ayrı bir bot kullan.'), 'cakisma');
+  assert.equal(telegramErrorOf('Telegram: Too Many Requests'), 'telegram');
+  assert.equal(telegramErrorOf('Telegram kurulmamış. Önce: beyin.py telegram kur'), 'kurulmamis');
+  assert.equal(telegramErrorOf('anything', 'webhook'), 'webhook', 'the engine’s code first');
+  assert.equal(telegramErrorOf('anything', 'not-a-code'), null);
+  // Something the window does not know is said as the engine said it, in either language.
+  const unknown = { bot: 'pyn_bot', son_hata: 'Beklenmeyen bir şey.' };
+  assert.deepEqual([telegramOf(unknown, true, 'en').error, telegramOf(unknown, true, 'en').errorCode], ['Beklenmeyen bir şey.', null]);
+  for (const code of TELEGRAM_ERRORS) assert.ok(TELEGRAM_SENTENCES[code].tr && TELEGRAM_SENTENCES[code].en, code);
+});
+
+test('a key refused before is not said while a listener runs: one was started with a key given since (pyn-telegram-jev-7)', () => {
+  const refused = { bot: 'pyn_bot', eslesti: false, son_hata: "Telegram anahtarı geçersiz; Ayarlar → Telegram'dan yeniden gir.", son_hata_kod: 'anahtar_gecersiz' };
+  // The engine keeps the refusal until the new listener's first round ends: the pairing screen, asking every few
+  // seconds, showed the key field again under the key just taken.
+  const running = telegramOf({ ...refused, calisiyor: true }, true, 'tr');
+  assert.deepEqual([running.error, running.errorCode, running.listening], [null, null, true]);
+  // Stopped by it (Telegram's 401 ends the listener): said, and the key asked for again.
+  const stopped = telegramOf({ ...refused, calisiyor: false }, true, 'tr');
+  assert.deepEqual([stopped.error, stopped.errorCode], [refused.son_hata, 'anahtar_gecersiz']);
+  // Any other trouble stays said while a listener runs: it is that listener's own.
+  const offline = telegramOf({ bot: 'pyn_bot', son_hata: 'Bağlantı yok: timed out', calisiyor: true }, true, 'tr');
+  assert.deepEqual([offline.error, offline.errorCode], ['Bağlantı yok: timed out', 'baglanti']);
+});
+
+test('what the engine refused with is its own sentence, not its JSON; in an English window, in English', () => {
   assert.equal(engineSentence(new Error('{"error": "ValueError", "message": "Telegram bu anahtarı tanımadı."}')), 'Telegram bu anahtarı tanımadı.');
   assert.equal(engineSentence(new Error('Çıkış kodu 1.')), 'Çıkış kodu 1.');
+  updateSettings((settings) => {
+    settings.language = 'en';
+  });
+  try {
+    assert.equal(engineSentence(new Error('{"error": "ValueError", "message": "Telegram bu anahtarı tanımadı."}')), TELEGRAM_SENTENCES.anahtar_gecersiz.en);
+    assert.equal(engineSentence(new Error('{"error": "ValueError", "message": "Başka bir şey.", "code": "webhook"}')), TELEGRAM_SENTENCES.webhook.en);
+  } finally {
+    updateSettings((settings) => {
+      settings.language = null;
+    });
+  }
 });
 
 test('a listener that keeps stopping is started again a little later each time, never more than five minutes later', () => {
@@ -168,6 +244,13 @@ test('the key is checked by the engine, kept encrypted, and the listener runs wi
   const again = await pairTelegramAgain();
   assert.deepEqual([again.paired, again.link], [false, 'https://t.me/pyn_bot?start=KOD12345']);
   assert.ok(asked(vault).includes('telegram kur --yeniden-esle +anahtar'));
+  // The listener was stopped before the new link was written, and started again after it (pyn-telegram-jev-2): left
+  // running, it wrote the old pairing back over the new one within its round.
+  await until(() => fs.existsSync(path.join(vault, 'dinle.pid')) && Number(fs.readFileSync(path.join(vault, 'dinle.pid'), 'utf8')) !== pid);
+  const lastBeat = Number(fs.readFileSync(path.join(vault, `nabiz-${pid}`), 'utf8'));
+  const written = Number(fs.readFileSync(path.join(vault, 'kur.zaman'), 'utf8'));
+  assert.ok(lastBeat < written, 'no listener ran while the pairing was written');
+  assert.equal(telegramListener(), 'running');
 
   const gone = await disconnectTelegram();
   await stopsBeating(vault);
@@ -175,6 +258,61 @@ test('the key is checked by the engine, kept encrypted, and the listener runs wi
   assert.equal(gone.bot, null);
   assert.equal(fs.existsSync(path.join(app.getPath('userData'), 'telegram.json')), false);
   assert.ok(asked(vault).includes('telegram kaldir +anahtar'));
+});
+
+test('a new key while paired keeps the pairing; one refused leaves the listener running with the key kept', { skip: !hasPython }, async () => {
+  const vault = vaultWithEngine();
+  fs.rmSync(telegramFolder(), { recursive: true, force: true });
+  await connectTelegram(KEY);
+  await until(() => fs.existsSync(path.join(vault, 'dinle.pid')));
+  await until(() => telegramListener() === 'running');
+  const paired = await telegramStatus();
+  assert.equal(paired.paired, true);
+  // The same bot's key again (one renewed at @BotFather): still paired (pyn-telegram-jev-7).
+  const renewed = await connectTelegram(KEY);
+  assert.deepEqual([renewed.paired, renewed.bot, renewed.listening], [true, 'pyn_bot', true]);
+  // A key Telegram refuses: said, and the listener started again with the key that works.
+  await assert.rejects(connectTelegram(REFUSED), /tanımadı/);
+  assert.equal(telegramListener(), 'running');
+  assert.equal((await telegramStatus()).paired, true);
+  await disconnectTelegram();
+  await stopsBeating(vault);
+});
+
+test('Telegram is kept in the app’s folder, not the vault’s: another vault chosen, it is still paired and listening (pyn-telegram-jev-3)', { skip: !hasPython }, async () => {
+  const first = vaultWithEngine();
+  fs.rmSync(telegramFolder(), { recursive: true, force: true });
+  await connectTelegram(KEY);
+  await until(() => fs.existsSync(path.join(first, 'dinle.pid')));
+  const second = vaultWithEngine();
+  await restartTelegram(); // as electron/ipc.ts does once another vault is chosen
+  await until(() => fs.existsSync(path.join(second, 'dinle.pid')));
+  const status = await telegramStatus();
+  assert.deepEqual([status.key, status.bot, status.paired], [true, 'pyn_bot', true]);
+  const folders = [first, second].flatMap((vault) => fs.readFileSync(path.join(vault, 'klasor.log'), 'utf8').trim().split(/\r?\n/));
+  assert.ok(folders.length >= 4 && folders.every((one) => one === telegramFolder()), 'every command and the listener, in either vault, are given the app’s folder');
+  assert.ok(fs.existsSync(path.join(telegramFolder(), 'tg.json')));
+  await disconnectTelegram();
+  await stopsBeating(second);
+});
+
+test('a listener that ends because Telegram is not set up is not started again and again', { skip: !hasPython }, async () => {
+  for (const older of [false, true]) {
+    const vault = vaultWithEngine();
+    fs.rmSync(telegramFolder(), { recursive: true, force: true });
+    if (older) fs.writeFileSync(path.join(vault, 'eski-motor'), '');
+    // A key kept from before (an engine that kept Telegram in another vault's state): the listener is started with it.
+    await connectTelegram(KEY);
+    await until(() => telegramListener() === 'running');
+    await stopTelegram();
+    fs.rmSync(path.join(telegramFolder(), 'tg.json'), { force: true });
+    await restartTelegram();
+    await until(() => telegramListener() !== 'running');
+    assert.equal(telegramListener(), 'off', older ? 'an engine from before the status: known by its words' : 'the engine says so');
+    const status = await telegramStatus();
+    assert.deepEqual([status.key, status.bot], [true, null], 'the settings ask for the key, which sets it up');
+  }
+  await disconnectTelegram();
 });
 
 test('a key Telegram does not know is said in the engine’s words and not kept', { skip: !hasPython }, async () => {

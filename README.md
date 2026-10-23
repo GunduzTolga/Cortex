@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.31" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.31-E8B23A">
+  <img alt="Sürüm 1.0.33" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.33-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
@@ -120,7 +120,7 @@ Kasadaki klasörler:
 
 Terminal gerekmez; uygulama gerekeni kendisi kurar.
 
-1. **İndir.** [Son sürüm sayfasından](https://github.com/GunduzTolga/Cortex/releases/latest) `Cortex Setup X.Y.Z.exe` dosyasını indir.
+1. **İndir.** [Son sürüm sayfasından](https://github.com/GunduzTolga/Cortex/releases/latest) `Cortex-Setup-X.Y.Z.exe` dosyasını indir.
 2. **Kur.** Kurulum yönetici izni istemez; yalnız senin kullanıcın için, Windows'un standart uygulama klasörüne kurulur. Kurulum sihirbazı Türkçedir.
    > **Kurulum dosyası henüz imzasız.** Windows bu yüzden mavi bir **"Windows bilgisayarınızı korudu"** ekranı gösterebilir. **Ek bilgi**'ye, ardından **Yine de çalıştır**'a bas. Kod imzalama sertifikası gelince bu ekran kalkacak.
 3. **İlk kurulum ekranını izle.** Pyn sırayla şunları yapar:
@@ -128,8 +128,8 @@ Terminal gerekmez; uygulama gerekeni kendisi kurar.
    2. **Kasa:** notlarının duracağı klasörü seçersin; mevcut bir Obsidian kasası da olabilir. Zorunlu tek adım budur.
    3. **Python:** yalnız bilgisayarında Python yoksa görünür. Uygulamayla gelen Python 3.12, yalnız senin kullanıcın için kurulur.
    4. **Pyn'in hafızası:** hafıza motoru kasaya kurulur; notlarına dokunulmaz.
-   5. **Yapay zeka aracın:** bilgisayarında kurulu araçları (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code) listeler; her birinin yanında giriş düğmesi, ayrıca API anahtarı girme düğmesi vardır.
-   6. **Sesle yazma:** isteğe bağlıdır, tek düğmeyle kurulur (yaklaşık 2 GB indirme). Kurulunca **Sürekli dinle** ve **Pencere açılınca dinle** anahtarları görünür.
+   5. **Yapay zeka aracın:** bilgisayarında kurulu araçları (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code) listeler; her birinin yanında giriş düğmesi, ayrıca API anahtarı girme düğmesi vardır. Claude Code kurulu değilse **Claude Code'u kur ve giriş yap** düğmesi çıkar: Anthropic'in kendi kurucusu bir pencerede çalışır, bitince giriş penceresi kendiliğinden açılır. Claude Code, Claude Pro ya da Max aboneliği ister. Uygulamayı yeniden açman gerekmez; sonradan kurduğun bir araç da pencereye döndüğünde görünür.
+   6. **Sesle yazma:** isteğe bağlıdır, tek düğmeyle kurulur (yaklaşık 2 GB indirme). Kurulumdan önce mikrofon izni sorulur. Kurulunca **Sürekli dinle** ve **Pencere açılınca dinle** anahtarları görünür; **Sürekli dinle** açılırken izin ayrıca sorulur.
 
    Her adım ne yaptığını söyler; isteğe bağlı adımlar **Atla** ile geçilir ve sonra Ayarlar'dan yapılır. İlk kurulum ekranı Ayarlar'dan yeniden açılabilir.
 
@@ -144,6 +144,7 @@ Terminal gerekmez; uygulama gerekeni kendisi kurar.
   - **Araçlar:** Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code; yerel modeller için LM Studio ve Ollama. Yerel modeli kendi uygulamasında yüklersin, Cortex onunla doğrudan konuşur; "bunu kaydet" dersen yerel model de gelen kutusuna ekler (7–8 milyar parametre ve üstü modeller bunu güvenilir yapar).
   - **Gelen kutusuna at** (`Ctrl+Enter`): gönder düğmesinin yanındadır; yazdığını yapay zekaya göndermeden `📥 000-Inbox/Yakala/`'ya kaydeder.
   - Model, mod ve düşünme düzeyi çiplerle seçilir; aracın izin istediği adımlar kartla sorulur; bağlamın ne kadar dolduğunu yazma kutusundaki halka gösterir.
+  - Claude Code kasadaki notlara sormadan yazar; kasanın dışındaki dosyalar ve komutlar için izin kartı çıkar. Claude Code kendi ayar ve hook dosyalarını (`.claude/`) yine sorar.
   - Sohbetin okuduğu, değiştirdiği ya da andığı notlar yan panelde açılır.
 - **Notlar:** Obsidian'a gerek kalmadan okuma ve yazma: wiki bağlantıları, canlı önizleme, geri bağlantılar, etiketler, üstüne gelince önizleme, arama (`tag:` ve `path:` ile), hızlı geçiş (`Ctrl+K`), şablonlar ve geri alınabilir çöp kutusu. Makbuzlar ve motorun ürettiği sayfalar salt okunurdur.
 - **Grafik:** notların ve aralarındaki bağlantılar; bir notun çevresini gösteren yerel grafik, makbuzları göster/gizle.
@@ -152,7 +153,7 @@ Terminal gerekmez; uygulama gerekeni kendisi kurar.
   - Sunucu odasının ışıkları araçlarının gerçek giriş durumunu, odalar kasanın sayılarını gösterir; ofisin ışığı günün saatine uyar.
   - İstersen ekip son notların hakkında konuşur: Ayarlar → Beyin'den (ya da Beyin ekranının kendi ayarlarından) bir araç (LM Studio, Ollama ya da Claude Code), model ve sıklık (10–60 dakika) seçersin. Varsayılan kapalıdır.
 
-**Sağ alttaki simge.** Pencereyi kapatınca Cortex bildirim alanında kalır ve Windows'la birlikte açılır; Telegram dinleyicisi de orada çalışmaya devam eder. Simgenin menüsü: mikrofonun durumu, **Sürekli dinle** aç/kapat (sesle yazma kuruluysa), **Not al**, **Cortex'i aç**, **Ayarlar**, **Çık**. İstemezsen Ayarlar → Genel → *Sağ altta çalışmaya devam et*. Uygulama tek kopya çalışır; ikinci kez açınca mevcut pencere öne gelir.
+**Sağ alttaki simge.** Pencereyi kapatınca Cortex bildirim alanında kalır ve Windows'la birlikte açılır; Telegram dinleyicisi de orada çalışmaya devam eder. Simgenin menüsü: mikrofonun durumu, **Sürekli dinle** aç/kapat (sesle yazma kuruluysa), **Not al**, **Cortex'i aç**, **Ayarlar**, **Çık**. **Sürekli dinle** yalnız Cortex çalışırken dinler: **Çık**'a basınca mikrofon birkaç saniye içinde kapanır. Mikrofon dinlerken pencereyi kapatırsan Cortex bunu her seferinde söyler. İstemezsen Ayarlar → Genel → *Sağ altta çalışmaya devam et*. Uygulama tek kopya çalışır; ikinci kez açınca mevcut pencere öne gelir.
 
 **Ayarlar** (üst çubuktaki dişli ya da `Ctrl+,`):
 
@@ -182,7 +183,7 @@ Kendin derlemek ve ayrıntılar için: [desktop/README.md](desktop/README.md).
 **Sesle yazma (yalnız Windows, isteğe bağlı).** İlk kurulum ekranından ya da Ayarlar → Sesle yazma'dan tek düğmeyle kurulur.
 
 - **Yaz ve kaydet.** Pencere açılınca dinlemeye başlar (Ayarlar → *Pencere açılınca dinle*). Konuş, ara verebilirsin; cümleler alana yazılır. Bitince **"kaydet"** ya da **"Pyn, kaydet"** de. Pyn'in adından sonra **"gönder"**, **"tamam"**, **"bitti"** ve **"bitir"** de kaydeder. Klavyeden yazmaya başlarsan mikrofon kapanır; `Ctrl+Alt+C`'ye yeniden basmak dinlemeyi bitirir; uzun süre kimse konuşmazsa mikrofon kendiliğinden kapanır.
-- **Sesle açma.** **Sürekli dinle** açıkken (varsayılan kapalı; sağ alttaki menüden ya da Ayarlar'dan açılır) uyandırma sözü pencereyi açar. Söz seçilebilir: **"Pyn, not al"** (varsayılan), **"Hey Pyn"** ya da **ikisi de** (Ayarlar → Sesle yazma → Uyandırma sözü). Sözü önce küçük bir yerel model (Vosk) yakalar, Pyn'in adını ardından yerel Whisper doğrular; sohbetteki bir "hey" ya da "not al" pencere açmaz.
+- **Sesle açma.** **Sürekli dinle** açıkken (varsayılan kapalı; sağ alttaki menüden ya da Ayarlar'dan açılır, açarken mikrofon izni sorulur; yalnız Cortex çalışırken dinler) uyandırma sözü pencereyi açar. Söz seçilebilir: **"Pyn, not al"** (varsayılan), **"Hey Pyn"** ya da **ikisi de** (Ayarlar → Sesle yazma → Uyandırma sözü). Sözü önce küçük bir yerel model (Vosk) yakalar, Pyn'in adını ardından yerel Whisper doğrular; sohbetteki bir "hey" ya da "not al" pencere açmaz.
 - **Sesli komutlar** (sözleri Ayarlar → Sesle yazma → Sesli komutlar'dan değişir):
 
   | Komut | Varsayılan sözler |
@@ -194,17 +195,22 @@ Kendin derlemek ve ayrıntılar için: [desktop/README.md](desktop/README.md).
   | Vazgeç | "iptal", "vazgeç" |
 
 - **Biraz farklı yazılan komutlar da tutar:** Whisper bir komutu boşlukları başka yerde yazarsa ("kayd et", "son cümle yi sil") ya da silme komutlarında bir eki yutarsa ("son kelime sil", "hepsi sil") komut yine çalışır. "notu kaydettim" ya da "son kelimeyi sildim" gibi cümleler komut sayılmaz, nota yazılır.
-- **Ses bilgisayardan çıkmaz ve diske yazılmaz;** yerel Whisper yazıya döker. NVIDIA kartlarda CUDA, AMD Radeon ve Intel Arc kartlarda Vulkan (whisper.cpp) ile ekran kartında, yoksa işlemcide çalışır. Kablosuz kulaklık sonradan bağlansa ya da Windows'un varsayılan mikrofonu değişse de dinleyici yeni mikrofona kendiliğinden geçer.
+- **Ses bilgisayardan çıkmaz ve diske yazılmaz;** yerel Whisper yazıya döker.
+  - NVIDIA kartlarda CUDA, AMD Radeon ve Intel Arc kartlarda Vulkan (whisper.cpp) ile ekran kartında çalışır; ikisi de yoksa işlemcide çalışır.
+  - İşlemcide hızlı `small` modeli yazar; "Hey Pyn"i küçük ayrı bir model doğrular, böylece pencere hemen açılır.
+  - Daha doğru ama işlemcide yavaş modeli Ayarlar → Sesle yazma → **Yazı modeli**'nden seçebilirsin.
+  - Uygulama hemen açılır, ses arka planda hazırlanır. Ayarlar → Sesle yazma'daki çubuk modelin ne kadarının indiğini ya da yüklendiğini gösterir. Sağ alttaki simge de "Ses hazırlanıyor…" der. Hazırlık uzun sürerse bildirim gelir; hazır olunca "Pyn hazır" der. Kablosuz kulaklık sonradan bağlansa ya da Windows'un varsayılan mikrofonu değişse de dinleyici yeni mikrofona kendiliğinden geçer.
+- **Bir kez kurulur.** Paketler ve modeller kullanıcının tek ses klasöründe durur (`%LOCALAPPDATA%\beyin-v3\ses`); bütün kasalar onu kullanır, başka bir kasaya geçince ses yeniden inmez. Kurulum olmazsa nedeni tek cümleyle söylenir (internet yok, disk dolu); ayrıntısı aynı klasördeki `kurulum.log` dosyasında.
 
 [Ayrıntılar](docs/v3/YAKALA.md#sesle-yazma-windows-isteğe-bağlı)
 
 ## Yakala: tek tuşla beyne at
 
-Gördüğün sayfayı, videoyu, tweet'i, makaleyi ya da dosyayı aynı `Ctrl+Alt+C` penceresiyle yakala. Kart `📥 000-Inbox/Yakala/`'ya düşer. Sonra asistanına **"yakalananları işle"** de: motor metni çıkarır, asistan derslerini `knowledge/` notlarına bağlar ve kartı kapatır. Aynı sayfayı ya da videoyu yeniden yakalarsan yeni kart açılmaz, eskisine eklenir.
+Gördüğün sayfayı, videoyu, tweet'i, makaleyi ya da dosyayı aynı `Ctrl+Alt+C` penceresiyle yakala. Kart `📥 000-Inbox/Yakala/`'ya düşer. Sonra asistanına **"yakalananları işle"** de: motor metni çıkarır, asistan derslerini `knowledge/` notlarına bağlar ve kartı kapatır. Aynı sayfayı ya da videoyu yeniden yakalarsan yeni kart açılmaz, eskisine eklenir; kart daha önce işlendiyse yeni isteğin için yeniden sıraya girer.
 
 - **Tarayıcıdaki sayfa:** Windows'ta Chrome, Edge, Brave, Vivaldi, Opera ya da Chromium; macOS'ta Chrome, Arc, Brave, Edge ya da Safari öndeyken kısayola basarsan açık sayfanın bağlantısı gelir. Pencerede **Bu sayfayı nota bağla** işaretlidir; `Alt+S` ile kaldırırsan not düz not olarak kaydedilir. Firefox'un adresi okunamaz.
 - **Ekran görüntüsü (Windows):** `Win+Shift+S` ile alan seç, sonra kısayola bas; görüntü küçük resmiyle nota eklenir. Son 10 dakikada alınmışsa işaretli gelir, daha eskiyse `Tab` ile eklenir.
-- **Pano:** yalnız son kayıttan sonra kopyaladığın metin nota işaretli gelir. Daha önce kopyalanmış metin (saatler önceki bir parola gibi) **Panodaki metni de ekle** seçeneği olarak durur, `Tab` ile eklenir.
+- **Pano (Windows):** son beş dakikada kopyaladığın ve henüz kaydetmediğin metin ya da bağlantı nota işaretli gelir. Daha eski bir kopya (saatler önceki bir parola gibi) pencerede görünür ama `Tab` ile eklemeden nota girmez. "Pyn, not al" ile açılan pencere panodan hiçbir şeyi kendiliğinden almaz.
 - **YouTube:** döküm videoda konuşulan dilde alınır. Bunun için bilgisayarda `yt-dlp` olmalıdır; altyazı yoksa ses yalnız yerelde bir Whisper komutuyla yazıya dökülür. Bu araçlar yoksa kart başlık ve açıklamayla kalır. Hangi araçların kurulu olduğunu `beyin.py yakala durum` söyler.
 - **Dosyalar:** Windows'ta dosyaya sağ tık → Gönder → **Beyne At**; macOS'ta Finder'da dosyayı seçip kısayola bas.
 - **Tarayıcı eklentisi:** Obsidian Web Clipper'ın **"Beyne at"** şablonu; giriş isteyen sayfalar da yakalanır.
@@ -253,7 +259,7 @@ Hafızayı model değil istemci taşır. Bu yüzden ücretsiz, uygun fiyatlı ya
 
 Cortex notlarını kendi başına hiçbir yere göndermez ve telemetri toplamaz.
 
-**Ağ istekleri.** Kendiliğinden yapılan tek istek, oturum açılışında arka planda GitHub'a sorulan "yeni sürüm var mı?" sorusudur: başarılı olursa günde en çok bir kez, başarısız olursa 1 ve 6 saat sonra yeniden denenir. Not, prompt ya da hesap bilgisi taşımaz; `preferences --update-notifications off` kapatır. Bunun dışındaki her istek senin açtığın bir şeyden gelir: Yakala'nın sayfa getirmesi, sesle yazmanın kurulumu (modeller ve paketler, yaklaşık 2 GB), güncelleme, Telegram'ı açtıysan Telegram'ın sunucularına sorulan yeni mesajlar, Beyin'in canlı konuşmalarını Claude Code'la açtıysan o araç.
+**Ağ istekleri.** Kendiliğinden yapılan tek istek, oturum açılışında arka planda GitHub'a sorulan "yeni sürüm var mı?" sorusudur: başarılı olursa günde en çok bir kez, başarısız olursa 1 ve 6 saat sonra yeniden denenir. Not, prompt ya da hesap bilgisi taşımaz; `preferences --update-notifications off` kapatır. Bunun dışındaki her istek senin açtığın bir şeyden gelir: Yakala'nın sayfa getirmesi, sesle yazmanın kurulumu (modeller ve paketler, yaklaşık 2 GB), uygulamadan Claude Code kurulumu (Anthropic'in `claude.ai/install.ps1` kurucusu), güncelleme, Telegram'ı açtıysan Telegram'ın sunucularına sorulan yeni mesajlar, Beyin'in canlı konuşmalarını Claude Code'la açtıysan o araç.
 
 **Asıl akış** şudur: yazdığın mesajla eşleşen notlar asistanının bağlamına eklenir ve böylece **kullandığın yapay zeka sağlayıcısına** (Anthropic, OpenAI, Google…) gider. Sistemin amacı budur; yerel bir model kullanırsan hiçbir şey bilgisayardan çıkmaz. Neyin gitmeyeceğini sen belirlersin:
 
@@ -302,7 +308,7 @@ Kurucu istemci bağlantılarını, ortak motoru, üç başlangıç skill'ini (**
 - **`pyn` komutu:** `python3 beyin.py pyn kur` sonrası her terminalde `pyn` yazınca Pyn'in mühürlü karşılama kutusu ve bu makinede kurulu istemcilerin menüsü açılır (yeşil hazır, kırmızı kapalı; yerel modeller dahil). `pyn claude`, `pyn codex` menüsüz açar; `pyn kontrol` eski istemcileri, `pyn guncelle` Cortex'i günceller; `pyn kaldir` her şeyi geri alır.
 - **Yakala:** `python3 beyin.py yakala kur` (kısayol `Ctrl+Alt+C` / `Control+Option+C`; değiştirmek için `yakala kisayol`). Sesle yazma (Windows): `py -3 beyin.py ses kur`.
 - **Telegram:** `python3 beyin.py telegram kur --token <anahtar>`, sonra `telegram dinle`. Durum: `telegram durum`; kaldırmak: `telegram kaldir`.
-- **Ananas teması:** `python3 beyin.py tema kur`. Obsidian için fildişi kâğıt, mürekkep kontur, sert gölgeli kartlar, Fraunces başlıklar; yazı tipleri temanın içinde gelir. `.obsidian/snippets/ananas.css` dosyasını yazar ve Obsidian'ın görünüm ayarında etkinleştirir; kenar çubuğunda klasörler sade Türkçe etiketlerle görünür, diskteki adlar değişmez. `tema kaldir` geri alır.
+- **Ananas teması:** `python3 beyin.py tema kur`. Obsidian için fildişi kâğıt, mürekkep kontur, sert gölgeli kartlar, Fraunces başlıklar; yazı tipleri temanın içinde gelir. `.obsidian/snippets/ananas.css` dosyasını yazar ve Obsidian'ın görünüm ayarında etkinleştirir; kenar çubuğunda klasörler sade Türkçe etiketlerle görünür, diskteki adlar değişmez. Her güncellemeden sonra kendiliğinden yeni sürüme yenilenir (elle: `tema yenile`); Obsidian'da kapattıysan kapalı kalır. `tema kaldir` geri alır. Yazı tiplerinin lisansı (SIL Open Font License 1.1) CSS'in başında yazılıdır.
 
 ## Günlük kullanım ve komutlar
 
@@ -339,14 +345,15 @@ Kasa klasöründe (Windows'ta `python3` yerine `py -3`):
 - **Masaüstü uygulamasıyla:** yeni sürümün kurulum dosyasını indirip kur, aç; ana ekrandaki **"Cortex güncellemesi hazır"** bildiriminde **Güncelle** (ya da Ayarlar → Cortex). Sesle yazmanın paketleri değiştiyse Ayarlar → Sesle yazma → **Sesle yazmayı güncelle** de görünür.
 - **Terminalden:** `pyn guncelle`, ya da kasada `python3 beyin.py update` (yalnız bakmak için `update --check`). Asistanına "beynimi güncelle" demek ya da kasadaki güncelleme kısayolu da aynı işi yapar.
 
-Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Paket önce doğrulanır (checksum, manifest, dosya hash'leri), notlarına dokunmadan ayrı bir deneme kasasında çalıştırılır ve ancak bundan sonra uygulanır. Bir kesintiden sonra `recover`, geri dönmek için `rollback`. İnternetsiz güncelleme: `update --package "/indirilen/beyin-v3-X.Y.Z.zip"`. Güncellemeden sonra Ctrl+Alt+C dinleyicisi kendiliğinden yeniden başlar. [Güncelleme rehberi](docs/v3/UPDATE.md)
+Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Paket önce doğrulanır (checksum, manifest, dosya hash'leri), notlarına dokunmadan ayrı bir deneme kasasında çalıştırılır ve ancak bundan sonra uygulanır. Bir kesintiden sonra `recover`, geri dönmek için `rollback`; kesintiden sonra bir notu ya da bir izin ayarını değiştirmiş olman kurtarmayı durdurmaz. Kurulu sürüm yayımlanmış son sürümden ileride olabilir (uygulamayla gelen sürüm henüz yayımlanmamışsa); `update` bunu `ahead` diye söyler, geri almak gerekmez. İnternetsiz güncelleme: `update --package "/indirilen/beyin-v3-X.Y.Z.zip"`. Güncellemeden sonra Ctrl+Alt+C dinleyicisi kendiliğinden yeniden başlar. [Güncelleme rehberi](docs/v3/UPDATE.md)
 
 ## Sorun giderme
 
 | Belirti | Çözüm |
 | --- | --- |
 | Kurulumda "Windows bilgisayarınızı korudu" | Kurulum dosyası henüz imzasız. **Ek bilgi** → **Yine de çalıştır**. |
-| "Hey Pyn" pencereyi açmıyor | Ayarlar → Sesle yazma: **Sürekli dinle** açık mı? Uyandırma sözü "Hey Pyn" ya da "İkisi de" mi (varsayılan "Pyn, not al")? Sağ alttaki simgenin menüsü mikrofonun dinleyip dinlemediğini ve hangi sözü beklediğini söyler. Ne duyduğunu görmek için: `py -3 beyin.py ses dene --uyandirma`. |
+| "Hey Pyn" pencereyi geç açıyor ya da yazı geç geliyor | Bilgisayarda NVIDIA, AMD ya da Intel Arc kartı yoksa ses işlemcide yazıya çevrilir. Ayarlar → Sesle yazma → **Yazı modeli**: **Hızlı** seçili olsun (1.0.32'den beri varsayılan). Açılıştan hemen sonra model yükleniyor olabilir: sağ alttaki simge "Ses hazırlanıyor…" diyorsa "Pyn hazır" bildirimini bekle. Süreler `%LOCALAPPDATA%\beyin-v3\ses\isci.log` dosyasında. |
+| "Hey Pyn" pencereyi açmıyor | Cortex çalışıyor mu? **Sürekli dinle** yalnız Cortex açıkken (sağ altta simgesi varken) dinler. Ayarlar → Sesle yazma: **Sürekli dinle** açık mı, izin verildi mi? Uyandırma sözü "Hey Pyn" ya da "İkisi de" mi (varsayılan "Pyn, not al")? Sağ alttaki simgenin menüsü mikrofonun dinleyip dinlemediğini ve hangi sözü beklediğini söyler; dinleyemiyorsa nedenini de (yalnız sessizlik geliyorsa Windows Ayarlar → Gizlilik ve güvenlik → Mikrofon → masaüstü uygulamalarının erişimi açık olmalı). Ne duyduğunu görmek için: `py -3 beyin.py ses dene --uyandirma`. |
 | Not al'da "Mikrofondan ses gelmiyor" | Mikrofon kapalı ya da sessizde olabilir, ya da Windows başka bir mikrofonu dinliyor: Windows ses ayarlarından doğru mikrofonu varsayılan yap. |
 | Asistan notları hatırlamıyor | İstemcide hook güvenini onayladığını kontrol et, sonra asistana "beyin-doktor ile kontrol et" de ya da `beyin.py doctor` çalıştır. |
 | Bir not bağlama hiç girmiyor | Notta `visibility: private` var mı, klasörünün adında "Özel", "Şifreler" gibi bir sözcük geçiyor mu? `beyin.py doctor` indeks dışı tutulanları gösterir. |
@@ -355,13 +362,16 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 | YouTube kartında döküm yok | `yt-dlp` kurulu mu? `beyin.py yakala durum` eksik araçları söyler. |
 | Gemini CLI `IneligibleTierError` veriyor | Google bireysel hesapla girişi kapattı; API anahtarıyla giriş yap. |
 | cmd'de `pyn` çalışmıyor | `pyn kur`u yeniden çalıştır, sonra **yeni** bir terminal aç. |
+| Kasayı taşıdım ya da kopyaladım (OneDrive Belgeler'i devraldı, klasörü yeniden adlandırdım), hafıza çalışmıyor | Masaüstü uygulaması kasayı açınca bunu kendisi düzeltir. Terminalden: kasada `python3 beyin.py relocate`. Taşınan kasa yeni yerine bağlanır; kopyaya kendi hafıza klasörü açılır, özgün kasaya dokunulmaz. |
 
-**Eski bir kurulumdan geliyorsan** (Cortex'in doğduğu açık kaynak projenin eski sürümleri): aynı kurucuyu mevcut kasa üzerinde bir kez çalıştır. Notlar, companion dosyaları, `daily/` ve `knowledge/` içerikleri korunur; tanınan eski yazıcılar geri alınabilir biçimde devreden çıkarılır. [Geçiş ayrıntıları](docs/v3/MIGRATION.md)
+**Eski bir kurulumdan geliyorsan** (Cortex'in doğduğu açık kaynak projenin eski sürümleri, `.beyin-version` 2.x ya da 3.x): masaüstü uygulaması kasayı açınca bunu "Cortex'e geçiş" olarak kendisi yapar; terminalde aynı kurucuyu mevcut kasa üzerinde bir kez çalıştır (eski kurulumun `update` komutu Cortex paketini eski sürüm sanar). Notlar, companion dosyaları, `daily/` ve `knowledge/` içerikleri korunur; tanınan eski yazıcılar geri alınabilir biçimde devreden çıkarılır. [Geçiş ayrıntıları](docs/v3/MIGRATION.md)
 
 ## Sürüm geçmişi
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.33](docs/v3/releases/1.0.33.md) | Baştan sona incelemenin düzeltmeleri: not yazarken harfler silinmiyor, çakışmada yazılan kaybolmuyor; Enter Pyn'in izin kartını habersiz onaylamıyor, Codex'te Reddet izin vermiyor, Pyn kasada yalnız Markdown notlarına sormadan yazar. Türkçe kullanıcı adlarında ses kuruluyor, eski kurulumlar da işlemcide hızlı modele geçiyor, ses kullanıcı başına tek klasörde. Yakala tek hatada ölmüyor, panodan eski metni ve parolaları almıyor, kasa değişince yeni kasaya geçiyor. Kopya bir not hafızayı kapatmıyor, "ne kadar / ne zaman" soruları notu buluyor, büyük kasalar hızlı. Python sürümü sınanıyor, taşınan kasa yerine bağlanıyor, hatalar tek cümle. Telegram'da kaçan mesajlar kaybolmuyor, kasa değişince bağlantı kopmuyor. |
+| [1.0.32](docs/v3/releases/1.0.32.md) | Ekran kartı olmayan bilgisayarlarda (Intel laptop) "Hey Pyn" yarım dakika geç açılıyordu: işlemcide hızlı model ve ayrı bir uyandırma doğrulayıcısı; ses hazırlanırken ve hazır olunca bildirim; yüklenemeyen ses kendiliğinden yeniden denenir. Kasa, anahtar, giriş, motor güncellemesi, Python ve Telegram değişiklikleri uygulamayı yeniden açmadan geçerli. Mikrofon izin ister: sesle yazma kurulmadan ve **Sürekli dinle** açılmadan önce sorulur; sürekli dinleme yalnız Cortex çalışırken olur, Çık'a basınca mikrofon kapanır. Pyn sohbetinde Claude Code kasadaki notlara (Core.md dahil) sormadan yazar; başka adımlar izin kartıyla sorulur. İlk kurulumda Claude Code yoksa uygulamadan kurulup giriş yapılır; sonradan kurulan araç ya da yapılan giriş, uygulamayı yeniden açmadan görünür. |
 | [1.0.31](docs/v3/releases/1.0.31.md) | Hafıza: "dün", "geçen cuma", "12 Ekim" diye sorunca o günün günlüğü gelir; hiçbir not cevap vermezse günlüklere bakılır; para/ücret, crash/çökme gibi eşanlamlılar tutar. Öncülün 3.12 Türkçe kök bulması (kurulmalı/kuruldu, şehri/şehir) ve açılışta kişi notları. Türkçe hafıza ölçümü eklendi. |
 | [1.0.30](docs/v3/releases/1.0.30.md) | Türkçe sesli komutlar daha iyi tutuyor: AMD ve Intel kartlarda Whisper en iyi beş tahmini tartıyor (NVIDIA'daki gibi); "kayd et", "son kelime sil" gibi biraz farklı yazılan komutlar da tutuyor. |
 | [1.0.29](docs/v3/releases/1.0.29.md) | "Hey Pyn" bilgisayar açılınca ya da güncellemeden sonra kendiliğinden dinliyor: ses yardımcısı mikrofonu açarken bir komut gelmesini beklemiyor, sürekli dinlemeyi kapatıp açmak gerekmiyor. |
@@ -399,7 +409,7 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 
 [Kaynak formatı](docs/v3/MARKDOWN.md) · [Runtime](docs/v3/RUNTIME.md) · [Semantik test sözleşmesi](docs/v3/SEMANTIC-TEST-CONTRACT.md) · [Sürüm paketi ve güncelleyici](docs/v3/UPDATE.md) · [Birden çok makine](docs/v3/MULTI-MACHINE.md) · [Tercihler](docs/v3/PREFERENCES.md) · [Yakala](docs/v3/YAKALA.md) · [Telegram](docs/v3/TELEGRAM.md) · [OpenCode](docs/v3/OPENCODE.md) · [Hermes](docs/v3/HERMES.md) · [OMP](docs/v3/OMP.md) · [Kiro](docs/v3/KIRO.md) · [Yakalama sunucusu](docs/v3/INGEST-SERVER.md) · [Masaüstü uygulaması](desktop/README.md)
 
-- **Motor:** `template/.claude/scripts/` altında, yalnız Python standart kütüphanesiyle. Sesle yazma kendi sanal ortamında (`state/ses/venv`) çalışan ayrı bir yardımcıdır; motor onun paketlerini içe almaz.
+- **Motor:** `template/.claude/scripts/` altında, yalnız Python standart kütüphanesiyle. Sesle yazma kendi sanal ortamında (kullanıcının tek ses klasörü, `%LOCALAPPDATA%\beyin-v3\ses\venv`; bütün kasalar onu kullanır) çalışan ayrı bir yardımcıdır; motor onun paketlerini içe almaz.
 - **Masaüstü uygulaması:** `desktop/` altında Electron, React ve TypeScript. Yalnız Windows için derlenir (NSIS kurulum dosyası); kod büyük ölçüde macOS ve Linux'ta da çalışır ama orada kurulum dosyası ve CI yoktur.
 - **Testler:** motor her sürümde Windows, macOS ve Linux'ta, Python 3.11 ve 3.13 ile 1.700'ü aşkın otomatik testle ve anlamsal senaryolarla doğrulanır; masaüstü uygulamasının ayrıca birim ve uçtan uca testleri vardır. Gerçek istemci kontrolleri [ayrı raporlanır](docs/v3/README.md).
 

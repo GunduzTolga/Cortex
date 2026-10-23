@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { BootstrapPayload, VaultStatus, WindowSettings } from '@shared/api';
 import { messageOf } from '@shared/ipcError';
 import { turkishOf } from '@shared/refusalsTr';
+import { leaveOpenNotes } from '../notes/openNotes';
 import { useSaved } from './saved';
 
 /**
@@ -27,6 +28,8 @@ interface AppState {
   bootError: string | null;
   settings: WindowSettings;
   vault: VaultStatus;
+  /** Counts the vaults chosen while the window is open: what was read of the one before is read again. */
+  vaultSeq: number;
   settingsUnreadable: BootstrapPayload['settingsUnreadable'];
   version: string;
   toasts: Toast[];
@@ -40,7 +43,8 @@ interface AppState {
   /** The system's dialog; the vault chosen, or the reason it could not be, said in a toast. */
   chooseVault(failed: string): Promise<void>;
   refreshVault(): Promise<void>;
-  toast(toast: Omit<Toast, 'id'>): void;
+  /** Returns the toast's id, for one that goes when what it says is over (dismissToast). */
+  toast(toast: Omit<Toast, 'id'>): string;
   dismissToast(id: string): void;
 }
 
@@ -54,8 +58,9 @@ export function refusal(message: string): string {
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
   bootError: null,
-  settings: { language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true },
+  settings: { language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false },
   vault: { vault: null, missing: false },
+  vaultSeq: 0,
   settingsUnreadable: null,
   version: '',
   toasts: [],
@@ -88,9 +93,15 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   async chooseVault(failed) {
+    /*
+      The note open on screen is saved first, in the vault it was read from:
+      once another is chosen, a note's path is read in that one, and a save
+      still to come would go there (src/notes/openNotes.ts).
+    */
+    await leaveOpenNotes();
     try {
       const status = await window.cortex.vault.choose();
-      if (status) set({ vault: status });
+      if (status) set((state) => ({ vault: status, vaultSeq: state.vaultSeq + 1 }));
     } catch (err) {
       get().toast({ tone: 'error', title: failed, detail: messageOf(err) });
     }
@@ -111,6 +122,7 @@ export const useApp = create<AppState>((set, get) => ({
     const detail = toast.detail && get().settings.language !== 'en' ? turkishOf(toast.detail) : toast.detail;
     set((state) => ({ toasts: [...state.toasts, { ...toast, detail, id }] }));
     if (!toast.sticky) setTimeout(() => get().dismissToast(id), toast.tone === 'error' ? 9000 : 4500);
+    return id;
   },
 
   dismissToast(id) {

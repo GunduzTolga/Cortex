@@ -145,7 +145,9 @@ class CrossPlatformPinTest(unittest.TestCase):
         pin(self.vault, str(self.root / 'moved-state'))
         refused = install(self.vault, self.state, self.env)
         self.assertNotEqual(refused.returncode, 0)
-        self.assertIn('Reinstall conflict: managed file changed .beyin-runtime.json', refused.stderr.decode('utf-8'))
+        error = json.loads(refused.stderr.decode('utf-8').strip().splitlines()[-1])
+        self.assertEqual(error['code'], 'update_conflict')
+        self.assertIn("Cortex'in yönettiği .beyin-runtime.json dosyası elle değiştirilmiş", error['message'])
 
     def test_same_os_foreign_user_pin_uses_this_machine_default_state(self):
         if sys.platform != 'win32':
@@ -201,6 +203,37 @@ class CrossPlatformPinTest(unittest.TestCase):
         self.assertFalse(same({'state': FOREIGN_PIN, 'schema': 1, 'extra': True}))
         self.assertFalse(same({'state': str(self.root / 'moved-state'), 'schema': 1}))
         self.assertFalse(same({'schema': 1}))
+
+
+class ErrorCodeTest(unittest.TestCase):
+    """C1: a failure the desktop app can name carries its `code`; the sentence stays the engine's."""
+
+    def load(self, name):
+        spec = importlib.util.spec_from_file_location('error_code_' + name.replace('/', '_'), ROOT / name)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_installer_errors_carry_their_code_and_a_full_disk_is_named(self):
+        import errno
+        installer = self.load('scripts/install_v3.py')
+        report = installer.error_report(OSError(errno.ENOSPC, 'No space left on device'))
+        self.assertEqual(report['code'], 'disk_full')
+        self.assertIn('Diskte yer kalmadı', report['message'])
+        report = installer.error_report(installer.failure('Kasadaki dosya elle değiştirilmiş.', 'legacy_review'))
+        self.assertEqual(report, {'error': 'ValueError', 'message': 'Kasadaki dosya elle değiştirilmiş.',
+                                  'code': 'legacy_review'})
+        self.assertNotIn('code', installer.error_report(ValueError('plain')))
+
+    def test_entry_lines_for_the_new_results(self):
+        entry = self.load('scripts/beyin_entry.py')
+        self.assertIn('yenilendi', entry.human_result({'status': 'refreshed', 'version': '1.0.33'}, 'update'))
+        self.assertIn('farkli dosyalari var', entry.human_result({'status': 'available', 'refresh': True,
+                                                                  'version': '1.0.33'}, 'update'))
+        self.assertIn('yeni yerine baglandi', entry.human_result({'status': 'relocated'}, 'relocate'))
+        self.assertIn('bir sey degismedi', entry.human_result({'status': 'unchanged'}, 'relocate'))
+        self.assertIn('Ananas temasi da', entry.human_result({'status': 'updated', 'version': '1.0.33',
+                                                              'theme': 'yenilendi'}, 'update'))
 
 
 if __name__ == '__main__':

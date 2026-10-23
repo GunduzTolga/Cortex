@@ -66,6 +66,8 @@ const RULES: Rule[] = [
   { pattern: /^Claude Code could not start: ([\s\S]*)$/, say: ([words]) => `Claude Code başlatılamadı: ${words}` },
   { pattern: /^(Claude Code|Codex) could not answer\.$/, say: ([tool]) => `${tool} cevap veremedi.` },
   { pattern: /^Codex did not start a thread\.$/, say: () => 'Codex bir konuşma başlatmadı.' },
+  { pattern: /^Codex stopped\.$/, say: () => 'Codex durdu.' },
+  { pattern: /^Codex stopped: ([\s\S]*)$/, say: ([words]) => `Codex durdu: ${words}` },
 
   // electron/services/localChat.ts: LM Studio, Ollama
   { pattern: /^([\s\S]+?) is not running\. Open it, load a model, and write again\.$/, say: ([server]) => `${server} çalışmıyor. Uygulamayı aç, bir model yükle ve yeniden yaz.` },
@@ -76,12 +78,19 @@ const RULES: Rule[] = [
   { pattern: /^Not a tool Cortex signs in to\.$/, say: () => 'Bu, Cortex’in giriş yaptığı araçlardan biri değil.' },
   { pattern: /^This tool is not signed in to from here\.$/, say: () => 'Bu araca buradan giriş yapılmıyor.' },
   { pattern: /^Signing in from Cortex opens a console window, which only Windows does here\.$/, say: () => 'Cortex’ten giriş yapmak bir konsol penceresi açar; bu yalnız Windows’ta çalışır.' },
+  { pattern: /^Cortex does not install this tool\.$/, say: () => 'Cortex bu aracı kurmuyor.' },
+  { pattern: /^Installing from Cortex opens a console window, which only Windows does here\.$/, say: () => 'Cortex’ten kurmak bir konsol penceresi açar; bu yalnız Windows’ta çalışır.' },
+  { pattern: /^This tool is installed already\.$/, say: () => 'Bu araç zaten kurulu.' },
   { pattern: /^This tool keeps its keys in its own sign-in\.$/, say: () => 'Bu araç anahtarlarını kendi girişinde saklar.' },
   { pattern: /^That is not a key\.$/, say: () => 'Bu bir anahtar değil.' },
   { pattern: /^Codex did not take the key\.$/, say: () => 'Codex anahtarı kabul etmedi.' },
   { pattern: /^This tool does not take a key here\.$/, say: () => 'Bu araç burada anahtar almıyor.' },
   { pattern: /^That is not an address\.$/, say: () => 'Bu bir adres değil.' },
   { pattern: /^This computer offers no safe place to keep a key\.$/, say: () => 'Bu bilgisayarda anahtarı saklayacak güvenli bir yer yok.' },
+  {
+    pattern: /^The kept keys could not be read just now, so nothing was written over them\. Try again in a moment\.$/,
+    say: () => 'Saklanan anahtarlar şu an okunamadı; üzerlerine hiçbir şey yazılmadı. Birazdan yeniden dene.',
+  },
 
   // electron/services/chat.ts: the chats
   { pattern: /^Choose the vault first\.$/, say: () => 'Önce kasayı seç.' },

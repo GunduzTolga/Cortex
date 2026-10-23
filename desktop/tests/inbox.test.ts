@@ -131,6 +131,7 @@ function fakeTurn(chatId: string, vault: string) {
     sessionId: null,
     number: 1,
     prefs: {},
+    signal: new AbortController().signal,
     emit: (event) => events.push(event),
     setOptions: (_next: ConfigOption[]) => undefined,
     setSession: () => undefined,

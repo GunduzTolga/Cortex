@@ -50,6 +50,15 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
+      # The Python the engine-backed tests and the end-to-end voice and microphone checks run the
+      # vault's engine with: the minor version the app installs for users (python.json), named to
+      # the app by BEYIN_PYTHON, which it takes before `py -3`. They used whatever Python the runner
+      # image had, and were skipped without a word on one without it (tests-ci-10).
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.12'
+
       - name: Bagimliliklar
         run: npm ci
 
@@ -58,12 +67,16 @@ jobs:
 
       - name: Testler
         run: npm test
+        env:
+          BEYIN_PYTHON: ${{ steps.python.outputs.python-path }}
 
       # The real window, never shown: drawn offscreen and photographed with
       # capturePage (scripts/e2e.mjs). Playwright drives Electron's own
       # Chromium, so no browser is downloaded.
       - name: Uctan uca
         run: npm run e2e
+        env:
+          BEYIN_PYTHON: ${{ steps.python.outputs.python-path }}
 
       # What the run saw, kept when it fails: a Windows runner cannot be watched.
       - uses: actions/upload-artifact@v4

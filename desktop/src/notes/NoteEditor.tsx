@@ -1,5 +1,5 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
-import { Compartment, EditorSelection, EditorState } from '@codemirror/state';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { Annotation, Compartment, EditorSelection, EditorState } from '@codemirror/state';
 import {
   Decoration,
   EditorView,
@@ -21,6 +21,7 @@ import { tags } from '@lezer/highlight';
 import type { MarkdownConfig } from '@lezer/markdown';
 import { insertTemplate, splitWikiLink } from '../../core/vaultNotes';
 import { livePreview, type LiveHooks } from './livePreview';
+import { holds, lineBreakOf, textWith } from './lineEndings';
 
 /**
  * A note's source, written in place: CodeMirror 6 with Markdown (GitHub's, as
@@ -30,9 +31,10 @@ import { livePreview, type LiveHooks } from './livePreview';
  * alias, and `#` its tags; Ctrl- or Cmd-click on a link opens it, Ctrl-S
  * saves at once (the screen saves by itself a moment after the last key too).
  *
- * The editor keeps the note's line endings: a file written with `\r\n` is
- * saved with them, so a note made on Windows does not change on every line
- * because it was opened here.
+ * The editor keeps the note's line endings (lineEndings.ts): a file written
+ * with `\r\n` is saved with them, so a note made on Windows does not change
+ * on every line because it was opened here, and a note opened and not touched
+ * is not saved at all.
  */
 
 export interface NoteEditorHandle {
@@ -119,6 +121,9 @@ const look = EditorView.theme({
   '.cm-panels': { backgroundColor: 'var(--color-zinc-50)', borderColor: 'var(--color-zinc-100)', fontFamily: 'var(--font-sans)' },
 });
 
+/** A text put in from outside the editor - the note read again from disk - which is what the screen holds already, not typed. */
+const fromDisk = Annotation.define<boolean>();
+
 const WIKI = /!?\[\[[^[\]\n]+?\]\]/g;
 const TAG = /(?<=^|[\s,;(])#[\p{L}\p{N}_/-]*[\p{L}_/-][\p{L}\p{N}_/-]*/gu;
 
@@ -188,6 +193,9 @@ export const NoteEditor = forwardRef<
   const latest = useRef({ onChange, onSave, onOpenLink, choices, hooks });
   latest.current = { onChange, onSave, onOpenLink, choices, hooks };
   const previewOf = (on: boolean) => (on ? livePreview(() => latest.current.hooks) : []);
+  // The line break the note is written with, as last read: what it is given back with. Counted once here, not at every render.
+  const [firstBreak] = useState(() => lineBreakOf(value));
+  const eol = useRef(firstBreak);
 
   useImperativeHandle(ref, () => ({
     topLine() {
@@ -240,7 +248,6 @@ export const NoteEditor = forwardRef<
     const state = EditorState.create({
       doc: value,
       extensions: [
-        value.includes('\r\n') ? EditorState.lineSeparator.of('\r\n') : [],
         history(),
         drawSelection(),
         highlightActiveLine(),
@@ -276,7 +283,7 @@ export const NoteEditor = forwardRef<
           },
         }),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) latest.current.onChange(update.state.doc.toString());
+          if (update.docChanged && !update.transactions.some((one) => one.annotation(fromDisk))) latest.current.onChange(textWith(update.state.doc, eol.current));
         }),
         EditorView.contentAttributes.of({ spellcheck: 'true', 'data-note-editor': '' }),
       ],
@@ -297,12 +304,21 @@ export const NoteEditor = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // A version read again from disk replaces the text; one that is what the editor already holds does nothing.
+  /*
+    A version read again from disk replaces the text; one that is what the
+    editor already holds, whatever its line breaks, does nothing. Put in, it is
+    not said back as typed (`fromDisk`): the screen has it already, and a note
+    with both kinds of line break would have come back with one kind, and been
+    saved so with nothing typed.
+  */
   useEffect(() => {
     const editor = view.current;
-    if (!editor || editor.state.doc.toString() === value) return;
-    const head = Math.min(editor.state.selection.main.head, value.length);
-    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: value }, selection: EditorSelection.cursor(head) });
+    if (!editor) return;
+    if (/[\r\n]/.test(value)) eol.current = lineBreakOf(value);
+    if (holds(editor.state.doc, value)) return;
+    const lines = value.replace(/\r\n?/g, '\n');
+    const head = Math.min(editor.state.selection.main.head, lines.length);
+    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: lines }, selection: EditorSelection.cursor(head), annotations: fromDisk.of(true) });
   }, [value]);
 
   useEffect(() => {

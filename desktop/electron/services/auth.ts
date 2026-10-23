@@ -2,9 +2,10 @@ import { execFile, spawn } from 'node:child_process';
 import os from 'node:os';
 import type { CliAuth, CliId } from '../../shared/chat';
 import { childEnv } from './acp';
-import { LOCAL_IDS, onPathAny, programOf } from './clis';
+import { LOCAL_IDS, onPathAny, powerShellExe, programOf, refreshPath } from './clis';
 import { LOCAL, type LocalId, findLocal, localModel, shortContext } from './localModels';
 import { KEY_ENV, KeyRefusal, forgetKey, hasKey, keptHere, saveKey } from './keys';
+import { readSettings } from './settings';
 
 /**
  * Signing in to the person's AI tools, from the chat: each one asked, with
@@ -30,6 +31,13 @@ import { KEY_ENV, KeyRefusal, forgetKey, hasKey, keptHere, saveKey } from './key
  * - LM Studio and Ollama: no sign-in; whether their server is up, and with
  *   which models, asked over HTTP on 127.0.0.1 (localModels.ts).
  *
+ * Claude Code, where it is not installed, is installed from here on Windows by
+ * Anthropic's own installer (`irm https://claude.ai/install.ps1 | iex`,
+ * code.claude.com/docs/en/setup, 21 October) in a console window, and its
+ * sign-in opened when that ends: nobody has to find a terminal first. A
+ * sign-in going on is asked after every few seconds, so the window updates when
+ * it is done, not only when its console is closed.
+ *
  * Nothing here runs through a shell, and no key is written anywhere but the
  * system's own encrypted store (keys.ts) or, for Codex, Codex's.
  */
@@ -43,6 +51,14 @@ const TOOLS: Array<{ id: CliId; login: string[] | null; key: CliAuth['key'] }> =
 ];
 
 const STATUS_TIMEOUT = 20_000;
+/** While a sign-in window is open: asked this often whether it is done, for at most this long. */
+const LOGIN_POLL = 4_000;
+const LOGIN_WATCH = 10 * 60_000;
+
+/** The tools installed from here, each by its maker's own installer run by Windows' PowerShell, and where it puts the program. */
+const INSTALLERS: Partial<Record<CliId, { run: string; puts: string }>> = {
+  claude: { run: 'irm https://claude.ai/install.ps1 | iex', puts: "(Join-Path $env:USERPROFILE '.local\\bin\\claude.exe')" },
+};
 
 let changed: () => void = () => undefined;
 
@@ -104,6 +120,7 @@ async function statusOf(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
     signedIn: null,
     detail: null,
     canLogin: installed && tool.login !== null && process.platform === 'win32',
+    canInstall: !installed && Boolean(INSTALLERS[tool.id]) && process.platform === 'win32',
     key: installed ? tool.key : null,
     baseUrl: Boolean(KEY_ENV[tool.id]?.baseUrl),
     hasKey: hasKey(tool.id),
@@ -131,6 +148,7 @@ async function localStatus(id: LocalId): Promise<CliAuth> {
     signedIn: up,
     detail: null,
     canLogin: false,
+    canInstall: false,
     key: null,
     baseUrl: false,
     hasKey: false,
@@ -138,8 +156,9 @@ async function localStatus(id: LocalId): Promise<CliAuth> {
   };
 }
 
-/** Every tool, and whether it is signed in. Asked in parallel: a tool started for its status takes a second or two. */
-export function authStatuses(): Promise<CliAuth[]> {
+/** Every tool, and whether it is signed in. Asked in parallel: a tool started for its status takes a second or two. A tool installed since the app started is found. */
+export async function authStatuses(): Promise<CliAuth[]> {
+  await refreshPath();
   return Promise.all([...TOOLS.map(statusOf), ...LOCAL_IDS.map(localStatus)]);
 }
 
@@ -161,9 +180,84 @@ export function startLogin(id: unknown): void {
   if (!tool.login || !program) throw new KeyRefusal('This tool is not signed in to from here.');
   if (process.platform !== 'win32') throw new KeyRefusal('Signing in from Cortex opens a console window, which only Windows does here.');
   const child = spawn(program.command, [...program.args, ...tool.login], { cwd: os.homedir(), env: childEnv(program.env), detached: true, stdio: 'ignore', windowsHide: false, shell: false });
-  child.on('error', () => changed());
-  child.on('exit', () => changed());
+  let open = true;
+  child.on('error', () => {
+    open = false;
+    changed();
+  });
+  child.on('exit', () => {
+    open = false;
+    changed();
+  });
   child.unref();
+  void watchLogin(tool, () => open);
+}
+
+/**
+ * A sign-in going on, asked after until it is done: the browser's sign-in can end with its
+ * console still open, or the person back in the app before closing it - and the window said
+ * nothing changed until the app was opened again (21 October). Watched only from signed out.
+ */
+async function watchLogin(tool: (typeof TOOLS)[number], open: () => boolean): Promise<void> {
+  if ((await statusOf(tool)).signedIn === true) return;
+  const until = Date.now() + LOGIN_WATCH;
+  while (open() && Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, LOGIN_POLL));
+    if (!open()) return;
+    if ((await statusOf(tool)).signedIn === true) {
+      changed();
+      return;
+    }
+  }
+}
+
+/**
+ * What the installer's console runs: the installer as its maker gives it, and, where the
+ * program is not where it puts it after, the console kept open until Enter so what went wrong
+ * can be read. Single quotes only: a double quote does not survive Windows' command line.
+ */
+export function installScript(id: CliId, turkish: boolean): string {
+  const installer = INSTALLERS[id];
+  if (!installer) throw new KeyRefusal('Cortex does not install this tool.');
+  const [going, failed] = turkish
+    ? ['Claude Code kuruluyor (Anthropic kurucusu: claude.ai/install.ps1)...', 'Claude Code kurulamadı. Yukarıda ne yazdığına bak; kapatmak için Enter']
+    : ['Installing Claude Code (the Anthropic installer: claude.ai/install.ps1)...', 'Claude Code was not installed. See what is written above; press Enter to close'];
+  return `Write-Host '${going}'; try { ${installer.run} } catch { Write-Host $_ -ForegroundColor Red }; if (-not (Test-Path ${installer.puts})) { Read-Host '${failed}' }`;
+}
+
+/**
+ * A tool installed by its maker's own installer, in a console window of its own: Claude Code
+ * by Anthropic's. When it ends, the PATH is read again, the window told, and the tool's
+ * sign-in opened where it is not signed in yet.
+ */
+export function installTool(id: unknown): void {
+  const tool = toolOf(id);
+  if (!INSTALLERS[tool.id]) throw new KeyRefusal('Cortex does not install this tool.');
+  if (process.platform !== 'win32') throw new KeyRefusal('Installing from Cortex opens a console window, which only Windows does here.');
+  if (programOf(tool.id)) throw new KeyRefusal('This tool is installed already.');
+  const script = installScript(tool.id, readSettings().language !== 'en');
+  const child = spawn(powerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { cwd: os.homedir(), env: childEnv(), detached: true, stdio: 'ignore', windowsHide: false, shell: false });
+  let ended = false;
+  const after = () => {
+    if (ended) return;
+    ended = true;
+    void afterInstall(tool);
+  };
+  child.on('error', after);
+  child.on('exit', after);
+  child.unref();
+}
+
+async function afterInstall(tool: (typeof TOOLS)[number]): Promise<void> {
+  await refreshPath(true);
+  changed();
+  if (!programOf(tool.id) || !tool.login) return;
+  if ((await statusOf(tool)).signedIn === true) return;
+  try {
+    startLogin(tool.id);
+  } catch {
+    /* Its sign-in is still a button away. */
+  }
 }
 
 /** A key for a tool: given to Codex itself, kept here for the others. */

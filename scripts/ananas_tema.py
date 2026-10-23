@@ -73,11 +73,28 @@ def asset_vars():
     return '\n'.join(lines)
 
 
+def licence_text():
+    """The three faces' copyright lines and the SIL Open Font License 1.1 they share.
+
+    OFL condition 2 asks for the notice and the licence with every copy, and every Cortex install
+    copies these faces twice: into the vault's ananas.css and, as TTF, into the state folder. A
+    pointer to this repository was all either carried (misc-scripts-6)."""
+    texts = [(TEMA / 'fonts' / (prefix + '-OFL.txt')).read_text(encoding='utf-8').replace('\r\n', '\n')
+             for prefix in ('fraunces', 'jetbrains-mono', 'schibsted-grotesk')]
+    bodies = {text.split('\n', 1)[1] for text in texts}
+    if len(bodies) != 1:
+        raise ValueError('tema/ananas/fonts/*-OFL.txt: licence bodies differ; ship each in full')
+    return '\n'.join(text.split('\n', 1)[0] for text in texts) + '\n' + bodies.pop()
+
+
 def css():
     """The snippet exactly as it lands in .obsidian/snippets/ananas.css."""
     source = (TEMA / 'ananas.css').read_text(encoding='utf-8')
-    note = ('/* Yazı tipleri: Fraunces, JetBrains Mono, Schibsted Grotesk; SIL Open Font License 1.1.\n'
-            '   Lisans metinleri Cortex deposunda: tema/ananas/fonts/*-OFL.txt */')
+    licence = licence_text()
+    if '*/' in licence:
+        raise ValueError('licence text would end the CSS comment')
+    note = ('/* Yazı tipleri: Fraunces, JetBrains Mono, Schibsted Grotesk; SIL Open Font License 1.1.\n\n' +
+            licence.rstrip('\n') + '\n*/')
     return '\n\n'.join((MARKER, note, font_faces(), asset_vars(), source)) + '\n'
 
 
@@ -131,8 +148,10 @@ def font_text():
              '',
              'Kaynak: tema/ananas/fonts-ttf/ (scripts/yazitipi_uret.py). Yeniden üretmek için:',
              '    py -3 scripts/ananas_tema.py uret',
-             'Lisans: SIL Open Font License 1.1; metinler Cortex deposunda tema/ananas/fonts/*-OFL.txt',
+             'Lisans: SIL Open Font License 1.1, metni LICENSE içinde; yakala yazı tiplerinin yanına OFL.txt',
+             'olarak yazar.',
              '"""',
+             'LICENSE = ' + repr(licence_text()),
              'FONTS = {']
     for path in sorted(TTF.glob('*.ttf')):
         lines += ['    ' + repr(path.name) + ': (', *['    ' + line for line in _chunked(path.read_bytes())], '    ),']

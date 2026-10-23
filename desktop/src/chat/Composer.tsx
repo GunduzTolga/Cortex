@@ -6,8 +6,10 @@ import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 import { Spinner } from '../ui/ui';
+import { escapeLayers } from '../ui/escapeLayers';
 import { useEscapeLayer } from '../ui/useEscapeLayer';
 import { authDot } from './AuthDialog';
+import { enterAnswers } from './permissionKey';
 import type { Asked } from './turns';
 
 /**
@@ -19,7 +21,8 @@ import type { Asked } from './turns';
  * vault's inbox instead (`📥 000-Inbox/Yakala`), and nothing goes to the
  * model. How full
  * the model's context is shows as a ring. A step the CLI asks leave for is a
- * card over it, answered with a click, or Enter for once.
+ * card over it, answered with a click, or Enter for once - only while the chat
+ * is in front and Enter means nothing else there (permissionKey.ts).
  */
 
 interface Choice {
@@ -160,28 +163,37 @@ const ANSWERS: Record<PermissionKind, Key> = {
   reject_always: 'chat.permission.never',
 };
 
-/** The CLI asks before a step: what it would do, and the answers it offers. Enter is "once". */
-function PermissionCard({ asked, onAnswer }: { asked: Asked; onAnswer: (option: string | null) => void }) {
+/**
+ * The CLI asks before a step: what it would do, and the answers it offers. Enter is "once", but only
+ * with the chat in front and pressed on the page or on the card, not in a field, an editor or on a
+ * button (permissionKey.ts): the chat stays drawn behind the other views, and a newline in a note
+ * approved a step nobody saw (desktop-ui-2).
+ */
+function PermissionCard({ asked, onAnswer, visible }: { asked: Asked; onAnswer: (option: string | null) => void; visible: boolean }) {
   const t = useT();
+  const card = useRef<HTMLDivElement>(null);
   const once = asked.options.find((one) => one.kind === 'allow_once');
   useEffect(() => {
+    if (!visible || !once) return;
     const key = (event: KeyboardEvent) => {
-      if (event.key === 'Enter' && !event.shiftKey && once && !(event.target as Element | null)?.closest('textarea, input')) {
-        event.preventDefault();
-        onAnswer(once.id);
-      }
+      if (!enterAnswers(event, { visible, layers: escapeLayers.size(), card: card.current, body: document.body })) return;
+      event.preventDefault();
+      onAnswer(once.id);
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, [once, onAnswer]);
+  }, [visible, once, onAnswer]);
   return (
-    <div className="mb-2 rounded-xl border-[1.5px] border-darkDelegation bg-paper-2 px-4 py-3 shadow-[3px_3px_0_0_#1b1712]" data-chat-permission={asked.id}>
+    <div ref={card} className="mb-2 rounded-xl border-[1.5px] border-darkDelegation bg-paper-2 px-4 py-3 shadow-[3px_3px_0_0_#1b1712]" data-chat-permission={asked.id}>
       <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-darkDelegation">
         <ShieldQuestion size={13} />
         {t('chat.permission.title')}
       </p>
-      <p className="mt-1.5 break-words font-mono text-[12px] text-zinc-700">{asked.title || asked.kind}</p>
-      {asked.paths.length ? <p className="mt-0.5 truncate font-mono text-[11px] text-zinc-400">{asked.paths.join(' · ')}</p> : null}
+      {/* Said whole, never cut to a line: what is asked for is what the person allows (electron/services/chatKit.ts, cardTextFor). */}
+      <p className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] text-zinc-700" data-chat-permission-title>
+        {asked.title || asked.kind}
+      </p>
+      {asked.paths.length ? <p className="mt-0.5 max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] text-zinc-500">{asked.paths.join(' · ')}</p> : null}
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {asked.options.map((option) => (
           <button
@@ -222,6 +234,7 @@ export function Composer({
   usage,
   asked,
   onAnswer,
+  visible,
   big = false,
   focusKey,
   auth,
@@ -242,6 +255,8 @@ export function Composer({
   usage: { used: number; size: number; cost: number | null; currency: string | null } | null;
   asked: Asked | null;
   onAnswer: (option: string | null) => void;
+  /** Whether the chat is in front: a card in a hidden chat is not answered from the keyboard. */
+  visible: boolean;
   /** The first screen's: taller, and given the cursor. */
   big?: boolean;
   /** Changed, the field takes the cursor: another chat put in front. */
@@ -300,7 +315,7 @@ export function Composer({
 
   return (
     <div className={`mx-auto w-full max-w-[46rem] ${big ? '' : 'px-6 pb-5'}`} data-chat-composer>
-      {asked ? <PermissionCard asked={asked} onAnswer={onAnswer} /> : null}
+      {asked ? <PermissionCard asked={asked} onAnswer={onAnswer} visible={visible} /> : null}
       <div className="rounded-2xl border border-zinc-200 bg-paper-2 shadow-[0_1px_2px_rgba(27,23,18,0.06)] transition-colors focus-within:border-zinc-400">
         <textarea
           ref={field}

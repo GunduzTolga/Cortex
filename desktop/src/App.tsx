@@ -1,21 +1,26 @@
 import { useEffect } from 'react';
+import { engineAction } from '@shared/setup';
 import { BookOpen, Building2, FolderOpen, MessageCircle, Network, Settings } from 'lucide-react';
 import seal from '../../tema/ananas/marka/pyn-muhur.svg';
 import type { Key } from './i18n';
 import { useT } from './i18n/useT';
 import { AuthDialog } from './chat/AuthDialog';
 import { ChatView } from './chat/ChatView';
+import { useChat, waitingChats } from './chat/chatStore';
 import { NotesView } from './notes/NotesView';
 import { GraphView } from './notes/GraphView';
 import { OfficeView } from './office/OfficeView';
 import { Onboarding } from './onboarding/Onboarding';
 import { NotesDialogs } from './notes/NotesMenus';
 import { useNotes } from './notes/notesStore';
+import { leaveOpenNotes } from './notes/openNotes';
 import { refusal, useApp } from './store/app';
+import { useConsent } from './store/consent';
 import { useSetup } from './store/setup';
 import { useView, type View } from './store/view';
 import { LanguageSwitch } from './ui/LanguageSwitch';
 import { SettingsDialog } from './ui/SettingsDialog';
+import { MicConsent } from './ui/MicConsent';
 import { Toasts } from './ui/Toasts';
 import { Button, Spinner } from './ui/ui';
 
@@ -42,6 +47,12 @@ export function App() {
 
   // The notification-area icon's "Ayarlar": the window comes back on its settings.
   useEffect(() => window.cortex.on.openSettings(() => useApp.getState().openSettings(true)), []);
+  // Its "listen all the time", not allowed yet: asked here, where it is explained (src/ui/MicConsent.tsx).
+  useEffect(() => window.cortex.on.askWake(() => void useSetup.getState().voice({ wake: true })), []);
+  // The window going for good: the note open saves what it holds first, or keeps it aside (src/notes/openNotes.ts).
+  useEffect(() => window.cortex.on.flush(() => leaveOpenNotes()), []);
+  // A word from work done in the background (yakala moved to the vault chosen): a failure stays until it is closed.
+  useEffect(() => window.cortex.on.notice((word) => void useApp.getState().toast({ ...word, sticky: word.tone === 'error' })), []);
 
   // The notes are named as the settings say, wherever they are shown (src/notes/notesStore.ts).
   useEffect(() => useNotes.getState().setNameIcons(nameIcons), [nameIcons]);
@@ -70,6 +81,7 @@ export function App() {
       )}
       {/* The confirmations, prompts and menus every view asks with. */}
       <NotesDialogs />
+      <MicConsent />
       <Toasts />
     </>
   );
@@ -106,27 +118,45 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
   const setView = useView((state) => state.setView);
   const choose = () => void useApp.getState().chooseVault(t('app.vault.failed'));
 
-  // An older Cortex in the vault than the one the app brought: said once, with the button that updates it.
+  // An older Cortex in the vault than the one the app brought, a stale one or the predecessor's: said once, with the button that mends it.
   const updatable = useSetup((s) => {
-    const engine = s.status?.engine;
-    return Boolean(engine?.installed && engine.bundled && engine.bundled.localeCompare(engine.installed, undefined, { numeric: true }) > 0);
+    const action = engineAction(s.status?.engine);
+    return action !== null && action !== 'install';
   });
+  const vaultSeq = useApp((s) => s.vaultSeq);
   useEffect(() => {
+    // The vault bound to where it is now (moved, renamed, copied): in the background; a failure said once, and the app goes on.
+    void window.cortex.setup
+      .settle()
+      .then((failure) => {
+        if (failure) useApp.getState().toast({ tone: 'error', title: t('setup.settle.failed'), detail: failure, sticky: true });
+      })
+      .catch(() => undefined);
     void (async () => {
       await useSetup.getState().refresh();
+      // Listening all the time found on without leave given here (set up before Cortex asked): it does not listen until allowed.
+      if (useSetup.getState().status?.voice?.wake && !useApp.getState().settings.wakeConsent) {
+        if (await useConsent.getState().ask('wakeFound')) await useApp.getState().setSettings({ wakeConsent: true });
+        else await useSetup.getState().voice({ wake: false });
+      }
       const engine = useSetup.getState().status?.engine;
-      if (!engine?.installed || !engine.bundled || engine.bundled.localeCompare(engine.installed, undefined, { numeric: true }) <= 0) return;
+      const action = engineAction(engine);
+      if (!engine?.installed || !engine.bundled || !action || action === 'install') return;
+      const values = { installed: engine.installed, bundled: engine.bundled };
       useApp.getState().toast({
         tone: 'info',
-        title: t('setup.update.title', { installed: engine.installed, bundled: engine.bundled }),
-        detail: t('setup.update.detail'),
+        title: t(action === 'refresh' ? 'setup.update.refreshTitle' : action === 'migrate' ? 'setup.update.migrateTitle' : 'setup.update.title', values),
+        detail: t(action === 'refresh' ? 'setup.update.refreshDetail' : action === 'migrate' ? 'setup.update.migrateDetail' : 'setup.update.detail', values),
         sticky: true,
-        action: { label: t('setup.update.action'), run: () => void useSetup.getState().run('engine') },
+        action: {
+          label: t(action === 'refresh' ? 'setup.update.refreshAction' : action === 'migrate' ? 'setup.update.migrateAction' : 'setup.update.action'),
+          run: () => void useSetup.getState().run('engine'),
+        },
       });
     })();
-    // Once per vault opened.
+    // Once per vault opened: chosen again counts, the same folder name or not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name]);
+  }, [name, vaultSeq]);
 
   // A vault gone from disk is said when the window comes back to it too, not only at the start.
   useEffect(() => {
@@ -134,6 +164,37 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
     window.addEventListener('focus', back);
     return () => window.removeEventListener('focus', back);
   }, []);
+
+  /*
+    The vault's notes are read again here, whichever view is in front: when they
+    change on disk, when the window comes back (where the platform cannot watch
+    the vault), and when a turn of Pyn's ends (it may have written some). Only
+    the notes screen did, and only while it was in front, so the chat's panel,
+    the links in its answers, the graph and the office showed the vault as it
+    was until the notes were opened (desktop-ui-7). The index is built again
+    only for what changed (electron/services/vaultNotes.ts), so this is cheap.
+    Read at the start too, where none is yet: with the graph or the office in
+    front from the last run, nothing else read it, and they showed no notes.
+  */
+  useEffect(() => {
+    if (missing) return;
+    const again = () => void useNotes.getState().refresh();
+    if (!useNotes.getState().index) again();
+    const stop = window.cortex.on.notesChanged(again);
+    window.addEventListener('focus', again);
+    return () => {
+      stop();
+      window.removeEventListener('focus', again);
+    };
+  }, [missing]);
+  const turnsEnded = useChat((s) => s.turnsEnded);
+  useEffect(() => {
+    if (turnsEnded && !missing) void useNotes.getState().refresh();
+    // A turn ended, not the vault found again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turnsEnded]);
+  // Pyn waiting on the person for a step, seen from any view: a mark on its tab (src/chat/ChatView.tsx says it once more).
+  const waiting = useChat((s) => Object.keys(waitingChats(s.open)).length > 0);
 
   // Ctrl+, opens the settings, as in most desktop apps.
   useEffect(() => {
@@ -171,6 +232,9 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
           >
             {icon}
             {t(words)}
+            {one === 'pyn' && waiting ? (
+              <span className="h-2 w-2 shrink-0 rounded-full border border-darkDelegation bg-gold" title={t('chat.waiting.badge')} aria-label={t('chat.waiting.badge')} role="img" data-app-view-waiting />
+            ) : null}
           </button>
         ))}
         <div className="ml-auto flex min-w-0 items-center gap-3">

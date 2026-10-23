@@ -2,6 +2,7 @@
 """Install or exactly roll back project-local V3 adapters. No global settings."""
 import argparse
 import base64
+import errno
 import hashlib
 import importlib.util
 import io
@@ -9,7 +10,6 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
 import stat
 import subprocess
 import sys
@@ -48,6 +48,27 @@ WINDOWS_STOCK_DOCTOR_HASH = "4b0e9aeae1067ae084380f7f179f12b9090213f3990c2973adb
 # The same edition after the V2 hooks key became "cortex-beyin" (1.0.0).
 CORTEX_WINDOWS_DOCTOR_HASH = "7c7a5c41f8c77790fc9a7c7b8b711f571981a841ece712fbcd940fedeb0639d8"
 RETIRED_STUB = b"# BEYIN_V3_LEGACY_RETIRED: canonical source runtime owns new outcomes.\n"
+# Digests of the stock V2 runners every V3 release retires, with LF line endings: the bytes of V2
+# 2.3.0 (template/.beyin-version), which template/ still holds and nothing runs any more. They are
+# the migration fingerprint: an untouched runner is recognised by them and retired, any other
+# bytes stop for review. Taken from the template at build time before, so an edit to a file
+# nothing runs, or a CRLF checkout of a stock vault, stopped every V2 vault's migration
+# (misc-scripts-1, hooks-clients-8). tests/v3_install_legacy_test.py holds the template to them;
+# fix V3, never these files.
+LEGACY_RUNNER_HASHES = {
+    ".claude/scripts/flush.py": ("f36f8eb4da19222c7a70ea2659b140595834ce7a52483a6549bcab869e2fb404",),
+    ".claude/scripts/compile.py": ("23af64eb892283b907de63fcb9241208a3edf13b4f2e41ff4cecb2a1a8570150",),
+    ".claude/hooks/session-start.sh": ("92dd2ce61777cc80034894fc8e0e053cebcec3bfc3c2455e5c1783b7bbae4088",),
+    ".claude/hooks/session-start.ps1": ("c90f93b3bd21deae6289504646b56b0aeb91a5ba38401b8188053d73eb1edcee",),
+    ".claude/hooks/session-end.sh": ("3f079c8b64a907fc81b58187d32317b1db182e14190d600498d6cd48b1fbb92a",),
+    ".claude/hooks/session-end.ps1": ("8fbf8f92572d01eb5b71582ae4e05df392c0aa69e60cfc57d5f3686c5251471c",),
+    ".claude/hooks/pre-compact.sh": ("19e39f72f431203374fe3f26b94c4ceae0f031949617d8a5bfdcb9b93964ffd8",),
+    ".claude/hooks/pre-compact.ps1": ("1af3b730efbe4148444cf9e6ea0421ca03b49d8588a43c7ed1760c1c5712c835",),
+    ".claude/hooks/prompt-counter.sh": ("3494e2a7282c0278372496c08a51c0e605879d16146ffe184a71e218721a40c0",),
+    ".claude/hooks/prompt-counter.ps1": ("bcb6375090dcbf716c62e0232f61772a69d83ced289ad5ed7d37126246237cde",),
+}
+# Where --backup-customized-legacy keeps a runner it retires, under .claude/.
+LEGACY_BACKUP = ".claude/v2-backup/"
 
 
 # User-owned starter embedded in an already-allowed package file. Old V3 updaters
@@ -141,6 +162,16 @@ def is_component_excluded(target, excluded):
     return False
 
 
+def failure(message, code=None, kind=ValueError):
+    """A failure said to the person: one Turkish sentence with the detail (the file it is about),
+    and, where the desktop app knows it, its name (C1: update_conflict, legacy_review...). main()
+    prints both; the app says a named one in the window's language with what it can do about it."""
+    error = kind(message)
+    if code:
+        error.code = code
+    return error
+
+
 def atomic(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(dir=path.parent, prefix=".beyin-install-")
@@ -157,6 +188,25 @@ def atomic(path, data):
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def text_digest(data):
+    """The digest of a text file read with LF line endings: git's autocrlf or an editor that saves
+    CRLF changes no byte that matters (as `line_endings_only` says for managed files)."""
+    return digest(data.replace(b"\r\n", b"\n"))
+
+
+def retired_stub(name):
+    """The stub that stands in a retired runner's place: it does nothing and says why."""
+    stub = RETIRED_STUB + (b"raise SystemExit(0)\n" if name.endswith(".py") else b"exit 0\n")
+    return b"#!/bin/sh\n" + stub if name.endswith(".sh") else stub
+
+
+def is_retired(data):
+    """A runner an earlier V3 install already retired: the file starts with the stub's line. A vault
+    whose state was lost (moved, reinstalled into a new state) has no record of having written it."""
+    text = data.replace(b"\r\n", b"\n") if data is not None else b""
+    return text.startswith(RETIRED_STUB) or text.startswith(b"#!/bin/sh\n" + RETIRED_STUB)
 
 
 def default_skill_hashes():
@@ -182,16 +232,26 @@ def jbytes(value):
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode()
 
 
+def _scripts_module(name):
+    """A runtime module of this package loaded by its path; the scripts folder need not be on sys.path."""
+    spec = importlib.util.spec_from_file_location("beyin_install_" + name, ROOT / "template/.claude/scripts" / (name + ".py"))
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    return module
+
+
+# Quoting and the exit-code rule of every command the installer writes (security-5, C3).
+POWERSHELL = _scripts_module("beyin_v3_powershell")
+
+
 def commands(argv):
     if any(any(c in str(value) for c in "\n\r\x00") for value in argv):
         raise ValueError("Newlines or NUL in command paths are unsupported")
     # Keep a direct form for POSIX shells and Codex's explicit fallback field.
     portable_argv = [str(value).replace("\\", "/") if os.name == "nt" else str(value) for value in argv]
-    posix = shlex.join(portable_argv)
+    posix = POWERSHELL.posix_hook(portable_argv)
     # Explicit PowerShell invocation with single-quoted literals inside encoded code.
     # EncodedCommand prevents cmd.exe metacharacters in paths being evaluated.
-    script = "& " + " ".join("'" + str(value).replace("'", "''") + "'" for value in argv)
-    script += "; exit $LASTEXITCODE"
+    script = POWERSHELL.hook_script(argv)
     encoded = base64.b64encode(script.encode("utf-16le")).decode()
     launcher = "powershell.exe"
     if os.name == "nt":
@@ -208,10 +268,10 @@ def commands(argv):
 
 def powershell_call(argv):
     """The PowerShell call operator on single-quoted literals, for a client that already runs
-    hooks in PowerShell (Gemini CLI on Windows); the same quoting as inside commands()."""
+    hooks in PowerShell (Gemini CLI on Windows); the same script as inside commands()."""
     if any(any(c in str(value) for c in "\n\r\x00") for value in argv):
         raise ValueError("Newlines or NUL in command paths are unsupported")
-    return "& " + " ".join("'" + str(value).replace("'", "''") + "'" for value in argv)
+    return POWERSHELL.hook_script(argv)
 
 
 # The six lifecycle moments in each client's own names (Gemini renames them; Qwen keeps Claude's).
@@ -223,6 +283,48 @@ def line_endings_only(baseline, current):
     """Managed files are UTF-8 text, so a CRLF rewrite by git autocrlf or an editor is not an edit."""
     if baseline is None or current is None: return False
     return baseline.replace(b"\r\n", b"\n") == current.replace(b"\r\n", b"\n")
+
+
+def unreachable_pin(data):
+    """A `.beyin-runtime.json` naming a state this machine has no install record in: a vault copied
+    or synced from another computer, whose own state stayed there. Nothing here reads that state,
+    so a new install may pin its own; relocate says to install again for exactly this case."""
+    try:
+        pinned = json.loads(data).get("state")
+        path = Path(pinned).expanduser()
+        return not path.is_absolute() or not (path / "v3-install.json").is_file()
+    except (ValueError, TypeError, AttributeError, OSError, RuntimeError):
+        return False
+
+
+def _kiro_hooks_ours(data):
+    """A Kiro hook file holding Beyin's hooks and nothing else."""
+    try:
+        hooks = json.loads(data).get("hooks")
+    except (ValueError, UnicodeError, AttributeError):
+        return False
+    def ours(hook):
+        command = str(hook.get("action", {}).get("command", "")) if isinstance(hook, dict) and isinstance(hook.get("action"), dict) else ""
+        return "beyin_v3_kiro.py" in command + encoded_script(command)
+    return isinstance(hooks, list) and bool(hooks) and all(ours(hook) for hook in hooks)
+
+
+# Files the installer generates whole and that carry a machine's paths (its Python, the vault's
+# folder), each known by its generator's mark. An install into a state with no record of them - a
+# vault copied or synced here with its own state left behind, the case `beyin.py relocate` sends
+# to a new install - writes this machine's edition instead of stopping on every one of them; the
+# record keeps the copy it found as `original`, so uninstall and rollback put that back.
+MACHINE_FILES = {
+    "Beyni Guncelle.cmd": lambda data: b"BEYIN_UPDATE_EXIT" in data,
+    "Beyni Güncelle.sh": lambda data: b"beyin_update_exit" in data,
+    "Beyni Güncelle.command": lambda data: b"beyin_update_exit" in data,
+    "Beyni Güncelle.desktop": lambda data: data.startswith(b"[Desktop Entry]") and "Name=Beyni Güncelle".encode() in data,
+    ".claude/hermes-plugin/__init__.py": lambda data: data.startswith(b'"""Hermes plugin shim for Beyin V3'),
+    ".claude/hermes-plugin/plugin.yaml": lambda data: data.startswith(b"name: beyin-v3\n"),
+    ".opencode/plugins/beyin-v3.js": lambda data: data.startswith(b"// Beyin V3 OpenCode plugin;"),
+    ".omp/hooks/pre/beyin-v3.ts": lambda data: data.startswith(b"// Beyin V3 OMP hook;"),
+    ".kiro/hooks/beyin-v3.json": _kiro_hooks_ours,
+}
 
 
 def conflict_case(current):
@@ -413,7 +515,7 @@ def uninstalled_content(name, item, current, previous, kept):
 
 def _install(vault, state, uninstall=False, plan_only=False, version="0.0.0", legacy_hashes=None,
              legacy_skill_hashes=None, migration=None, migration_plan=None, accept_customized=(),
-             keep_customized=(), exclude_components=(), include_components=()):
+             keep_customized=(), exclude_components=(), include_components=(), backup_customized=False):
     vault, state = vault.resolve(), state.resolve()
     if not vault.is_dir() or state == vault or vault in state.parents:
         raise ValueError("Existing vault and state outside vault required")
@@ -462,10 +564,7 @@ def _install(vault, state, uninstall=False, plan_only=False, version="0.0.0", le
     planned = {}
     modes = {}
     if legacy_hashes is None:
-        legacy_hashes = {}
-        legacy_sources = [ROOT/'template/.claude/scripts'/name for name in ('flush.py','compile.py')] + [ROOT/'template/.claude/hooks'/(name+suffix) for name in ('session-start','session-end','pre-compact','prompt-counter') for suffix in ('.sh','.ps1')]
-        for source in legacy_sources:
-            if source.exists(): legacy_hashes[source.relative_to(ROOT/'template').as_posix()] = digest(source.read_bytes())
+        legacy_hashes = {name: hashes[0] for name, hashes in LEGACY_RUNNER_HASHES.items()}
     if legacy_skill_hashes is None:
         legacy_skill_hashes = default_skill_hashes()
     if not isinstance(legacy_skill_hashes, dict) or any(
@@ -480,15 +579,25 @@ def _install(vault, state, uninstall=False, plan_only=False, version="0.0.0", le
     legacy_skill_hashes = {name: sorted(set(known_skill_hashes.get(name, [])) |
                                       set(legacy_skill_hashes.get(name, [])))
                            for name in known_skill_hashes.keys() | legacy_skill_hashes.keys()}
-    # An accepted path only supplies its own file's digest, so every other runner still needs review.
-    if accept_customized:
-        legacy_hashes = dict(legacy_hashes)
+    # Every digest that marks a runner as stock: the pinned fingerprint, the package's copy of it
+    # (an older updater passes only that), and the runners the person accepted by name. An
+    # accepted path only supplies its own file's digest, so every other runner still needs review.
+    stock_legacy = {name: set(hashes) for name, hashes in LEGACY_RUNNER_HASHES.items()}
+    for name, expected in legacy_hashes.items():
+        if name not in LEGACY_RUNNERS:
+            raise ValueError('unsupported legacy managed path')
+        stock_legacy.setdefault(name, set()).add(expected)
     for name in accept_customized:
         if name not in LEGACY_RUNNERS:
             raise ValueError('unsupported legacy managed path ' + str(name))
         path = vault / name
         if path.exists():
-            legacy_hashes[name] = digest(path.read_bytes())
+            stock_legacy[name].add(text_digest(path.read_bytes()))
+
+    def stock(name, data):
+        """A V2 runner as some release shipped it, line endings aside, or one V3 already retired."""
+        known = stock_legacy.get(name, ())
+        return data is not None and (digest(data) in known or text_digest(data) in known or is_retired(data))
     # A kept runner is the user's own writer running next to V3: never planned, never
     # retired, never in the manifest. The choice persists in the manifest so a later
     # update, which takes no flags, does not ask for the same review again.
@@ -527,20 +636,36 @@ def _install(vault, state, uninstall=False, plan_only=False, version="0.0.0", le
             raise ValueError("Managed destination escapes vault")
         planned[path.relative_to(vault).as_posix()] = content
 
-    for name, expected in legacy_hashes.items():
-        if name not in LEGACY_RUNNERS:
-            raise ValueError('unsupported legacy managed path')
+    legacy_backups = []
+    for name in LEGACY_RUNNERS:
         if name in kept:
             continue
         path = vault / name
         if path.exists() and name not in manifest['files']:
-            if digest(path.read_bytes()) != expected:
-                raise ValueError('Customized legacy runner requires review ' + name)
-            stub = RETIRED_STUB + (b'raise SystemExit(0)\n' if name.endswith('.py') else b'exit 0\n')
-            if name.endswith('.sh'): stub = b'#!/bin/sh\n' + stub
-            add(name, stub)
+            current = path.read_bytes()
+            if not stock(name, current):
+                if not backup_customized:
+                    raise failure('Kasadaki eski Cortex (V2) dosyası ' + name + ' elle değiştirilmiş; kurulum onun '
+                                  'üzerine yazmamak için durdu. Dosyayı inceleyip kurucuyu --accept-customized-legacy ' +
+                                  name + ' (emekliye ayır), --keep-customized-legacy ' + name + ' (olduğu gibi bırak) '
+                                  'ya da --backup-customized-legacy (yedekleyip emekliye ayır) ile yeniden çalıştır.',
+                                  'legacy_review')
+                # The person's runner, byte for byte, under .claude/v2-backup/; a different copy
+                # already there is never written over: the next free name (.1, .2, ...) is used.
+                backup = LEGACY_BACKUP + name[len('.claude/'):]
+                number = 0
+                while (vault / backup).exists() and (vault / backup).read_bytes() != current:
+                    number += 1
+                    backup = LEGACY_BACKUP + name[len('.claude/'):] + '.' + str(number)
+                add(backup, current)
+                legacy_backups.append({'file': name, 'backup': backup})
+            add(name, retired_stub(name))
     for source in sorted((ROOT / "template/.claude/scripts").glob("beyin_v3*.py")):
         add(".claude/scripts/" + source.name, source.read_bytes())
+    # The CLI before the entry that loads it: an update cut short in between leaves a new CLI under
+    # an old entry, which works, never a new entry over an old CLI, which made every beyin.py
+    # command fail - recover and rollback too (install-update-5). The entry is the last code written.
+    add(".claude/scripts/beyin_v3_cli.py", (ROOT / "scripts/beyin_v3.py").read_bytes())
     add("beyin.py", (ROOT / "scripts/beyin_entry.py").read_bytes())
     add(".beyin-runtime.json", jbytes({"state": str(state), "schema": 1}))
     add(".beyin-version", (version + "\n").encode())
@@ -582,7 +707,6 @@ def _install(vault, state, uninstall=False, plan_only=False, version="0.0.0", le
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         for name, content in module.plan_plugin(vault, state).items():
             add(name, content)
-    add(".claude/scripts/beyin_v3_cli.py", (ROOT / "scripts/beyin_v3.py").read_bytes())
     hook = vault / ".claude/scripts/beyin_v3_hook.py"
     kiro_adapter = vault / ".claude/scripts/beyin_v3_kiro.py"
     for harness, name in (("claude", ".claude/settings.local.json"), ("codex", ".codex/hooks.json")):
@@ -783,13 +907,24 @@ Use Markdown source files as truth; run `python3 beyin.py sync` in the vault roo
         if item and not already and (current is None or digest(current) != item["installed_hash"]):
             baseline = base64.b64decode(item["installed_content"]) if item.get("installed_content") else None
             if not semantic_unchanged(name, baseline, current, manifest.get("commands", []), user_owned, user_excluded):
-                raise ValueError("Reinstall conflict: managed file changed " + name +
-                                 " (" + conflict_case(current) + ")")
+                raise failure("Cortex'in yönettiği " + name + " dosyası " + ("silinmiş" if current is None else "elle değiştirilmiş") +
+                              "; üzerine yazılmadı. O değişikliği geri alıp ya da dosyayı başka bir yere taşıyıp yeniden dene.",
+                              "update_conflict")
         elif not item and current is not None and not line_endings_only(planned[name], current):
             semantic = name in ("AGENTS.md", "CLAUDE.md", ".claude/settings.local.json", ".claude/settings.json", ".codex/hooks.json", ".agents/hooks.json", ".codex/config.toml", ".beyin-version", ".gemini/settings.json", ".qwen/settings.json")
-            legacy = digest(current) in legacy_skill_hashes.get(name, []) or legacy_hashes.get(name) == digest(current)
+            legacy = (digest(current) in legacy_skill_hashes.get(name, []) or stock(name, current)
+                      or (name == ".beyin-runtime.json" and unreachable_pin(current))
+                      or (name in MACHINE_FILES and MACHINE_FILES[name](current))
+                      or any(entry["file"] == name for entry in legacy_backups))
             if not semantic and not legacy:
-                raise ValueError("Unmanaged file conflict " + name)
+                if name == ".beyin-runtime.json":
+                    # The pin of an install this state has no record of: the vault was moved or
+                    # copied, and its own state is elsewhere (beyin.py relocate binds it again).
+                    raise failure("Bu kasa başka bir Cortex kurulumuna bağlı (.beyin-runtime.json); kasa taşınmış ya da "
+                                  "kopyalanmış olabilir. Önce kasada beyin.py relocate çalıştır, sonra yeniden dene.",
+                                  "vault_moved")
+                raise failure("Kasada Cortex'in yazacağı " + name + " dosyası zaten var ve içeriği farklı; üzerine "
+                              "yazılmadı. Dosyayı başka bir yere taşıyıp yeniden dene.", "update_conflict")
     # A file an excluded component installed earlier is planned as None (delete) when untouched,
     # or back to the user's original when it replaced one: the existing encode(None) path,
     # which installed 3.3/3.4 updaters already apply. An edited file stays and is the user's.
@@ -813,8 +948,10 @@ Use Markdown source files as truth; run `python3 beyin.py sync` in the vault roo
             removed.append(name)
         else:
             preserved_excluded.append(name)
+    backup_names = {entry["backup"] for entry in legacy_backups}
     for name, content in planned.items():
-        if name == PERSON_TEMPLATE_PATH:
+        if name == PERSON_TEMPLATE_PATH or name in backup_names:
+            # Written once and the person's from then on: no update or uninstall claims it.
             next_manifest["files"].pop(name, None)
             continue
         if name in removed: continue
@@ -834,7 +971,8 @@ Use Markdown source files as truth; run `python3 beyin.py sync` in the vault roo
     else:
         next_manifest.pop("excluded_components", None)
     if plan_only:
-        return {"planned": planned, "manifest": next_manifest, "modes": modes, "removed": removed, "preserved_excluded": preserved_excluded}
+        return {"planned": planned, "manifest": next_manifest, "modes": modes, "removed": removed, "preserved_excluded": preserved_excluded,
+                "legacy_backups": legacy_backups}
     spec = importlib.util.spec_from_file_location('beyin_install_transaction', ROOT / 'template/.claude/scripts/beyin_v3_update.py')
     updater = importlib.util.module_from_spec(spec); spec.loader.exec_module(updater)
     operations = []
@@ -858,19 +996,26 @@ Use Markdown source files as truth; run `python3 beyin.py sync` in the vault roo
                'migration_plan':migration_plan,'migration_backup':encode(marker.read_bytes() if marker.exists() else None)}
     with updater.locked(vault,state):
         if (state/'update-journal.json').exists():
-            raise ValueError('Pending installation; run installed beyin.py recover or rollback first')
+            raise failure('Bu kasada yarım kalmış bir kurulum var; önce kasada beyin.py recover (tamamla) ya da '
+                          'beyin.py rollback (geri al) çalıştır.', 'pending_journal')
         atomic(state/'update-journal.json',jbytes(journal))
         updater._apply(vault,state,journal,(migration,migration_plan) if migration else None)
     if sorted(user_excluded) != stored_excluded:
         exclusions.save_exclusions(vault, user_excluded)
     from beyin_v3_companion import initialize
     companion = initialize(vault, state)
+    # An Ananas snippet the person installed before is brought to this release (misc-scripts-5).
+    theme = updater._refresh_theme(vault)
     result = {'status':'installed','files':len(planned),'trust_review_required':True,'kept_legacy':kept,
               'excluded_components': sorted(user_excluded),
               'removed': removed, 'preserved_excluded': preserved_excluded,
               'companion': companion,
               'update_notice': 'New releases are checked on GitHub at most daily; notes are not sent. Disable with beyin.py preferences --update-notifications off.',
               'skills':{'synced':[s for s in ('beyin','beyin-doktor','beyin-guncelle') if not is_component_excluded(f'.agents/skills/{s}/', user_excluded)],'conflicts':[], 'mode':'managed'}}
+    if legacy_backups:
+        result['legacy_backups'] = legacy_backups
+    if theme == 'yenilendi':
+        result['theme'] = theme
     # V2 flush sentinels whose writer provably died: the cutover went ahead, and the summaries
     # they were writing most likely never reached daily/.
     if migration_plan and migration_plan.get('orphaned_legacy_state'):
@@ -913,7 +1058,7 @@ def package_defaults():
 
 def install(vault, state, uninstall=False, plan_only=False, version=None, legacy_hashes=None,
             legacy_skill_hashes=None, accept_customized=(), keep_customized=(),
-            exclude_components=(), include_components=()):
+            exclude_components=(), include_components=(), backup_customized=False):
     package = package_defaults()
     if package is not None:
         if version is not None and version != package['version']:
@@ -932,7 +1077,8 @@ def install(vault, state, uninstall=False, plan_only=False, version=None, legacy
     if plan_only or uninstall:
         return _install(vault, state, uninstall, plan_only, version, legacy_hashes, legacy_skill_hashes,
                         accept_customized=accept_customized, keep_customized=keep_customized,
-                        exclude_components=exclude_components, include_components=include_components)
+                        exclude_components=exclude_components, include_components=include_components,
+                        backup_customized=backup_customized)
     directory = ROOT / 'template/.claude/scripts'
     if (Path(state).resolve() / 'update-journal.json').exists():
         spec = importlib.util.spec_from_file_location('beyin_install_recovery', directory / 'beyin_v3_update.py')
@@ -947,7 +1093,8 @@ def install(vault, state, uninstall=False, plan_only=False, version=None, legacy
             return _install(vault, state, version=version, legacy_hashes=legacy_hashes,
                             legacy_skill_hashes=legacy_skill_hashes, migration=module, migration_plan=plan,
                             accept_customized=accept_customized, keep_customized=keep_customized,
-                            exclude_components=exclude_components, include_components=include_components)
+                            exclude_components=exclude_components, include_components=include_components,
+                            backup_customized=backup_customized)
     finally:
         sys.path.remove(str(directory))
 
@@ -977,6 +1124,8 @@ def main():
                         help="retire one named customized legacy runner (vault-relative); repeatable")
     parser.add_argument("--keep-customized-legacy", action="append", default=[], metavar="PATH",
                         help="leave one named customized legacy runner and its hook entries untouched and unmanaged (vault-relative); repeatable")
+    parser.add_argument("--backup-customized-legacy", action="store_true",
+                        help="copy every customized legacy runner byte for byte under .claude/v2-backup/, then retire it")
     parser.add_argument("--exclude-component", action="append", default=[], metavar="COMPONENT",
                         help="disable/exclude a managed component, skill, adapter, or launcher; repeatable")
     parser.add_argument("--include-component", action="append", default=[], metavar="COMPONENT",
@@ -1004,12 +1153,26 @@ def main():
         result = install(args.vault, args.state or default_state(args.vault.resolve()), args.uninstall,
                          plan_only=args.plan, accept_customized=accepted, keep_customized=kept,
                          exclude_components=excluded,
-                         include_components=included)
+                         include_components=included, backup_customized=args.backup_customized_legacy)
         print(json.dumps(plan_report(result) if args.plan else result))
     except Exception as exc:
-        print(json.dumps({"error": type(exc).__name__, "message": str(exc)}), file=sys.stderr)
+        print(json.dumps(error_report(exc)), file=sys.stderr)
         return 1
     return 0
+
+
+def error_report(exc):
+    """The error JSON (C1): what failed, its sentence, and its name where the desktop app knows it.
+    A full disk is named here whichever write met it."""
+    error = {"error": type(exc).__name__, "message": str(exc)}
+    code = getattr(exc, "code", None)
+    if isinstance(code, str):
+        error["code"] = code
+    elif isinstance(exc, OSError) and (exc.errno == errno.ENOSPC or getattr(exc, "winerror", None) in (39, 112)):
+        error["code"] = "disk_full"
+        error["message"] = ("Diskte yer kalmadı (" + (exc.strerror or str(exc)) + "); biraz yer açıp yeniden dene, "
+                            "yarım kalan kurulum kaldığı yerden sürer.")
+    return error
 
 
 if __name__ == "__main__":

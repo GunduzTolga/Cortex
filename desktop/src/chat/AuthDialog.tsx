@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { KeyRound, LogIn, RefreshCw, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Download, KeyRound, LogIn, RefreshCw, Trash2 } from 'lucide-react';
 import type { CliAuth, CliId } from '@shared/chat';
 import { messageOf } from '@shared/ipcError';
 import type { Key } from '../i18n';
@@ -53,13 +53,31 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
   const [key, setKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [busy, setBusy] = useState(false);
-  const [waiting, setWaiting] = useState(false);
+  // Its sign-in's window open. Its installer's is the window's (chatStore.ts), so the empty chat and this row say the same.
+  const [signingIn, setSigningIn] = useState(false);
+  const installing = useChat((state) => (state.installing?.id === tool.id ? state.installing : null));
   const failed = (err: unknown) => toast({ tone: 'error', title: t('auth.failed'), detail: messageOf(err) });
+
+  // The sign-in's window closed, or the tool says it is signed in: "finish signing in" is no longer what goes on.
+  useEffect(() => {
+    if (!signingIn) return;
+    return window.cortex.on.authChanged(() => setSigningIn(false));
+  }, [signingIn]);
+  useEffect(() => {
+    if (tool.signedIn) setSigningIn(false);
+  }, [tool.signedIn]);
 
   const login = async () => {
     try {
       await window.cortex.chat.login(tool.id);
-      setWaiting(true);
+      setSigningIn(true);
+    } catch (err) {
+      failed(err);
+    }
+  };
+  const install = async () => {
+    try {
+      await useChat.getState().install(tool.id);
     } catch (err) {
       failed(err);
     }
@@ -102,6 +120,14 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
       {tool.local?.shortContext ? <p className="mt-1 text-[11.5px] font-semibold text-bad" data-auth-short>{t('auth.local.short', { tokens: tool.local.shortContext })}</p> : null}
       {refused && tool.signedIn ? <p className="mt-1 text-[11.5px] font-semibold text-bad" data-auth-expired>{t('auth.expired')}</p> : null}
       <p className="mt-1.5 text-[11.5px] leading-relaxed text-zinc-400">{t(NOTES[tool.id])}</p>
+      {!tool.installed && tool.canInstall ? (
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <Button tone="primary" onClick={() => void install()} disabled={Boolean(installing && !installing.failed)} data-auth-install>
+            <Download size={13} />
+            {t('auth.install')}
+          </Button>
+        </div>
+      ) : null}
       {tool.installed ? (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           {tool.canLogin ? (
@@ -124,7 +150,13 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
           ) : null}
         </div>
       ) : null}
-      {waiting ? <p className="mt-2 text-[11.5px] text-zinc-500">{t('auth.login.waiting')}</p> : null}
+      {installing && !tool.installed ? (
+        <p className={`mt-2 text-[11.5px] ${installing.failed ? 'text-bad' : 'text-zinc-500'}`} data-auth-install-state={installing.failed ? 'failed' : 'running'}>
+          {t(installing.failed ? 'onboarding.tools.installFailed' : 'auth.install.waiting')}
+        </p>
+      ) : signingIn ? (
+        <p className="mt-2 text-[11.5px] text-zinc-500">{t('auth.login.waiting')}</p>
+      ) : null}
       {keying ? (
         <form
           className="mt-2.5 space-y-2"

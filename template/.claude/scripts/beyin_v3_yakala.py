@@ -152,8 +152,14 @@ def kind_of(url=None, files=(), app=None):
         return 'dosya'
     if not url:
         return 'mail' if app and re.search(r'mail|outlook|spark|thunderbird', app, re.I) else 'metin'
-    host = (urlparse(url).hostname or '').lower().removeprefix('www.').removeprefix('m.')
-    path = urlparse(url).path.lower()
+    try:
+        parts = urlparse(url)
+        host = (parts.hostname or '').lower().removeprefix('www.').removeprefix('m.')
+    except ValueError:
+        # A malformed link ("http://[abc") raised here inside the listener's window loop, which then
+        # never ran again: no window, no key, a microphone nobody could let go. capture() refuses it.
+        return 'makale'
+    path = parts.path.lower()
     if host in ('youtube.com', 'youtu.be', 'music.youtube.com'):
         return 'youtube'
     if host in ('x.com', 'twitter.com', 'fxtwitter.com', 'vxtwitter.com'):
@@ -177,8 +183,11 @@ def canonical(url):
     """
     if not url:
         return ''
-    parts = urlparse(url.strip())
-    host = (parts.hostname or '').lower().rstrip('.').removeprefix('www.').removeprefix('m.')
+    try:
+        parts = urlparse(url.strip())
+        host = (parts.hostname or '').lower().rstrip('.').removeprefix('www.').removeprefix('m.')
+    except ValueError:
+        return url.strip()  # a card edited by hand to a malformed link matches only itself
     try:
         port = parts.port
     except ValueError:
@@ -216,24 +225,59 @@ def _value(raw):
     return raw
 
 
-def read_card(path):
-    text = Path(path).read_text(encoding='utf-8')
+FRONT_KEY = re.compile(r'^([A-Za-z_][\w-]*):\s?(.*)$')
+
+
+def _front(text):
+    """A card's frontmatter as (key, value, its lines) in order, and where the body starts; None
+    for a card without one. A key's lines are its own and the ones under it that are not a key: a
+    list's items, a block scalar, a comment (key None: lines before the first key)."""
     if not text.startswith('---'):
-        return {}, text
+        return None
     end = text.find('\n---', 3)
     if end < 0:
-        return {}, text
-    meta = {}
-    for line in text[3:end].splitlines():
-        match = re.match(r'^([A-Za-z_][\w-]*):\s?(.*)$', line)
+        return None
+    blocks = []
+    for line in text[3:end].splitlines()[1:]:
+        match = FRONT_KEY.match(line)
         if match:
-            meta[match.group(1)] = _value(match.group(2))
-    return meta, text[end + 4:].lstrip('\n')
+            blocks.append((match.group(1), _value(match.group(2)), [line]))
+        elif blocks:
+            blocks[-1][2].append(line)
+        else:
+            blocks.append((None, None, [line]))
+    return blocks, end + 4
 
 
-def _dump(meta, body):
-    lines = ['---']
+def read_card(path):
+    text = Path(path).read_text(encoding='utf-8')
+    front = _front(text)
+    if front is None:
+        return {}, text
+    blocks, start = front
+    return {key: value for key, value, _lines in blocks if key is not None}, text[start:].lstrip('\n')
+
+
+def _raw_front(path):
+    """The frontmatter the card on disk has now, each key as it is written there (_front)."""
+    try:
+        front = _front(Path(path).read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError):
+        return []
+    return front[0] if front else []
+
+
+def _dump(meta, body, raw=()):
+    """The card's text. A key the engine did not change keeps its lines from `raw` (the card as it
+    was) byte for byte: the person's tags and aliases as Obsidian writes them, a list or a block
+    scalar this reader never parsed, true and 3 as YAML values, not strings. Every rewrite (a
+    recapture, isle, bitti) used to drop a list and quote the rest."""
+    kept = {key: (value, lines) for key, value, lines in raw if key is not None}
+    lines = ['---'] + [line for key, _read, block in raw if key is None for line in block]
     for key, value in meta.items():
+        if key in kept and kept[key][0] == value:
+            lines.extend(kept[key][1])
+            continue
         if value is None or value == '':
             continue
         lines.append(key + ': ' + json.dumps(value, ensure_ascii=False))
@@ -260,13 +304,14 @@ def _atomic_text(path, text, prefix='.yakala-'):
 
 
 def write_card(path, meta, body):
+    text = _dump(meta, body, _raw_front(path))  # what the person added by hand stays as they wrote it
     if os.name == 'nt':
-        return _atomic_text(path, _dump(meta, body))
+        return _atomic_text(path, text)
     # Preserve the existing non-Windows write path; this PR hardens Windows capture.
     path = Path(path)
     fd, temp = tempfile.mkstemp(prefix='.yakala-', dir=path.parent)
     with os.fdopen(fd, 'w', encoding='utf-8', newline='\n') as handle:
-        handle.write(_dump(meta, body))
+        handle.write(text)
     os.replace(temp, path)
 
 
@@ -283,6 +328,34 @@ def cards(vault):
         if meta.get('tur') == 'yakala':
             found.append({'path': path, 'id': path.stem, 'meta': meta, 'body': body})
     return found
+
+
+HEAD_BYTES = 4096  # a card's frontmatter, as far as finding its url needs
+
+
+def _card_for(vault, key):
+    """The card that already holds the source `key` (canonical), or None. Only each card's head
+    is read, the whole of the one that matches: the inbox only grows, and a page capture read
+    every card in it on the listener's window thread (seconds on a synced vault a year old)."""
+    folder = inbox(vault)
+    if not folder.is_dir():
+        return None
+    for path in sorted(folder.glob('*.md')):
+        try:
+            with open(path, encoding='utf-8', errors='ignore') as handle:
+                head = handle.read(HEAD_BYTES)
+        except OSError:
+            continue
+        found = re.search(r'^url:[ \t]*(.*?)[ \t]*$', head, re.M) if head.startswith('---') else None
+        if not found or canonical(str(_value(found.group(1)))) != key:
+            continue
+        try:
+            meta, body = read_card(path)
+        except (OSError, UnicodeDecodeError):
+            continue
+        if meta.get('tur') == 'yakala' and meta.get('url') and canonical(str(meta['url'])) == key:
+            return {'path': path, 'id': path.stem, 'meta': meta, 'body': body}
+    return None
 
 
 def find_card(vault, card_id):
@@ -356,25 +429,34 @@ def capture(vault, url=None, text=None, files=(), why='', app=None, title=None, 
     files = [Path(f).expanduser() for f in files]
     if not (url or text or files):
         raise ValueError('Yakalanacak bir sey yok: URL, metin ya da dosya ver.')
+    if not vault.is_dir():
+        # A vault moved, renamed or deleted since the listener or a shortcut was set up for it: the
+        # inbox was made again under the old path, and the notes went where nobody looked.
+        raise ValueError('Kasa bulunamadi: ' + str(vault) + ' (tasinmis ya da silinmis olabilir); not kaydedilmedi.')
     folder = inbox(vault)
     folder.mkdir(parents=True, exist_ok=True)
     stamp = now()
     if url:
-        key = canonical(url)
-        for card in cards(vault):
-            if card['meta'].get('url') and canonical(card['meta']['url']) == key:
-                body = card['body'].rstrip()
-                addition = '\n\n## Yeniden yakalandi (' + stamp.strftime('%Y-%m-%d %H:%M') + ')\n' + (why or '_(not yok)_')
-                if text:
-                    addition += '\n\n' + _quote(text)
-                # A picture added to a page captured before is kept too, not dropped.
-                copied = _capture_files(vault, folder, files) if os.name == 'nt' else []
-                if copied:
-                    addition += '\n\n## Dosyalar\n\n' + '\n'.join('- [[' + item + ']]' for item in copied)
-                if os.name == 'nt' and (text or copied):
-                    card['meta']['visibility'] = 'private'
-                write_card(card['path'], card['meta'], body + addition)
-                return {'status': 'mevcut_karta_eklendi', 'id': card['id'], 'path': str(card['path'].relative_to(vault))}
+        card = _card_for(vault, canonical(url))
+        if card is not None:
+            body = card['body'].rstrip()
+            addition = '\n\n## Yeniden yakalandi (' + stamp.strftime('%Y-%m-%d %H:%M') + ')\n' + (why or '_(not yok)_')
+            if text:
+                addition += '\n\n' + _quote(text)
+            # A picture added to a page captured before is kept too, not dropped.
+            copied = _capture_files(vault, folder, files) if os.name == 'nt' else []
+            if copied:
+                addition += '\n\n## Dosyalar\n\n' + '\n'.join('- [[' + item + ']]' for item in copied)
+            if text or copied:
+                card['meta']['visibility'] = 'private'
+            if card['meta'].get('durum') in ('islendi', 'hata'):
+                # A new reason for a source handled before is new work: back in the queue, or the
+                # session notice and `isle` never saw it. `isle` takes up the text it has already
+                # (process), the agent only what was asked since.
+                card['meta']['durum'] = 'bekliyor'
+                card['meta']['yeniden_yakalandi'] = stamp.isoformat(timespec='seconds')
+            write_card(card['path'], card['meta'], body + addition)
+            return {'status': 'mevcut_karta_eklendi', 'id': card['id'], 'path': str(card['path'].relative_to(vault))}
     # Windows: a page link with an attached picture stays a link card, so `isle` still fetches it.
     kind = kind_of(url, () if url and os.name == 'nt' else files, app)
     if not title:
@@ -384,8 +466,10 @@ def capture(vault, url=None, text=None, files=(), why='', app=None, title=None, 
     path = _unique(folder / (name + '.md'))
     meta = {'tur': 'yakala', 'durum': 'bekliyor', 'kaynak_turu': kind, 'baslik': _first_line(title, 160),
             'url': url, 'yakalandi': stamp.isoformat(timespec='seconds'), 'arac': tool, 'uygulama': app,
-            # Clipboard text, a picture or a file on the card may be anything the person copied: private.
-            'visibility': 'private' if kind in ('mail', 'metin', 'dosya') or (os.name == 'nt' and (text or files)) else 'internal'}
+            # Clipboard text, a picture or a file on the card may be anything the person copied: private,
+            # on every system (a page's card with a Telegram message or a selection on it was marked
+            # internal off Windows, and private cards are what automatic context leaves out).
+            'visibility': 'private' if kind in ('mail', 'metin', 'dosya') or text or files else 'internal'}
     for key, value in (extra or {}).items():
         meta.setdefault(key, value)
     body = ['# ' + _first_line(title, 160), '', '## Neden', '', why or '_(not yok)_']
@@ -994,6 +1078,17 @@ def _write_raw(path, text, encoding='utf-8', newline='\n'):
         path.write_text(text, encoding=encoding, newline=newline)
 
 
+def _earlier_raw(vault, meta):
+    """The text a card captured again kept from when it was handled (`ham`), when it is still
+    there inside the vault; None for every other card."""
+    if meta.get('durum') != 'bekliyor' or not meta.get('yeniden_yakalandi') or not meta.get('ham'):
+        return None
+    try:
+        return _safe_vault_file(Path(vault).resolve(), str(meta['ham']))
+    except (OSError, ValueError):
+        return None
+
+
 def process(vault, card_ids=None, allow_audio=True, retry=False):
     vault = Path(vault)
     found = tools()
@@ -1002,14 +1097,33 @@ def process(vault, card_ids=None, allow_audio=True, retry=False):
     results = []
     for card in targets:
         meta, body = dict(card['meta']), card['body']
+        entry = {'id': card['id'], 'kart': card['path'].relative_to(vault).as_posix(),
+                 'kaynak_turu': meta.get('kaynak_turu'), 'baslik': meta.get('baslik'),
+                 'neden': _section(body, 'Neden'), 'url': meta.get('url')}
+        earlier = _earlier_raw(vault, meta)
+        if earlier is not None:
+            # Captured again after it was handled (capture): its text is here already. A video's
+            # audio is not fetched and transcribed again for a new reason about the same video.
+            try:
+                meta.update(durum='cikarildi')
+                meta.pop('hata', None)
+                write_card(card['path'], meta, body)
+                entry.update(durum='cikarildi', yontem='onceki', ham=meta['ham'], karakter=earlier.stat().st_size,
+                             yeniden_yakalandi=meta.get('yeniden_yakalandi'))
+                entry['not'] = ('Kaynak daha once islendi; metni yine ayni ham dosyada. Yalniz son "## Islendi" '
+                                'bolumunden sonraki "## Yeniden yakalandi" istegini isle.')
+            except OSError as exc:
+                if os.name != 'nt':
+                    raise
+                entry.update(durum='hata')
+                entry['not'] = str(exc)[:200]
+            results.append(entry)
+            continue
         try:
             info = {}
             text, method, note = extract(vault, card, found, allow_audio, info)
         except Exception as exc:  # one broken source must not stop the queue
             text, method, note, info = None, None, type(exc).__name__ + ': ' + str(exc)[:200], {}
-        entry = {'id': card['id'], 'kart': card['path'].relative_to(vault).as_posix(),
-                 'kaynak_turu': meta.get('kaynak_turu'), 'baslik': meta.get('baslik'),
-                 'neden': _section(body, 'Neden'), 'url': meta.get('url')}
         try:
             if info.get('title') and (not meta.get('baslik') or str(meta.get('baslik')).startswith(('http://', 'https://'))):
                 body = re.sub(r'^# .*$', lambda _m: '# ' + _first_line(info['title'], 160), body, count=1, flags=re.M)
@@ -1439,6 +1553,68 @@ PALETTE = {'bg': '#f3efe4', 'card': '#fffaf0', 'card_line': '#1b1712', 'shadow':
            'accent_text': '#1b1712', 'key': '#fffaf0', 'key_line': '#1b1712', 'ok': '#5c6b4a', 'bad': '#b4472f'}
 KIND_LABEL = {'youtube': 'VİDEO', 'x': 'TWEET', 'mail': 'MAİL', 'github': 'REPO', 'pdf': 'PDF', 'makale': 'SAYFA'}
 
+# The window in English when Cortex's desktop app is set to English (`dil` in masaustu.json): the
+# Turkish line is the key, the English one what is shown. What the voice understands stays
+# Turkish (its models are Turkish), so the spoken commands are shown as they must be said.
+# An error the engine raised (after "Kaydedilemedi:") is shown as it is.
+ENGLISH = {
+    'Not al': 'Take a note',
+    'Neden kaydediyorsun?': 'Why are you saving this?',
+    'Aklındakini yaz…': 'Write what is on your mind…',
+    'Bu sayfayı nota bağla · Alt+S': 'Attach this page · Alt+S',
+    'Panodaki bağlantıyı nota bağla · Tab': 'Attach the copied link · Tab',
+    'Panodaki metni de ekle · ': 'Also add the copied text · ',
+    'Bu metni nota ekle · Tab': 'Add this text to the note · Tab',
+    'Tab: panoyu ekle': 'Tab: add the clipboard',
+    'Tab: bağlantıyı ekle': 'Tab: attach the link',
+    '%s ile her yerden açılır': 'Opens anywhere with %s',
+    'Kaydet': 'Save', 'Kapat': 'Close', 'Ekle': 'Add',
+    'Önce bir şey yaz ya da söyle': 'Type or say something first',
+    'Kaydedilemedi: ': 'Could not save: ',
+    '✓  Kaydedildi': '✓  Saved',
+    'VİDEO': 'VIDEO', 'MAİL': 'MAIL', 'SAYFA': 'PAGE', 'DOSYA': 'FILE', 'METİN': 'TEXT', 'GÖRSEL': 'IMAGE',
+    'Panodaki görüntü eklenecek': 'The copied image goes with the note', 'Panoda bir görüntü var': 'An image is on the clipboard',
+    'eski, geçici dosyası silinmiş': 'old, its temporary file is gone', 'az önce': 'just now', '%d dk önce': '%d min ago',
+    '%d saat önce': '%d h ago', '%d gün önce': '%d days ago',
+    'Ses açılamadı, yeniden deneniyor: ': 'Voice could not start, trying again: ',
+    'Ses modeli indiriliyor: %d / %d MB': 'Downloading the voice model: %d / %d MB',
+    'Ses hazırlanıyor… birazdan konuşabilirsin': 'Voice is getting ready… you can speak in a moment',
+    '● Dinliyorum': '● Listening', 'Söylediğini yazıya çeviriyorum…': 'Writing down what you said…',
+    'Konuşmak için mikrofona tıkla ya da %s\'ye bir daha bas': 'Click the microphone or press %s again to speak',
+    'Konuş, ara verebilirsin · bitince “Pyn, kaydet” de ya da Enter · Esc: vazgeç':
+        'Speak, pauses are fine · then say “Pyn, kaydet” (save) or press Enter · Esc: cancel',
+    'Susunca yazarım · “kaydet” ya da Enter: kaydet · Esc: vazgeç': 'I write when you stop · “kaydet” or Enter: save · Esc: cancel',
+    'Ya da yaz · Enter kaydeder, Esc kapatır': 'Or type · Enter saves, Esc closes',
+    'Mikrofondan ses gelmiyor': 'No sound from the microphone',
+    'Mikrofon kapalı ya da sessizde olabilir; Windows ses ayarlarından doğru mikrofonu seç':
+        'The microphone may be off or muted; pick the right one in the Windows sound settings',
+    'Yazmaya başladın; dinlemeyi bıraktım': 'You started typing; I stopped listening',
+    'Konuşmak için mikrofona tıkla': 'Click the microphone to speak', 'Konuş, ben yazayım…': 'Speak, I will write…',
+    '✓ Panodaki görüntü eklendi': '✓ The copied image was added',
+    'Panoda görüntü yok: önce bir görüntü kopyala': 'No image on the clipboard: copy one first',
+    'Bir şey duyamadım; yeniden dene ya da yaz': 'I did not hear anything; try again or type',
+    'Bir süredir ses gelmedi; dinlemeyi bıraktım': 'Nothing was said for a while; I stopped listening',
+    'Ses: ': 'Voice: ', 'bir sorun oldu': 'something went wrong', 'Ses yardımcısı kapandı': 'The voice helper stopped',
+    'Komutlar: ': 'Say (Turkish): ',
+    'Beyne atıldı: ': 'Saved to Cortex: ',
+}
+
+
+def _desktop_language():
+    """'en' when Cortex's desktop app is set to English (it says so in masaustu.json), else 'tr'."""
+    try:
+        said = json.loads((_user_folder() / 'masaustu.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return 'tr'
+    return 'en' if isinstance(said, dict) and said.get('dil') == 'en' else 'tr'
+
+
+def _words(language):
+    """The window's lines in `language`: a function from the Turkish line to the one shown."""
+    if language != 'en':
+        return lambda text: text
+    return lambda text: ENGLISH.get(text, text)
+
 # Each role names the Ananas face first; tkinter only sees installed fonts, so the system face follows it.
 FONT_ROLES = {
     'display': ('Fraunces', 'Fraunces 72pt', 'Georgia'),
@@ -1481,6 +1657,7 @@ def _logo(root):
 
 
 FONT_DIR = 'yazitipleri'
+FONT_LICENSE = 'OFL.txt'
 _fonts_loaded = False
 
 
@@ -1499,12 +1676,16 @@ def _load_fonts(state):
         folder = Path(state) / FONT_DIR
         missing = [name for name, size in marka.FONT_SIZES.items()
                    if not (folder / name).is_file() or (folder / name).stat().st_size != size]
-        if missing:
+        # The faces' licence goes with them (OFL condition 2): written once beside the TTFs.
+        if missing or not (folder / FONT_LICENSE).is_file():
             import base64
             import beyin_v3_yazitipi as yazitipi
             folder.mkdir(parents=True, exist_ok=True)
             for name in missing:
                 (folder / name).write_bytes(base64.b64decode(''.join(yazitipi.FONTS[name])))
+            licence = getattr(yazitipi, 'LICENSE', None)
+            if licence:
+                (folder / FONT_LICENSE).write_text(licence, encoding='utf-8', newline='\n')
         add = ctypes.windll.gdi32.AddFontResourceExW
         add.argtypes = [ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_void_p]
         loaded = [name for name in marka.FONT_SIZES if add(str(folder / name), 0x10, None)]  # 0x10: FR_PRIVATE
@@ -1575,6 +1756,9 @@ def _fit(canvas, text, font, width):
 # then the reader and the card.
 
 IMAGE_FRESH = 600  # seconds; only a screenshot younger than this starts switched on, the rest waits for Tab
+# Seconds since the clipboard last changed (the listener sees it change) within which copied text
+# or a copied link starts switched on; older, it is shown and waits for Tab.
+CLIP_FRESH = 300
 IMAGE_PIXEL_LIMIT = 16_777_216  # decoded pixels, checked before any Tk decode
 IMAGE_LIMIT = 64 * 1024 * 1024  # bytes taken from the clipboard; two 4K screens side by side fit as a bitmap
 PNG_MAGIC = b'\x89PNG\r\n\x1a\n'
@@ -1777,23 +1961,23 @@ def clipboard_image(clip, context, at=None):
         return None
 
 
-def _ago(seconds):
+def _ago(seconds, say=lambda text: text):
     minutes = int(seconds // 60)
     if minutes < 1:
-        return 'az önce'
+        return say('az önce')
     if minutes < 60:
-        return str(minutes) + ' dk önce'
-    return str(minutes // 60) + ' saat önce' if minutes < 2880 else str(minutes // 1440) + ' gün önce'
+        return say('%d dk önce') % minutes
+    return say('%d saat önce') % (minutes // 60) if minutes < 2880 else say('%d gün önce') % (minutes // 1440)
 
 
-def image_lines(image, on):
+def image_lines(image, on, say=lambda text: text):
     """What the clipboard picture's row says: whether it goes with the note, and its facts."""
     facts = ['%d×%d' % (image['width'], image['height'])]
     if image['age'] is not None:
-        facts.append(_ago(image['age']))
+        facts.append(_ago(image['age'], say))
     elif image['stale']:
-        facts.append('eski, geçici dosyası silinmiş')
-    return 'Panodaki görüntü eklenecek' if on else 'Panoda bir görüntü var', ' · '.join(facts)
+        facts.append(say('eski, geçici dosyası silinmiş'))
+    return say('Panodaki görüntü eklenecek') if on else say('Panoda bir görüntü var'), ' · '.join(facts)
 
 
 def _image_thumb(root, image, box=(112, 54)):
@@ -1834,7 +2018,7 @@ def _attachment(canvas, root, y, width, pad, kind, headline, detail='', thumb=No
     return items, x, height
 
 
-def _image_card(canvas, root, image, y, width, pad, changed, hooks=None):
+def _image_card(canvas, root, image, y, width, pad, changed, hooks=None, say=lambda text: text):
     """The clipboard picture as one compact row: the picture small, whether it goes with the note,
     its facts, and a box to tick; Tab or a click switches it. Calls changed(on), returns the next y.
     `hooks` gets `switch(on)`: the voice's "panodaki resmi ekle" turns it on."""
@@ -1843,18 +2027,18 @@ def _image_card(canvas, root, image, y, width, pad, changed, hooks=None):
     thumb = _image_thumb(root, image, box=(64, 32))
     if thumb is not None:
         image['thumb'] = thumb  # Tk drops a picture nothing refers to
-    items, text_x, height = _attachment(canvas, root, y, width, pad, 'GÖRSEL', '', thumb=thumb)
+    items, text_x, height = _attachment(canvas, root, y, width, pad, say('GÖRSEL'), '', thumb=thumb)
     mid = y + height / 2
     # The switch at the right: a box and what it does, the key beside it.
     switch_font = _font(11, 'bold')
-    label_w = tkfont.Font(root=root, font=switch_font).measure('Ekle')
+    label_w = tkfont.Font(root=root, font=switch_font).measure(say('Ekle'))
     key_font = _font(9, 'bold', 'label')
     key_w = tkfont.Font(root=root, font=key_font).measure('Tab') + 12
     right = width - pad - 12
     key_x2 = right
     key = [_round_rect(canvas, key_x2 - key_w, mid - 10, key_x2, mid + 10, 4, fill=P['key'], outline=P['key_line'], width=1.2),
            canvas.create_text(key_x2 - key_w / 2, mid, text='Tab', fill=P['text'], font=key_font)]
-    label = canvas.create_text(key_x2 - key_w - 8, mid, text='Ekle', anchor='e', fill=P['text'], font=switch_font)
+    label = canvas.create_text(key_x2 - key_w - 8, mid, text=say('Ekle'), anchor='e', fill=P['text'], font=switch_font)
     box_x2 = key_x2 - key_w - 8 - label_w - 8
     box = _round_rect(canvas, box_x2 - 16, mid - 8, box_x2, mid + 8, 3, fill=P['card'], outline=P['card_line'], width=1.5)
     tick = canvas.create_text(box_x2 - 8, mid, text='✓', fill=P['accent_text'], font=_font(9, 'bold'), state='hidden')
@@ -1863,7 +2047,7 @@ def _image_card(canvas, root, image, y, width, pad, changed, hooks=None):
 
     def draw():
         on = state['on']
-        first, second = image_lines(image, on)
+        first, second = image_lines(image, on, say)
         line = first + '  ·  ' + second
         canvas.itemconfigure(headline, text=_fit(canvas, line, _font(12, 'bold'), room), fill=P['text'] if on else P['soft'])
         canvas.itemconfigure(box, fill=P['accent'] if on else P['card'])
@@ -2032,7 +2216,7 @@ def without_last_sentence(text):
     return text[:ends[-1]].rstrip() if ends else ''
 
 
-def spoken_commands_line(commands):
+def spoken_commands_line(commands, say=lambda text: text):
     """The voice panel's line of what can be said, each command by its first words (for
     "sil", the longest: "hepsini sil" says what it does)."""
     parts = []
@@ -2043,11 +2227,11 @@ def spoken_commands_line(commands):
         if said:
             parts.append('“' + said[0] + '”')
     # Short, to fit the window's width: the line above says "Pyn, kaydet" already.
-    return 'Komutlar: ' + ' · '.join(parts) if parts else ''
+    return say('Komutlar: ') + ' · '.join(parts) if parts else ''
 
 
 def _spoken_commands(state):
-    """The voice commands as set in state/ses (beyin_v3_ses), their defaults where it cannot say."""
+    """The voice commands as set in the voice folder (beyin_v3_ses), their defaults where it cannot say."""
     try:
         import beyin_v3_ses as ses
     except Exception:
@@ -2068,12 +2252,84 @@ def with_spoken(current, spoken):
 
 
 class VoiceLink:
-    """What a window knows of the voice helper (beyin_v3_ses.Worker): it, and whether its model is loaded."""
+    """What a window knows of the voice helper (beyin_v3_ses.Worker): it, and whether its model is loaded.
 
-    def __init__(self, worker):
+    A helper whose model would not load (no network for its first download, a card not ready as
+    Windows signs in) or that stopped is started again by `start`, after 10 seconds, then twice as
+    long each time up to five minutes: before, the voice stayed dead, the window saying "Ses
+    hazırlanıyor…" for ever, until the listener was started again with the computer.
+    """
+
+    FIRST_WAIT, LONGEST_WAIT = 10.0, 300.0
+
+    def __init__(self, worker, start=None):
         self.worker = worker
+        self.start = start
         self.ready = False
         self.what = ''
+        self.error = ''
+        self.retry_at = None
+        self.wait = self.FIRST_WAIT
+        # A model being fetched: (MB come, MB in all), for the settings' bar and the window to show.
+        self.progress = None
+        # The wake listener as the helper last said it ('uyandirma'): 'dinliyor' while it really
+        # hears, 'sorun' with why ('mikrofon', 'sessiz', 'model') and a sentence, 'kapali'; None
+        # until it says.
+        self.wake, self.wake_problem, self.wake_message = None, None, ''
+
+    def heard(self, event, moment):
+        """An event from the helper, kept; True when what the link says has changed."""
+        kind = event.get('olay')
+        if kind == 'indiriliyor':
+            progress = (int(event.get('mb') or 0), int(event.get('toplam') or 0))
+            changed, self.progress = progress != self.progress, progress
+            return changed
+        if kind == 'denetci':  # the wake phrase's checker, fetched after the model: nothing more comes
+            changed, self.progress = self.progress is not None, None
+            return changed
+        if kind == 'uyandirma':
+            durum = event.get('durum') if event.get('durum') in ('dinliyor', 'sorun', 'kapali') else None
+            problem = event.get('neden') if durum == 'sorun' and event.get('neden') in ('mikrofon', 'sessiz', 'model') else None
+            message = str(event.get('mesaj') or '')[:200] if durum == 'sorun' else ''
+            changed = (durum, problem, message) != (self.wake, self.wake_problem, self.wake_message)
+            self.wake, self.wake_problem, self.wake_message = durum, problem, message
+            return changed
+        if kind == 'hazir':
+            self.ready, self.what, self.error, self.wait, self.progress = True, event.get('aciklama') or '', '', self.FIRST_WAIT, None
+            return True
+        if kind == 'hata' and event.get('neden') == 'model':
+            self.ready, self.error = False, str(event.get('mesaj') or 'model açılamadı')[:200]
+            self.worker.send('kapat')  # its end ('bitti') sets the next try
+            return True
+        if kind == 'bitti':
+            self.ready = False
+            self.error = self.error or 'Ses yardımcısı kapandı'
+            self.wake, self.wake_problem, self.wake_message = None, None, ''  # a new helper says it anew
+            if self.start is not None and self.retry_at is None:
+                self.retry_at, self.wait = moment + self.wait, min(self.LONGEST_WAIT, self.wait * 2)
+            return True
+        return False
+
+    def listens(self):
+        """Whether the wake listener really listens now: the model ready and its microphone heard."""
+        return self.ready and self.wake == 'dinliyor'
+
+    def revive(self, moment):
+        """A stopped helper started again once its wait is over; True when that was tried. One that
+        cannot even be started (its environment gone) is tried again later: the listener goes on."""
+        if self.retry_at is None or moment < self.retry_at:
+            return False
+        self.retry_at, self.ready, self.progress = None, False, None
+        try:
+            self.worker = self.start()
+        except Exception as exc:
+            self.error = 'Ses yardımcısı başlatılamadı: ' + str(exc)[:150]
+            self.retry_at, self.wait = moment + self.wait, min(self.LONGEST_WAIT, self.wait * 2)
+        return True
+
+    def word(self):
+        """What the listener says of its voice (beyin_v3_ses.say_listener)."""
+        return 'hazir' if self.ready else 'hata' if self.retry_at is not None else 'yukleniyor'
 
 
 def popup(vault, context=None, master=None, state=None, voice=None, listening=False, auto_listen=False):
@@ -2103,6 +2359,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             state = None
     _load_fonts(state)
     snapshot = os.environ.get('BEYIN_YAKALA_SNAPSHOT')
+    say = _words(_desktop_language())
     owner = master is None
     root = tk.Tk() if owner else tk.Toplevel(master)
     root.withdraw()
@@ -2113,14 +2370,25 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         # A listener's window closes without returning here: its temp copy goes with the window.
         root.bind('<Destroy>', lambda event: _image_done(image) if event.widget is root else None, add='+')
     clip_is_url = bool(re.match(r'^https?://\S+$', clip))
-    url = context.get('url') or (clip if clip_is_url else None)
+    if clip_is_url:
+        try:
+            _safe_source_url(clip)  # the rule capture() and the browser's address follow (tab_url)
+        except ValueError:
+            # A local or malformed link (http://localhost:3000, http://[fe80::1) was taken as the
+            # page: capture() refused it and nothing could be saved from the window, and a malformed
+            # one stopped the listener's loop. It is copied text, kept as text, never fetched.
+            clip_is_url = False
     files = list(context.get('dosyalar') or [])
-    clip_text = clip if clip and not clip_is_url else ''
+    # A link on the clipboard is the page only when the key found none; next to one it is offered
+    # as copied text. Unticking the browser's page never swaps in a link the window did not show.
+    clip_link = clip_is_url and not context.get('url') and not files
+    url = context.get('url') or (clip if clip_link else None)
+    clip_text = clip if clip and not clip_link else ''
     # A page read from the browser's address bar goes with the note unless switched off (Alt+S).
     browser_link = bool(context.get('url')) and context.get('url_kaynak') == 'tarayici'
-    link = {'on': True}
     sequence = fresh = None
-    if os.name == 'nt':
+    listener = context.get('clipboard_generation') is not None
+    if os.name == 'nt' or listener:
         try:
             sequence = _clipboard_sequence()
         except Exception:
@@ -2129,11 +2397,21 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                                 context.get('clipboard_generation'))
         if context.get('pano_sira') is not None and context['pano_sira'] != sequence:
             fresh = False  # copied after the key was pressed: an alternative, not what was meant
-    # Text copied hours ago (a password, a message) is never saved by just pressing Enter.
-    include = {'on': bool(clip_text) and not url and not files and fresh is not False}
+        if listener and fresh and not (context.get('pano_yasi') is not None and context['pano_yasi'] <= CLIP_FRESH):
+            # Not saved since, but copied long ago (or before the listener started, so of unknown age):
+            # a password copied at eleven went with a note said at three.
+            fresh = False
+    # Text or a link copied hours ago (a password, a one-time link) is never saved by just
+    # pressing Enter, and nothing on the clipboard by "Pyn, not al" said from across the room:
+    # in a window the wake phrase opened nobody looked at what it would take. Shown, Tab adds it.
+    taken = fresh is not False and not listening
+    include = {'on': bool(clip_text) and not url and not files and taken}
+    link = {'on': taken if clip_link else True}
+    if image and listening:
+        image['on'] = False
 
     P, W, pad = PALETTE, 760, 30
-    root.title('Not al')
+    root.title(say('Not al'))
     root.configure(bg=P['bg'])
     root.resizable(False, False)
     if os.name == 'nt':
@@ -2152,7 +2430,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
     else:
         canvas.create_oval(pad, y - 7, pad + 14, y + 7, fill=P['accent'], outline=P['card_line'], width=1.5)
         title_x = pad + 24
-    canvas.create_text(title_x, y, text='Not al', anchor='w', fill=P['text'], font=_font(16, 'bold', 'display'))
+    canvas.create_text(title_x, y, text=say('Not al'), anchor='w', fill=P['text'], font=_font(16, 'bold', 'display'))
     source = context.get('uygulama') or ''
     if source:
         canvas.create_text(W - pad, y, text=_fit(canvas, source.upper(), _font(10, 'bold', 'label'), 300), anchor='e',
@@ -2178,7 +2456,11 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
     field_item = canvas.create_window(pad, y, window=entry, anchor='nw', width=field_width, height=line_height + 2 * FIELD_PAD)
     # Clipboard text that does not go by default is offered beside the note instead (Tab).
     clip_optional = bool(clip_text) and bool(url or files or not include['on'])
-    placeholder_text = 'Neden kaydediyorsun?' if (url or files or include['on']) else 'Aklındakini yaz…'
+
+    def placeholder_for():
+        """What the empty field asks: the reason when something goes with the note, else the note."""
+        return say('Neden kaydediyorsun?') if ((url and link['on']) or files or include['on']) else say('Aklındakini yaz…')
+    placeholder_text = placeholder_for()
     hint = {'on': False}
     # Typing in the field while it listens lets the microphone go (set with the microphone below).
     typing = {'stop': None}
@@ -2249,7 +2531,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         voice_y = y + 8
         voice_line = canvas.create_text(pad, voice_y, anchor='w', fill=P['muted'], font=_font(12), text='')
         voice_help = canvas.create_text(pad, voice_y + 22, anchor='w', fill=P['faint'], font=_font(11), text='')
-        said = spoken_commands_line(_spoken_commands(state))
+        said = spoken_commands_line(_spoken_commands(state), say)
         canvas.create_text(pad, voice_y + 42, anchor='w', fill=P['muted'], font=_font(11),
                            text=_fit(canvas, said, _font(11), W - 2 * pad))
         y += 70 if said else 50
@@ -2262,65 +2544,72 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                            text=_fit(canvas, line, _font(12, 'bold'), W - pad - 14 - text_x))
         y += height + 16
 
+    def follow_rows():
+        """A row switched on or off: the empty field asks for the reason or for the note."""
+        nonlocal placeholder_text
+        placeholder_text = placeholder_for()
+        if hint['on']:
+            show_hint()
+
+    def check_row(holder, text, keys):
+        """A box to tick under the row above it: whether that goes with the note (`holder['on']`).
+        A click, or one of `keys`, switches it."""
+        nonlocal y
+        box = _round_rect(canvas, pad + 2, y + 2, pad + 18, y + 18, 4, fill=P['accent'] if holder['on'] else P['card'],
+                          outline=P['card_line'], width=1.5)
+        tick = canvas.create_text(pad + 10, y + 10, text='✓', fill=P['accent_text'], font=_font(10, 'bold'),
+                                  state='normal' if holder['on'] else 'hidden')
+        label = canvas.create_text(pad + 28, y + 10, anchor='w', fill=P['soft'], font=_font(12),
+                                   text=_fit(canvas, text, _font(12), W - 2 * pad - 40))
+
+        def flip(event=None):
+            if event is not None and getattr(event, 'state', 0) & 0x4:
+                return None  # AltGr (Ctrl+Alt) types a character; it is not this key
+            holder['on'] = not holder['on']
+            canvas.itemconfigure(box, fill=P['accent'] if holder['on'] else P['card'])
+            canvas.itemconfigure(tick, state='normal' if holder['on'] else 'hidden')
+            follow_rows()
+            return 'break'
+        for item in (box, tick, label):
+            canvas.tag_bind(item, '<Button-1>', flip)
+        for key_name in keys:
+            root.bind(key_name, flip)
+        y += 30
+
     # What goes with the note, one row each.
     if files:
-        compact('DOSYA', Path(files[0]).name + ('  +' + str(len(files) - 1) if len(files) > 1 else ''), str(Path(files[0]).parent))
+        compact(say('DOSYA'), Path(files[0]).name + ('  +' + str(len(files) - 1) if len(files) > 1 else ''), str(Path(files[0]).parent))
     elif url:
-        compact(KIND_LABEL.get(kind_of(url), 'SAYFA'), context.get('baslik') or url, url)
+        compact(say(KIND_LABEL.get(kind_of(url), 'SAYFA')), context.get('baslik') or url, url)
+        # The browser's page goes unless switched off (Alt+S); a copied link only when copied a
+        # moment ago (as copied text), else it waits for Tab. Either way the box says which.
         if browser_link:
-            lbox = _round_rect(canvas, pad + 2, y + 2, pad + 18, y + 18, 4, fill=P['accent'], outline=P['card_line'], width=1.5)
-            ltick = canvas.create_text(pad + 10, y + 10, text='✓', fill=P['accent_text'], font=_font(10, 'bold'))
-            llabel = canvas.create_text(pad + 28, y + 10, anchor='w', fill=P['soft'], font=_font(12),
-                                        text='Bu sayfayı nota bağla · Alt+S')
-
-            def link_toggle(event=None):
-                if event is not None and getattr(event, 'state', 0) & 0x4:
-                    return None  # AltGr (Ctrl+Alt) types a character; it is not this key
-                link['on'] = not link['on']
-                canvas.itemconfigure(lbox, fill=P['accent'] if link['on'] else P['card'])
-                canvas.itemconfigure(ltick, state='normal' if link['on'] else 'hidden')
-                return 'break'
-            for item in (lbox, ltick, llabel):
-                canvas.tag_bind(item, '<Button-1>', link_toggle)
-            root.bind('<Alt-s>', link_toggle)
-            root.bind('<Alt-S>', link_toggle)
-            y += 30
+            check_row(link, say('Bu sayfayı nota bağla · Alt+S'), ('<Alt-s>', '<Alt-S>'))
+        elif clip_link:
+            check_row(link, say('Panodaki bağlantıyı nota bağla · Tab'), ('<Tab>', '<Alt-s>', '<Alt-S>'))
     elif clip_text and include['on']:
-        compact('METİN', _first_line(clip_text, 200), '')
+        compact(say('METİN'), _first_line(clip_text, 200), '')
+        check_row(include, say('Bu metni nota ekle · Tab'), ('<Tab>',))  # copied a moment ago; Tab leaves it out
 
     # Optional clipboard toggle: something better is already being saved, or the text's age is unknown.
     if clip_optional:
-        box = _round_rect(canvas, pad + 2, y + 2, pad + 18, y + 18, 4, fill=P['card'], outline=P['card_line'], width=1.5)
-        tick = canvas.create_text(pad + 10, y + 10, text='✓', fill=P['accent_text'], font=_font(10, 'bold'), state='hidden')
-        label = canvas.create_text(pad + 28, y + 10, anchor='w', fill=P['soft'], font=_font(12),
-                                   text=_fit(canvas, 'Panodaki metni de ekle · ' + _first_line(clip_text, 120), _font(12), W - 2 * pad - 40))
-
-        def toggle(_event=None):
-            include['on'] = not include['on']
-            canvas.itemconfigure(box, fill=P['accent'] if include['on'] else P['card'])
-            canvas.itemconfigure(tick, state='normal' if include['on'] else 'hidden')
-            return 'break'
-        for item in (box, tick, label):
-            canvas.tag_bind(item, '<Button-1>', toggle)
-        root.bind('<Tab>', toggle)
-        y += 30
+        check_row(include, say('Panodaki metni de ekle · ') + _first_line(clip_text, 120), ('<Tab>',))
 
     # Clipboard image: shown before it is attached; Tab or a click takes it off or puts it back.
     image_card = {}
     if image:
         def image_changed(on):
-            nonlocal placeholder_text
             files[:] = [image['path']] if on else []
-            placeholder_text = 'Neden kaydediyorsun?' if on else 'Aklındakini yaz…'
-            if hint['on']:
-                show_hint()
-        y = _image_card(canvas, root, image, y, W, pad, image_changed, image_card)
+            follow_rows()
+        y = _image_card(canvas, root, image, y, W, pad, image_changed, image_card, say)
 
     # Footer: status on the left, key hints on the right.
     y += 6
     footer_y = y + 14
     status = canvas.create_text(pad, footer_y, anchor='w', fill=P['muted'], font=_font(12),
-                                text='Tab: panoyu ekle' if clip_optional else key_label + ' ile her yerden açılır')
+                                text=say('Tab: panoyu ekle') if clip_optional
+                                else say('Tab: bağlantıyı ekle') if clip_link and not link['on']
+                                else say('%s ile her yerden açılır') % key_label)
     right = W - pad
 
     def keycap(x_right, key, label):
@@ -2333,8 +2622,8 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         _round_rect(canvas, x2 - key_w, footer_y - 11, x2, footer_y + 11, 4, fill=P['key'], outline=P['key_line'], width=1.5)
         canvas.create_text(x2 - key_w / 2, footer_y, text=key, fill=P['text'], font=_font(10, 'bold', 'label'))
         return x2 - key_w - 18
-    right = keycap(right, '↵', 'Kaydet')
-    keycap(right, 'esc', 'Kapat')
+    right = keycap(right, '↵', say('Kaydet'))
+    keycap(right, 'esc', say('Kapat'))
     height = footer_y + 30
     canvas.configure(height=height)
     # A paper window on a light desktop needs its own edge: the ink frame of the Ananas sheet.
@@ -2356,6 +2645,10 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
     layout['grow'] = grow
 
     def close():
+        # Fading out, it is not the window a second press of the key or the voice talks to: the
+        # press went to it and opened nothing, and the microphone recorded for a window going away.
+        root.closing = True
+
         def fade(alpha):
             if alpha <= 0:
                 root.destroy()
@@ -2371,25 +2664,32 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
     def save(_event=None):
         text = clip_text if include['on'] else None
         why = '' if hint['on'] else field_text().strip()
-        page = url if (link['on'] or not browser_link) else (clip if clip_is_url else None)
+        page = url if link['on'] else None
         if not (page or files or text or why):
-            canvas.itemconfigure(status, text='Önce bir şey yaz ya da söyle', fill=P['bad'])
+            canvas.itemconfigure(status, text=say('Önce bir şey yaz ya da söyle'), fill=P['bad'])
             return 'break'
+        title = context.get('baslik') if page and page == context.get('url') else None
+        if text and why and not (page or files) and not clip_is_url:
+            # What the person typed or said names the card and its file, never what was copied. Not
+            # for a copied link capture() takes as the source: like every link card it is named by
+            # its page, whose title `isle` reads (named by the reason, it never got that title).
+            title = why
         if not (page or files or text):
             text, why = why, ''  # only a typed line: the line itself is the note
         try:
-            result.update(capture(vault, url=page, text=text, files=files, why=why, app=context.get('uygulama'),
-                                  title=context.get('baslik') if page and page == context.get('url') else None))
+            result.update(capture(vault, url=page, text=text, files=files, why=why, app=context.get('uygulama'), title=title))
         except Exception as exc:
-            canvas.itemconfigure(status, text=_fit(canvas, 'Kaydedilemedi: ' + str(exc), _font(12), 360), fill=P['bad'])
+            canvas.itemconfigure(status, text=_fit(canvas, say('Kaydedilemedi: ') + str(exc), _font(12), 360), fill=P['bad'])
             return 'break'
-        if os.name == 'nt' and ((text and include['on']) or (image and image.get('path') in files)):
-            _clipboard_saved(vault, sequence, state, context.get('clipboard_generation'))  # now consumed
+        if (os.name == 'nt' or listener) and (clip_text or clip_link or image):
+            # Shown in the window, taken or not, it is no longer news: a copy the person left
+            # out came back ticked in the next window.
+            _clipboard_saved(vault, sequence, state, context.get('clipboard_generation'))
         if voice is not None and voice_mode['now'] in ('bekliyor', 'dinliyor'):
             voice.worker.send('iptal')  # saved: the microphone goes with the window
         voice_mode['continuous'] = False
         entry.configure(state='disabled', fg=P['muted'])
-        canvas.itemconfigure(status, text='✓  Kaydedildi', fill=P['ok'], font=_font(12, 'bold'))
+        canvas.itemconfigure(status, text=say('✓  Kaydedildi'), fill=P['ok'], font=_font(12, 'bold'))
         root.after(520, close)
         return 'break'
 
@@ -2439,15 +2739,18 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                 canvas.itemconfigure(bar, state='normal' if listening_now else 'hidden')
             device = (' · ' + heard['device']) if heard['device'] else ''
             text = message or {
-                'yok': 'Ses hazırlanıyor… birazdan konuşabilirsin',
-                'bekliyor': '● Dinliyorum' + device,
-                'dinliyor': '● Dinliyorum' + device,
-                'ceviriyor': 'Söylediğini yazıya çeviriyorum…',
-            }.get(mode, 'Konuşmak için mikrofona tıkla ya da ' + key_label + '\'ye bir daha bas')
+                # A helper being started again after its model would not load says so, not "loading" for ever.
+                'yok': (say('Ses açılamadı, yeniden deneniyor: ') + voice.error) if getattr(voice, 'error', '')
+                       else (say('Ses modeli indiriliyor: %d / %d MB') % voice.progress) if getattr(voice, 'progress', None)
+                       else say('Ses hazırlanıyor… birazdan konuşabilirsin'),
+                'bekliyor': say('● Dinliyorum') + device,
+                'dinliyor': say('● Dinliyorum') + device,
+                'ceviriyor': say('Söylediğini yazıya çeviriyorum…'),
+            }.get(mode, say('Konuşmak için mikrofona tıkla ya da %s\'ye bir daha bas') % key_label)
             helper = help_text or (
-                'Konuş, ara verebilirsin · bitince “Pyn, kaydet” de ya da Enter · Esc: vazgeç' if listening_now and voice_mode['continuous']
-                else 'Susunca yazarım · “kaydet” ya da Enter: kaydet · Esc: vazgeç' if listening_now
-                else 'Ya da yaz · Enter kaydeder, Esc kapatır')
+                say('Konuş, ara verebilirsin · bitince “Pyn, kaydet” de ya da Enter · Esc: vazgeç') if listening_now and voice_mode['continuous']
+                else say('Susunca yazarım · “kaydet” ya da Enter: kaydet · Esc: vazgeç') if listening_now
+                else say('Ya da yaz · Enter kaydeder, Esc kapatır'))
             colour = P[tone] if tone else (P['text'] if listening_now else P['muted'])
             line_font = _font(12, 'bold') if listening_now or tone else _font(12)
             canvas.itemconfigure(voice_line, text=_fit(canvas, text, line_font, W - 2 * pad - (50 if listening_now else 0)),
@@ -2455,7 +2758,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             canvas.itemconfigure(voice_help, text=_fit(canvas, helper, _font(11), W - 2 * pad))
             if hint['on']:
                 # The empty field says where the words will go while it listens.
-                set_field('Konuş, ben yazayım…' if listening_now else placeholder_text)
+                set_field(say('Konuş, ben yazayım…') if listening_now else placeholder_text)
                 entry.mark_set('insert', '1.0')
 
         def level(value, speech=False):
@@ -2475,8 +2778,8 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             # not that (seen: the warning over a sentence being written).
             if heard['since'] is not None and not heard['voice'] and time_now() - heard['since'] > 3 and heard['peak'] < 0.05:
                 heard.update(since=None, warned=True)
-                voice_set('dinliyor', 'Mikrofondan ses gelmiyor' + ((' · ' + heard['device']) if heard['device'] else ''), 'bad',
-                          'Mikrofon kapalı ya da sessizde olabilir; Windows ses ayarlarından doğru mikrofonu seç')
+                voice_set('dinliyor', say('Mikrofondan ses gelmiyor') + ((' · ' + heard['device']) if heard['device'] else ''), 'bad',
+                          say('Mikrofon kapalı ya da sessizde olabilir; Windows ses ayarlarından doğru mikrofonu seç'))
 
         def listen():
             if voice.worker.send('dinle', surekli=voice_mode['continuous']):
@@ -2501,7 +2804,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             if voice_mode['now'] in ('bekliyor', 'dinliyor'):
                 voice.worker.send('iptal')
                 pending['drop'] = True
-                voice_set('hazir', 'Yazmaya başladın; dinlemeyi bıraktım', None, 'Konuşmak için mikrofona tıkla')
+                voice_set('hazir', say('Yazmaya başladın; dinlemeyi bıraktım'), None, say('Konuşmak için mikrofona tıkla'))
         typing['stop'] = stop_for_typing
 
         def write_in(spoken):
@@ -2521,19 +2824,19 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             nonlocal placeholder_text
             if image_card.get('switch'):
                 image_card['switch'](True)
-                voice_set(voice_mode['now'], '✓ Panodaki görüntü eklendi', 'ok')
+                voice_set(voice_mode['now'], say('✓ Panodaki görüntü eklendi'), 'ok')
                 return
             picture = clipboard_image('', {})
             if not picture:
-                voice_set(voice_mode['now'], 'Panoda görüntü yok: önce bir görüntü kopyala', 'bad')
+                voice_set(voice_mode['now'], say('Panoda görüntü yok: önce bir görüntü kopyala'), 'bad')
                 return
             # Its temp copy goes with the window, as the one found on opening does.
             root.bind('<Destroy>', lambda event: _image_done(picture) if event.widget is root else None, add='+')
             files[:] = [picture['path']]
-            placeholder_text = 'Neden kaydediyorsun?'
+            placeholder_text = say('Neden kaydediyorsun?')
             if hint['on']:
                 show_hint()
-            voice_set(voice_mode['now'], '✓ Panodaki görüntü eklendi · %d×%d' % (picture['width'], picture['height']), 'ok')
+            voice_set(voice_mode['now'], say('✓ Panodaki görüntü eklendi') + ' · %d×%d' % (picture['width'], picture['height']), 'ok')
 
         def take_back(command):
             """"son kelimeyi sil" or "son cümleyi sil" said: the field without its last word or sentence."""
@@ -2551,6 +2854,10 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         def voice_event(event):
             kind = event.get('olay')
             last = event.get('son', True)
+            if kind == 'indiriliyor':
+                if voice_mode['now'] == 'yok':
+                    voice_set('yok')  # how much of the model has come, as it comes
+                return
             if pending['drop']:
                 # Let go for typing: what was said before still goes in, as words only; the
                 # helper's last word about that recording changes nothing.
@@ -2607,19 +2914,19 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                     voice_mode['continuous'] = False
                     close()
                 elif wanted:
-                    voice_set('hazir', 'Bir şey duyamadım; yeniden dene ya da yaz', 'bad')
+                    voice_set('hazir', say('Bir şey duyamadım; yeniden dene ya da yaz'), 'bad')
                 elif voice_mode['continuous']:
                     # The helper ended a dictation nobody spoke into for a while: no microphone stays open by itself.
                     voice_mode['continuous'] = False
                     if not spoken and command is None:
-                        voice_set('hazir', 'Bir süredir ses gelmedi; dinlemeyi bıraktım', None, 'Konuşmak için mikrofona tıkla')
+                        voice_set('hazir', say('Bir süredir ses gelmedi; dinlemeyi bıraktım'), None, say('Konuşmak için mikrofona tıkla'))
             elif kind == 'hata':
                 pending['save'] = False
                 voice_mode['continuous'] = False
-                voice_set('hazir' if voice.ready else 'yok', 'Ses: ' + (event.get('mesaj') or event.get('neden') or 'bir sorun oldu'), 'bad')
+                voice_set('hazir' if voice.ready else 'yok', say('Ses: ') + (event.get('mesaj') or event.get('neden') or say('bir sorun oldu')), 'bad')
             elif kind == 'bitti':
                 voice_mode['continuous'] = False
-                voice_set('yok', 'Ses yardımcısı kapandı', 'bad')
+                voice_set('yok', say('Ses yardımcısı kapandı'), 'bad')
 
         for part in [button, *glyph]:
             canvas.tag_bind(part, '<Button-1>', voice_toggle)
@@ -2958,6 +3265,84 @@ def _write_listener_state(state, **values):
     path.write_text(json.dumps(data) + '\n', encoding='utf-8')
 
 
+def _user_folder():
+    """The person's own folder beside every vault's state (%LOCALAPPDATA%\\beyin-v3), where the
+    desktop app's word (masaustu.json) and the listener's (dinleyici.json) are."""
+    return Path(os.environ.get('LOCALAPPDATA') or str(Path.home() / 'AppData' / 'Local')) / 'beyin-v3'
+
+
+# Which vault the key, the listener and the Start-menu, Send To and Startup shortcuts serve: they
+# are the person's, one set for every vault, while each vault keeps its own state. `kur` writes it,
+# `kaldir` removes it only in that vault. Without it a listener started for the vault used before
+# kept writing notes there after the desktop app moved to another one (and made the inbox again
+# under a vault that was gone), and `kaldir` in that old vault stopped the new vault's listener.
+OWNER_FILE = 'yakala-sahip.json'
+
+
+def owner_file():
+    return _user_folder() / OWNER_FILE
+
+
+def _owner():
+    """What `kur` wrote: {surum, vault, state, tus, at}, or None where nothing (or nothing whole) is."""
+    try:
+        said = json.loads(owner_file().read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    return said if isinstance(said, dict) and isinstance(said.get('vault'), str) and said['vault'] else None
+
+
+def _same_vault(one, other):
+    """One folder, as Windows compares paths: in any letter case, with either slash."""
+    return os.path.normcase(os.path.normpath(str(one))) == os.path.normcase(os.path.normpath(str(other)))
+
+
+def _owns(vault):
+    """Whether the key and the listener are this vault's (False also where no record says)."""
+    owner = _owner()
+    return owner is not None and _same_vault(owner['vault'], Path(vault).resolve())
+
+
+def _write_owner(vault, state, spec):
+    path = owner_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {'surum': 1, 'vault': str(vault), 'state': str(state), 'tus': spec, 'at': time_now()}
+    _atomic_text(path, json.dumps(data, ensure_ascii=False) + '\n', '.yakala-sahip-')
+
+
+LISTENER_LOG = 'dinleyici.log'
+
+
+def _listener_log(state):
+    """What went wrong in the resident listener, into state/yakala/dinleyici.log: pythonw has no
+    console, and an error in its window loop used to leave no trace at all. The same error at most
+    once a minute, the file kept small. Returns log(where, error=None) (None: the one handled now)."""
+    import time
+    import traceback
+    path = Path(state) / 'yakala' / LISTENER_LOG
+    last = {}
+
+    def log(where, error=None):
+        try:
+            if error is None:
+                error = sys.exc_info()[1]
+            text = ''.join(traceback.format_exception(type(error), error, error.__traceback__))[-4000:]
+            moment = time.monotonic()
+            if moment - last.get(text, -3600.0) < 60:
+                return
+            if len(last) > 50:
+                last.clear()
+            last[text] = moment
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.is_file() and path.stat().st_size > 256 * 1024:
+                os.replace(path, path.with_name(LISTENER_LOG + '.1'))
+            with open(path, 'a', encoding='utf-8') as stream:
+                stream.write(now().isoformat(timespec='seconds') + ' ' + where + '\n' + text + '\n')
+        except Exception:
+            pass  # a log that cannot be written must not become the listener's next error
+    return log
+
+
 def _own_modules(script, paths=None):
     """The listener's script and the engine's modules it loaded, by when each last changed: an
     update that changes only one of them (the voice, the brand) still restarts the listener."""
@@ -3120,18 +3505,32 @@ def _windows_reader_main(kind):
     return 0
 
 
+TICK_ACTIVE, TICK_IDLE = 25, 100  # milliseconds between the listener's looks: a window open, idle
+KEY_RETRY_MS = 30_000  # how often a listener whose key another app holds asks for it again
+
+
+def _tick(window_open, last_active, moment):
+    """How soon the listener looks again: every 25 ms while a window is open or for two seconds
+    after something happened, every 100 ms when idle. It looked 40 times a second from sign-in to
+    shutdown, keeping a laptop's processor from resting for a key pressed a few times a day."""
+    return TICK_ACTIVE if window_open or moment - last_active < 2 else TICK_IDLE
+
+
 def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name=LISTENER_STOP, open_name=LISTENER_OPEN):
     """Resident hotkey on Windows: Tk is warm before the key, so the window opens at once.
 
     A small thread owns RegisterHotKey and reads the foreground window the moment the key
     arrives; the popup opens as a Toplevel on this process's waiting Tk root. One listener per
-    user (a named mutex). `yakala kur` and `kaldir` stop it through a named event, never by
-    killing a process. When an update replaces this script, the listener restarts itself on the
-    new code once no window is open.
+    user (a named mutex), for the vault the key was last set up for (yakala-sahip.json): it leaves
+    when `kur` moves the key to another vault. `yakala kur` and `kaldir` stop it through a named
+    event, never by killing a process. When an update replaces this script, the listener restarts
+    itself on the new code once no window is open. When another app holds the key it stays (the
+    voice, "Pyn, not al" and the desktop app's "Not al" need no key) and asks for it again.
     """
     import ctypes
     import queue
     import threading
+    import time
     from ctypes import wintypes
     user32 = ctypes.WinDLL('user32', use_last_error=True)
     kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -3142,21 +3541,40 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
     user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+    user32.SetTimer.argtypes, user32.SetTimer.restype = [wintypes.HWND, ctypes.c_size_t, wintypes.UINT, ctypes.c_void_p], ctypes.c_size_t
+    user32.KillTimer.argtypes = [wintypes.HWND, ctypes.c_size_t]
+    user32.GetClipboardSequenceNumber.restype = ctypes.c_uint32
     vault, state = Path(vault), Path(state)
+    owner = _owner()
+    if owner is not None and not _same_vault(owner['vault'], vault):
+        # `kur` set the key up for another vault since this listener's shortcut was made: that
+        # vault's listener serves the key, the window and the voice.
+        return 0
     lock = kernel32.CreateMutexW(None, False, mutex_name)
     if not lock or ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS: another listener serves this user
         return 0
+    spec = spec or saved_hotkey(state)
+    if owner is None:
+        # Set up before the record existed: the key is this vault's, as the last `kur` left its
+        # Startup shortcut. Written now, `kaldir` and the desktop app know whose it is.
+        try:
+            _write_owner(vault, state, spec)
+        except OSError:
+            pass
     stop = kernel32.CreateEventW(None, True, False, stop_name)
     opener = kernel32.CreateEventW(None, False, False, open_name)  # auto-reset: one window a request
     # A listener that is still on its way out may keep the event alive, signalled: that request
     # was for it, not for us.
     kernel32.ResetEvent.argtypes = [wintypes.HANDLE]
     kernel32.ResetEvent(stop)
-    mods, vk = windows_virtual_key(spec or saved_hotkey(state))
+    mods, vk = windows_virtual_key(spec)
+    log = _listener_log(state)
     _load_fonts(state)
     import tkinter as tk
     root = tk.Tk()
     root.withdraw()
+    # An error in a callback of any of its windows is written down: under pythonw it went nowhere.
+    root.report_callback_exception = lambda _kind, error, _trace: log('pencere', error)
     _font(12)  # resolve the faces now, not when the key is pressed
     pressed, ready, started = queue.Queue(), {}, threading.Event()
     # The voice helper (beyin_v3_ses), where it is installed and on: started with the listener so
@@ -3165,12 +3583,33 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
     try:
         import beyin_v3_ses as ses
         if ses.usable(state):
-            link = VoiceLink(ses.Worker(state))
+            link = VoiceLink(ses.Worker(state), start=lambda: ses.Worker(state))
     except Exception:
         link = None
 
+    # Whether the key is this listener's, once RegisterHotKey has answered (`kisayol`): 'tamam', or
+    # 'mesgul' while another app holds it. Not said before that.
+    key = {}
+
+    def say_voice():
+        """The desktop app told how the voice is (beyin_v3_ses.say_listener): loading, ready, failed;
+        whether the wake phrase is really listened for, or why not; whether the key is this
+        listener's or another app's."""
+        try:
+            if link is None:
+                ses.say_listener(ses='yok', uyandirma=False, uyandirma_sorun=None, uyandirma_mesaj='', **key)
+            else:
+                mb, total = link.progress or (None, None)
+                wake = bool(voice_config.get('wake'))
+                ses.say_listener(ses=link.word(), model=link.what, mesaj=link.error, mb=mb, toplam=total,
+                                 uyandirma=wake and link.listens(),
+                                 uyandirma_sorun=link.wake_problem if wake else None,
+                                 uyandirma_mesaj=link.wake_message if wake else '', **key)
+        except Exception:
+            pass
+    say_voice()
+
     def watch():
-        import time
         msg = wintypes.MSG()
         user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)  # create this thread's message queue
         ready['tid'] = kernel32.GetCurrentThreadId()
@@ -3182,99 +3621,205 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
                 break
             time.sleep(0.1)
         started.set()
-        if not ready['ok']:
-            return
+        # Taken by another app: asked for again every half minute (WM_TIMER), and kept as soon as
+        # that app lets it go. The listener used to leave instead, and the voice and the wake
+        # phrase, which only it runs, went with it until the next sign-in, without a word.
+        retry = 0 if ready['ok'] else user32.SetTimer(None, 0, KEY_RETRY_MS, None)
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             if msg.message == 0x0312:  # WM_HOTKEY: read the foreground window before ours appears
                 pressed.put(windows_context())
-        user32.UnregisterHotKey(None, 1)
+            elif msg.message == 0x0113 and not ready['ok'] and user32.RegisterHotKey(None, 1, mods | 0x4000, vk):
+                ready['ok'] = True
+                user32.KillTimer(None, retry)
+        if ready['ok']:
+            user32.UnregisterHotKey(None, 1)
 
     threading.Thread(target=watch, daemon=True).start()
     started.wait(10)
     ok = ready.get('ok', False)
-    _write_listener_state(state, kisayol_calisiyor=ok, tid=ready.get('tid'), at=time_now())
-    if not ok:
-        root.destroy()
-        kernel32.CloseHandle(lock)
-        return 1
+    try:
+        _write_listener_state(state, kisayol_calisiyor=ok, tid=ready.get('tid'), at=time_now())
+    except OSError:
+        log('durum')
+    key['kisayol'] = 'tamam' if ok else 'mesgul'
+    say_voice()  # whether the key is ours, now that it is known
     script = Path(__file__).resolve()
     stamps = _own_modules(script)
-    windows, ticks = [], [0]
-    clipboard = {'generation': secrets.token_hex(16), 'baseline': None}
+    windows = []
+    clipboard = {'generation': secrets.token_hex(16), 'baseline': None, 'seen': None, 'changed': None}
     try:
-        clipboard['baseline'] = _clipboard_sequence()
+        clipboard['baseline'] = clipboard['seen'] = _clipboard_sequence()
     except Exception:
         pass
+    begun = time.monotonic()
+    # When each look that is not every tick is due next (by the clock: the tick is slower when
+    # idle), and when something last happened.
+    done, due, active = [False], {'house': begun + 2, 'voice': begun + 10, 'clipboard': begun + 0.5}, [begun]
 
     def finish(restart=False):
-        if link is not None:
-            link.worker.close(1.5)
-        user32.PostThreadMessageW(ready['tid'], 0x0012, 0, 0)  # WM_QUIT ends the hotkey thread
-        kernel32.CloseHandle(lock)
-        kernel32.CloseHandle(stop)
-        if opener:
-            kernel32.CloseHandle(opener)
-        if restart:
-            subprocess.Popen([sys.executable, str(script), 'dinle', '--vault', str(vault)], close_fds=True,
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             creationflags=DETACHED | NO_WINDOW)
-        root.destroy()
+        done[0] = True
+        try:
+            if link is not None:
+                link.worker.close(1.5)
+        except Exception:
+            log('kapanis')
+        try:
+            try:
+                ses.say_listener(ses='kapali')  # the next listener says how it is when it starts
+            except Exception:
+                pass
+            if ready.get('tid'):
+                user32.PostThreadMessageW(ready['tid'], 0x0012, 0, 0)  # WM_QUIT ends the hotkey thread
+            kernel32.CloseHandle(lock)
+            kernel32.CloseHandle(stop)
+            if opener:
+                kernel32.CloseHandle(opener)
+            if restart:
+                subprocess.Popen([sys.executable, str(script), 'dinle', '--vault', str(vault)], close_fds=True,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 creationflags=DETACHED | NO_WINDOW)
+        except Exception:
+            log('kapanis')
+        finally:
+            root.destroy()  # whatever failed above, the process ends: no listener left half alive
 
-    def poll():
+    def clipboard_seen(moment):
+        """The clipboard's number now; when it changed, the moment it was first seen so: how long
+        ago the text or the link on it was copied (pano_yasi), which the sequence alone cannot say."""
+        try:
+            number = user32.GetClipboardSequenceNumber() or None  # looked at twice a second: this listener's own handle
+        except Exception:
+            return
+        if number != clipboard['seen']:
+            clipboard['seen'], clipboard['changed'] = number, moment
+
+    def open_window(context, listening=False):
+        moment = time.monotonic()
+        clipboard_seen(moment)  # copied just before the key: its age is now, not half a second ago
+        age = None if clipboard['changed'] is None else round(moment - clipboard['changed'], 1)
+        context = dict(context, clipboard_generation=clipboard['generation'], clipboard_baseline=clipboard['baseline'],
+                       pano_yasi=age)
+        auto = False
+        if link is not None and not listening:
+            try:
+                auto = bool(ses.load_config(state).get('otomatik_dinle', True))
+            except Exception:
+                auto = False
+        before = {str(child) for child in root.winfo_children()}
+        try:
+            opened = popup(vault, context, master=root, state=state, voice=link, listening=listening, auto_listen=auto)
+        except Exception:
+            # The window could not be built (seen: a malformed link on the clipboard): written
+            # down, its half-built remains taken away, and the dictation the wake phrase began for
+            # it let go. The listener goes on to the next press.
+            log('pencere')
+            for child in root.winfo_children():
+                if str(child) not in before:
+                    try:
+                        child.destroy()
+                    except Exception:
+                        pass
+            if listening and link is not None:
+                try:
+                    link.worker.send('iptal')
+                except Exception:
+                    pass
+            return
+        if opened is not None and not isinstance(opened, dict):
+            windows.append(opened)
+        try:
+            _write_listener_state(state, son_pencere=time_now())
+        except OSError:
+            pass
+
+    def tell(window, event):
+        try:
+            window.voice_event(event)
+        except Exception:
+            log('ses')
+
+    def step():
+        nonlocal link
+        moment = time.monotonic()
         if kernel32.WaitForSingleObject(stop, 0) == 0:  # WAIT_OBJECT_0: kur or kaldir asked us to go
             return finish()
         if opener and kernel32.WaitForSingleObject(opener, 0) == 0:  # `yakala pencere`: as if the key were pressed
             pressed.put({})
-        windows[:] = [window for window in windows if window.winfo_exists()]
-        ticks[0] += 1
-        if ticks[0] % 80 == 0 and not windows:  # about every two seconds
+        # A window fading out after Enter or Esc is not the one a press or the voice talks to.
+        windows[:] = [window for window in windows if window.winfo_exists() and getattr(window, 'closing', False) is not True]
+        if windows:
+            active[0] = moment
+        if ready.get('ok') and key.get('kisayol') != 'tamam':
+            key['kisayol'] = 'tamam'  # the app that held the key let it go, and the hotkey thread took it
             try:
-                if _own_modules(script, list(stamps)) != stamps:
-                    return finish(restart=True)
+                _write_listener_state(state, kisayol_calisiyor=True, at=time_now())
             except OSError:
-                pass
-        def open_window(context, listening=False):
-            context = dict(context, clipboard_generation=clipboard['generation'], clipboard_baseline=clipboard['baseline'])
-            auto = False
-            if link is not None and not listening:
+                log('durum')  # the desktop app is still told (below): it reads dinleyici.json
+            say_voice()
+        if moment >= due['clipboard']:
+            due['clipboard'] = moment + 0.5
+            clipboard_seen(moment)
+        if moment >= due['house']:  # about every two seconds
+            due['house'] = moment + 2
+            owner = _owner()
+            if owner is not None and not _same_vault(owner['vault'], vault):
+                return finish()  # `kur` moved the key to another vault: its listener takes over
+            if not windows:
                 try:
-                    auto = bool(ses.load_config(state).get('otomatik_dinle', True))
-                except Exception:
-                    auto = False
-            opened = popup(vault, context, master=root, state=state, voice=link, listening=listening, auto_listen=auto)
-            if opened is not None and not isinstance(opened, dict):
-                windows.append(opened)
-            _write_listener_state(state, son_pencere=time_now())
-
-        if link is not None:
-            if ticks[0] % 80 == 0:  # the wake word or the commands changed with `ses ayar`
-                try:
+                    if _own_modules(script, list(stamps)) != stamps:
+                        return finish(restart=True)
+                except OSError:
+                    pass
+            if link is not None:
+                try:  # the wake word or the commands changed with `ses ayar`, or the desktop app came or went
                     path = ses.ses_dir(state) / ses.CONFIG
                     mtime = path.stat().st_mtime if path.exists() else None
                     if mtime != voice_config['mtime']:
                         voice_config['mtime'] = mtime
-                        link.worker.send('uyandirma', acik=bool(ses.load_config(state).get('uyandirma')))
                         link.worker.send('ayar')
+                    # Listening all the time only while Cortex runs and the person allowed it there
+                    # (ses.wake_allowed): quitting the app lets the microphone go within two seconds.
+                    allowed = ses.wake_allowed(ses.load_config(state))
+                    if allowed != voice_config.get('wake'):
+                        voice_config['wake'] = allowed
+                        link.worker.send('uyandirma', acik=allowed)
+                        say_voice()
                 except OSError:
                     pass
+                # A helper that stopped, or whose model would not load, started again in its time.
+                if not windows and link.revive(time_now()):
+                    voice_config['wake'] = voice_config['mtime'] = None  # the new helper is told both again
+                    say_voice()
+        if link is None and moment >= due['voice']:  # about every ten seconds
+            due['voice'] = moment + 10
+            # A voice helper that would not start with the listener, or voice set up without the
+            # listener started again: taken up now, not at the next sign-in.
+            try:
+                if ses.usable(state):
+                    link = VoiceLink(ses.Worker(state), start=lambda: ses.Worker(state))
+                    voice_config['wake'] = voice_config['mtime'] = None
+                    say_voice()
+            except Exception:
+                pass
+        if link is not None:
             for event in link.worker.take():
+                active[0] = moment
                 kind = event.get('olay')
-                if kind == 'hazir':
-                    link.ready, link.what = True, event.get('aciklama') or ''
-                elif kind == 'bitti':
-                    link.ready = False
+                if link.heard(event, time_now()):
+                    say_voice()
                 if kind == 'uyandi' and not windows:
                     open_window(windows_context(read_url=False), listening=True)  # "Pyn, not al": the window opens listening
                     if windows and hasattr(windows[-1], 'voice_event'):
-                        windows[-1].voice_event(event)  # and says which microphone it listens to
+                        tell(windows[-1], event)  # and says which microphone it listens to
                     continue
                 if windows and hasattr(windows[-1], 'voice_event'):
-                    windows[-1].voice_event(event)
+                    tell(windows[-1], event)
         try:
             context = pressed.get_nowait()
         except queue.Empty:
             context = None
         if context is not None:
+            active[0] = moment
             if windows:  # a second press brings the open window back instead of stacking another
                 windows[-1].lift()
                 _bring_to_front(windows[-1])
@@ -3283,9 +3828,23 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
                     windows[-1].voice_toggle()  # and, with the voice, starts or ends listening
             else:
                 open_window(context)
-        root.after(25, poll)
 
-    root.after(25, poll)
+    def poll():
+        # Whatever one look runs into, the next one comes: one error here (a malformed link on the
+        # clipboard) once left a listener alive that never looked again. The key did nothing, the
+        # desktop app's "Not al" nothing, the microphone stayed open after the app quit, and `kur`
+        # could not stop it, until the next sign-in.
+        try:
+            step()
+        except Exception:
+            log('dinleyici')
+        if not done[0]:
+            try:
+                root.after(_tick(bool(windows), active[0], time.monotonic()), poll)
+            except Exception:
+                log('dinleyici')
+
+    root.after(TICK_ACTIVE, poll)
     root.mainloop()
     return 0
 
@@ -3384,6 +3943,9 @@ Windows'ta komutlardaki `python3` yerine `py -3` yaz.
 2. **Her `cikarildi` kartı oku.** Kartı ve `ham` dosyasını (`.ham/<id>.md`) oku. Uzun transkriptte
    önce bölüm başlıklarına bak, sonra nedenle ilgili kısmı oku. `ajan-okusun` yönteminde dosyayı
    kendin aç. Mail kartında Gmail/Outlook bağlantın varsa thread'in tamamını oradan oku.
+   Kartta `yeniden_yakalandi` varsa (yöntem `onceki`) kaynak daha önce işlendi ve kullanıcı onu
+   yeni bir nedenle yeniden yakaladı: yalnız son `## Islendi` bölümünden sonraki
+   `## Yeniden yakalandi` bölümlerindeki isteği işle, mevcut bilgi notunu geliştir.
 3. **Dersleri bağla.** Kaynak başına 1-5 somut ders çıkar. Önce `knowledge/index.md` ve ilgili
    kavramı oku; mevcut notu geliştir, yoksa `beyin` skill'indeki kuralla `knowledge/concepts/<konu>.md`
    oluştur. Her dersin altında kaynak satırı: kart bağlantısı, URL ve videoda zaman damgası
@@ -3634,9 +4196,15 @@ def install(vault, state, hotkey=True, spec=None):
                                               'tus_secildi': chosen}, ensure_ascii=False) + '\n',
                                   encoding='utf-8')
     if hotkey and os.name == 'nt':
+        # The key, the listener and the shortcuts are this vault's now (yakala-sahip.json): a listener
+        # another vault started leaves, and only this vault's `kaldir` takes them away. Written before
+        # the listener starts, which reads it.
+        _write_owner(vault, state, spec)
         # Started only now, after the key is saved: the listener reads it from the state above.
-        done['dinleyici'] = _start_windows_listener(target, script, vault, state, programs, icon)
-        if not done['dinleyici']:
+        done['dinleyici'], key = _start_windows_listener(target, script, vault, state, programs, icon)
+        if key is not None:
+            done['kisayol_calisiyor'] = key
+        if done['dinleyici'] is False:
             _windows_shortcut(*start_menu, win_value, icon)  # Explorer's slower key, but a working one
     done['araclar'] = {name: bool(path) for name, path in tools().items()}
     return done
@@ -3646,11 +4214,14 @@ STARTUP_NAME = 'Pyn Yakala.lnk'
 
 
 def _start_windows_listener(target, script, vault, state, programs, icon):
-    """Start the resident listener with Windows and right now; True once it holds the key."""
+    """Start the resident listener with Windows and right now: (whether it runs, whether it holds
+    the key). (True, True) once it has the key; (True, False) when another app holds it and the
+    listener stays without it; (None, None) when it has not said yet (a slow first start); (False,
+    None) where no listener may start."""
     startup = programs / 'Startup' / STARTUP_NAME
     if os.environ.get('BEYIN_V3_NO_SPAWN') == '1':
         startup.unlink(missing_ok=True)
-        return False  # tests and CI: no resident process, the Start-menu key keeps working
+        return False, None  # tests and CI: no resident process, the Start-menu key keeps working
     import time
     _windows_shortcut(startup, target, _argline([script, 'dinle', '--vault', vault]), icon=icon)
     before = time_now()
@@ -3662,27 +4233,39 @@ def _start_windows_listener(target, script, vault, state, programs, icon):
     while time.monotonic() < deadline:
         info = _listener_state(state)
         if info.get('at', 0) >= before - 1 and 'kisayol_calisiyor' in info:
-            if info['kisayol_calisiyor']:
-                return True
-            break
+            # The key another app's: the listener stays and starts with Windows (the voice, the wake
+            # phrase and "Not al" need no key) and asks for the key again. It used to be stopped and
+            # its Startup shortcut removed, the voice with it. The Start-menu entry gets no key:
+            # Explorer cannot take one another app holds, and holding it, it would keep it from the
+            # listener for good.
+            return True, bool(info['kisayol_calisiyor'])
         time.sleep(0.1)
-    startup.unlink(missing_ok=True)
-    stop_windows_listener()
-    return False
+    # Not heard from yet. pythonw, Tk and the fonts on a fresh laptop, the virus scanner reading
+    # each file, took longer than this, and the listener was stopped and its Startup shortcut
+    # removed: nothing listened, then or after a restart, and nothing said so. It is left to come
+    # up and to start with Windows; the Start-menu entry gets no key meanwhile (Explorer and the
+    # listener cannot both own it). Where it never comes up the desktop app says no listener runs.
+    return None, None
 
 
-def uninstall(vault, state):
-    state = Path(state).resolve()
-    removed = []
-    if sys.platform == 'darwin' and _agent_vault() == str(Path(vault).resolve()):
-        # Only the listener this vault installed: one hotkey serves one vault at a time.
-        subprocess.run(['launchctl', 'bootout', 'gui/' + str(os.getuid()) + '/' + LAUNCH_LABEL], capture_output=True)
-        _launch_agent().unlink()
-        removed.append('LaunchAgent')
-    elif os.name == 'nt':
-        if _listener_state(state).get('pid'):  # only the listener this vault started
+def _uninstall_windows(vault, state):
+    """What `kaldir` takes away on Windows: (what it removed, the vault the key serves when that is
+    another one). The listener and the Startup, Start-menu and Send To shortcuts are the person's,
+    one set for every vault: only the vault they serve takes them away. `kaldir` in a vault used
+    before stopped the current vault's listener and deleted its shortcuts. Where no record says
+    whose they are (set up before it existed): as before, if this vault set a key up."""
+    removed, owner = [], _owner()
+    if owner is not None:
+        mine = _same_vault(owner['vault'], Path(vault).resolve())
+    else:
+        try:
+            mine = bool(json.loads(_state_path(state).read_text(encoding='utf-8')).get('kisayol'))
+        except (OSError, ValueError, AttributeError):
+            mine = False
+    if mine:
+        # Not where no listener may run (tests, CI): the stop event is the whole session's.
+        if (owner is not None or _listener_state(state).get('pid')) and os.environ.get('BEYIN_V3_NO_SPAWN') != '1':
             stop_windows_listener()
-            (state / LISTENER_STATE).unlink(missing_ok=True)
             removed.append('dinleyici')
         startup = _windows_dirs()[0] / 'Startup' / STARTUP_NAME
         if startup.exists():
@@ -3693,7 +4276,24 @@ def uninstall(vault, state):
             if link.exists():
                 link.unlink()
                 removed.append(str(link.name))
-        (state / ICON_NAME).unlink(missing_ok=True)
+        if owner is not None:
+            owner_file().unlink(missing_ok=True)
+            removed.append(OWNER_FILE)
+    (Path(state) / LISTENER_STATE).unlink(missing_ok=True)  # this vault's own note of a listener it started once
+    (Path(state) / ICON_NAME).unlink(missing_ok=True)
+    return removed, (None if mine or owner is None else owner['vault'])
+
+
+def uninstall(vault, state):
+    state = Path(state).resolve()
+    removed, elsewhere = [], None
+    if sys.platform == 'darwin' and _agent_vault() == str(Path(vault).resolve()):
+        # Only the listener this vault installed: one hotkey serves one vault at a time.
+        subprocess.run(['launchctl', 'bootout', 'gui/' + str(os.getuid()) + '/' + LAUNCH_LABEL], capture_output=True)
+        _launch_agent().unlink()
+        removed.append('LaunchAgent')
+    elif os.name == 'nt':
+        removed, elsewhere = _uninstall_windows(vault, state)
     link = Path(vault) / '.claude/skills/beyin-yakala'
     if link.is_symlink() and os.readlink(link).replace('\\', '/').endswith('.agents/skills/beyin-yakala'):
         link.unlink()
@@ -3713,20 +4313,35 @@ def uninstall(vault, state):
     if _state_path(state).exists():
         _state_path(state).unlink()
         removed.append(STATE_FILE)
-    return {'status': 'kaldirildi', 'kaldirilan': removed, 'notlar_korundu': True}
+    result = {'status': 'kaldirildi', 'kaldirilan': removed, 'notlar_korundu': True}
+    if elsewhere:
+        result['sahip_kasa'] = elsewhere  # the key and its listener serve that vault, untouched
+    return result
 
 
 def status(vault, state):
     installed = _state_path(state).is_file()
-    running = None
+    running = owner = None
     if sys.platform == 'darwin' and _agent_vault() == str(Path(vault).resolve()):
         probe = subprocess.run(['launchctl', 'print', 'gui/' + str(os.getuid()) + '/' + LAUNCH_LABEL], capture_output=True)
         running = probe.returncode == 0
     elif os.name == 'nt' and installed:
-        running = windows_listener_running()
-    return {'status': 'tamam', 'kurulu': installed, 'dinleyici_calisiyor': running,
-            'bekleyen': pending(vault), 'klasor': INBOX,
-            'araclar': {name: bool(path) for name, path in tools().items()}}
+        running, owner = _windows_listener_for(vault)
+    result = {'status': 'tamam', 'kurulu': installed, 'dinleyici_calisiyor': running,
+              'bekleyen': pending(vault), 'klasor': INBOX,
+              'araclar': {name: bool(path) for name, path in tools().items()}}
+    if owner is not None:
+        result['sahip_kasa'] = owner
+    return result
+
+
+def _windows_listener_for(vault):
+    """(Whether a listener runs for this vault, the vault it runs for when that is another one): the
+    one listener there is said to run for whichever vault asked."""
+    owner = _owner()
+    if owner is not None and not _same_vault(owner['vault'], Path(vault).resolve()):
+        return False, owner['vault']  # it saves nothing here
+    return windows_listener_running(), None
 
 
 # ---------------------------------------------------------------- CLI
@@ -3776,12 +4391,19 @@ def human(result, command):
         lines = ['Kisayol degisti.' if command == 'kisayol' else 'Yakala kuruldu.']
         if result.get('kisayol'):
             lines.append('Kisayol: ' + result['kisayol'] + ' (her uygulamada calisir).')
-        if result.get('kisayol_calisiyor') is False:
+        if result.get('kisayol_calisiyor') is False and result.get('dinleyici') is True:
+            lines.append('UYARI: ' + str(result.get('kisayol') or 'Bu tus') + ' baska bir uygulamada kayitli. Dinleyici yine calisiyor '
+                         '(ses, "Pyn, not al" ve Not al) ve tusu yarim dakikada bir yeniden ister. '
+                         'Baska bir tus icin: beyin.py yakala kisayol ctrl+alt+x')
+        elif result.get('kisayol_calisiyor') is False:
             lines.append('UYARI: kisayol dinleyicisi baslamadi; bu tus baska bir uygulamada kayitli olabilir. Baska bir tus dene.')
-        if result.get('dinleyici') is True:
+        if result.get('dinleyici') is True and result.get('kisayol_calisiyor') is not False:
             lines.append('Pencere aninda acilir: dinleyici calisiyor ve Windows acilisinda kendiliginden baslar.')
         elif result.get('dinleyici') is False:
             lines.append('Dinleyici baslamadi; kisayol Baslat menusu uzerinden (daha yavas) calisir.')
+        elif 'dinleyici' in result:
+            lines.append('Dinleyici aciliyor (ilk acilis yavas olabilir); Windows acilisinda da kendiliginden baslar. '
+                         'Kisayol birkac saniye icinde de calismazsa: beyin.py yakala kur')
         if command == 'kisayol':
             return '\n'.join(lines)
         if result.get('gonder_menusu'):
@@ -3793,10 +4415,13 @@ def human(result, command):
             lines.append('Istege bagli eksik araclar: ' + ', '.join(missing) + ' (video altyazisi ve ses icin; yoksa elde olanla devam edilir).')
         return '\n'.join(lines)
     if command == 'kaldir':
-        return 'Yakala kaldirildi. Yakalanan notlar yerinde duruyor.'
+        return 'Yakala kaldirildi. Yakalanan notlar yerinde duruyor.' + (
+            '\nKisayol ve dinleyici baska bir kasanin, onlara dokunulmadi: ' + result['sahip_kasa'] if result.get('sahip_kasa') else '')
     if command == 'durum':
         return ('Kurulu: ' + ('evet' if result['kurulu'] else 'hayir') +
-                ('' if result['dinleyici_calisiyor'] is None else '\nKisayol dinleyicisi: ' + ('calisiyor' if result['dinleyici_calisiyor'] else 'durmus')) +
+                ('' if result['dinleyici_calisiyor'] is None else '\nKisayol dinleyicisi: ' + (
+                    'baska bir kasada (' + result['sahip_kasa'] + '); burada kurmak icin: beyin.py yakala kur' if result.get('sahip_kasa')
+                    else 'calisiyor' if result['dinleyici_calisiyor'] else 'durmus')) +
                 '\nBekleyen kaynak: ' + str(result['bekleyen']) +
                 '\nAraclar: ' + ', '.join(n + ('=var' if ok else '=yok') for n, ok in result['araclar'].items()))
     if result.get('status') == 'islendi':
@@ -3859,8 +4484,9 @@ def main(argv=None, vault=None, state=None):
     state = Path(state) if state else resolve_state(vault)
     command = args.command or 'pencere'
     as_json = args.force_json or not sys.stdout or not sys.stdout.isatty()
-    if command == 'pencere' and not getattr(args, 'baglam', None) and open_windows_listener():
-        # The running listener opens it: the same window as the key's, its microphone warm.
+    if command == 'pencere' and not getattr(args, 'baglam', None) and _owns(vault) and open_windows_listener():
+        # The running listener opens it: the same window as the key's, its microphone warm. Only
+        # this vault's: another vault's listener saved the desktop app's "Not al" into that vault.
         result = {'status': 'dinleyici'}
     elif command == 'pencere':
         context = json.loads(args.baglam) if getattr(args, 'baglam', None) else gather_context()
@@ -3871,16 +4497,31 @@ def main(argv=None, vault=None, state=None):
         listen_mac(vault, Path(__file__).resolve(), args.keycode, args.mods)
         return 0
     elif command == 'ekle':
-        url, files, texts = None, [], []
-        for item in args.items:
-            if re.match(r'^https?://', item) and not url:
-                url = item
-            elif Path(item).expanduser().is_file():
-                files.append(item)
-            else:
-                texts.append(item)
-        text = args.metin or ('\n'.join(texts) if texts else None)
-        result = capture(vault, url=url, text=text, files=files, why=args.neden, title=args.baslik, tool=args.arac)
+        # Send To > Beyne At runs under pythonw: no console, so what happened is said on the screen.
+        # It said nothing at all, whether the file was saved or not (one Outlook still held).
+        sent = args.arac == 'gonder-menusu' and sys.stdout is None
+        try:
+            url, files, texts = None, [], []
+            for item in args.items:
+                if re.match(r'^https?://', item) and not url:
+                    url = item
+                elif Path(item).expanduser().is_file():
+                    files.append(item)
+                elif args.arac == 'gonder-menusu' and Path(item).expanduser().is_dir():
+                    # Saved as a card holding nothing but the folder's path, before.
+                    raise ValueError('Klasor gonderilemez (' + Path(item).name + '); icindeki dosyalari sec.')
+                else:
+                    texts.append(item)
+            text = args.metin or ('\n'.join(texts) if texts else None)
+            result = capture(vault, url=url, text=text, files=files, why=args.neden, title=args.baslik, tool=args.arac)
+        except Exception as exc:
+            if not sent:
+                raise
+            _sent_note(False, str(exc))
+            return 1
+        if sent:
+            names = [Path(item).name for item in files] or [result.get('path', '')]
+            _sent_note(True, ', '.join(names[:3]) + (' +' + str(len(names) - 3) if len(names) > 3 else ''))
     elif command == 'isle':
         result = process(vault, args.ids or None, allow_audio=not args.ses_yok, retry=args.tekrar)
     elif command == 'bitti':
@@ -3915,6 +4556,39 @@ def main(argv=None, vault=None, state=None):
         sys.stdout.reconfigure(errors='replace')
     print(human(result, command))
     return 0
+
+
+def _sent_note(ok, text):
+    """What Send To > Beyne At did, on the screen (Windows): a failure in a message box the person
+    closes, a success in a small note at the screen's corner that goes by itself."""
+    if os.name != 'nt':
+        return
+    say = _words(_desktop_language())
+    if not ok:
+        try:
+            import ctypes
+            box = ctypes.WinDLL('user32').MessageBoxW
+            box.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
+            box(None, say('Kaydedilemedi: ') + text, 'Beyne At', 0x30 | 0x10000 | 0x40000)  # warning, to the front, on top
+        except Exception:
+            pass
+        return
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+        root.withdraw()
+        root.overrideredirect(True)
+        root.attributes('-topmost', True)
+        tk.Label(root, text='✓  ' + say('Beyne atıldı: ') + text, bg=PALETTE['card'], fg=PALETTE['text'], font=_font(12, 'bold'),
+                 padx=18, pady=12, highlightthickness=2, highlightbackground=PALETTE['card_line']).pack()
+        root.update_idletasks()
+        width, height = root.winfo_reqwidth(), root.winfo_reqheight()
+        root.geometry('+%d+%d' % (max(0, root.winfo_screenwidth() - width - 24), max(0, root.winfo_screenheight() - height - 72)))
+        root.deiconify()
+        root.after(2600, root.destroy)
+        root.mainloop()
+    except Exception:
+        pass  # the file is saved; only the note could not be shown
 
 
 def _json_text(result, stream):

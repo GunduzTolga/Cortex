@@ -2,95 +2,11 @@
 import json
 import os
 from pathlib import Path
-import re
-import sys
 import tempfile
-import unicodedata
 
-PROJECT_SCOPES_FILE = ".beyin-projects.json"
-
-
-def _scope_path(value):
-    if not isinstance(value, str):
-        raise ValueError("project scope folder must be a string")
-    folder = unicodedata.normalize("NFC", value.replace("\\", "/")).strip().strip("/")
-    parts = folder.split("/")
-    if not folder or value.strip().startswith(("/", "\\")) or re.match(r"[A-Za-z]:", folder) or ".." in parts or "." in parts:
-        raise ValueError("project scope folder must be vault-relative")
-    return folder
-
-
-def _scope_key(value):
-    return unicodedata.normalize("NFC", value.replace("\\", "/")).casefold()
-
-
-def _scope_folder_exists(vault_root, folder):
-    """Every configured folder must name a real vault folder under the matching rule.
-
-    A mistyped or renamed folder would otherwise match nothing, and with shared_unscoped
-    its notes would silently join every other project's scope.
-    """
-    current = Path(vault_root)
-    for part in folder.split("/"):
-        key = _scope_key(part)
-        try:
-            with os.scandir(current) as entries:
-                match = next((entry.name for entry in entries if entry.is_dir() and _scope_key(entry.name) == key), None)
-        except OSError:
-            return False
-        if match is None:
-            return False
-        current = current / match
-    return True
-
-
-def read_project_scopes(vault_root):
-    """None when the vault has no scope file: every gate keeps its exact-field behavior.
-
-    folders maps a vault-relative folder to a project; a record's own non-empty project
-    field wins. shared_unscoped lets a project query also see records no folder or field
-    assigns to any project. Another project's records never enter a project's scope.
-    Missing folders are skipped with a warning so unrelated projects remain fully functional.
-    """
-    path = Path(vault_root) / PROJECT_SCOPES_FILE
-    if path.is_symlink():
-        raise ValueError("project scopes must be a regular vault-local file")
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (ValueError, OSError) as exc:
-        raise ValueError("invalid project scopes file; expected JSON") from exc
-    if not isinstance(data, dict) or set(data) - {"folders", "shared_unscoped"}:
-        raise ValueError("project scopes accept only folders and shared_unscoped")
-    folders = data.get("folders", {})
-    shared = data.get("shared_unscoped", False)
-    if not isinstance(folders, dict) or not isinstance(shared, bool):
-        raise ValueError("folders must be an object and shared_unscoped a boolean")
-    mapped = {}
-    missing = []
-    for folder, project in folders.items():
-        if not isinstance(project, str) or not project.strip():
-            raise ValueError("project scope names must be non-empty strings")
-        folder = _scope_path(folder)
-        if not _scope_folder_exists(vault_root, folder):
-            missing.append(folder)
-            try:
-                sys.stderr.write(f"Warning: project scope folder not found in the vault: {folder}\n")
-                sys.stderr.flush()
-            except Exception:
-                pass
-            # Retain the mapping so stale --no-sync rows never become shared notes.
-        key = _scope_key(folder)
-        if mapped.get(key, project) != project:
-            raise ValueError("project scope folder is assigned twice: " + folder)
-        mapped[key] = project
-    # Longest folder first, so a nested folder can belong to a different project.
-    return {
-        "folders": sorted(mapped.items(), key=lambda item: -len(item[0])),
-        "shared_unscoped": shared,
-        "missing_folders": missing,
-    }
+# One implementation with retrieval: a copy here had already drifted (it read a BOM that the
+# retrieval reader refused, so doctor said ok while every project query failed).
+from beyin_v3 import PROJECT_SCOPES_FILE, _scope_folder_exists, _scope_key, _scope_path, read_project_scopes  # noqa: F401
 
 
 def check_project_scopes(vault_root):

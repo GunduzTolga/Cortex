@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { ChatEvent, ChatOpened, ChatPush, ChatSummary, CliAuth, CliId, CliInfo, ConfigOption } from '@shared/chat';
 import { messageOf } from '@shared/ipcError';
+import { waitingIn } from './turns';
 
 /**
  * What the chat screen holds: the CLIs this machine has, the vault's chats,
@@ -46,12 +47,24 @@ interface ChatState {
   authOpen: CliId | 'all' | null;
   /** Tools a chat was refused by for want of a sign-in since one last answered: their own status can say signed in with a token that has expired. */
   authFailed: CliId[];
+  /**
+   * A tool being installed from here, its installer's window open, or whose installer ended
+   * without it (`failed`). One for the window: the empty chat's button and the sign-ins' row
+   * each kept their own, and neither heard the installer end (desktop-ui-9).
+   */
+  installing: { id: CliId; failed: boolean } | null;
+  /** Its installer opened (electron/services/auth.ts, installTool); a refusal is thrown back to be said where it was asked. */
+  install(id: CliId): Promise<void>;
+  /** Counts the turns that ended in this window's chats: what the CLI wrote is read again (App.tsx). */
+  turnsEnded: number;
   loadAuth(): Promise<void>;
   openAuth(focus?: CliId): void;
   closeAuth(): void;
   boot(): Promise<void>;
   /** The CLIs asked again: a model server opened since, or closed. */
   refreshClis(): Promise<void>;
+  /** Another vault chosen: its chats listed, none of the last vault's left open. */
+  vaultChanged(): Promise<void>;
   select(id: string | null): Promise<void>;
   setCli(cli: CliId): void;
   setDraft(key: string, text: string): void;
@@ -101,6 +114,7 @@ export const useChat = create<ChatState>((set, get) => {
       const open = { ...state.open };
       let chats = state.chats;
       let authFailed = state.authFailed;
+      let turnsEnded = state.turnsEnded;
       for (const push of pushes) {
         if (push.summary) {
           const summary = push.summary;
@@ -115,13 +129,18 @@ export const useChat = create<ChatState>((set, get) => {
         let next = chat;
         // Numbered, so an event read with the chat and pushed as well is taken once.
         if (push.event && (push.seq === undefined || push.seq > next.seq)) next = { ...next, events: [...next.events, push.event], seq: push.seq ?? next.seq };
-        if (push.state) next = { ...next, running: push.state.running, options: push.state.options };
+        if (push.state) {
+          if (next.running && !push.state.running) turnsEnded += 1;
+          next = { ...next, running: push.state.running, options: push.state.options };
+        }
         open[push.chatId] = next;
       }
-      return { open, chats, authFailed };
+      return { open, chats, authFailed, turnsEnded };
     });
   };
   let listening = false;
+  // The cards answered and not yet told back: a second Enter, or a second click, before the push comes is not sent again.
+  const answering = new Set<string>();
 
   return {
     clis: null,
@@ -146,6 +165,18 @@ export const useChat = create<ChatState>((set, get) => {
     auth: null,
     authOpen: null,
     authFailed: [],
+    installing: null,
+    turnsEnded: 0,
+
+    async install(id) {
+      set({ installing: { id, failed: false } });
+      try {
+        await window.cortex.chat.install(id);
+      } catch (err) {
+        set({ installing: null });
+        throw err;
+      }
+    },
 
     async loadAuth() {
       try {
@@ -171,9 +202,20 @@ export const useChat = create<ChatState>((set, get) => {
           queue.push(push);
           if (!frame) frame = requestAnimationFrame(flush);
         });
-        // A sign-in window closed: every tool asked again.
-        window.cortex.on.authChanged(() => void get().loadAuth());
-        // Back from another app - LM Studio, where a model was just loaded: the CLIs asked again.
+        // A sign-in or an install ended: every tool asked again, and the CLIs, one of which may be new.
+        window.cortex.on.authChanged(() => {
+          void get()
+            .loadAuth()
+            .then(() => {
+              // An installer that ended without its tool leaves its button to be pressed again, and says so; the tool there, whenever it came, nothing is left to say.
+              const installing = get().installing;
+              if (!installing) return;
+              if (get().auth?.find((one) => one.id === installing.id)?.installed) set({ installing: null });
+              else if (!installing.failed) set({ installing: { ...installing, failed: true } });
+            });
+          void get().refreshClis();
+        });
+        // Back from another app - LM Studio, where a model was just loaded, or a terminal, where a tool was installed: the CLIs asked again.
         window.addEventListener('focus', () => void get().refreshClis());
       }
       try {
@@ -190,12 +232,23 @@ export const useChat = create<ChatState>((set, get) => {
       }
     },
 
+    async vaultChanged() {
+      try {
+        set({ chats: await window.cortex.chat.list(), active: null, open: {}, error: null });
+      } catch (err) {
+        set({ error: messageOf(err) });
+      }
+    },
+
     async refreshClis() {
       try {
+        const had = new Set((get().clis ?? []).filter((one) => one.available).map((one) => one.id));
         const clis = await window.cortex.chat.clis();
         const chosen = get().cli;
         const available = clis.filter((one) => one.available);
         set({ clis, cli: chosen && available.some((one) => one.id === chosen) ? chosen : (available[0]?.id ?? chosen) });
+        // A tool installed since: whether it is signed in is asked too, for the tool chip.
+        if (available.some((one) => !had.has(one.id))) void get().loadAuth();
       } catch {
         /* The list as it was. */
       }
@@ -259,7 +312,15 @@ export const useChat = create<ChatState>((set, get) => {
 
     answer(permission, option) {
       const { active } = get();
-      if (active) void window.cortex.chat.answer(active, permission, option).catch((err: unknown) => set({ error: messageOf(err) }));
+      if (!active) return;
+      const key = `${active}:${permission}`;
+      if (answering.has(key)) return;
+      answering.add(key);
+      void window.cortex.chat.answer(active, permission, option).catch((err: unknown) => {
+        // Not taken: the card stays, and can be answered again.
+        answering.delete(key);
+        set({ error: messageOf(err) });
+      });
     },
 
     async setOption(option, value) {
@@ -299,3 +360,18 @@ export const useChat = create<ChatState>((set, get) => {
     },
   };
 });
+
+/**
+ * The chats waiting on the person, each with the card it waits on: a chat still answering whose
+ * card is not answered. Read for the badge on Pyn's tab, the chat list and the notice of a card
+ * that comes while its chat is not in front (desktop-ui-m1); with `useShallow`, since it is a new
+ * object at every read.
+ */
+export function waitingChats(open: Record<string, OpenChat>): Record<string, string> {
+  const waiting: Record<string, string> = {};
+  for (const [id, chat] of Object.entries(open)) {
+    const card = chat.running ? waitingIn(chat.events) : null;
+    if (card) waiting[id] = card.id;
+  }
+  return waiting;
+}

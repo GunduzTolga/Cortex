@@ -1,15 +1,18 @@
-import { useEffect, useMemo } from 'react';
-import { BookOpen, PencilLine, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef } from 'react';
+import { BookOpen, Download, PencilLine, Plus, ShieldQuestion, Trash2 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 // Pyn's own face in the chat, where Pyn is the one talking; the seal stays the app's mark.
 import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz.svg';
 import type { ChatSummary } from '@shared/chat';
+import { messageOf } from '@shared/ipcError';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
 import { noteFor, useNotes } from '../notes/notesStore';
 import { useConfirm, usePrompt } from '../notes/NotesMenus';
 import { useApp } from '../store/app';
-import { Spinner } from '../ui/ui';
-import { useChat } from './chatStore';
+import { useView } from '../store/view';
+import { Button, Spinner } from '../ui/ui';
+import { useChat, waitingChats } from './chatStore';
 import { Composer } from './Composer';
 import { SidePane } from './SidePane';
 import { Transcript } from './Transcript';
@@ -48,6 +51,7 @@ function ChatList() {
   const active = useChat((state) => state.active);
   const open = useChat((state) => state.open);
   const clis = useChat((state) => state.clis);
+  const waiting = useChat(useShallow((state) => waitingChats(state.open)));
   const confirm = useConfirm();
   const prompt = usePrompt();
   const groups = useMemo(() => groupsOf(chats), [chats]);
@@ -93,7 +97,12 @@ function ChatList() {
                     data-chat-item={chat.id}
                   >
                     <span className={`flex items-center gap-1.5 truncate text-[13px] ${chat.id === active ? 'font-semibold text-darkDelegation' : 'text-zinc-600'}`}>
-                      {open[chat.id]?.running ? <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-gold" data-chat-running /> : null}
+                      {/* A chat waiting on the person's leave says so, over its running dot: it does not go on until answered. */}
+                      {waiting[chat.id] ? (
+                        <ShieldQuestion size={13} className="shrink-0 text-darkDelegation" aria-label={t('chat.waiting.badge')} data-chat-waiting />
+                      ) : open[chat.id]?.running ? (
+                        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-gold" data-chat-running />
+                      ) : null}
                       <span className="truncate">{chat.title || t('chat.untitled')}</span>
                     </span>
                     <span className="block truncate text-[10.5px] text-zinc-400">
@@ -122,7 +131,9 @@ export function ChatView({ visible }: { visible: boolean }) {
   const t = useT();
   const toast = useApp((s) => s.toast);
   const state = useChat();
-  const { clis, active, open, cli, drafts, error } = state;
+  const { clis, active, open, cli, drafts, error, auth } = state;
+  // Claude Code being installed, from here or from the sign-ins: its installer's window, then its sign-in's (chatStore.ts).
+  const installing = state.installing?.id === 'claude' ? state.installing : null;
   const chat = active ? open[active] : null;
   const summary = active ? state.chats.find((one) => one.id === active) : null;
   const turns = useMemo(() => turnsOf(chat?.events ?? []), [chat?.events]);
@@ -144,12 +155,60 @@ export function ChatView({ visible }: { visible: boolean }) {
     if (!useNotes.getState().index) void useNotes.getState().refresh();
   }, []);
 
+  // Another vault chosen while the window is open: its chats and its notes, not the last one's (they stayed until a restart).
+  const vaultSeq = useApp((s) => s.vaultSeq);
+  useEffect(() => {
+    if (!vaultSeq) return;
+    void useChat.getState().vaultChanged();
+    void useNotes.getState().refresh();
+  }, [vaultSeq]);
+
   // A refusal from the main process - a CLI gone, a message too long - said once.
   useEffect(() => {
     if (!error) return;
     toast({ tone: 'error', title: t('chat.failed'), detail: error });
     useChat.setState({ error: null });
   }, [error, toast, t]);
+
+  /*
+    A card that comes while its chat is not in front - another view, another
+    chat - is said once, with the way to it, until it is answered or seen: the
+    chat waited on the person with nothing on screen to say so (desktop-ui-m1).
+    The badges on Pyn's tab and in the list stay while it waits.
+  */
+  const waiting = useChat(useShallow((s) => waitingChats(s.open)));
+  const seen = useRef(new Set<string>());
+  const told = useRef(new Map<string, { chat: string; toast: string }>());
+  useEffect(() => {
+    const cards = new Set(Object.values(waiting));
+    for (const [chatId, card] of Object.entries(waiting)) {
+      if (seen.current.has(card)) continue;
+      seen.current.add(card);
+      if (visible && chatId === active) continue;
+      const title = useChat.getState().chats.find((one) => one.id === chatId)?.title || t('chat.untitled');
+      const toastId = useApp.getState().toast({
+        tone: 'info',
+        title: t('chat.waiting.title'),
+        detail: t('chat.waiting.detail', { name: title }),
+        sticky: true,
+        action: {
+          label: t('chat.waiting.go'),
+          run: () => {
+            useView.getState().setView('pyn');
+            void useChat.getState().select(chatId);
+          },
+        },
+      });
+      told.current.set(card, { chat: chatId, toast: toastId });
+    }
+    // Answered, ended, or its chat in front now: the notice goes. A card answered is not asked again.
+    for (const [card, notice] of told.current) {
+      if (cards.has(card) && !(visible && notice.chat === active)) continue;
+      useApp.getState().dismissToast(notice.toast);
+      told.current.delete(card);
+    }
+    for (const card of seen.current) if (!cards.has(card)) seen.current.delete(card);
+  }, [waiting, visible, active, t]);
 
   // Ctrl+K: a new chat, while Pyn is in front.
   useEffect(() => {
@@ -190,6 +249,7 @@ export function ChatView({ visible }: { visible: boolean }) {
       usage={usage}
       asked={asked}
       onAnswer={(option) => asked && state.answer(asked.id, option)}
+      visible={visible}
       auth={state.auth}
       onAuth={() => state.openAuth(summary?.cli ?? cli ?? undefined)}
     />
@@ -214,7 +274,8 @@ export function ChatView({ visible }: { visible: boolean }) {
                 {touched.length ? <span className="rounded-full bg-zinc-100 px-1.5 text-[10px] font-semibold tabular-nums text-zinc-600">{touched.length}</span> : null}
               </button>
             ) : null}
-            <Transcript turns={turns} running={chat.running} onSignIn={() => summary && state.openAuth(summary.cli)} />
+            {/* Keyed by its chat: another chat opens at its last message and follows its answer, not at the scroll of the one before. */}
+            <Transcript key={active} turns={turns} running={chat.running} onSignIn={() => summary && state.openAuth(summary.cli)} />
             {composer(false)}
           </>
         ) : (
@@ -248,6 +309,26 @@ export function ChatView({ visible }: { visible: boolean }) {
               ) : (
                 <div className="rounded-xl border border-zinc-200 bg-paper-2 px-4 py-3 text-[13px] leading-relaxed text-zinc-600" data-chat-no-cli>
                   {t('chat.noCli', { names: clis.map((one) => one.name).join(', ') })}
+                  {auth?.find((one) => one.id === 'claude')?.canInstall ? (
+                    <div className="mt-3">
+                      <Button
+                        tone="primary"
+                        disabled={Boolean(installing && !installing.failed)}
+                        onClick={() => {
+                          state.install('claude').catch((err: unknown) => toast({ tone: 'error', title: t('auth.failed'), detail: messageOf(err) }));
+                        }}
+                        data-chat-install
+                      >
+                        <Download size={13} />
+                        {t('chat.noCli.install')}
+                      </Button>
+                      {installing ? (
+                        <p className={`mt-2 text-[12px] ${installing.failed ? 'text-bad' : 'text-zinc-500'}`} data-chat-install-state={installing.failed ? 'failed' : 'running'}>
+                          {t(installing.failed ? 'onboarding.tools.installFailed' : 'auth.install.waiting')}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>

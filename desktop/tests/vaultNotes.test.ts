@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import test from 'node:test';
 import {
   captureFolder,
+  conflictName,
   fillTemplate,
   freeName,
   insertTemplate,
@@ -225,6 +226,21 @@ test('a name Windows or a wiki link would not take is refused, and a free one is
   assert.equal(nameProblem('x'.repeat(181)), 'long');
   assert.equal(freeName('Adsız', ['Başka']), 'Adsız');
   assert.equal(freeName('Adsız', ['adsiz', 'Adsız 1']), 'Adsız 2');
+});
+
+test('what could not be saved over a note is kept under a name a note can have, with when', () => {
+  const at = new Date(2026, 9, 22, 9, 5);
+  assert.equal(conflictName('Plan', 'çakışma', at), 'Plan (çakışma 2026-10-22 09.05)', 'the time with a dot: Windows takes no colon in a name');
+  assert.equal(nameProblem(conflictName('Plan', 'çakışma', at)), null);
+  // A name an older tool let through, with what a new note may not have in it.
+  const odd = conflictName('C# [taslak]: v2', 'conflict', at);
+  assert.equal(nameProblem(odd), null, odd);
+  assert.equal(odd, 'C taslak v2 (conflict 2026-10-22 09.05)');
+  const long = conflictName('x'.repeat(180), 'çakışma', at);
+  assert.equal(nameProblem(long), null, 'cut to fit');
+  assert.equal(nameProblem(`${long} 12`), null, 'with room for the number a taken name is given');
+  assert.ok(long.endsWith('(çakışma 2026-10-22 09.05)'));
+  assert.equal(nameProblem(conflictName('###', 'conflict', at)), null, 'a name with nothing left keeps the word');
 });
 
 test('search: every word somewhere, a title worth more than a body, tags and paths as filters, lines with their marks', () => {

@@ -1,28 +1,36 @@
 name: V3 offline platform contracts
 
 on:
+  # Whatever the suite reads (tests-ci-6): the engine, the template it installs and compares (the V2
+  # runners and hooks the installer recognises among them), the theme, the generators, VERSION.
   pull_request:
     paths:
-      - 'template/.claude/scripts/beyin_v3*.py'
-      - 'scripts/*v3*.py'
-      - 'scripts/beyin_entry.py'
-      - 'template/.agents/skills/**'
+      - 'VERSION'
+      - 'scripts/**'
+      - 'template/**'
+      - 'tema/**'
       - 'tests/v3_*.py'
       - 'tests/fixtures/v3/**'
       - '.github/workflows/v3.yml'
   push:
     branches: [main, 'codex/v3-foundation']
     paths:
-      - 'template/.claude/scripts/beyin_v3*.py'
-      - 'scripts/*v3*.py'
-      - 'scripts/beyin_entry.py'
-      - 'template/.agents/skills/**'
+      - 'VERSION'
+      - 'scripts/**'
+      - 'template/**'
+      - 'tema/**'
       - 'tests/v3_*.py'
       - 'tests/fixtures/v3/**'
       - '.github/workflows/v3.yml'
 
 permissions:
   contents: read
+
+# A newer push to a pull request stops the run its older one started (tests-ci-5); a push to a
+# branch runs to the end.
+concurrency:
+  group: v3-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   stdlib-contracts:
@@ -46,8 +54,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      # The voice helper's tests (its microphone, Telegram's voice notes) need numpy, which only the
+      # voice environment has: the engine never imports it, as v3_stdlib_imports_test holds. On CI
+      # those tests fail rather than skip without it (tests-ci-2).
+      - name: numpy for the voice helper's tests
+        run: python -m pip install --disable-pip-version-check numpy
+      # Bun runs the OMP hook as OMP does (v3_omp_test). On Ubuntu only: the hook is the same
+      # TypeScript everywhere, and elsewhere those tests are skipped without bun.
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.os == 'ubuntu-latest'
       - name: Offline source, runtime, lifecycle and skill contracts
         # A hang writes where every thread stands, a few minutes before the job's own limit would only cancel it.
-        run: python scripts/run_v3_tests.py --hang-after ${{ matrix.os == 'windows-latest' && 3000 || 1500 }}
+        # On Ubuntu every test file in a process of its own, one per core: a file that passes only
+        # beside the others fails there, as it does run alone (tests-ci-3), and the run takes a
+        # fraction of the time (tests-ci-4). macOS and Windows keep one process, as they always ran.
+        # There the limit holds for each file, and a file can start minutes into the run: 15 minutes,
+        # several times the longest file, so one started last still says where it hung within the 30.
+        run: python scripts/run_v3_tests.py ${{ matrix.os == 'ubuntu-latest' && '--each --jobs 0' || '' }} --hang-after ${{ matrix.os == 'windows-latest' && 3000 || matrix.os == 'ubuntu-latest' && 900 || 1500 }}
       - name: Frozen development and holdout retrieval gates
         run: python scripts/evaluate_v3.py

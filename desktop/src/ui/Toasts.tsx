@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-react';
+import { useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 
 const ICONS = {
@@ -11,6 +12,7 @@ const ICONS = {
 export function Toasts() {
   const toasts = useApp((s) => s.toasts);
   const dismissToast = useApp((s) => s.dismissToast);
+  const t = useT();
   if (!toasts.length) return null;
   return (
     <div data-above-layers="toast" className="pointer-events-none fixed bottom-5 right-5 z-[85] flex w-80 flex-col gap-2">
@@ -34,7 +36,7 @@ export function Toasts() {
               {toast.action.label}
             </button>
           ) : null}
-          <button type="button" onClick={() => dismissToast(toast.id)} className="h-fit rounded p-0.5 text-zinc-300 hover:text-darkDelegation">
+          <button type="button" onClick={() => dismissToast(toast.id)} aria-label={t('common.close')} title={t('common.close')} className="h-fit rounded p-0.5 text-zinc-300 hover:text-darkDelegation" data-toast-close>
             <X size={13} />
           </button>
         </div>

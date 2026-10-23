@@ -28,6 +28,8 @@ export interface CliAuth {
   detail: string | null;
   /** Whether its own sign-in can be opened from here, in a window of its own. */
   canLogin: boolean;
+  /** Whether it can be installed from here, by its maker's installer in a window of its own (Claude Code, on Windows). */
+  canInstall: boolean;
   /** Where a key goes: kept by Cortex and given as the tool's environment, handed to the tool itself, or nowhere. */
   key: 'cortex' | 'cli' | null;
   /** Whether a key needs the OpenAI-compatible address it is for. */
@@ -79,7 +81,9 @@ export type ChatEvent =
   | { type: 'plan'; entries: Array<{ content: string; status: string }> }
   | { type: 'usage'; used: number; size: number; cost: number | null; currency: string | null }
   | { type: 'done'; reason: string }
-  | { type: 'error'; message: string; kind: string | null };
+  | { type: 'error'; message: string; kind: string | null }
+  /** Something the person should know about the answer: `new-session`, the CLI could not continue the chat's conversation and began a new one. */
+  | { type: 'notice'; notice: string };
 
 export interface ChatOpened {
   chat: ChatSummary;
@@ -116,6 +120,8 @@ export interface ChatApi {
   auth(): Promise<CliAuth[]>;
   /** The tool's own sign-in, in a window of its own; the statuses are pushed again when it closes. */
   login(cli: CliId): Promise<void>;
+  /** The tool installed by its maker's installer, in a window of its own; its sign-in opened after; the statuses pushed again. */
+  install(cli: CliId): Promise<void>;
   /** A key for a tool: kept encrypted by Cortex, or handed to the tool itself (Codex). */
   setKey(cli: CliId, key: string, baseUrl?: string): Promise<CliAuth[]>;
   forgetKey(cli: CliId): Promise<CliAuth[]>;

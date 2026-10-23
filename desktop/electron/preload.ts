@@ -71,6 +71,7 @@ const api: CortexApi = {
     remove: (id) => invoke('chat:remove', id),
     auth: () => invoke('chat:auth'),
     login: (cli) => invoke('chat:login', cli),
+    install: (cli) => invoke('chat:install', cli),
     setKey: (cli, key, baseUrl) => invoke('chat:setKey', cli, key, baseUrl),
     forgetKey: (cli) => invoke('chat:forgetKey', cli),
     toInbox: (text) => invoke('chat:toInbox', text),
@@ -87,17 +88,31 @@ const api: CortexApi = {
   },
   setup: {
     status: () => invoke('setup:status'),
+    settle: () => invoke('setup:settle'),
     installPython: () => invoke('setup:installPython'),
     installEngine: () => invoke('setup:installEngine'),
     installVoice: () => invoke('setup:installVoice'),
     voice: (patch) => invoke('setup:voice', patch),
+    helper: () => invoke('setup:helper'),
+    restartListener: () => invoke('setup:restartListener'),
+    hotkey: (spec) => invoke('setup:hotkey', spec),
   },
   on: {
     notesChanged: (handler) => subscribe('notes:changed', handler),
     chat: (handler) => listen('chat:event', handler),
     authChanged: (handler) => subscribe('chat:authChanged', handler),
     setup: (handler) => listen('setup:event', handler),
+    voiceStatus: (handler) => listen('setup:voice', handler),
+    voiceHelper: (handler) => listen('setup:helper', handler),
+    notice: (handler) => listen('app:notice', handler),
     openSettings: (handler) => subscribe('app:openSettings', handler),
+    askWake: (handler) => subscribe('app:askWake', handler),
+    flush: (handler) => {
+      // Answered whatever the save came to: the window waits for the answer, not for the save to succeed.
+      const listener = () => void handler().catch(() => undefined).finally(() => ipcRenderer.send('app:flushed'));
+      ipcRenderer.on('app:flush', listener);
+      return () => ipcRenderer.removeListener('app:flush', listener);
+    },
   },
 };
 

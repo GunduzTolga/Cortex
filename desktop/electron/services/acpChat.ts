@@ -1,9 +1,10 @@
 import { app } from 'electron';
 import type { CliId, ConfigOption, PermissionKind, ToolStatus } from '../../shared/chat';
 import { AcpConnection, AcpError } from './acp';
-import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, TITLE_MAX, type Turn, TurnFailure, scrubberFor, shownPath, textOf } from './chatKit';
+import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
 import { launchFor } from './clis';
 import { keptHere } from './keys';
+import { readSettings } from './settings';
 
 /**
  * The chat with the CLIs that speak the Agent Client Protocol: OpenCode
@@ -25,8 +26,16 @@ interface Conn {
 const conns = new Map<CliId, Conn>();
 /** Each chat's session, in the program it lives in. */
 const sessions = new Map<string, { conn: Conn; sessionId: string }>();
+
+interface Running {
+  turn: Turn;
+  conn: Conn;
+  /** Ends the turn as stopped without waiting for the program: a turn let go after Stop while other chats run on its program. */
+  letGo: () => void;
+}
+
 /** The turn each session is running now: what its notifications and requests are told to. */
-const running = new Map<string, Turn>();
+const running = new Map<string, Running>();
 const stopping = new Map<string, ReturnType<typeof setTimeout>>();
 
 /** The way in each ACP tool names for a key in its environment, as their `initialize` answered on 14 October. */
@@ -54,10 +63,11 @@ export function optionsOf(configOptions: unknown): ConfigOption[] | null {
   return out;
 }
 
-function pathsOf(vault: string, locations: unknown): string[] {
+/** The paths a step names, each as `show` says it: shownPath for the transcript, a card's whole path for a card. */
+function pathsOf(vault: string, locations: unknown, show: (vault: string, place: string) => string = shownPath): string[] {
   if (!Array.isArray(locations)) return [];
   return locations
-    .map((one) => (typeof one === 'object' && one !== null && typeof (one as { path?: unknown }).path === 'string' ? shownPath(vault, (one as { path: string }).path) : null))
+    .map((one) => (typeof one === 'object' && one !== null && typeof (one as { path?: unknown }).path === 'string' ? show(vault, (one as { path: string }).path) : null))
     .filter((one): one is string => one !== null)
     .slice(0, 20);
 }
@@ -107,6 +117,12 @@ function connectionFor(cli: CliId, vault: string): Promise<Conn> {
       const method = KEY_METHODS[cli];
       if (method && keptHere(cli) && answer?.authMethods?.some((one) => one.id === method)) await conn.acp.request('authenticate', { methodId: method });
     });
+  // A start that failed is not kept: the next message starts the program again, rather than meet the same failure until the app is closed.
+  conn.ready.catch(() => {
+    if (conns.get(cli) !== conn) return;
+    conns.delete(cli);
+    conn.acp.close();
+  });
   conns.set(cli, conn);
   return conn.ready.then(() => conn);
 }
@@ -119,19 +135,25 @@ async function sessionFor(turn: Turn, conn: Conn): Promise<string> {
   if (known && conn.canResume) {
     try {
       const resumed = (await conn.acp.request('session/resume', { sessionId: known, cwd: conn.vault, mcpServers: [] })) as { configOptions?: unknown } | null;
+      if (turn.signal.aborted) throw new Stopped();
       sessions.set(turn.chatId, { conn, sessionId: known });
       const options = optionsOf(resumed?.configOptions);
       if (options) turn.setOptions(options);
       return known;
-    } catch {
+    } catch (err) {
+      if (err instanceof Stopped) throw err;
       /* A session the program no longer has: a new one. */
     }
   }
   const made = (await conn.acp.request('session/new', { cwd: conn.vault, mcpServers: [] })) as { sessionId?: unknown; configOptions?: unknown } | null;
+  // Stopped meanwhile: the session is left unrecorded rather than written over a later turn's.
+  if (turn.signal.aborted) throw new Stopped();
   if (typeof made?.sessionId !== 'string') throw new TurnFailure('The program did not start a session.', null);
   const sessionId = made.sessionId;
   sessions.set(turn.chatId, { conn, sessionId });
   turn.setSession(sessionId);
+  // The chat had a conversation this program could not continue: the person is told it begins anew, rather than find it forgotten.
+  if (known) turn.emit({ type: 'notice', notice: 'new-session' });
   let options = optionsOf(made.configOptions) ?? [];
   turn.setOptions(options);
   for (const [configId, value] of Object.entries(turn.prefs)) {
@@ -152,7 +174,7 @@ async function sessionFor(turn: Turn, conn: Conn): Promise<string> {
 function heard(conn: Conn, method: string, params: unknown): void {
   if (method !== 'session/update' || typeof params !== 'object' || params === null) return;
   const { sessionId, update } = params as { sessionId?: unknown; update?: Record<string, unknown> };
-  const turn = typeof sessionId === 'string' ? running.get(sessionId) : undefined;
+  const turn = typeof sessionId === 'string' ? running.get(sessionId)?.turn : undefined;
   if (!turn || !update) return;
   const scrub = scrubberFor(conn.vault);
   const content = update.content as { type?: unknown; text?: unknown } | undefined;
@@ -207,14 +229,20 @@ function heard(conn: Conn, method: string, params: unknown): void {
 async function asked(method: string, params: unknown): Promise<unknown> {
   if (method !== 'session/request_permission') throw new AcpError(`Cortex does not answer ${method}.`, -32601);
   const { sessionId, toolCall, options } = (params ?? {}) as { sessionId?: unknown; toolCall?: Record<string, unknown>; options?: unknown };
-  const turn = typeof sessionId === 'string' ? running.get(sessionId) : undefined;
+  const turn = typeof sessionId === 'string' ? running.get(sessionId)?.turn : undefined;
   if (!turn) return { outcome: { outcome: 'cancelled' } };
-  const scrub = scrubberFor(turn.vault);
+  // A card hides nothing: the vault said as a word, a path outside it whole, the title to its end (chatKit.ts).
+  const say = cardTextFor(turn.vault, vaultWord(readSettings().language !== 'en'));
   const choices = (Array.isArray(options) ? options : [])
     .filter((one): one is { optionId: string; name?: unknown; kind?: unknown } => typeof one === 'object' && one !== null && typeof one.optionId === 'string')
     .slice(0, 8)
-    .map((one) => ({ id: one.optionId, name: scrub(textOf(one.name, 80)) || one.optionId, kind: PERMISSION_KINDS.includes(one.kind as PermissionKind) ? (one.kind as PermissionKind) : 'allow_once' }));
-  const chosen = await turn.ask({ title: scrub(textOf(toolCall?.title, TITLE_MAX) || textOf(toolCall?.kind, 40)), kind: textOf(toolCall?.kind, 40) || 'other', paths: pathsOf(turn.vault, toolCall?.locations), options: choices });
+    .map((one) => ({ id: one.optionId, name: say(textOf(one.name, 80)) || one.optionId, kind: PERMISSION_KINDS.includes(one.kind as PermissionKind) ? (one.kind as PermissionKind) : 'allow_once' }));
+  const chosen = await turn.ask({
+    title: cutSaid(say(textOf(toolCall?.title, 100_000) || textOf(toolCall?.kind, 40))),
+    kind: textOf(toolCall?.kind, 40) || 'other',
+    paths: pathsOf(turn.vault, toolCall?.locations, (vault, place) => cardPath(vault, place, say)),
+    options: choices,
+  });
   return chosen ? { outcome: { outcome: 'selected', optionId: chosen } } : { outcome: { outcome: 'cancelled' } };
 }
 
@@ -224,8 +252,8 @@ function failureOf(err: unknown): TurnFailure {
   if (err instanceof AcpError) {
     const data = err.data as { errorName?: unknown; authMethods?: unknown } | null;
     if (data && typeof data.errorName === 'string') return new TurnFailure(err.message, data.errorName.slice(0, 60));
-    // Not logged in: the CLI names the ways it can be (Qwen Code, 14 October).
-    if (data && Array.isArray(data.authMethods)) return new TurnFailure(err.message, 'auth');
+    // Not logged in: the CLI names the ways it can be (Qwen Code, 14 October), or says so by the protocol's own code for it, `auth_required`.
+    if ((data && Array.isArray(data.authMethods)) || err.code === -32000) return new TurnFailure(err.message, 'auth');
     if (err.code === -32601) return new TurnFailure(err.message, 'unsupported');
     return new TurnFailure(err.message, err.code === null ? 'stopped' : null);
   }
@@ -235,16 +263,23 @@ function failureOf(err: unknown): TurnFailure {
 export const acpBackend: Backend = {
   async run(turn, message) {
     let sessionId: string | null = null;
+    let entry: Running | null = null;
     try {
-      const conn = await connectionFor(turn.cli, turn.vault);
-      sessionId = await sessionFor(turn, conn);
-      running.set(sessionId, turn);
-      const result = (await conn.acp.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: message }] })) as { stopReason?: unknown } | null;
+      const conn = await unlessStopped(turn.signal, connectionFor(turn.cli, turn.vault));
+      sessionId = await unlessStopped(turn.signal, sessionFor(turn, conn));
+      const letGo = new Promise<{ stopReason: string }>((resolve) => {
+        entry = { turn, conn, letGo: () => resolve({ stopReason: 'cancelled' }) };
+        running.set(sessionId as string, entry);
+      });
+      const prompt = conn.acp.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: message }] });
+      const result = (await Promise.race([prompt, letGo])) as { stopReason?: unknown } | null;
       return typeof result?.stopReason === 'string' ? result.stopReason : 'end_turn';
     } catch (err) {
+      // After Stop, however the program ended the turn - its answer, an error, the program ended - the turn was stopped.
+      if (err instanceof Stopped || turn.signal.aborted) return 'cancelled';
       throw failureOf(err);
     } finally {
-      if (sessionId) running.delete(sessionId);
+      if (sessionId && entry && running.get(sessionId) === entry) running.delete(sessionId);
       const timer = stopping.get(turn.chatId);
       if (timer) clearTimeout(timer);
       stopping.delete(turn.chatId);
@@ -253,9 +288,23 @@ export const acpBackend: Backend = {
 
   cancel(chatId) {
     const held = sessions.get(chatId);
-    if (!held || !running.has(held.sessionId)) return;
+    const now = held ? running.get(held.sessionId) : undefined;
+    if (!held || !now) return;
     held.conn.acp.notify('session/cancel', { sessionId: held.sessionId });
-    if (!stopping.has(chatId)) stopping.set(chatId, setTimeout(() => running.has(held.sessionId) && held.conn.acp.close(), STOP_GRACE));
+    if (stopping.has(chatId)) return;
+    stopping.set(
+      chatId,
+      setTimeout(() => {
+        if (running.get(held.sessionId) !== now) return;
+        // One program carries every chat of its CLI: ended only when this turn is the only one on it. Else this
+        // turn alone is let go, its session with it, and the chat's next message resumes it or starts a new one.
+        if ([...running.values()].some((other) => other !== now && other.conn === now.conn)) {
+          running.delete(held.sessionId);
+          if (sessions.get(chatId) === held) sessions.delete(chatId);
+          now.letGo();
+        } else held.conn.acp.close();
+      }, STOP_GRACE.ms),
+    );
   },
 
   async setOption(chatId, options, option, value) {

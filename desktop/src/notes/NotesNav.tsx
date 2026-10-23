@@ -29,6 +29,7 @@ import { Spinner } from '../ui/ui';
 import { folderLabel, labelOf, useActiveTab, useNotes, type NavTab } from './notesStore';
 import { openContextMenu, usePrompt, type MenuItem } from './NotesMenus';
 import { TrashPanel, useTrash } from './bin';
+import { leaveOpenNotes } from './openNotes';
 
 /**
  * The notes screen's left column: the vault as a tree, a search over every
@@ -217,6 +218,8 @@ export function useMakers() {
   };
   // A move or a rename said the same way: the tabs follow it, and the notes whose links were pointed at it, or could not be, are named.
   const moved = async (path: string, ask: () => Promise<{ path: string; updated: string[]; skipped: string[] }>, failed: Key) => {
+    // A note open on screen is saved where it is first: a save still to come would look for it where it no longer is (openNotes.ts).
+    await leaveOpenNotes(path);
     try {
       const done = await ask();
       useNotes.getState().moved(path, done.path);

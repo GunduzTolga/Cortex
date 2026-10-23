@@ -48,12 +48,44 @@ RELEASED_V2_HOOKS = {
 }
 
 
+# The same for the two V2 runners, which nothing pinned before (tests-ci-6): a flush.py or
+# compile.py edited "to fix a V2 test" stopped every stock V2 vault's migration.
+RELEASED_V2_RUNNERS = {
+    'flush.py': 'f36f8eb4da19222c7a70ea2659b140595834ce7a52483a6549bcab869e2fb404',
+    'compile.py': '23af64eb892283b907de63fcb9241208a3edf13b4f2e41ff4cecb2a1a8570150',
+}
+
+
 class ReleasedLegacyHooksTest(unittest.TestCase):
     def test_legacy_hook_templates_keep_their_released_bytes(self):
         for name, expected in RELEASED_V2_HOOKS.items():
             with self.subTest(name=name):
                 data = (ROOT / 'template/.claude/hooks' / name).read_bytes()
                 self.assertEqual(hashlib.sha256(data).hexdigest(), expected)
+
+    def test_legacy_runner_templates_keep_their_released_bytes(self):
+        for name, expected in RELEASED_V2_RUNNERS.items():
+            with self.subTest(name=name):
+                data = (ROOT / 'template/.claude/scripts' / name).read_bytes()
+                self.assertEqual(hashlib.sha256(data).hexdigest(), expected,
+                                 'a migration anchor, never code to fix: fix V3 instead')
+
+    def test_the_installer_pins_the_fingerprint_the_template_holds(self):
+        # The installer and the release builder carry these digests themselves: neither reads the
+        # template files, so an edit to them can no longer move what a stock vault is known by.
+        spec = importlib.util.spec_from_file_location('beyin_pin_installer', ROOT / 'scripts/install_v3.py')
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        pinned = {name.rsplit('/', 1)[1]: hashes for name, hashes in installer.LEGACY_RUNNER_HASHES.items()}
+        self.assertEqual(set(installer.LEGACY_RUNNER_HASHES), set(installer.LEGACY_RUNNERS))
+        for name, expected in {**RELEASED_V2_HOOKS, **RELEASED_V2_RUNNERS}.items():
+            self.assertEqual(pinned[name][0], expected, name)
+        with tempfile.TemporaryDirectory() as folder:
+            import zipfile
+            package = build_package(Path(folder) / 'release.zip', '3.0.1', isolated_env(Path(folder) / 'home'))
+            with zipfile.ZipFile(package) as archive:
+                wire = json.loads(archive.read('manifest.json'))['legacy_hashes']
+        self.assertEqual(wire, {name: hashes[0] for name, hashes in installer.LEGACY_RUNNER_HASHES.items()})
 
 
 class InstallLegacyExemptionTest(unittest.TestCase):
@@ -135,9 +167,11 @@ class InstallLegacyExemptionTest(unittest.TestCase):
                     path = self.seed(relative, (RELEASED / 'v3.0.2' / (name + '.md')).read_bytes()
                                      + b'\nUser customization.\n')
                     before = snapshot(self.vault)
-                    with self.assertRaisesRegex(ValueError, 'Unmanaged file conflict'):
+                    with self.assertRaises(ValueError) as raised:
                         self.installer.install(self.vault, self.state, plan_only=True,
                                                legacy_skill_hashes=subset)
+                    self.assertEqual(raised.exception.code, 'update_conflict')
+                    self.assertIn(' ' + relative + ' dosyası zaten var', str(raised.exception))
                     self.assertEqual(snapshot(self.vault), before)
                     path.unlink()
 
@@ -179,23 +213,77 @@ class InstallLegacyExemptionTest(unittest.TestCase):
             with self.subTest(root=root):
                 self.assertIn(current, hashes[root + '/skills/beyin-doktor/SKILL.md'])
 
+    def test_a_stock_runner_with_crlf_line_endings_is_retired_not_refused(self):
+        # A second Windows machine cloning a V2 vault with git's autocrlf has every runner in CRLF.
+        stock = (ROOT / 'template/.claude/scripts/flush.py').read_bytes()
+        runner = self.seed('.claude/scripts/flush.py', stock.replace(b'\n', b'\r\n'))
+        hook = self.seed('.claude/hooks/session-start.sh',
+                         (ROOT / 'template/.claude/hooks/session-start.sh').read_bytes().replace(b'\n', b'\r\n'))
+        result = self.cli()
+        self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
+        self.assertTrue(runner.read_bytes().startswith(self.installer.RETIRED_STUB))
+        self.assertIn(self.installer.RETIRED_STUB, hook.read_bytes())
+        self.assertEqual(self.cli('--uninstall').returncode, 0)
+        self.assertEqual(runner.read_bytes(), stock.replace(b'\n', b'\r\n'))
+
+    def test_a_reinstall_into_a_new_state_passes_the_stubs_an_earlier_install_left(self):
+        # The state was lost (a moved vault, a reinstall with another --state): the stubs V3 wrote
+        # are no customized runners and are never refused.
+        self.seed('.claude/scripts/flush.py', (ROOT / 'template/.claude/scripts/flush.py').read_bytes())
+        self.seed('.claude/hooks/session-end.sh', (ROOT / 'template/.claude/hooks/session-end.sh').read_bytes())
+        self.assertEqual(self.cli().returncode, 0)
+        stub = (self.vault / '.claude/scripts/flush.py').read_bytes()
+        import shutil
+        shutil.rmtree(self.state)
+        self.state = self.base / 'yeni-state'
+        result = self.cli()
+        self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
+        self.assertEqual((self.vault / '.claude/scripts/flush.py').read_bytes(), stub)
+
+    def test_backup_flag_keeps_a_customized_runner_byte_for_byte_and_retires_it(self):
+        runner = self.seed('.claude/scripts/flush.py', CUSTOM_RUNNER)
+        hook = self.seed('.claude/hooks/session-end.sh', CUSTOM_HOOK)
+        earlier = self.seed('.claude/v2-backup/scripts/flush.py', b'an older copy of someone else\n')
+        result = self.cli('--backup-customized-legacy')
+        self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
+        report = json.loads(result.stdout)
+        self.assertEqual(report['legacy_backups'], [
+            {'file': '.claude/hooks/session-end.sh', 'backup': '.claude/v2-backup/hooks/session-end.sh'},
+            {'file': '.claude/scripts/flush.py', 'backup': '.claude/v2-backup/scripts/flush.py.1'}])
+        self.assertEqual((self.vault / '.claude/v2-backup/scripts/flush.py.1').read_bytes(), CUSTOM_RUNNER)
+        self.assertEqual((self.vault / '.claude/v2-backup/hooks/session-end.sh').read_bytes(), CUSTOM_HOOK)
+        self.assertEqual(earlier.read_bytes(), b'an older copy of someone else\n')
+        self.assertTrue(runner.read_bytes().startswith(self.installer.RETIRED_STUB))
+        self.assertIn(self.installer.RETIRED_STUB, hook.read_bytes())
+        # The copies are the person's from then on: no update or uninstall claims them.
+        files = json.loads((self.state / 'v3-install.json').read_text(encoding='utf-8'))['files']
+        self.assertFalse([name for name in files if name.startswith('.claude/v2-backup/')])
+        self.assertEqual(self.cli('--uninstall').returncode, 0)
+        self.assertEqual(runner.read_bytes(), CUSTOM_RUNNER)
+        self.assertEqual((self.vault / '.claude/v2-backup/scripts/flush.py.1').read_bytes(), CUSTOM_RUNNER)
+
     def test_unknown_skill_content_is_still_an_unmanaged_conflict(self):
         for root in ROOTS:
             for name in SKILLS:
                 with self.subTest(root=root, skill=name):
                     relative = root + '/skills/' + name + '/SKILL.md'
                     path = self.seed(relative, b'Kullanicinin kendi ' + name.encode() + b' skilli.\n')
-                    with self.assertRaises(ValueError) as raised:
-                        self.installer.install(self.vault, self.state, plan_only=True)
-                    self.assertEqual(str(raised.exception), 'Unmanaged file conflict ' + relative)
-                    path.unlink()
+                    try:
+                        with self.assertRaises(ValueError) as raised:
+                            self.installer.install(self.vault, self.state, plan_only=True)
+                        self.assertEqual(raised.exception.code, 'update_conflict')
+                        self.assertEqual(str(raised.exception),
+                                         "Kasada Cortex'in yazacağı " + relative + ' dosyası zaten var ve içeriği farklı; '
+                                         'üzerine yazılmadı. Dosyayı başka bir yere taşıyıp yeniden dene.')
+                    finally:
+                        path.unlink()
 
     def test_customized_legacy_runner_needs_its_own_named_acceptance(self):
         runner = self.seed('.claude/scripts/flush.py', CUSTOM_RUNNER)
         with self.assertRaises(ValueError) as raised:
             self.installer.install(self.vault, self.state, plan_only=True)
-        self.assertIn('Customized legacy runner requires review .claude/scripts/flush.py',
-                      str(raised.exception))
+        self.assertEqual(raised.exception.code, 'legacy_review')
+        self.assertIn('V2) dosyası .claude/scripts/flush.py elle değiştirilmiş', str(raised.exception))
         self.assertEqual(runner.read_bytes(), CUSTOM_RUNNER)
         result = self.cli('--accept-customized-legacy', '.claude/scripts/flush.py')
         self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
@@ -210,8 +298,8 @@ class InstallLegacyExemptionTest(unittest.TestCase):
         with self.assertRaises(ValueError) as raised:
             self.installer.install(self.vault, self.state, plan_only=True,
                                    accept_customized=('.claude/scripts/flush.py',))
-        self.assertIn('Customized legacy runner requires review .claude/scripts/compile.py',
-                      str(raised.exception))
+        self.assertEqual(raised.exception.code, 'legacy_review')
+        self.assertIn('V2) dosyası .claude/scripts/compile.py elle değiştirilmiş', str(raised.exception))
 
     def test_acceptance_outside_the_legacy_runner_set_is_rejected(self):
         self.seed('notes/rapor.md', b'Kullanici notu.\n')
@@ -328,8 +416,8 @@ class InstallLegacyExemptionTest(unittest.TestCase):
         with self.assertRaises(ValueError) as raised:
             self.installer.install(self.vault, self.state, plan_only=True,
                                    keep_customized=('.claude/scripts/flush.py',))
-        self.assertIn('Customized legacy runner requires review .claude/scripts/compile.py',
-                      str(raised.exception))
+        self.assertEqual(raised.exception.code, 'legacy_review')
+        self.assertIn('V2) dosyası .claude/scripts/compile.py elle değiştirilmiş', str(raised.exception))
 
     def test_keeping_a_path_outside_the_legacy_runner_set_is_rejected(self):
         self.seed('notes/rapor.md', b'Kullanici notu.\n')
@@ -455,8 +543,9 @@ class InstallLegacyExemptionTest(unittest.TestCase):
         self.assertNotIn('session-end.sh', settings.read_text(encoding='utf-8'))
         # V3's own entries; on Windows the command is an encoded PowerShell launcher, so select by exclusion.
         edit(lambda group: [h.update(timeout=99) for h in group['hooks'] if 'session-end.sh' not in json.dumps(h)])
-        with self.assertRaisesRegex(ValueError, 'Reinstall conflict: managed file changed .claude/settings.local.json'):
+        with self.assertRaisesRegex(ValueError, "Cortex'in yönettiği .claude/settings.local.json dosyası elle değiştirilmiş") as raised:
             self.installer.install(self.vault, self.state, plan_only=True)
+        self.assertEqual(raised.exception.code, 'update_conflict')
 
     def test_accepting_a_previously_kept_runner_retires_it_and_ends_the_keep(self):
         runner = self.seed('.claude/scripts/flush.py', CUSTOM_RUNNER)

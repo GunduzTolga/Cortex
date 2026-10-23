@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { engineFailureText } from '../../shared/engineError';
 import { pythonOf } from './localChat';
 import { readSettings } from './settings';
 import { installedVersion, runPython } from './setup';
@@ -80,15 +81,9 @@ export async function captureToInbox(input: InboxInput, tool = 'pyn'): Promise<I
   try {
     result = await runPython(args, { cwd: vault, timeout: TIMEOUT });
   } catch (err) {
+    // The engine's sentence, never its JSON (shared/engineError.ts).
     const said = err instanceof Error ? err.message : String(err);
-    let message = said;
-    try {
-      const parsed = JSON.parse(said) as { message?: unknown };
-      if (typeof parsed.message === 'string' && parsed.message) message = parsed.message;
-    } catch {
-      // not JSON: the line as it came
-    }
-    throw new Error(message);
+    throw new Error(engineFailureText(said, readSettings().language === 'en' ? 'en' : 'tr') ?? said);
   }
   if (typeof result.path !== 'string') throw new Error(say('Kart yazılamadı.', 'The card was not written.'));
   return { path: result.path.replace(/\\/g, '/'), added: result.status === 'mevcut_karta_eklendi' ? 'existing' : 'new' };

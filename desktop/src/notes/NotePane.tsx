@@ -2,8 +2,10 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import { ArrowLeft, ArrowRight, BookOpen, Code2, ExternalLink, FolderOpen, LayoutTemplate, MoreHorizontal, PencilLine, Trash2 } from 'lucide-react';
 import type { NoteRead } from '@shared/notes';
 import { messageOf } from '@shared/ipcError';
-import { fillTemplate, folderOf, insertTemplate, nameProblem, noteTitle, parseNote, pathKey, shortestLink } from '../../core/vaultNotes';
+import { appLanguage } from '@shared/language';
+import { conflictName, fillTemplate, folderOf, insertTemplate, nameProblem, noteTitle, parseNote, pathKey, shortestLink } from '../../core/vaultNotes';
 import { TemplatePicker, templateText } from './templates';
+import { translate, type Key } from '../i18n';
 import { useT } from '../i18n/useT';
 import { refusal, useApp } from '../store/app';
 import { Spinner } from '../ui/ui';
@@ -13,23 +15,72 @@ import type { LiveHooks } from './livePreview';
 import { imageOf } from './vaultCache';
 import { peekLeave, peekSoon } from './peek';
 import { nameIcon } from '../../core/titles';
-import { folderLabel, useActiveTab, useLabel, useNotes } from './notesStore';
+import { folderLabel, nameLabel, useActiveTab, useLabel, useNotes } from './notesStore';
 import { Menu } from './NotesMenus';
 import { useTrash } from './bin';
 import { NAME_PROBLEM } from './NotesNav';
+import { holdOpenNote } from './openNotes';
 
 /**
  * One note, read or written. It is read from the vault when it is opened and
  * again when the file changes on disk while nothing here is unsaved; it is
- * saved a moment after the last key, at Ctrl-S, and when the note is left -
- * each time over the version that was read, so that a note Obsidian, Pyn or a
- * sync wrote meanwhile is never written over: the screen says so and the
- * person chooses which stays.
+ * saved a moment after the last key, at Ctrl-S, when the window is left, and
+ * when the note is left - each time over the version that was read, so that a
+ * note Obsidian, Pyn or a sync wrote meanwhile is never written over: the
+ * screen says so and the person chooses which stays. A note left before they
+ * have chosen, or gone from where it was, keeps what was typed in a note of
+ * its own beside it (`keepAside`): nothing typed goes with the pane.
  */
 
 const SAVE_AFTER_MS = 1000;
 
 type Saving = 'saved' | 'unsaved' | 'saving' | 'failed';
+
+/** A sentence in the window's language, for what is said after the pane that asked is gone. */
+const say = (key: Key, values?: Record<string, string | number>) => translate(appLanguage(useApp.getState().settings.language), key, values);
+
+/** Text put on the clipboard from a press: the page's clipboard API is one of the permissions the window is refused (electron/main.ts). */
+function copyText(text: string): void {
+  const field = document.createElement('textarea');
+  field.value = text;
+  field.style.position = 'fixed';
+  field.style.opacity = '0';
+  document.body.appendChild(field);
+  field.select();
+  document.execCommand('copy');
+  field.remove();
+}
+
+/**
+ * Text that could not be saved over its note - the note changed on disk
+ * meanwhile, or is gone from where it was - kept as a note of its own beside
+ * it (`conflictName`), or at the vault's top when its folder is gone too, and
+ * the person told which, with the way to it. Where nothing can be written -
+ * nor anything should be, as when another vault is open now and the note's
+ * path names a note of that one (`here` false) - the toast stays and holds
+ * the text, to be copied.
+ */
+async function keepAside(path: string, text: string, why: string, here = true): Promise<void> {
+  const toast = useApp.getState().toast;
+  const name = conflictName(noteTitle(path), say('notes.aside.word'), new Date());
+  for (const folder of here ? new Set([folderOf(path), '']) : []) {
+    try {
+      const made = await window.cortex.notes.create(folder, name, { text, unique: true });
+      void useNotes.getState().refresh();
+      toast({
+        tone: 'info',
+        sticky: true,
+        title: say('notes.aside.kept'),
+        detail: `${say('notes.aside.where', { name: nameLabel(noteTitle(made.path)) })}\n${why}`,
+        action: { label: say('notes.aside.open'), run: () => useNotes.getState().open(made.path) },
+      });
+      return;
+    } catch {
+      /* Not there: the next place. */
+    }
+  }
+  toast({ tone: 'error', sticky: true, title: say('notes.aside.none', { name: nameLabel(noteTitle(path)) }), detail: why, action: { label: say('notes.aside.copy'), run: () => copyText(text) } });
+}
 
 /** `- [ ]` and `- [x]` on one line of a note, the other way round. */
 export function toggleTask(text: string, line: number): string | null {
@@ -80,16 +131,37 @@ export function NotePane({ path }: { path: string }) {
   const shownTitle = keptLabel ?? title;
   const reader = useRef<HTMLDivElement>(null);
   const editor = useRef<NoteEditorHandle>(null);
-  // What the save in flight and the last one read, for the callbacks that outlive a render.
-  const current = useRef({ path, text, doc, saving: false });
+  /*
+    What the callbacks that outlive a render read: the note as last read or
+    saved, the text as typed, the save in flight and the one asked for while it
+    ran, whether the pane is still on screen, the text last kept aside, and the
+    vault the note was read from (the screen keys the pane by it, NotesView.tsx).
+  */
+  const current = useRef({
+    path,
+    text,
+    doc,
+    vaultSeq: useApp.getState().vaultSeq,
+    running: null as Promise<string | null> | null,
+    queued: null as string | true | null,
+    mounted: true,
+    keptAside: null as string | null,
+  });
   current.current = { ...current.current, path, text, doc };
+  // The window's language as now chosen, for the callbacks made once.
+  const saying = useRef(t);
+  saying.current = t;
 
   const writable = doc !== null && doc.text !== null && doc.hash !== null && !doc.readOnly && !conflict;
   const dirty = doc !== null && doc.text !== null && text !== doc.text;
 
   const load = useCallback(async () => {
+    // What was on screen as the read began: typed over meanwhile, the read is let go, not put over what was typed.
+    const before = current.current.text;
     try {
       const read = await window.cortex.notes.read(path);
+      // Its version is not taken either: a save then goes over the version read before, and says so if the disk is another.
+      if (current.current.doc && current.current.text !== before) return;
       setDoc(read);
       setText(read.text ?? '');
       setFailed(null);
@@ -97,54 +169,102 @@ export function NotePane({ path }: { path: string }) {
       setChanged(false);
       setSaving('saved');
     } catch (err) {
-      setFailed(refusal(messageOf(err)));
+      // A note on screen that would not be read again stays as it is, and says so; only one never read shows why in its place.
+      if (current.current.doc) toast({ tone: 'error', title: saying.current('notes.read.failed'), detail: messageOf(err) });
+      else setFailed(refusal(messageOf(err)));
     }
-  }, [path]);
+  }, [path, toast]);
 
   // One pane per note (the screen keys it by the path), so a save that outlives it is still of this note.
   useEffect(() => {
     void load();
   }, [load]);
 
-  // The file changed on disk: read again when nothing here is unsaved, else say so and wait for the person.
+  /*
+    The file changed on disk: read again when nothing here is unsaved, else say
+    so and wait for the person. Only a time later than the version read or
+    saved here is a change from outside. The index is built again after each
+    save, and until it is, it holds the time before it: read as a change, that
+    read the note again and again, and each read put the note over what was
+    typed meanwhile (desktop-ui-1). A file put back with an older time is not
+    seen here, and the next save, checked against the disk, says so.
+  */
   useEffect(() => {
-    if (!doc || onDisk === null || Math.abs(onDisk - doc.modified) < 1 || current.current.saving) return;
+    if (!doc || onDisk === null || onDisk - doc.modified < 1 || current.current.running) return;
     if (current.current.text === (doc.text ?? '')) void load();
     else setChanged(true);
   }, [onDisk, revision, doc, load]);
 
+  /*
+    The text saved over the version read: null once what is on screen is on
+    disk, else why it is not. One save at a time, and one asked for while it
+    runs is made once it ends, with what is typed by then: dropped, as it was,
+    nothing armed the timer again, and what was typed during a slow save
+    stayed unsaved (desktop-ui-5).
+  */
   const save = useCallback(
-    async (base?: string) => {
-      const { path: at, text: now, doc: was } = current.current;
-      if (!was || was.text === null || was.hash === null || was.readOnly || current.current.saving) return;
-      if (now === was.text && !base) return;
-      current.current.saving = true;
-      setSaving('saving');
-      try {
-        const saved = await window.cortex.notes.save(at, now, base ?? was.hash);
-        // The renderer is not strict: the union is told apart with `in`, as CLAUDE.md says.
-        if ('hash' in saved) {
-          const next = { ...was, text: now, hash: saved.hash, modified: saved.modified };
-          current.current.doc = next;
-          if (current.current.path === at) {
-            setDoc(next);
-            setConflict(null);
-            setChanged(false);
-            setSaving(current.current.text === now ? 'saved' : 'unsaved');
-          }
-          void useNotes.getState().refresh();
-        } else if ('current' in saved && current.current.path === at) {
-          setConflict(saved.current);
-          setSaving('unsaved');
-        }
-      } catch (err) {
-        setSaving('failed');
-        toast({ tone: 'error', title: t('notes.save.failed'), detail: messageOf(err) });
-      } finally {
-        current.current.saving = false;
+    (base?: string): Promise<string | null> => {
+      if (current.current.running) {
+        current.current.queued = base ?? current.current.queued ?? true;
+        return current.current.running;
       }
+      const once = async (over: string | undefined): Promise<string | null> => {
+        const { path: at, text: now, doc: was } = current.current;
+        if (!was || was.text === null || was.hash === null || was.readOnly) return null;
+        if (now === was.text && !over) return null;
+        /*
+          Another vault chosen since the note was read: its path now names a
+          note of that one, which this text is not saved over. Choosing it saved
+          the note first (store/app.ts, `chooseVault`); this is what a save
+          still to come, from the pane going, would have written there - over a
+          copy of the vault, say, where the same note is the same version.
+        */
+        if (useApp.getState().vaultSeq !== current.current.vaultSeq) return say('notes.aside.otherVault');
+        setSaving('saving');
+        try {
+          const saved = await window.cortex.notes.save(at, now, over ?? was.hash);
+          // The renderer is not strict: the union is told apart with `in`, as CLAUDE.md says.
+          if ('hash' in saved) {
+            const next = { ...was, text: now, hash: saved.hash, modified: saved.modified };
+            current.current.doc = next;
+            if (current.current.path === at) {
+              setDoc(next);
+              setConflict(null);
+              setChanged(false);
+              setSaving(current.current.text === now ? 'saved' : 'unsaved');
+            }
+            void useNotes.getState().refresh();
+            return null;
+          }
+          if ('current' in saved && current.current.path === at) {
+            setConflict(saved.current);
+            setSaving('unsaved');
+          }
+          return say('notes.aside.changed');
+        } catch (err) {
+          setSaving('failed');
+          // A pane left says it with where its text went (`leave`).
+          if (current.current.mounted) toast({ tone: 'error', title: saying.current('notes.save.failed'), detail: messageOf(err) });
+          return refusal(messageOf(err));
+        }
+      };
+      const running = (async () => {
+        try {
+          for (let over = base; ; ) {
+            const why = await once(over);
+            const again = current.current.queued;
+            current.current.queued = null;
+            if (again === null) return why;
+            over = again === true ? undefined : again;
+          }
+        } finally {
+          current.current.running = null;
+        }
+      })();
+      current.current.running = running;
+      return running;
     },
-    [t, toast],
+    [toast],
   );
 
   useEffect(() => {
@@ -154,8 +274,44 @@ export function NotePane({ path }: { path: string }) {
     return () => clearTimeout(timer);
   }, [text, dirty, writable, save]);
 
-  // Leaving the note saves what is unsaved, over the version read.
-  useEffect(() => () => void save(), [save]);
+  /*
+    The note left - another note or tab, the bin, another vault, the window
+    closed: what is unsaved is saved over the version read, and what cannot be
+    (the note changed on disk and the person had not chosen yet, or it is gone
+    from where it was) is kept as a note beside it. Before, it went with the
+    pane, and nothing said so (desktop-ui-3).
+  */
+  const leave = useCallback(async () => {
+    const why = await save();
+    const { text: now, doc: was } = current.current;
+    if (why === null || !was || was.text === null || now === was.text || now === current.current.keptAside) return;
+    current.current.keptAside = now;
+    await keepAside(path, now, why, useApp.getState().vaultSeq === current.current.vaultSeq);
+  }, [path, save]);
+
+  // Asked of the note by a delete, another vault and the window going away (openNotes.ts); left when the pane goes.
+  useEffect(() => holdOpenNote(path, leave), [path, leave]);
+  useEffect(() => {
+    current.current.mounted = true;
+    return () => {
+      current.current.mounted = false;
+      void leave();
+    };
+  }, [leave]);
+
+  // The window left - for another app, the icon by the clock, sleep - saves at once, not a second later (desktop-ui-8).
+  useEffect(() => {
+    const now = () => void save();
+    const hidden = () => {
+      if (document.visibilityState === 'hidden') void save();
+    };
+    window.addEventListener('blur', now);
+    document.addEventListener('visibilitychange', hidden);
+    return () => {
+      window.removeEventListener('blur', now);
+      document.removeEventListener('visibilitychange', hidden);
+    };
+  }, [save]);
 
   // The text of the note in front, for the outline and the links beside it.
   useEffect(() => {
@@ -252,8 +408,9 @@ export function NotePane({ path }: { path: string }) {
         if (link && to && box && /\.md$/i.test(to)) peekSoon(to, link.subpath, box);
         else peekLeave();
       },
+      taskLabel: (done) => t(done ? 'notes.task.done' : 'notes.task.todo'),
     }),
-    [path, openLink],
+    [path, openLink, t],
   );
 
   // A template from the vault's templates folder, into this note: at the cursor while writing, at the end while reading.

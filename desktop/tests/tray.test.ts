@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { app } from 'electron';
 import type { VoiceStatus } from '../shared/setup';
-import { listensAlways, startWithWindows, trayItems, trayTooltip } from '../electron/services/tray';
+import type { ListenerWord } from '../shared/setup';
+import { keepStartWithWindows, listensAlways, startWithWindows, trayItems, trayTooltip } from '../electron/services/tray';
 
 const voice = (change: Partial<VoiceStatus>): VoiceStatus => ({
   installed: true,
@@ -16,8 +17,10 @@ const voice = (change: Partial<VoiceStatus>): VoiceStatus => ({
   ...change,
 });
 
+const hearing: ListenerWord = { ses: 'hazir', model: '', mesaj: '', uyandirma: true, mb: null, toplam: null, uyandirma_sorun: null, uyandirma_mesaj: '', kisayol: 'tamam' };
+
 test('the icon’s menu says whether the microphone listens and switches it, opens a note, the window, the settings, and quits', () => {
-  const items = trayItems(voice({ wake: true }), false, false, true);
+  const items = trayItems(voice({ wake: true }), false, false, true, { word: hearing });
   assert.deepEqual(
     items.map((item) => [item.label, item.action ?? null, item.icon ?? null, item.enabled ?? true]),
     [
@@ -38,7 +41,9 @@ test('the icon’s menu says whether the microphone listens and switches it, ope
   assert.equal(trayItems(voice({}), true, false, true)[1].label, 'Listen all the time (“Pyn, not al”)', 'in the window’s language');
   assert.equal(trayItems(voice({}), false, false, false)[3].enabled, false, 'no vault: no note to take');
   assert.equal(trayItems(voice({ wakePhrase: 'hey pyn' }), false, false, true)[1].label, 'Sürekli dinle (“Hey Pyn”)', 'the phrase chosen');
-  assert.equal(trayItems(voice({ wakePhrase: 'ikisi', wake: true }), false, false, true)[0].label, 'Mikrofon dinliyor: “Hey Pyn” ya da “Pyn, not al”', 'both');
+  assert.equal(trayItems(voice({ wakePhrase: 'ikisi', wake: true }), false, false, true, { word: hearing })[0].label, 'Mikrofon dinliyor: “Hey Pyn” ya da “Pyn, not al”', 'both');
+  // On in the settings, and no listener says it hears (none runs yet): the microphone is not said to listen (windows-e2e-5).
+  assert.equal(trayItems(voice({ wake: true }), false, false, true)[0].icon, 'mikrofon-kapali');
 });
 
 test('without voice typing set up, or switched off, there is no microphone to switch', () => {
@@ -52,9 +57,40 @@ test('without voice typing set up, or switched off, there is no microphone to sw
 });
 
 test('the icon says whether the microphone listens', () => {
-  assert.equal(trayTooltip(voice({ wake: true }), false), 'Cortex · mikrofon “Pyn, not al” için dinliyor');
+  assert.equal(trayTooltip(voice({ wake: true }), false, { word: hearing }), 'Cortex · mikrofon “Pyn, not al” için dinliyor');
+  assert.equal(trayTooltip(voice({ wake: true }), false), 'Cortex · mikrofon kapalı', 'on, but nothing says it hears');
   assert.equal(trayTooltip(voice({ wake: false }), false), 'Cortex · mikrofon kapalı');
   assert.equal(trayTooltip(null, true), 'Cortex · the microphone is off');
+});
+
+test('at its start, Cortex writes its start-up entry only where it is missing or left behind: turned off in Windows, it stays off (desktop-shell-6)', () => {
+  const stub = app as unknown as { isPackaged: boolean; loginItems: unknown[]; loginEntry: boolean };
+  stub.isPackaged = true;
+  stub.loginItems.length = 0;
+  try {
+    // The entry there (Task Manager may hold it turned off; it reads as there all the same): nothing written.
+    stub.loginEntry = true;
+    keepStartWithWindows(true, 'win32');
+    assert.deepEqual(stub.loginItems, []);
+    // The first run: written.
+    stub.loginEntry = false;
+    keepStartWithWindows(true, 'win32');
+    assert.deepEqual(stub.loginItems, [{ openAtLogin: true, args: ['--gizli'] }]);
+    // The setting off and the entry left behind: taken away; off and none, nothing.
+    keepStartWithWindows(false, 'win32');
+    keepStartWithWindows(false, 'win32');
+    assert.deepEqual(stub.loginItems, [{ openAtLogin: true, args: ['--gizli'] }, { openAtLogin: false, args: ['--gizli'] }]);
+    // The person's own choice in the settings is written as it is.
+    startWithWindows(true, 'win32');
+    assert.equal(stub.loginItems.length, 3);
+    // Not on another system.
+    keepStartWithWindows(true, 'darwin');
+    assert.equal(stub.loginItems.length, 3);
+  } finally {
+    stub.isPackaged = false;
+    stub.loginItems.length = 0;
+    stub.loginEntry = false;
+  }
 });
 
 test('Cortex starts with Windows only as the installed app', () => {

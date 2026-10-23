@@ -36,6 +36,8 @@ export interface AcpHandlers {
 /** A line longer than this is not a message: the program is stopped rather than let fill the memory. */
 const LINE_MAX = 16 * 1024 * 1024;
 const STDERR_KEPT = 8 * 1024;
+/** After its exit, how long the program's last words on standard error are waited for. */
+const DRAIN_MS = 1000;
 
 /** A Claude Code session's own variables: what ties a program started inside it to that session's host and sign-in. */
 const HOST_SESSION = /^(CLAUDECODE|CLAUDE_CODE_.+|CLAUDE_AGENT_SDK_.+|CLAUDE_PID|CLAUDE_EFFORT|CLAUDE_PREVIEW_.+)$/i;
@@ -76,7 +78,10 @@ export class AcpConnection {
     // A pipe closed under a write (the program gone) is said by its exit, not thrown here.
     this.child.stdin.on('error', () => undefined);
     this.child.on('error', (err) => this.end(null, `${this.stderr}\n${err.message}`.trim()));
-    this.child.on('exit', (code) => this.end(code, this.stderr.trim()));
+    // Why it stopped is read once its output is closed: at its exit, Node may not have handed over all
+    // it wrote to standard error. A program it left holding the pipes open is not waited for long.
+    this.child.on('exit', (code) => setTimeout(() => this.end(code, this.stderr.trim()), DRAIN_MS).unref());
+    this.child.on('close', (code) => this.end(code, this.stderr.trim()));
   }
 
   get alive(): boolean {

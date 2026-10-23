@@ -1,5 +1,5 @@
 import type { ChatEvent, ConfigOption, PermissionKind, ToolStatus } from '@shared/chat';
-import { parseNote } from '../../core/vaultNotes';
+import { parseNote, type NoteLink } from '../../core/vaultNotes';
 
 /**
  * A chat's events read as turns, the way the screen shows them: what the
@@ -36,10 +36,12 @@ export interface Turn {
   text: string;
   asked: Asked[];
   plan: Array<{ content: string; status: string }> | null;
+  /** What the person should know about this answer (`new-session`: the CLI began the conversation anew). */
+  notices: string[];
   end: { kind: 'done'; reason: string } | { kind: 'error'; message: string; error: string | null } | null;
 }
 
-const empty = (user: Turn['user']): Turn => ({ user, thought: '', steps: [], text: '', asked: [], plan: null, end: null });
+const empty = (user: Turn['user']): Turn => ({ user, thought: '', steps: [], text: '', asked: [], plan: null, notices: [], end: null });
 
 export function turnsOf(events: readonly ChatEvent[]): Turn[] {
   const turns: Turn[] = [];
@@ -95,6 +97,9 @@ export function turnsOf(events: readonly ChatEvent[]): Turn[] {
       case 'plan':
         current().plan = event.entries;
         break;
+      case 'notice':
+        if (!current().notices.includes(event.notice)) current().notices.push(event.notice);
+        break;
       case 'done':
         current().end = { kind: 'done', reason: event.reason };
         break;
@@ -112,6 +117,24 @@ export function turnsOf(events: readonly ChatEvent[]): Turn[] {
 export function waitingOn(turns: readonly Turn[]): Asked | null {
   const last = turns[turns.length - 1];
   return last?.asked.find((one) => one.answer === undefined) ?? null;
+}
+
+/**
+ * The card `waitingOn(turnsOf(events))` finds, found without reading the chat into turns: from the
+ * end back to the person's last message, the first card not answered. Read for every open chat at
+ * every frame (chatStore.ts, waitingChats), so it walks the last turn only.
+ */
+export function waitingIn(events: readonly ChatEvent[]): Extract<ChatEvent, { type: 'permission' }> | null {
+  const answered = new Set<string>();
+  let found: Extract<ChatEvent, { type: 'permission' }> | null = null;
+  for (let at = events.length - 1; at >= 0; at -= 1) {
+    const event = events[at];
+    if (event.type === 'user') break;
+    // Walking back, a card's answer is met before the card.
+    if (event.type === 'answered') answered.add(event.id);
+    else if (event.type === 'permission' && !answered.has(event.id)) found = event;
+  }
+  return found;
 }
 
 /** The last word on how full the model's context is, and what the chat has cost. */
@@ -136,6 +159,33 @@ export interface NoteRef {
   mentioned: boolean;
 }
 
+/*
+  The links of an ended answer, by its words. The panel's list is read again
+  at every streamed piece, and every answer of the chat was parsed again with
+  it: some 10 ms a frame at forty answers on a 2.8 GHz server core, more on a
+  laptop (desktop-ui-4). An ended answer's words do not change, so its links
+  are kept; the answer still coming is parsed as it comes and not kept, or
+  every piece of it would be. A few hundred answers, the oldest let go first.
+*/
+const LINKS_KEPT = 512;
+const linksKept = new Map<string, NoteLink[]>();
+
+/** An answer's links: kept by its words once it has ended (exported for the tests, which hold that it is kept). */
+export function linksOf(turn: Turn): NoteLink[] {
+  if (!turn.end) return parseNote(turn.text).links;
+  const kept = linksKept.get(turn.text);
+  if (kept) {
+    // Used again: the last to be let go.
+    linksKept.delete(turn.text);
+    linksKept.set(turn.text, kept);
+    return kept;
+  }
+  const links = parseNote(turn.text).links;
+  linksKept.set(turn.text, links);
+  if (linksKept.size > LINKS_KEPT) linksKept.delete(linksKept.keys().next().value as string);
+  return links;
+}
+
 /**
  * The notes a chat touched, the most recent first: those its steps read or
  * changed, and those its answers link to (`[[wiki]]` or Markdown). A path that
@@ -155,7 +205,7 @@ export function notesOf(turns: readonly Turn[], note: (path: string) => string |
     for (const step of turn.steps) {
       for (const path of step.paths) if (path.toLowerCase().endsWith('.md')) touch(note(path), at, step.kind === 'edit' || step.kind === 'delete' || step.kind === 'move' ? 'edited' : 'read');
     }
-    for (const link of parseNote(turn.text).links) {
+    for (const link of linksOf(turn)) {
       const to = link.target && !link.embed ? resolve(link.target, link.kind) : null;
       // A link to an image or another file is not a note.
       if (to?.toLowerCase().endsWith('.md')) touch(to, at, 'mentioned');

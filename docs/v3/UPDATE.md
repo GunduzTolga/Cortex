@@ -32,7 +32,18 @@ python3 beyin.py update
 
 `doctor` yerel kayıtları, bekleyen işleri ve sorunları gösterir. Bir metadata raporu gerçek istemci teslimi veya her notun doğru yorumlandığı kanıtı değildir.
 
-`update --check` resmi stable release'i inceler ve paketi geçici alanda doğrular. Vault ve mevcut runtime dosyalarını değiştirmez. Paket verilmezse ağ erişimi gerekir. `update` aynı doğrulamadan sonra yeni sürümü uygular. Aynı sürüme ikinci güncelleme no-op'tur; sayısal sürüm sırası kullanılır. Eski bir paketi yükleyerek downgrade yapılmaz; geri dönüş için `rollback` kullanılır.
+`update --check` resmi stable release'i inceler ve paketi geçici alanda doğrular. Vault ve mevcut runtime dosyalarını değiştirmez. Paket verilmezse ağ erişimi gerekir. `update` aynı doğrulamadan sonra yeni sürümü uygular; sayısal sürüm sırası kullanılır.
+
+Sonuçlar:
+
+- `updated`: yeni sürüm yazıldı.
+- `refreshed`: paket kurulu sürümle aynı numarayı taşıyor ama kodu farklı (aynı sürümün sonraki bir derlemesi); farklı dosyalar güncellemeyle aynı journal içinde yazıldı ve `rollback` ile geri alınabilir. Karşılaştırma kurucunun son yazdığı kayda (`v3-install.json` içindeki `installed_hash`) göre yapılır: elle değiştirdiğin bir motor dosyası tek başına yenileme sebebi sayılmaz. `--check` bu durumu `available` ve `refresh: true` olarak bildirir.
+- `noop`: kurulu sürüm paketle aynı.
+- `ahead`: kurulu sürüm yayımlanmış son sürümden ileride (örneğin masaüstü uygulamasıyla gelen sürüm henüz yayımlanmamış). Bu bir hata ya da geri alma önerisi değildir; paket indirilmez.
+
+Eski bir paketi `--package` ile vererek downgrade yapılmaz; geri dönüş için `rollback` kullanılır.
+
+Kurulu bir Ananas teması (`beyin.py tema kur`) her güncellemeden sonra yeni sürümün CSS'ine yenilenir; Obsidian'da temayı kapattıysan kapalı kalır, Cortex'in yazmadığı bir `ananas.css` dosyasına dokunulmaz. Elle yenilemek için: `beyin.py tema yenile`.
 
 Varsayılan indirme kaynağı `GunduzTolga/Cortex` deposunun resmi GitHub stable release'idir. Preview, hareket eden geliştirme dalı veya üçüncü taraf paket kaynağı otomatik seçilmez. Stable release ya da beklenen ZIP yoksa bunu hata olarak bildirir; yayın varmış gibi sonuç vermez.
 
@@ -64,13 +75,55 @@ python3 beyin.py recover
 python3 beyin.py rollback
 ```
 
-`recover`, yarım kalan işlemin journal'ını okuyup planlanan işlemi tamamlar. Bir hata mesajı işlemin iptal edildiği anlamına gelmez; bazı sistem dosyaları yazılmış, başarılı sürüm damgası henüz yazılmamış olabilir.
+`recover`, yarım kalan işlemin journal'ını okuyup planlanan işlemi tamamlar. Bir hata mesajı işlemin iptal edildiği anlamına gelmez; bazı sistem dosyaları yazılmış, başarılı sürüm damgası henüz yazılmamış olabilir. Paketin `install_v3.py` komutunu aynı vault için yeniden çalıştırmak da bekleyen journal'ı tamamlar (`install_resumed: true`).
+
+Kurtarma, kesintiden önceki ön koşulları olduğu gibi tekrar oynatmaz, bugünkü vault'a göre yeniden değerlendirir:
+
+- V2 geçişinin kanıtı (notların ve eski V2 durumunun parmak izi) kurtarma başında, V2 yazıcı kilitleri tutulurken yeniden alınır. Kurulum sırasında ya da kesintiden sonra değişen bir not artık her denemeyi aynı hatayla durdurmaz. Kurulum sürerken bir not değişirse ilk deneme `migration_changed` koduyla durur; ikinci deneme tamamlar.
+- Kesintiden sonra yönetilen bir dosyayı değiştirdiysen (güncelleme onu kesintiden önce yazmış olsun ya da olmasın): ayar dosyalarında (`.claude/settings.local.json`, `.codex/hooks.json`, `.gemini/settings.json` ve benzerleri) eklediğin anahtar (ör. bir sohbette "Her zaman izin ver"; istemcinin, kurulum onu yazmadan önce oluşturduğu bir ayar dosyası da) yeni sürümün girdileriyle birleştirilir; `AGENTS.md` ve `CLAUDE.md` içinde yönetilen bloğun dışına yazdığın metin korunur, yalnız blok yenilenir; kurulum yazmadan önce kendin oluşturduğun bir `AGENTS.md`'ye blok eklenir. Sonradan `rollback` yalnız yönetilen bölümü eski haline döndürür, senin değişikliğin kalır; ilk kurulumun oluşturduğu bir dosyada geriye yalnız senin eklediğin kalır. Motor dosyalarındaki bir değişiklik ve yönetilen bölümün içindeki bir düzenleme hâlâ çakışmadır.
+
+Giriş (`beyin.py`) her zaman motorun komut satırı modülünden (`beyin_v3_cli.py`) sonra yazılır. Yine de iki dosya farklı sürümlerden kalırsa `update`, `recover` ve `rollback` komut satırı modülü olmadan da çalışır.
 
 `rollback`, son sistem işleminin yedeğini geri getirir. [Opsiyonel global köprüyü](GLOBAL-BRIDGE.md) kendin eklediysen, köprüyü içermeyen eski bir kuruluma (öncül projenin 3.1.0 ve öncesi sürümleri) `rollback` veya `uninstall` yapmadan önce global ayardaki köprü handler'larını kaldır; olmayan bir scripti global hook'ta bırakmak istemci hatası üretir. Eski 2.x kurulumundan ilk geçişte önceki sürüm ve tanınan eski runner'lar da geri yüklenir. Temiz Cortex kurulumunu geri almak `uninstalled` olarak raporlanır; olmayan bir eski sürüm uydurulmaz. Sonradan eklediğin kullanıcı notları silinmez. Bu komut bütün vault geçmişini geri alan bir işlem değildir.
 
-Yönetilen dosyada araya giren kullanıcı değişikliği varsa işlem bunu ezmek yerine conflict ile durur. Desteklenen JSON ayarlarında ilgisiz değişiklikler korunur; çakışan yönetilen bölüm için inceleme gerekir. Kilitli/aktif bir writer varsa tamamlanmasını bekleyip tekrar dene. Kaybolmuş bir işin kilit/sentinel dosyasını gelişigüzel silme.
+Yönetilen dosyada araya giren kullanıcı değişikliği varsa işlem bunu ezmek yerine conflict ile durur. `rollback` kullanıcının payı olan dosyalarda yalnız yönetilen bölümü geri alır: `AGENTS.md` ve `CLAUDE.md` içinde blok dışına yazdığın metin, JSON ayarlarında (`.claude/settings.local.json`, `.claude/settings.json`, `.codex/hooks.json`, `.agents/hooks.json`, `.gemini/settings.json`, `.qwen/settings.json`) eklediğin anahtarlar ve güncellemenin değiştirmediği `CLAUDE.md` / `.codex/config.toml` dosyalarına sonradan eklediğin satırlar korunur. Yönetilen bölümün kendisi değiştiyse ya da bir motor dosyası elle düzenlendiyse veya silindiyse inceleme gerekir. Kilitli/aktif bir writer varsa tamamlanmasını bekleyip tekrar dene. Kaybolmuş bir işin kilit/sentinel dosyasını gelişigüzel silme.
 
-Yalnız satır sonu farkı değişiklik sayılmaz: `core.autocrlf` ya da bir editör yönetilen dosyayı CRLF'e çevirmişse güncelleme, kaldırma ve rollback durmaz, dosya yeniden yazılırken stok LF biçimine döner. Conflict mesajı sebebi söyler: `content differs` gerçek bir düzenleme, `deleted` silinmiş dosya demektir.
+Yalnız satır sonu farkı değişiklik sayılmaz: `core.autocrlf` ya da bir editör yönetilen dosyayı CRLF'e çevirmişse güncelleme, kaldırma ve rollback durmaz, dosya yeniden yazılırken stok LF biçimine döner. Kurulum, güncelleme ve rollback çakışmayı Türkçe ve dosyanın adıyla söyler (ör. `Cortex'in yönettiği .claude/scripts/beyin_v3.py dosyası elle değiştirilmiş` ya da `silinmiş`); kaldırma (`--uninstall`) mesajı `content differs` ya da `deleted` der.
+
+### Hata kodları
+
+`beyin.py` ve paketin `install_v3.py` komutu bir işlem başarısız olunca stderr'e tek satır JSON yazar: `{"error": "<tür>", "message": "<Türkçe cümle>", "code": "<kod>"}`. `code` yalnız masaüstü uygulamasının tanıdığı durumlarda vardır ve uygulama onu pencerenin dilinde, yapabildiği bir eylemle söyler:
+
+| Kod | Ne oldu |
+| --- | --- |
+| `updater_busy` | Motor başka bir işi bitiriyor (bir sohbetin hafızası yazılıyor); birkaç saniye sonra yeniden dene. |
+| `update_conflict` | Yönetilen bir dosya elle değiştirilmiş ya da kurucunun yazacağı adda başka bir dosya var. |
+| `rollback_conflict` | Geri alınacak bir dosya güncellemeden sonra değiştirilmiş. |
+| `pending_journal` | Yarım kalmış bir kurulum var; önce `recover` ya da `rollback`. |
+| `migration_changed` | Notlar kurulum sürerken değişti; yeniden dene. |
+| `python_too_old` | Python 3.11'den eski. |
+| `legacy_review` | Eski V2 runner'ı elle değiştirilmiş ([MIGRATION](MIGRATION.md)). |
+| `network` | GitHub'a ulaşılamadı. |
+| `disk_full` | Diskte yer kalmadı. |
+| `vault_moved` | Vault taşınmış ya da kopyalanmış; `beyin.py relocate` (aşağıda). |
+
+## Vault'u taşımak ya da kopyalamak
+
+Hook komutları, hafıza veritabanı (`vault_root`), güncelleme journal'ları, güncelleme başlatıcısı ve Hermes/OMP eklentileri vault'un kurulduğu klasörü adıyla taşır. Vault taşındığında (OneDrive'ın Belgeler klasörünü devralması, yeniden adlandırma) ya da kopyalandığında vault klasöründe şunu çalıştır:
+
+```sh
+python3 beyin.py relocate
+```
+
+- Eski klasör artık yoksa (ya da orada bu state'e bağlı kurulu bir vault kalmadıysa) vault taşınmıştır: hafıza yeni yere bağlanır, hook komutları `.bak` yedekleriyle yeniden yazılır, başlatıcı ve eklentiler yeni yolla yenilenir. Sonuç `relocated`.
+- Eski klasör hâlâ aynı state'e bağlı kurulu bir vault ise bu klasör bir kopyadır: iki vault bir hafızayı paylaşmaz. Kopyaya bu makinenin kendi varsayılan state klasörü açılır, kurulum kaydı oraya taşınır, `.beyin-runtime.json` ve hook komutları yeni state'i gösterir. İndeks notlardan yeniden kurulur; state'teki ayarlar varsayılandan başlar. Özgün vault'a ve state'ine dokunulmaz. Sonuç `separated`.
+- Zaten bu klasöre bağlıysa hiçbir şey yazılmaz: `unchanged`.
+
+Masaüstü uygulaması bunu bir vault'u her açışında kendisi yapar. State'te kurulum kaydı yoksa (vault başka bir bilgisayardan geldiyse) `relocate` `vault_moved` koduyla durur ve yeniden kurmanı söyler; o zaman paketin `install_v3.py` komutu bu makine için yeni bir state sabitler ve diğer bilgisayarın yollarını taşıyan kurulum dosyalarını (başlatıcı, eklentiler, Kiro hook dosyası) bu makinenin sürümüyle değiştirir; bulduğu kopyalar kurulum kaydında `original` olarak kalır.
+
+Hook dosyaları iki bilgisayar arasında eşitleniyorsa (her ikisinde kurulu, OneDrive'daki bir vault) `relocate` onları açıldığı bilgisayarın yollarına göre yeniden yazar; öbür bilgisayar da açınca kendi yollarına çevirir. Aynı içerikteki bir yedek zaten varsa yeni `.bak` dosyası açılmaz, her geçişte yedek birikmez.
+
+Hook komutları hiçbir zaman 2 çıkış koduyla bitmez: Claude Code, Codex ve Qwen 2'yi "engelle" diye okur ve taşınmış bir vault'ta her istem reddedilirdi. Python'un betiği bulamaması ya da bir argüman hatası 1 olarak döner; hata görünür, hiçbir şeyi engellemez.
 
 
 ## State dizinini taşımak
@@ -89,8 +142,8 @@ varsayılanı bırakıp state'i başka bir yere almak gerekir:
 
 Taşıma desteklenen bir işlemdir: `install_v3.py --state` yeni yolu sabitler. Veritabanı
 **vault kök yoluna** bağlıdır, state yoluna değil; bu yüzden aynı vault için state'i taşımak
-veritabanını geçersizleştirmez. Vault'u taşımak ayrı bir konudur ve orada yerel state
-Markdown'dan yeniden kurulur; ayrıntı için [QUICKSTART](QUICKSTART.md).
+veritabanını geçersizleştirmez. Vault'u taşımak ayrı bir konudur: `beyin.py relocate`
+veritabanını vault'un yeni köküne bağlar (yukarıda, "Vault'u taşımak ya da kopyalamak").
 
 ### Adımlar
 
@@ -230,6 +283,10 @@ Online ZIP indirmesinde GitHub asset SHA-256 ve varsa resmi checksum dosyası, h
 
 ## Bakımcı için yayın
 
-`VERSION` ve `docs/v3/releases/X.Y.Z.md` aynı sürümü tanımlar. `Verified V3 release package` workflow'u ZIP'i bir kez build eder; altı OS/Python kombinasyonu bu aynı ZIP'i temiz kurulum, devralınan koddan geçiş (deponun ilk commit'i `7177077`'den `0.9.0` etiketiyle build edilir; bu commit yeniden yazılmamalı), no-op, rollback ve kesinti/recover ile doğrular. PR çalışmaları yayın yapmaz.
+`VERSION` ve `docs/v3/releases/X.Y.Z.md` aynı sürümü tanımlar. `Verified V3 release package` workflow'u ZIP'i bir kez build eder; altı OS/Python kombinasyonu bu aynı ZIP'i temiz kurulum, devralınan koddan geçiş (deponun ilk commit'i `7177077`'den `0.9.0` etiketiyle build edilir; bu commit yeniden yazılmamalı), no-op, rollback ve kesinti/recover ile doğrular. PR çalışmaları yayın yapmaz. PR'da test takımı ve erişim kapıları (`evaluate_v3.py`) yalnız `V3 offline platform contracts` (`v3.yml`) iş akışında koşar; yayın iş akışı onları elle başlatıldığında yeniden koşar, ZIP'in kurulum, geçiş ve geri alma doğrulamasını PR'da da yapar. Aynı PR'a yeni bir push gelince iki iş akışının eski çalışması durur; elle başlatılmış bir yayın hiç kesilmez.
 
-Main üzerinde manuel `workflow_dispatch` ve `publish=true`, testler yeşilse aynı bytes'ı önce draft olarak yükler, sonra stable/latest yayınlar ve yayınlanmış asset'i tekrar indirip doğrular. Var olan release'in üzerine yazılmaz; yeni sürüm numarası gerekir. Opsiyonel global köprü (#41) pakettedir; kurulum ve güncelleme global ayarları değiştirmez ([GLOBAL-BRIDGE.md](GLOBAL-BRIDGE.md)).
+Test takımı yerelde `python scripts/run_v3_tests.py` ile tek süreçte koşar. `python scripts/run_v3_tests.py --each --jobs 0` her test dosyasını kendi sürecinde, çekirdek başına bir dosya koşar: yalnız başka bir dosyanın ardından geçen bir dosya burada düşer ve takım çok daha kısa sürer. Ubuntu CI'ı böyle koşar; macOS ve Windows tek süreçte. Ses yardımcısının testleri numpy ister (`python -m pip install numpy`); yerelde numpy yoksa atlanır, CI'da (`CI` ortam değişkeni) düşer.
+
+Main üzerinde manuel `workflow_dispatch` ve `publish=true`, testler yeşilse yayını üç adımda yapar. Önce doğrulanmış motor paketini (`beyin-v3-X.Y.Z.zip` ve `.sha256`) bir draft release'e yükler. Sonra Windows kurulum dosyasını aynı doğrulanmış paketle (ikinci bir derlemeyle değil) bir Windows makinesinde üretip `Cortex-Setup-X.Y.Z.exe` adıyla draft'a ekler; depoda kod imzalama sertifikası varsa dosya imzalanır. Ancak üç dosya da draft'tayken release stable/latest yapılır ve yayınlanmış asset'ler tekrar indirilip doğrulanır. Böylece README'nin gönderdiği "son sürüm" sayfasında kurulum dosyası hiç eksik kalmaz. Bir adım yarıda kalırsa iş akışını aynı commit'te yeniden çalıştır: yayımlanmamış draft bulunur ve aynı baytlarla doldurulur; yayımlanmış bir release'in üzerine hiçbir zaman yazılmaz, yeni sürüm numarası gerekir.
+
+Derleme adımı iki sürüm kuralını da denetler: `desktop/package.json` sürümü `VERSION` ile aynı olmalıdır (kurulum dosyası birinin, kasadaki motor ötekinin adını taşır) ve motor dosyaları (`scripts/install_v3.py`, `scripts/beyin_v3.py`, `scripts/beyin_entry.py`, `template/.claude/scripts`, başlangıç skill'leri) son yayımlanmış etiketten beri değiştiyse `VERSION` o etiketten büyük olmalıdır. Aynı numarayla farklı motor dağıtılırsa ne güncelleyici ne uygulama onu yeni sayar. Opsiyonel global köprü (#41) pakettedir; kurulum ve güncelleme global ayarları değiştirmez ([GLOBAL-BRIDGE.md](GLOBAL-BRIDGE.md)).

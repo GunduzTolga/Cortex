@@ -246,8 +246,12 @@ class ReceiptProjectionConflictTest(unittest.TestCase):
         ctx_data = json.loads(ctx_res.stdout)
         self.assertTrue(any('NC-7319' in r.get('text', '') for r in ctx_data.get('records', [])))
 
-    def test_true_source_conflicts_still_block_queue_drain(self):
-        """Adversarial check: genuine source note conflicts (duplicate ID) still block queue drain."""
+    def test_a_duplicate_id_is_reported_without_holding_the_queue(self):
+        """A duplicated id leaves both copies out of the index; the queue drains, the conflict stays reported.
+
+        Holding the events back fixed nothing: record_checkpoints stores them before the sync, and
+        hook-queue grew by one file per event until someone found the copy.
+        """
         (self.vault / 'notes/duplicate_a.md').write_text(
             '---\nid: collision-id\nkind: fact\nvisibility: internal\n---\n# Note A\n',
             encoding='utf-8',
@@ -266,9 +270,32 @@ class ReceiptProjectionConflictTest(unittest.TestCase):
         self.assertEqual(len(list((self.state / 'hook-queue').glob('*.json'))), 1)
 
         result = drain_queue(self.vault, self.state)
-        # Because of genuine source conflict, drain must fail and keep queue intact
+        self.assertEqual((result['processed'], result['failed']), (1, 0))
+        self.assertEqual(len(list((self.state / 'hook-queue').glob('*.json'))), 0)
+        health = json.loads((self.state / 'hook-health.json').read_text(encoding='utf-8'))['sync']
+        self.assertEqual(health['status'], 'conflict')
+        self.assertEqual(health['conflicts'][0]['sources'], ['notes/duplicate_a.md', 'notes/duplicate_b.md'])
+
+    def test_a_conflict_a_retry_may_clear_still_blocks_queue_drain(self):
+        """Adversarial check: a journal entry that could not be replayed (a locked source) keeps the queue."""
+        engine = SyncEngine(self.vault, self.state)
+        engine.sync()
+        source = 'notes/canary.md'
+        entry = engine.journal / (hashlib.sha256(source.encode()).hexdigest() + '.json')
+        old = hashlib.sha256((self.vault / source).read_bytes()).hexdigest()
+        entry.write_text(json.dumps({'source': source, 'old_hash': old, 'content': 'Replayed.\n', 'kind': 'note'}),
+                         encoding='utf-8')
+        from beyin_v3_hook import enqueue_event, drain_queue
+        import beyin_v3_sync
+        enqueue_event(self.vault, self.state, {'event': 'test'}, 'codex')
+        with patch.object(beyin_v3_sync, 'atomic', side_effect=PermissionError(13, 'locked by another program')):
+            result = drain_queue(self.vault, self.state)
         self.assertEqual(result['failed'], 1)
         self.assertEqual(len(list((self.state / 'hook-queue').glob('*.json'))), 1)
+        self.assertTrue(entry.exists(), 'kept for the next sync')
+        result = drain_queue(self.vault, self.state)
+        self.assertEqual((result['processed'], result['failed']), (1, 0))
+        self.assertEqual((self.vault / source).read_text(encoding='utf-8'), 'Replayed.\n')
 
 
     def test_view_classification_requires_both_known_path_and_reason(self):

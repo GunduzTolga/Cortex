@@ -2,7 +2,7 @@ import type { ChatApi, ChatPush } from './chat';
 import type { AppLanguage } from './language';
 import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
 import type { OfficeApi } from './office';
-import type { SetupApi, SetupPush } from './setup';
+import type { ListenerSeen, SetupApi, SetupPush, VoiceStatus } from './setup';
 import type { TelegramApi } from './telegram';
 
 /**
@@ -24,6 +24,17 @@ export interface WindowSettings {
   onboarded: boolean;
   /** The window closed, Cortex stays in the notification area (the microphone switched from there), and starts there with Windows. */
   background: boolean;
+  /** The person let voice typing use the microphone. */
+  voiceConsent: boolean;
+  /** The person let the microphone listen all the time for the wake phrase while Cortex runs; until then it does not. */
+  wakeConsent: boolean;
+}
+
+/** A word from the main process for a toast, from work the window did not ask for and does not wait on (yakala moved to another vault). */
+export interface AppNotice {
+  tone: 'info' | 'success' | 'error';
+  title: string;
+  detail?: string;
 }
 
 /** The vault by its folder's name, and whether that folder is still there; never its path. */
@@ -100,7 +111,17 @@ export interface CortexApi {
     authChanged(handler: () => void): () => void;
     /** A setup job going on: a step, or its end. */
     setup(handler: (push: SetupPush) => void): () => void;
+    /** The voice status read anew (the notification-area icon switched it): the settings show it as it is. */
+    voiceStatus(handler: (voice: VoiceStatus | null) => void): () => void;
+    /** The listener's word changed - its voice helper fetching a model (how far), loading, ready, failed; the wake phrase heard or not; its key - or it was found not running. */
+    voiceHelper(handler: (seen: ListenerSeen) => void): () => void;
+    /** Something done in the background, said once (shared/api.ts, AppNotice). */
+    notice(handler: (word: AppNotice) => void): () => void;
     /** The notification-area icon's "Ayarlar": open the settings. */
     openSettings(handler: () => void): () => void;
+    /** The notification-area icon's "listen all the time", asked of a person who has not allowed it yet: the window asks. */
+    askWake(handler: () => void): () => void;
+    /** The window is going for good: what the page holds unsaved is saved, and the main process told once it is (electron/main.ts). */
+    flush(handler: () => Promise<void>): () => void;
   };
 }

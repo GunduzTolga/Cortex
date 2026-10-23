@@ -2,15 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Download, FolderOpen, KeyRound, LogIn, Mic, RefreshCw, SkipForward } from 'lucide-react';
 import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz.svg';
 import type { CliAuth, CliId } from '@shared/chat';
-import type { SetupStatus } from '@shared/setup';
+import { engineAction, type SetupStatus, wakePhraseLabel } from '@shared/setup';
 import { AuthDialog, TOOL_NAMES } from '../chat/AuthDialog';
 import { useChat } from '../chat/chatStore';
 import type { Key } from '../i18n';
-import { useT } from '../i18n/useT';
+import { useLanguage, useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 import { useSetup } from '../store/setup';
 import { LanguageSwitch } from '../ui/LanguageSwitch';
-import { Progress } from '../ui/SetupSections';
+import { HotkeyBusy, Progress, VoiceHelperBar, engineButtonText, pythonWantingText } from '../ui/SetupSections';
 import { Button, Switch, inputClass } from '../ui/ui';
 
 /**
@@ -44,11 +44,6 @@ const OPTIONAL = new Set<StepId>(['name', 'python', 'engine', 'tools', 'voice'])
  */
 const serving = (tool: CliAuth) => Boolean(tool.local && tool.signedIn && tool.local.loaded.length);
 
-function newerBundled(status: SetupStatus | null): boolean {
-  const { installed, bundled } = status?.engine ?? { installed: null, bundled: null };
-  return Boolean(installed && bundled && bundled.localeCompare(installed, undefined, { numeric: true }) > 0);
-}
-
 export function Onboarding() {
   const t = useT();
   const settings = useApp((s) => s.settings);
@@ -61,27 +56,49 @@ export function Onboarding() {
   const [skipped, setSkipped] = useState<Set<StepId>>(new Set());
   // Python's step stays in the list once it was needed, so it can be seen done.
   const [neededPython, setNeededPython] = useState(false);
-  // The tools signed in to from here: a sign-in window opened for them closed with the tool signed in.
+  // The tools signed in to from here: a sign-in opened for them, from its button or after its install, that ended signed in.
   const [fresh, setFresh] = useState<Set<CliId>>(new Set());
   const trying = useRef<Set<CliId>>(new Set());
-  useEffect(
-    () =>
-      window.cortex.on.authChanged(() => {
-        void useChat
-          .getState()
-          .loadAuth()
-          .then(() => {
-            const now = useChat.getState().auth ?? [];
-            const signed = [...trying.current].filter((id) => now.find((tool) => tool.id === id)?.signedIn === true);
-            trying.current.clear();
-            if (signed.length) setFresh((before) => new Set([...before, ...signed]));
-          });
-      }),
-    [],
-  );
+  // Claude Code being installed from here, or its installer ended without it.
+  const [installing, setInstalling] = useState<'running' | 'failed' | null>(null);
+  const installRef = useRef(installing);
+  installRef.current = installing;
+  useEffect(() => {
+    const reread = () =>
+      useChat
+        .getState()
+        .loadAuth()
+        .then(() => {
+          const now = useChat.getState().auth ?? [];
+          const signed = [...trying.current].filter((id) => now.find((tool) => tool.id === id)?.signedIn === true);
+          // One not signed in yet stays tried: its sign-in may still be going on, or come after its install.
+          for (const id of signed) trying.current.delete(id);
+          if (signed.length) setFresh((before) => new Set([...before, ...signed]));
+          if (installRef.current === 'running') setInstalling(now.find((tool) => tool.id === 'claude')?.installed ? null : 'failed');
+        });
+    const stop = window.cortex.on.authChanged(() => void reread());
+    // Back from a terminal or the browser, where a tool or Python was installed or signed in to: asked again.
+    const back = () => {
+      void useChat.getState().loadAuth();
+      void useSetup.getState().refresh();
+    };
+    window.addEventListener('focus', back);
+    return () => {
+      stop();
+      window.removeEventListener('focus', back);
+    };
+  }, []);
   const login = (id: CliId) => {
     trying.current.add(id);
     void window.cortex.chat.login(id).catch(() => trying.current.delete(id));
+  };
+  const install = (id: CliId) => {
+    trying.current.add(id);
+    setInstalling('running');
+    void window.cortex.chat.install(id).catch(() => {
+      trying.current.delete(id);
+      setInstalling('failed');
+    });
   };
 
   useEffect(() => {
@@ -105,7 +122,8 @@ export function Onboarding() {
     name: Boolean(settings.userName),
     vault: Boolean(vault),
     python: Boolean(status?.python),
-    engine: Boolean(status?.engine.installed) && !newerBundled(status),
+    // Installed and nothing to do: not an older one, nor the predecessor's, nor stale against the app's (shared/setup.ts).
+    engine: Boolean(status?.engine.installed) && !engineAction(status?.engine),
     tools: fresh.size > 0 || Boolean(auth?.some(serving)),
     voice: Boolean(status?.voice?.installed),
     done: false,
@@ -161,7 +179,7 @@ export function Onboarding() {
           {at === 'vault' ? <VaultStep name={vault?.name ?? null} /> : null}
           {at === 'python' ? <PythonStep status={status} /> : null}
           {at === 'engine' ? <EngineStep status={status} /> : null}
-          {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} onLogin={login} /> : null}
+          {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} installing={installing} onLogin={login} onInstall={install} /> : null}
           {at === 'voice' ? <VoiceStep status={status} /> : null}
           {at === 'done' ? <DoneStep order={order} done={done} skipped={skipped} canFinish={Boolean(vault)} /> : null}
 
@@ -314,10 +332,17 @@ function VaultStep({ name }: { name: string | null }) {
 function PythonStep({ status }: { status: SetupStatus | null }) {
   const t = useT();
   const run = useSetup((s) => s.run);
+  // A Python found but not fit - too old, or a launcher with nothing behind it - is said, so the step is not a riddle (desktop-shell-1).
+  const wanting = status && !status.python ? pythonWantingText(t, status.pythonWanting) : null;
   return (
     <div>
       <Heading title={t('onboarding.python.title')}>
-        <p>{t('onboarding.python.body')}</p>
+        <p>{t(wanting ? 'onboarding.python.bodyWanting' : 'onboarding.python.body')}</p>
+        {wanting ? (
+          <p className="text-[12.5px] font-semibold text-darkDelegation" data-onboarding-python-wanting>
+            {wanting}
+          </p>
+        ) : null}
       </Heading>
       {status?.python ? (
         <Done>{t('onboarding.python.ready')}</Done>
@@ -342,22 +367,22 @@ function EngineStep({ status }: { status: SetupStatus | null }) {
   const t = useT();
   const run = useSetup((s) => s.run);
   const installed = status?.engine.installed ?? null;
-  const bundled = status?.engine.bundled ?? null;
-  const newer = newerBundled(status);
+  const action = engineAction(status?.engine);
   return (
     <div>
       <Heading title={t('onboarding.engine.title')}>
         <p>{t('onboarding.engine.body')}</p>
         <p className="text-[12.5px] text-zinc-500">{t('onboarding.engine.touch')}</p>
+        {status && action === 'migrate' ? <p className="text-[12.5px] text-zinc-500">{t('setup.engine.legacy', { installed: installed ?? '', bundled: status.engine.bundled ?? '' })}</p> : null}
       </Heading>
       {!status ? null : !status.python ? (
         <p className="mt-5 text-[13px] text-zinc-600">{t('onboarding.needsPython')}</p>
-      ) : installed && !newer ? (
+      ) : installed && !action ? (
         <Done>{t('setup.engine.current', { installed })}</Done>
-      ) : bundled ? (
-        <Button tone="primary" className="mt-5" disabled={Boolean(status.job)} onClick={() => void run('engine')} data-onboarding-engine>
+      ) : action ? (
+        <Button tone="primary" className="mt-5" disabled={Boolean(status.job)} onClick={() => void run('engine')} data-onboarding-engine={action}>
           {installed ? <RefreshCw size={14} /> : <Download size={14} />}
-          {installed ? t('setup.engine.update', { bundled }) : t('setup.engine.install')}
+          {engineButtonText(t, status.engine)}
         </Button>
       ) : (
         <p className="mt-5 text-[13px] text-zinc-600">{t('setup.engine.noneNoPackage')}</p>
@@ -366,10 +391,25 @@ function EngineStep({ status }: { status: SetupStatus | null }) {
   );
 }
 
-function ToolsStep({ auth, fresh, onLogin }: { auth: CliAuth[] | null; fresh: Set<CliId>; onLogin: (id: CliId) => void }) {
+function ToolsStep({
+  auth,
+  fresh,
+  installing,
+  onLogin,
+  onInstall,
+}: {
+  auth: CliAuth[] | null;
+  fresh: Set<CliId>;
+  installing: 'running' | 'failed' | null;
+  onLogin: (id: CliId) => void;
+  onInstall: (id: CliId) => void;
+}) {
   const t = useT();
   const refused = useChat((s) => s.authFailed);
   const tools = (auth ?? []).filter((tool) => tool.installed);
+  // Claude Code missing, and installable from here (Windows): offered first, with its sign-in after.
+  const claude = auth?.find((tool) => tool.id === 'claude');
+  const offerInstall = Boolean(claude && !claude.installed && claude.canInstall);
   const state = (tool: CliAuth): [Key, string] =>
     tool.local
       ? serving(tool)
@@ -390,8 +430,21 @@ function ToolsStep({ auth, fresh, onLogin }: { auth: CliAuth[] | null; fresh: Se
         <p>{t('onboarding.tools.body')}</p>
         <p className="text-[12.5px] text-zinc-500">{t('onboarding.tools.honest')}</p>
       </Heading>
-      {auth && !tools.length ? <p className="mt-5 text-[13px] text-zinc-600">{t('onboarding.tools.none')}</p> : null}
-      <ul className="mt-5 divide-y divide-zinc-100 rounded-xl border border-darkDelegation/15 bg-white" data-onboarding-tool-list>
+      {offerInstall ? (
+        <div className="mt-5 rounded-xl border border-darkDelegation/25 bg-white px-4 py-3.5" data-onboarding-install="claude">
+          <p className="text-[13.5px] font-semibold text-darkDelegation">{t('onboarding.tools.install.title')}</p>
+          <p className="mt-1 text-[12.5px] leading-relaxed text-zinc-600">{t('onboarding.tools.install.body')}</p>
+          <Button tone="primary" className="mt-3" disabled={installing === 'running'} onClick={() => onInstall('claude')} data-onboarding-install-start>
+            <Download size={14} />
+            {t('onboarding.tools.install')}
+          </Button>
+          {installing === 'running' ? <p className="mt-2 text-[12px] text-zinc-500" data-onboarding-installing>{t('onboarding.tools.installing')}</p> : null}
+          {installing === 'failed' ? <p className="mt-2 text-[12px] font-semibold text-bad" data-onboarding-install-failed>{t('onboarding.tools.installFailed')}</p> : null}
+        </div>
+      ) : auth && !tools.length ? (
+        <p className="mt-5 text-[13px] text-zinc-600">{t('onboarding.tools.none')}</p>
+      ) : null}
+      <ul className={`mt-5 divide-y divide-zinc-100 rounded-xl border border-darkDelegation/15 bg-white${tools.length ? '' : ' hidden'}`} data-onboarding-tool-list>
         {tools.map((tool) => {
           const [words, colours] = state(tool);
           return (
@@ -420,6 +473,8 @@ function ToolsStep({ auth, fresh, onLogin }: { auth: CliAuth[] | null; fresh: Se
 
 function VoiceStep({ status }: { status: SetupStatus | null }) {
   const t = useT();
+  const english = useLanguage() === 'en';
+  const wakeConsent = useApp((s) => s.settings.wakeConsent);
   const run = useSetup((s) => s.run);
   const voice = status?.voice ?? null;
   return (
@@ -433,9 +488,19 @@ function VoiceStep({ status }: { status: SetupStatus | null }) {
       ) : voice?.installed ? (
         <>
           <Done>{t('onboarding.voice.ready')}</Done>
+          {/* Set up is not ready: its model loads, the first time downloads, while the app is already open. */}
+          <VoiceHelperBar />
+          <HotkeyBusy />
           {/* The always-listening mode chosen here, where it is explained: not found later in the settings. */}
           <div className="mt-4 rounded-xl border border-darkDelegation/15 bg-white py-1">
-            <Switch checked={voice.wake} onChange={(wake) => void useSetup.getState().voice({ wake })} label={t('setup.voice.wake')} hint={t('setup.voice.wake.hint')} data-onboarding-voice-wake />
+            {/* The phrase as it is set: the words were shown with a "{phrase}" hole in them, and the hint named "Hey Pyn" while it was "Pyn, not al" (windows-e2e-4). */}
+            <Switch
+              checked={voice.wake && wakeConsent}
+              onChange={(wake) => void useSetup.getState().voice({ wake })}
+              label={t('setup.voice.wake', { phrase: wakePhraseLabel(voice.wakePhrase, english) })}
+              hint={t('setup.voice.wake.hint', { phrase: wakePhraseLabel(voice.wakePhrase, english) })}
+              data-onboarding-voice-wake
+            />
             <Switch checked={voice.auto} onChange={(auto) => void useSetup.getState().voice({ auto })} label={t('setup.voice.auto')} hint={t('setup.voice.auto.hint')} data-onboarding-voice-auto />
           </div>
         </>

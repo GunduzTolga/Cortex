@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron';
-import type { BootstrapPayload, WindowSettings } from '../shared/api';
+import type { AppNotice, BootstrapPayload, WindowSettings } from '../shared/api';
 import { readSettings, settingsUnreadable, tidyName, updateSettings } from './services/settings';
-import { startWithWindows } from './services/tray';
+import { restartingListener, sayMicrophone } from './services/microphone';
+import { currentListener, expectVoiceTurn, onHelperChange, startWithWindows, trayChanged } from './services/tray';
 import { setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
@@ -46,9 +47,39 @@ function broadcast(channel: string, payload: unknown): void {
   }
 }
 
+/** A word for the window from work it did not ask for and does not wait on (yakala moved): said in a toast. */
+function notice(word: AppNotice): void {
+  broadcast('app:notice', word);
+}
+
+/**
+ * Yakala moved to the vault open now, in the background, where it served another (services/setup.ts, repointYakala):
+ * said once it has moved - the notes taken with the key go somewhere else from now on - or when it could not. At the
+ * app's start (electron/main.ts), only from a vault no longer there.
+ */
+export function moveYakala(onlyWhereGone = false): void {
+  const say = (tr: string, en: string) => (readSettings().language === 'en' ? en : tr);
+  void setup.repointYakala(onlyWhereGone).then(
+    (key) => {
+      if (!key) return;
+      notice({
+        tone: 'success',
+        title: say('Not alma bu kasaya taşındı', 'Note taking moved to this vault'),
+        detail: say(`${key}, uyandırma sözü ve Gönder → Beyne At ile alınan notlar artık bu kasaya kaydediliyor.`, `Notes taken with ${key}, the wake phrase and Send to → Beyne At now go into this vault.`),
+      });
+    },
+    (err: unknown) =>
+      notice({
+        tone: 'error',
+        title: say('Not alma bu kasaya taşınamadı', 'Note taking could not be moved to this vault'),
+        detail: `${err instanceof Error ? err.message : String(err)} ${say('Kısayolla alınan notlar hâlâ önceki kasaya gidiyor.', 'Notes taken with the key still go into the vault before.')}`,
+      }),
+  );
+}
+
 function windowSettings(): WindowSettings {
-  const { language, allFiles, nameIcons, userName, onboarded, background } = readSettings();
-  return { language, allFiles, nameIcons, userName, onboarded, background };
+  const { language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent } = readSettings();
+  return { language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent };
 }
 
 export function registerIpc(): void {
@@ -69,8 +100,15 @@ export function registerIpc(): void {
     if (typeof asked.userName === 'string' || asked.userName === null) change.userName = tidyName(asked.userName);
     if (typeof asked.onboarded === 'boolean') change.onboarded = asked.onboarded;
     if (typeof asked.background === 'boolean') change.background = asked.background;
+    if (typeof asked.voiceConsent === 'boolean') change.voiceConsent = asked.voiceConsent;
+    if (typeof asked.wakeConsent === 'boolean') change.wakeConsent = asked.wakeConsent;
     if (Object.keys(change).length) updateSettings((settings) => Object.assign(settings, change));
     if (change.background !== undefined) startWithWindows(change.background);
+    // The listener hears it within two seconds: allowed, the microphone listens; taken back, it lets go. Yakala's
+    // window takes the language from the same word.
+    if (change.wakeConsent !== undefined || change.language !== undefined) sayMicrophone();
+    // The icon's words follow: leave given or taken back, or another language.
+    if (change.wakeConsent !== undefined || change.language !== undefined) trayChanged();
     return windowSettings();
   });
 
@@ -84,15 +122,21 @@ export function registerIpc(): void {
     if (!dir) return null;
     const before = readSettings().vault;
     const status = await setVault(dir);
+    const changed = before !== readSettings().vault;
     // The notes screen reads the vault now chosen, watched from its next read (services/vaultNotes.ts).
-    if (before !== readSettings().vault) {
+    if (changed) {
       vaultNotes.stopWatchingVault();
       // The CLIs were started in the vault left: ended, to start again in this one.
       chat.shutdownChats();
-      // The Telegram listener writes into the vault chosen now.
-      void telegram.restartTelegram();
       broadcast('notes:changed', null);
     }
+    // Its engine bound to where the folder is now (a vault moved, renamed or copied), in the background; the
+    // Telegram listener writes into the vault chosen now once that is done (services/setup.ts, settleVault).
+    const settled = setup.settleVault();
+    if (changed) void settled.then(() => telegram.restartTelegram());
+    // Yakala - the key, "Pyn, not al", Send To - kept writing into the vault left (yakala-3): it follows, once bound.
+    // Chosen again, the same vault tries again where moving it failed; where it is this vault's already, nothing runs.
+    void settled.then(() => moveYakala());
     return status;
   });
 
@@ -135,15 +179,22 @@ export function registerIpc(): void {
   handle('chat:toInbox', (text) => captureToInbox({ text }, 'pyn'));
 
   // Signing in to those tools (services/auth.ts): a key goes in and is never sent back.
-  auth.onAuthChanged(() => broadcast('chat:authChanged', null));
+  auth.onAuthChanged(() => {
+    // A sign-in or an install ended: CLIs started before it start again with it at their next message.
+    chat.restartIdleChats();
+    broadcast('chat:authChanged', null);
+  });
   handle('chat:auth', () => auth.authStatuses());
   handle('chat:login', (cli) => auth.startLogin(cli));
+  handle('chat:install', (cli) => auth.installTool(cli));
   handle('chat:setKey', async (cli, key, baseUrl) => {
     await auth.setToolKey(cli, key, baseUrl);
+    chat.restartIdleChats();
     return auth.authStatuses();
   });
   handle('chat:forgetKey', (cli) => {
     auth.forgetToolKey(cli);
+    chat.restartIdleChats();
     return auth.authStatuses();
   });
 
@@ -153,11 +204,55 @@ export function registerIpc(): void {
 
   // Cortex's engine and voice typing set up from the app (services/setup.ts): the window names a job, never a program or a file.
   setup.onSetupPush((payload) => broadcast('setup:event', payload));
+  // Switched from the notification-area icon: the settings, open or not, show the voice as it is now.
+  setup.onVoiceStatus((voice) => broadcast('setup:voice', voice));
+  // The voice helper fetching a model, loading it, ready or failed, the listener not running: the settings' bar follows.
+  onHelperChange((seen) => broadcast('setup:helper', seen));
+  handle('setup:helper', () => currentListener());
+  // The listener found not running started again; the key another app holds changed (yakala kur).
+  handle('setup:restartListener', () => {
+    expectVoiceTurn();
+    return setup.restartListener();
+  });
+  handle('setup:hotkey', (spec) => {
+    expectVoiceTurn();
+    return setup.changeHotkey(spec);
+  });
   handle('setup:status', () => setup.setupStatus());
-  handle('setup:installPython', () => setup.installPython());
-  handle('setup:installEngine', () => setup.installEngine());
-  handle('setup:installVoice', () => setup.installVoice());
-  handle('setup:voice', (patch) => setup.setVoice(patch));
+  // The vault opened bound to where it is now: the window says a failure once (src/App.tsx).
+  handle('setup:settle', () => setup.settleVault());
+  // What was set up is taken up now, not at the next start: the Telegram listener starts (or starts
+  // again on the new engine), and the chats' CLIs take the engine's new hooks at their next message.
+  handle('setup:installPython', async () => {
+    const status = await setup.installPython();
+    // The vault opened while there was no Python is bound to where it is now with this one (services/setup.ts,
+    // settleVault), its failure said once as at its opening; the Telegram listener starts in it after.
+    void setup.settleVault().then((failure) => {
+      const say = (tr: string, en: string) => (readSettings().language === 'en' ? en : tr);
+      if (failure) notice({ tone: 'error', title: say('Pyn\'in hafızası bu kasaya bağlanamadı', 'Pyn’s memory could not be tied to this vault'), detail: failure });
+      return telegram.restartTelegram();
+    });
+    return status;
+  });
+  handle('setup:installEngine', async () => {
+    // Yakala's listener runs from the engine's files and starts itself again once they change: given the time to come
+    // up that every restart the app causes is given, not said "not running" meanwhile on a slow laptop.
+    const status = await restartingListener(() => setup.installEngine());
+    chat.restartIdleChats();
+    void telegram.restartTelegram();
+    // A vault chosen before it had an engine: yakala moves to it now (yakala-3).
+    moveYakala();
+    return status;
+  });
+  handle('setup:installVoice', () => {
+    // The voice getting ready is said in the notification area: asked for now.
+    expectVoiceTurn();
+    return setup.installVoice();
+  });
+  handle('setup:voice', (patch) => {
+    expectVoiceTurn();
+    return setup.setVoice(patch);
+  });
 
   // Notes from the phone through the person's own Telegram bot (services/telegram.ts): a key goes in and is never sent back.
   handle('telegram:status', () => telegram.telegramStatus());

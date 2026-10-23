@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CornerDownLeft, FilePlus2, FileText } from 'lucide-react';
 import { messageOf } from '@shared/ipcError';
-import { folderOf, fuzzyMatch, nameProblem } from '../../core/vaultNotes';
+import { folderOf, fuzzyMatch, nameProblem, noteTitle } from '../../core/vaultNotes';
+import { sameTitle } from '../../core/titles';
 import { useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 import { useDialogLayer } from '../ui/useEscapeLayer';
@@ -87,7 +88,17 @@ export function QuickSwitcher({ open, onClose }: { open: boolean; onClose: () =>
     return out.sort((a, b) => b.score - a.score).slice(0, SHOWN);
   }, [index, query]);
 
-  const exact = choices.some((one) => one.title.toLowerCase() === query.trim().toLowerCase());
+  /*
+    A name a note has already - as shown, as on disk, or as an alias, in any
+    folder - is not offered as a new note: compared as a link compares names
+    (core/titles.ts), and among every note, not the forty shown. Lowercased,
+    `istanbul gezisi` was not `İstanbul Gezisi`, and a second note was made
+    beside the first (desktop-ui-12).
+  */
+  const exact = useMemo(() => {
+    const wanted = query.trim();
+    return Boolean(wanted) && (index?.notes ?? []).some((note) => sameTitle(labelOf(note.path), wanted) || sameTitle(noteTitle(note.path), wanted) || note.aliases.some((alias) => sameTitle(alias, wanted)));
+  }, [index, query]);
   const canMake = Boolean(query.trim()) && !exact && !readOnly && !nameProblem(query.trim());
   const count = choices.length + (canMake ? 1 : 0);
 

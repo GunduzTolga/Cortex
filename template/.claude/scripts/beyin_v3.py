@@ -15,6 +15,7 @@ import re
 import sqlite3
 import stat
 import sys
+import time
 import unicodedata
 import urllib.parse
 
@@ -228,6 +229,72 @@ def resolve_supersedes(records):
     return retired, dead
 
 
+def _supersedes_values(record):
+    values = record.get("supersedes", [])
+    return [values] if isinstance(values, str) else values if isinstance(values, list) else []
+
+
+def supersedes_inputs(db):
+    """The records resolve_supersedes needs, ordered by id, without decoding the whole index.
+
+    resolve_supersedes over them returns exactly what it returns over every record: each record
+    that names a supersedes value (_json() writes compact keys and a list of ids opens with '["',
+    so the text filter is a superset), and every record such a value could resolve to by id,
+    path or file name, found in markdown_sources. A record no Markdown source owns (ingest) keeps
+    its source in the payload only, so those are always read; they are few.
+    """
+    rows = {ident: json.loads(payload) for ident, payload in db.execute(
+        "SELECT id, payload FROM records WHERE instr(payload, ?) > 0 OR instr(payload, ?) > 0",
+        ('"supersedes":["', '"supersedes":"'))}
+    if not any(_supersedes_values(record) for record in rows.values()):
+        return []
+    keys, paths, names = set(), set(), set()
+    for record in rows.values():
+        for raw in _supersedes_values(record):
+            key = _supersedes_key(raw)
+            folded = key[:-3] if key.casefold().endswith(".md") else key
+            keys.add(key)
+            if folded:
+                paths.add(folded.casefold())
+                names.add(folded.rsplit("/", 1)[-1].casefold())
+    try:
+        owned = db.execute("SELECT id, source FROM markdown_sources").fetchall()
+    except sqlite3.OperationalError:
+        owned = None  # a store that never synced Markdown: every record is read
+    if owned is None:
+        wanted = None
+    else:
+        wanted = set(keys)
+        for ident, source in owned:
+            source = str(source).replace("\\", "/").strip("/")
+            path_key = (source[:-3] if source.casefold().endswith(".md") else source).casefold()
+            if path_key in paths or path_key.rsplit("/", 1)[-1] in names:
+                wanted.add(ident)
+        wanted -= rows.keys()
+    if wanted is None or len(wanted) > 512:  # beyond a statement's bound parameters: read them all
+        query, params = "SELECT id, payload FROM records", ()
+    else:
+        query = ("SELECT id, payload FROM records WHERE id NOT IN (SELECT id FROM markdown_sources)"
+                 + (" OR id IN (" + ",".join("?" * len(wanted)) + ")" if wanted else ""))
+        params = tuple(sorted(wanted))
+    for ident, payload in db.execute(query, params):
+        if ident not in rows:
+            rows[ident] = json.loads(payload)
+    return [rows[ident] for ident in sorted(rows)]
+
+
+# Every write to records moves this counter (triggers the sync engine installs), whichever code
+# wrote it: an older engine after a rollback, the store API, a sync. Results derived from the
+# whole table are kept with the counter they were computed at and stay valid while it holds.
+GENERATION_KEY = "records_generation"
+
+
+def records_generation(db):
+    """The records counter, or None while no sync has installed its triggers."""
+    row = db.execute("SELECT value FROM metadata WHERE key=?", (GENERATION_KEY,)).fetchone()
+    return None if row is None else str(row[0])
+
+
 _WIKI_LINK = re.compile(r"\[\[([^\[\]\n]+)\]\]")
 # A destination is <angle bracketed> (may hold spaces) or a bare path; an optional "title" may follow.
 _MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]\n]*\]\(\s*(?:<([^<>\n]+)>|([^()<>\s]+))(?:\s+\"[^\"]*\")?\s*\)")
@@ -372,6 +439,8 @@ def read_project_scopes(vault_root):
     field wins. shared_unscoped lets a project query also see records no folder or field
     assigns to any project. Another project's records never enter a project's scope.
     Missing folders are skipped with a warning so unrelated projects remain fully functional (#317).
+    The one reader of the file: beyin_v3_projects (doctor, project-scope) uses it as well, so
+    what doctor accepts is what retrieval applies.
     """
     path = Path(vault_root) / PROJECT_SCOPES_FILE
     if path.is_symlink():
@@ -379,7 +448,8 @@ def read_project_scopes(vault_root):
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # utf-8-sig: Windows PowerShell 5.1 and Notepad write a BOM.
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (ValueError, OSError) as exc:
         raise ValueError("invalid project scopes file; expected JSON") from exc
     if not isinstance(data, dict) or set(data) - {"folders", "shared_unscoped"}:
@@ -389,12 +459,18 @@ def read_project_scopes(vault_root):
     if not isinstance(folders, dict) or not isinstance(shared, bool):
         raise ValueError("folders must be an object and shared_unscoped a boolean")
     mapped = {}
+    missing = []
     for folder, project in folders.items():
         if not isinstance(project, str) or not project.strip():
             raise ValueError("project scope names must be non-empty strings")
         folder = _scope_path(folder)
         if not _scope_folder_exists(vault_root, folder):
-            print(f"Warning: project scope folder not found in the vault: {folder}", file=sys.stderr)
+            missing.append(folder)
+            try:
+                sys.stderr.write(f"Warning: project scope folder not found in the vault: {folder}\n")
+                sys.stderr.flush()
+            except Exception:
+                pass  # no stderr (pythonw) must not cost the read
             # Keep the boundary for stale indexed rows used by explicit --no-sync.
             # Dropping it would expose the other project's notes as shared_unscoped.
         key = _scope_key(folder)
@@ -402,7 +478,8 @@ def read_project_scopes(vault_root):
             raise ValueError("project scope folder is assigned twice: " + folder)
         mapped[key] = project
     # Longest folder first, so a nested folder can belong to a different project.
-    return {"folders": sorted(mapped.items(), key=lambda item: -len(item[0])), "shared_unscoped": shared}
+    return {"folders": sorted(mapped.items(), key=lambda item: -len(item[0])), "shared_unscoped": shared,
+            "missing_folders": missing}
 
 
 def record_scope(record, scopes):
@@ -571,14 +648,27 @@ STOPWORDS = _tokens("the a an is are was were what which who when where how why 
 # never a noun: the progressive (-iyor, spoken -iyo), the reported past with a person (-mıştı,
 # -mışız), the future with more after it (-acaktı) and the optative (-ayım, -elim). The plain
 # past (-dım, -tuk) stays: "dostum", "saatim" and "quantum" end the same way. "geçmiş" and
-# "yiyecek" are nouns and stay.
+# "yiyecek" are nouns and stay. A plural of the future form is as often a noun as a verb
+# (yiyecekler, içecekler, gelecekler), so only its past and reported forms (yapacaklardı,
+# yapacaklarmış) count as a verb.
 _VERB_FORM = re.compile(
     r"^[a-z]{2,}(?:"
     r"[iu]yor[a-z]*|[iu]yo[mz]?"
     r"|m[iu]s(?:t[iu][a-z]*|[iu][mz]|l[ae]r[a-z]*)"
-    r"|[ae]c[ae][kg](?:t[iu][a-z]*|[iu][mz]|s[iu]n[a-z]*|l[ae]r[a-z]*)"
+    r"|[ae]c[ae][kg](?:t[iu][a-z]*|[iu][mz]|s[iu]n[a-z]*|l[ae]r(?:d[iu]|m[iu]s)[a-z]*)"
     r"|[ae]y[iu]m|[ae]l[iu]m"
     r")$")
+# Nouns that end like the reported past: their plural (geçmişler, dolmuşlar) is a noun, not "-mışlar".
+_MIS_NOUN_PLURAL = re.compile(r"^(?:gecmis|dolmus|altmis|yetmis)l[ae]r[a-z]*$")
+# Spoken and suffixed question words, matched as whole folded words: their stems (nelerd, nerd,
+# kact) are nobody's topic, while kimya, kaçak or nerf must stay.
+QUESTION_FORMS = frozenset((
+    "neler", "nelerdi", "nelerdir", "nelermis", "neymis", "neyle", "nerde", "nerden", "nereden", "nerdeydi",
+    "neredeydi", "kacta", "kacar", "kacinci", "niye", "nicin", "kimin", "kime", "kimi", "kimden", "kimle",
+    "kiminle", "kimdi", "kimdir"))
+# After "ne" these words ask how much or when, not what about: "kira ne kadar", "toplantı ne
+# zamandı", "ne vakit". "o/bu/şu kadar" is a measure, and "ne zamana kadar" asks the same.
+_AFTER_NE = ("zaman", "kadar", "vakit")
 
 
 def query_words(text):
@@ -587,7 +677,16 @@ def query_words(text):
     text = _APOSTROPHE_SUFFIX.sub("", str(text))
     text = unicodedata.normalize("NFKD", text.casefold())
     text = "".join(c for c in text if not unicodedata.combining(c)).replace("ı", "i")
-    words = [word for word in re.findall(r"[a-z0-9]+", text) if not _VERB_FORM.match(word)]
+    words, previous, asked = [], "", False
+    for word in re.findall(r"[a-z0-9]+", text):
+        # A two-word question ("toplantı ne zaman") kept "zaman" as its second word, and the
+        # passage search wants two shared words, so the note about the meeting never matched.
+        asked = ((previous == "ne" and word.startswith(_AFTER_NE))
+                 or (word.startswith("kadar") and (asked or previous in ("o", "bu", "su"))))
+        previous = word
+        if asked or word in QUESTION_FORMS or (_VERB_FORM.match(word) and not _MIS_NOUN_PLURAL.match(word)):
+            continue
+        words.append(word)
     return {_stem(word) for word in words} - STOPWORDS
 
 
@@ -654,6 +753,19 @@ def _path_redirected(path):
     return stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_reparse_tag", 0))
 
 
+def bound_elsewhere(bound):
+    """The error for a runtime bound to another vault root: the vault was moved or copied (C2).
+
+    Said as what to do about it - `beyin.py relocate` binds the runtime where the vault is now, or
+    gives a copy a runtime of its own - and named (`code`) for the desktop app, which runs relocate
+    itself when it opens a vault. Before, a bare "runtime belongs to another vault" had no fix."""
+    error = ValueError('Bu kasanın hafızası başka bir klasördeki kasaya bağlı (' + str(bound) + '); kasa taşındıysa '
+                       'ya da kopyalandıysa bu kasada beyin.py relocate çalıştır (Cortex uygulaması kasayı açınca '
+                       'bunu kendisi yapar).')
+    error.code = 'vault_moved'
+    return error
+
+
 class MemoryStore:
     def __init__(self, state_dir, vault_root, read_only=False, busy_timeout=10):
         self.read_only = bool(read_only)
@@ -680,10 +792,18 @@ class MemoryStore:
             if not binding:
                 raise ValueError("read-only runtime is not bound to a vault")
             if binding[0] != str(self.vault_root):
-                raise ValueError("runtime belongs to another vault")
+                raise bound_elsewhere(binding[0])
             return
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.state_dir.chmod(0o700)
+        root = str(self.vault_root)
+        # An initialized store bound to this vault is opened with reads alone. The schema script
+        # and the binding insert below take the write lock, so every open of a writable store
+        # used to queue behind a running sync (seconds on a large vault), and a hook or CLI
+        # command failed with "database is locked" once that outlived its busy timeout.
+        if self._initialized(root):
+            self.database.chmod(0o600)
+            return
         with self._connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY, payload TEXT NOT NULL);
@@ -698,14 +818,36 @@ class MemoryStore:
                 );
                 CREATE INDEX IF NOT EXISTS events_record_sequence ON events(record_id,sequence);
             """)
-            root = str(self.vault_root)
             binding = db.execute("SELECT value FROM metadata WHERE key='vault_root'").fetchone()
             if binding and binding[0] != root:
-                raise ValueError("runtime belongs to another vault")
+                raise bound_elsewhere(binding[0])
             if not binding and db.execute("SELECT COUNT(*) FROM records").fetchone()[0]:
                 raise ValueError("unbound existing runtime requires explicit migration")
             db.execute("INSERT OR IGNORE INTO metadata VALUES ('vault_root',?)", (root,))
         self.database.chmod(0o600)
+
+    _SCHEMA = frozenset(("records", "receipts", "metadata", "events", "events_record_sequence"))
+
+    def _initialized(self, root):
+        """True when the store already has its schema and is bound to `root`, read without a write lock.
+
+        A store bound to another vault raises here as below; anything missing (a new store, an
+        older schema, no binding yet) leaves the decision to the schema script and its checks.
+        """
+        if not self.database.is_file():
+            return False
+        try:
+            with self._connect() as db:
+                names = {row[0] for row in db.execute(
+                    "SELECT name FROM sqlite_master WHERE type IN ('table','index')")}
+                if not self._SCHEMA <= names:
+                    return False
+                binding = db.execute("SELECT value FROM metadata WHERE key='vault_root'").fetchone()
+        except sqlite3.DatabaseError:
+            return False
+        if binding and binding[0] != root:
+            raise bound_elsewhere(binding[0])
+        return bool(binding)
 
     @contextmanager
     def _connect(self):
@@ -727,14 +869,24 @@ class MemoryStore:
     def close(self):
         """Connections are scoped to each operation; provided for callers."""
 
+    # A still-building passage index falls back to the note-level path only up to this many
+    # candidates: that path counts every note's words, about 5 s a prompt at 3,000 notes, and
+    # the sync worker builds the index right after each sync anyway (beyin_v3_passage.warm).
+    NOTE_FALLBACK_MAX = 500
+
     def context_for(self, harness, query, **kwargs):
         today = kwargs.pop("today", None)  # the day "dün" counts from; the passage path reads it
         if kwargs.get("strict") is True and self.STRICT_PASSAGES:
             try:
                 from beyin_v3_passage import context_for as passage_context
                 return passage_context(self, harness, query, today=today, **kwargs)
-            except Exception:
-                pass  # a real failure or a still-building index keeps the note-level path
+            except Exception as exc:
+                # A real failure or a still-building index keeps the note-level path; a large
+                # pool still building answers nothing this turn instead of outliving the hook.
+                if getattr(exc, "pending_total", 0) > self.NOTE_FALLBACK_MAX:
+                    if harness not in HARNESSES:
+                        raise ValueError("unsupported harness") from exc
+                    return pack_context([], kwargs.get("limit", 5), kwargs.get("budget_chars", 8000))
         return shared_context(self, harness, query, **kwargs)
 
     def _source(self, value, *, _resolved=None):
@@ -871,6 +1023,65 @@ class MemoryStore:
             db.execute("UPDATE records SET payload=? WHERE id=?", (_json(record), id))
             db.execute("INSERT INTO events(event_type,record_id,revision,record) VALUES ('update',?,?,?)", (id, record["revision"], _json(record)))
         return record
+
+    # Every changed source stores its whole note in events, so a daily log or a companion file
+    # rewritten a few times a day grew the runtime by tens of MB a year that never came back,
+    # and the text of a note the user deleted stayed readable there for good.
+    EVENTS_KEEP = 20
+    EVENTS_DELETED_DAYS = 90
+    EVENTS_PRUNE_INTERVAL = 86400
+
+    def prune_events(self, now=None, busy_timeout=0.5):
+        """Bound the event history; best effort, at most once a day, never inside a sync.
+
+        Each record keeps its newest EVENTS_KEEP snapshots, so history() still shows recent
+        revisions, and a deleted record keeps its final delete event, which sets history()'s
+        boundary. A record deleted more than EVENTS_DELETED_DAYS ago loses its whole trail:
+        history() then returns nothing for it. Events carry no time, so each run notes the
+        sequence it reached (event_epochs); a delete at or below the sequence reached that many
+        days ago is old enough. AUTOINCREMENT never reuses a sequence, so the cut-offs in
+        receipt_view_history stay valid. The freed pages go back to the file system once they
+        are a quarter of the database. Returns the number of events removed.
+        """
+        self._require_writable()
+        now = time.time() if now is None else now
+        db = sqlite3.connect(self.database, timeout=busy_timeout)
+        try:
+
+            def due():
+                last = db.execute("SELECT value FROM metadata WHERE key='events_last_prune'").fetchone()
+                return last is None or now - float(last[0]) >= self.EVENTS_PRUNE_INTERVAL
+
+            # Read first: the other drains of the day take no write lock at all.
+            if not due():
+                return 0
+            with db:
+                db.execute("BEGIN IMMEDIATE")
+                if not due():
+                    return 0
+                db.execute("CREATE TABLE IF NOT EXISTS event_epochs(sequence INTEGER NOT NULL, at REAL NOT NULL)")
+                # The index on (record_id, sequence) finds each record's Nth newest event.
+                removed = db.execute("DELETE FROM events WHERE sequence < (SELECT newer.sequence FROM events AS newer "
+                                     "WHERE newer.record_id = events.record_id ORDER BY newer.sequence DESC "
+                                     "LIMIT 1 OFFSET ?)", (self.EVENTS_KEEP - 1,)).rowcount
+                cutoff = db.execute("SELECT MAX(sequence) FROM event_epochs WHERE at <= ?",
+                                    (now - self.EVENTS_DELETED_DAYS * 86400,)).fetchone()[0]
+                if cutoff is not None:
+                    removed += db.execute(
+                        "DELETE FROM events WHERE record_id IN (SELECT last.record_id FROM events AS last "
+                        "WHERE last.event_type = 'delete' AND last.sequence <= ? AND last.sequence = "
+                        "(SELECT MAX(sequence) FROM events AS later WHERE later.record_id = last.record_id)) "
+                        "AND record_id NOT IN (SELECT id FROM records)", (cutoff,)).rowcount
+                    db.execute("DELETE FROM event_epochs WHERE sequence < ?", (cutoff,))
+                reached = db.execute("SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='events'), 0)").fetchone()[0]
+                db.execute("INSERT INTO event_epochs VALUES (?,?)", (reached, now))
+                db.execute("INSERT OR REPLACE INTO metadata VALUES ('events_last_prune',?)", (str(now),))
+            free, pages = (db.execute(f"PRAGMA {name}").fetchone()[0] for name in ("freelist_count", "page_count"))
+            if free >= 1024 and free * 4 >= pages:
+                db.execute("VACUUM")
+            return removed
+        finally:
+            db.close()
 
     def history(self, record_id, audience="internal"):
         """Source-verified immutable snapshots, ordered by global event sequence.
@@ -1230,6 +1441,32 @@ class MemoryStore:
         """Ids retired by any trusted record, not only by the ones this reader may see (#201)."""
         return resolve_supersedes(self._records() if records is None else records)[0]
 
+    DERIVED_KEYS = ("derived_generation", "derived")
+
+    def derived(self):
+        """What the last sync derived from the whole index ({"retired", "dead", "metadata_ignored"}),
+        or None when no sync stored it or the index has changed since."""
+        with self._connect() as db:
+            rows = dict(db.execute("SELECT key, value FROM metadata WHERE key IN (?,?,?)",
+                                   (GENERATION_KEY,) + self.DERIVED_KEYS))
+        current = rows.get(GENERATION_KEY)
+        if current is None or rows.get("derived_generation") != current or "derived" not in rows:
+            return None
+        try:
+            value = json.loads(rows["derived"])
+        except ValueError:
+            return None
+        return value if isinstance(value, dict) else None
+
+    def superseded_ids(self):
+        """_superseded_ids() without decoding the whole index: the last sync's result while the
+        index has not changed since, else computed from supersedes_inputs."""
+        derived = self.derived()
+        if derived is not None and isinstance(derived.get("retired"), list):
+            return set(derived["retired"])
+        with self._connect() as db:
+            return resolve_supersedes(supersedes_inputs(db))[0]
+
     def _retrieve(self, query, project=None, audience="internal", statuses=None, limit=5, budget_chars=8000, snapshot=False, strict=False, candidate_only=False):
         if audience not in ("public", "internal", "private"):
             raise ValueError("invalid audience")
@@ -1258,6 +1495,16 @@ class MemoryStore:
                 if candidate_only:
                     return []
                 return pack_context([], limit, budget_chars, stale_count)
+        if snapshot and not terms:
+            # Nothing can be scored: every weight is 0 and _by_weight keeps the newest first, the
+            # order the scoring path gives. Counting every note's words for it took most of a
+            # large vault's SessionStart (seconds at a few thousand notes).
+            ranked = self._by_weight([(0, record) for record in eligible if record["id"] not in superseded
+                                      and _status_allowed(record, allowed_statuses)
+                                      and not (strict and str(record.get("source", "")).startswith(self.STRICT_EXCLUDE))])
+            if candidate_only:
+                return [record for _, record in ranked[:limit]]
+            return pack_context([record for _, record in ranked], limit, budget_chars, stale_count)
         ranked = []
         vocabularies = {}
         term_counts = {}

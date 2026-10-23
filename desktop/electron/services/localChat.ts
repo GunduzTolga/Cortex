@@ -1,12 +1,13 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { app } from 'electron';
 import type { ConfigOption } from '../../shared/chat';
 import { childEnv } from './acp';
-import { type Backend, type Turn, TurnFailure, scrubberFor } from './chatKit';
-import { onPathFile } from './clis';
+import { type Backend, Stopped, type Turn, TurnFailure, scrubberFor, unlessStopped } from './chatKit';
+import { onPathFile, onPathFiles } from './clis';
+import { writeWhole } from './fileWrite';
 import { captureToInbox } from './inbox';
 import { LOCAL, type LocalId, type LocalModels, baseOf, findLocal, localModel } from './localModels';
 import { readSettings } from './settings';
@@ -118,39 +119,177 @@ function loadSession(id: string): Session | null {
 
 function saveSession(session: Session): void {
   try {
-    fs.mkdirSync(sessionDir(), { recursive: true });
-    const temp = `${sessionFile(session.id)}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify({ chosen: session.chosen, started: session.started, messages: session.messages.slice(-MESSAGES_MAX) }), 'utf8');
-    fs.renameSync(temp, sessionFile(session.id));
+    writeWhole(sessionFile(session.id), JSON.stringify({ chosen: session.chosen, started: session.started, messages: session.messages.slice(-MESSAGES_MAX) }));
   } catch {
     /* Kept in memory for this start. */
   }
 }
 
-/**
- * Python as the vault's engine is run: BEYIN_PYTHON where it is set, else Windows' `py -3`, else a `python3` on the PATH.
- * Never the Store's stand-in, which opens the Store. On Windows, where python.org's installer puts a Python for this user
- * too: the one the first-run screen installs is found at once, without the PATH this process started with knowing it.
- */
-export function pythonOf(env: NodeJS.ProcessEnv = process.env): { command: string; args: string[] } | null {
-  if (env.BEYIN_PYTHON) return { command: env.BEYIN_PYTHON, args: [] };
-  if (process.platform === 'win32') {
-    const launcher = onPathFile(['py.exe'], env);
-    if (launcher) return { command: launcher, args: ['-3'] };
-    const python = onPathFile(['python.exe'], env, (file) => !/\\WindowsApps\\/i.test(file));
-    if (python) return { command: python, args: [] };
-    const own = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'Programs', 'Python') : null;
-    if (!own) return null;
-    if (fs.existsSync(path.join(own, 'Launcher', 'py.exe'))) return { command: path.join(own, 'Launcher', 'py.exe'), args: ['-3'] };
-    const installed = ['Python313', 'Python312', 'Python311'].map((name) => path.join(own, name, 'python.exe')).find((file) => fs.existsSync(file));
-    return installed ? { command: installed, args: [] } : null;
-  }
-  const python = onPathFile(['python3', 'python'], env);
-  return python ? { command: python, args: [] } : null;
+/** How a Python is started: its program, and what comes before the script (`py -3`). */
+export interface PythonLaunch {
+  command: string;
+  args: string[];
 }
 
-/** The context the vault's hook gives for this moment of the chat; empty where there is none to give. */
-export function hookContext(vault: string, event: 'SessionStart' | 'UserPromptSubmit', sessionId: string, prompt: string): Promise<string> {
+/** The oldest Python the vault's engine runs on: its package's `min_python` (scripts/build_v3_release.py). */
+export const PYTHON_MIN = [3, 11] as const;
+/** How long a Python is given to say its version: a first start under a virus scan takes seconds, and a slow answer is not a wrong one. */
+const PROBE_TIMEOUT = 15_000;
+/** A Python found wanting is asked again after this long: one installed meanwhile (python.org, winget, the app's own) is then seen. */
+const RECHECK_AFTER = 30_000;
+
+/** What a Python said when asked its version: fit for the engine, or not - too old, or not running at all - and when. */
+type Verdict = { fit: true; version: string } | { fit: false; version: string | null; at: number };
+const verdicts = new Map<string, Verdict>();
+const asking = new Map<string, Promise<string | null | undefined>>();
+const keyOf = (one: PythonLaunch) => [one.command, ...one.args].join('\0');
+
+/**
+ * Every Python the vault's engine could be run by on this machine, the one preferred first: Windows' `py -3` (the newest
+ * Python it knows), a `python.exe` on the PATH, then where python.org's installer puts one for this user - the one the
+ * first-run screen installs is found at once, without the PATH this process started with knowing it; elsewhere `python3`.
+ * Never the Store's stand-in, which opens the Store. Found by name only: whether one runs, and is new enough, is
+ * `usablePython`'s to ask.
+ */
+export function pythonCandidates(env: NodeJS.ProcessEnv = process.env): PythonLaunch[] {
+  const found: PythonLaunch[] = [];
+  const add = (command: string, args: string[] = []) => {
+    if (!found.some((one) => keyOf(one) === keyOf({ command, args }))) found.push({ command, args });
+  };
+  if (process.platform === 'win32') {
+    const launcher = onPathFile(['py.exe'], env);
+    if (launcher) add(launcher, ['-3']);
+    for (const python of onPathFiles(['python.exe'], env, (file) => !/\\WindowsApps\\/i.test(file))) add(python);
+    const own = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'Programs', 'Python') : null;
+    if (own) {
+      if (fs.existsSync(path.join(own, 'Launcher', 'py.exe'))) add(path.join(own, 'Launcher', 'py.exe'), ['-3']);
+      for (const name of ['Python313', 'Python312', 'Python311']) {
+        const file = path.join(own, name, 'python.exe');
+        if (fs.existsSync(file)) add(file);
+      }
+    }
+    return found;
+  }
+  // A Mac's own python3 is 3.9: a newer one later on the PATH, or under its versioned name, is the one.
+  for (const python of onPathFiles(['python3', 'python', 'python3.13', 'python3.12', 'python3.11'], env)) add(python);
+  return found;
+}
+
+/**
+ * Python as the vault's engine is run: BEYIN_PYTHON where it is set, else the first of this machine's Pythons not found
+ * wanting. Found by name, the way it was before it is asked (`usablePython`): the status at the app's start asks, and from
+ * then on a `py` launcher left behind with no Python, or a Python 3.10, is passed over here too - Telegram, the inbox and
+ * the chat's memory run on the one the setup found fit.
+ */
+export function pythonOf(env: NodeJS.ProcessEnv = process.env): PythonLaunch | null {
+  if (env.BEYIN_PYTHON) return { command: env.BEYIN_PYTHON, args: [] };
+  return pythonCandidates(env).find((one) => verdicts.get(keyOf(one))?.fit !== false) ?? null;
+}
+
+/**
+ * What a Python says it is ("3.12"): null when it does not start, fails (a `py` launcher with no Python behind it says
+ * "No suitable Python runtime found" and exits) or says something else; undefined when it did not answer in time. Its
+ * input is closed, so a launcher that would ask to install a Python is told no rather than waited on.
+ */
+export function pythonVersion(one: PythonLaunch, timeout = PROBE_TIMEOUT): Promise<string | null | undefined> {
+  return new Promise((resolve) => {
+    let said = '';
+    let late = false;
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(one.command, [...one.args, '-c', "import sys; print('%d.%d' % sys.version_info[:2])"], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: childEnv({ PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' }),
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    // Answered at the timeout, not when the output closes: a launcher's Python, left running, may hold it open.
+    const timer = setTimeout(() => {
+      late = true;
+      child.kill();
+      resolve(undefined);
+    }, timeout);
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      said = (said + chunk).slice(-200);
+    });
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (late) return;
+      const version = /^(\d+)\.(\d+)\s*$/.exec(said.trim().split(/\r?\n/).pop() ?? '');
+      resolve(code === 0 && version ? `${version[1]}.${version[2]}` : null);
+    });
+  });
+}
+
+/** A version the engine runs on: 3.11 or newer. */
+export function fitVersion(version: string): boolean {
+  const [major, minor] = version.split('.').map(Number);
+  return major > PYTHON_MIN[0] || (major === PYTHON_MIN[0] && minor >= PYTHON_MIN[1]);
+}
+
+/**
+ * The Python the vault's engine is run by, each of this machine's asked its version until one is 3.11 or newer; null
+ * when none is (the first-run screen and the settings then offer the Python the app came with). Its answer is kept: a
+ * fit one is not asked again, one found wanting is after a while. One that does not answer in time is not taken for
+ * wanting - a slow first start is not a wrong Python - and is used, and asked again the next time.
+ */
+export async function usablePython(env: NodeJS.ProcessEnv = process.env, timeout = PROBE_TIMEOUT): Promise<PythonLaunch | null> {
+  if (env.BEYIN_PYTHON) return { command: env.BEYIN_PYTHON, args: [] };
+  for (const one of pythonCandidates(env)) {
+    const key = keyOf(one);
+    const known = verdicts.get(key);
+    if (known?.fit) return one;
+    if (known && Date.now() - known.at < RECHECK_AFTER) continue;
+    // Two asking at once (the status at start, the notification-area icon) start it once.
+    let answer = asking.get(key);
+    if (!answer) {
+      answer = pythonVersion(one, timeout);
+      asking.set(key, answer);
+      void answer.finally(() => asking.delete(key));
+    }
+    const version = await answer;
+    if (version === undefined) return one;
+    if (version !== null && fitVersion(version)) {
+      verdicts.set(key, { fit: true, version });
+      return one;
+    }
+    verdicts.set(key, { fit: false, version, at: Date.now() });
+  }
+  return null;
+}
+
+/**
+ * Why no Python of this machine is used, as the setup says it: the newest one found too old ("3.10"), 'broken' when
+ * those found do not run (a `py` launcher left behind when Python was uninstalled), null when none was found at all.
+ */
+export function pythonWanting(env: NodeJS.ProcessEnv = process.env): string | null {
+  let broken = false;
+  let newest: string | null = null;
+  const rank = (version: string) => version.split('.').reduce((sum, part) => sum * 1000 + Number(part), 0);
+  for (const one of pythonCandidates(env)) {
+    const known = verdicts.get(keyOf(one));
+    if (!known || known.fit) continue;
+    if (known.version === null) broken = true;
+    else if (!newest || rank(known.version) > rank(newest)) newest = known.version;
+  }
+  return newest ?? (broken ? 'broken' : null);
+}
+
+/** What each Python said, forgotten: one was just installed, and the launcher that had nothing behind it may have now. */
+export function forgetPythonVerdicts(): void {
+  verdicts.clear();
+}
+
+/** The context the vault's hook gives for this moment of the chat; empty where there is none to give, or when the turn is stopped (the hook ended with it). */
+export function hookContext(vault: string, event: 'SessionStart' | 'UserPromptSubmit', sessionId: string, prompt: string, signal?: AbortSignal): Promise<string> {
   const hook = path.join(vault, '.claude', 'scripts', 'beyin_v3_hook.py');
   let state: string | null = null;
   try {
@@ -166,7 +305,7 @@ export function hookContext(vault: string, event: 'SessionStart' | 'UserPromptSu
       const child = execFile(
         python.command,
         [...python.args, hook, '--vault', vault, '--state', state, '--harness', 'opencode'],
-        { cwd: vault, timeout: HOOK_TIMEOUT, windowsHide: true, maxBuffer: 4 * 1024 * 1024, env: childEnv({ PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' }) },
+        { cwd: vault, timeout: HOOK_TIMEOUT, windowsHide: true, maxBuffer: 4 * 1024 * 1024, signal, env: childEnv({ PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' }) },
         (error, stdout) => {
           try {
             const text = error ? '' : (JSON.parse(String(stdout || '{}')) as { hookSpecificOutput?: { additionalContext?: unknown } })?.hookSpecificOutput?.additionalContext;
@@ -239,13 +378,31 @@ export function localOptions(found: LocalModels, current: string): ConfigOption[
   return [{ id: 'model', name: 'Model', category: 'model', current, choices: ordered.map((one) => ({ value: one, name: found.loaded.includes(one) ? `${one} · ${loadedWord}` : one })) }];
 }
 
-/** The conversation cut to what the model can hold: the session's own context always, the oldest turns dropped first. */
+/** Two messages of one side running together, made one: the person's two questions with a blank line between. */
+function alternating(messages: Message[]): Message[] {
+  const out: Message[] = [];
+  for (const one of messages) {
+    const last = out[out.length - 1];
+    if (last && last.role === one.role) out[out.length - 1] = { role: one.role, content: `${last.content}\n\n${one.content}` };
+    else out.push(one);
+  }
+  return out;
+}
+
+/**
+ * The conversation cut to what the model can hold: the session's own context always, the oldest
+ * turns dropped first. What goes takes turns, the person first: the chat templates of Gemma and
+ * Mistral in LM Studio refuse anything else ("Conversation roles must alternate"), and a turn that
+ * failed (two of the person's messages in a row) or a cut that left the model's answer first broke
+ * every later message of the chat.
+ */
 export function fitted(messages: Message[], contextTokens: number | undefined): Message[] {
   const budget = Math.max(4_000, (contextTokens ?? 8_192) * 3);
   const system = messages.filter((one) => one.role === 'system');
-  const rest = messages.filter((one) => one.role !== 'system');
+  const rest = alternating(messages.filter((one) => one.role !== 'system'));
   let size = [...system, ...rest].reduce((sum, one) => sum + one.content.length, 0);
   while (rest.length > 1 && size > budget) size -= rest.shift()!.content.length;
+  while (rest.length > 1 && rest[0].role === 'assistant') rest.shift();
   return [...system, ...rest];
 }
 
@@ -380,85 +537,114 @@ function complete(
   });
 }
 
+/** One turn of a local chat: the hook asked for its memory, the model asked, its tool run; how the turn ended. */
+async function answer(turn: Turn, message: string, session: Session, found: LocalModels, model: string, signal: AbortSignal): Promise<string> {
+  const id = turn.cli as LocalId;
+  const scrub = scrubberFor(turn.vault);
+  let content = message;
+  if (!session.started) {
+    const context = await hookContext(turn.vault, 'SessionStart', session.id, message, signal);
+    // Stopped while the hook was asked: nothing of the turn is kept, and the session is begun at the next.
+    if (signal.aborted) return 'cancelled';
+    session.messages.unshift({ role: 'system', content: [preamble(), context].filter(Boolean).join('\n\n') });
+    session.started = true;
+  } else {
+    const context = await hookContext(turn.vault, 'UserPromptSubmit', session.id, message, signal);
+    if (signal.aborted) return 'cancelled';
+    if (context) content = `${context}\n\n---\n\n${message}`;
+  }
+  const asked: Message = { role: 'user', content };
+  session.messages.push(asked);
+  // A turn that came to no answer - failed, or stopped before a word - is taken back, so the conversation kept goes on taking turns.
+  const takeBack = () => {
+    const at = session.messages.lastIndexOf(asked);
+    if (at >= 0) session.messages.splice(at, 1);
+  };
+  try {
+    const answerId = `turn-${turn.number}`;
+    const key = `${id}:${model}`;
+    // The tool's exchange in this turn: sent with the conversation while it lasts, never kept.
+    const exchange: Wire[] = [];
+    let answer = '';
+    let used: number | null = null;
+    for (let round = 0; ; round += 1) {
+      const tools = round < TOOL_ROUNDS && !toolless.has(key) ? TOOLS : undefined;
+      let result: { text: string; used: number | null; calls: ToolCall[] };
+      try {
+        result = await complete(
+          id,
+          model,
+          [...fitted(session.messages, found.contexts[model]), ...exchange],
+          signal,
+          (piece) => turn.emit({ type: 'text', id: round ? `${answerId}:${round}` : answerId, text: scrub(piece) }),
+          (piece) => turn.emit({ type: 'thought', id: `${answerId}:thought`, text: scrub(piece) }),
+          tools,
+        );
+      } catch (err) {
+        // A model that takes no tools: asked again without it, and from then on.
+        if (tools && err instanceof TurnFailure && NO_TOOLS.test(err.message)) {
+          toolless.add(key);
+          round -= 1;
+          continue;
+        }
+        throw err;
+      }
+      used = result.used ?? used;
+      if (result.text) answer = answer ? `${answer}\n\n${result.text}` : result.text;
+      if (!result.calls.length || signal.aborted) break;
+      exchange.push({ role: 'assistant', content: result.text || null, tool_calls: result.calls });
+      for (const [at, call] of result.calls.entries()) {
+        const outcome = await runTool(call, turn, `${answerId}:tool:${round}:${at}`);
+        exchange.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(outcome) });
+      }
+    }
+    if (answer) session.messages.push({ role: 'assistant', content: answer });
+    else if (signal.aborted) takeBack();
+    const size = found.contexts[model];
+    if (used !== null && size) turn.emit({ type: 'usage', used, size, cost: null, currency: null });
+    return signal.aborted ? 'cancelled' : 'end_turn';
+  } catch (err) {
+    takeBack();
+    throw err;
+  }
+}
+
 export const localBackend: Backend = {
   async run(turn, message) {
     const id = turn.cli as LocalId;
-    const found = await findLocal(id);
-    if (!found.models.length) throw new TurnFailure(`${LOCAL[id].name} is not running, or has no model. Open it, load a model, and write again.`, 'local-off');
-    // The conversation is the chat's, by its id: the hook's session and the file it is kept in.
-    let session = sessions.get(turn.chatId) ?? loadSession(turn.chatId);
-    if (!session) {
-      session = { id: turn.chatId, chosen: null, started: false, messages: [] };
-      turn.setSession(session.id);
-    }
-    sessions.set(turn.chatId, session);
-    const pending = pendingChoice.get(turn.chatId);
-    if (pending) session.chosen = pending;
-    pendingChoice.delete(turn.chatId);
-    // The model chosen on this chat's chip while the server has it; else the one loaded in its app now.
-    const model = session.chosen && found.models.includes(session.chosen) ? session.chosen : localModel(found, turn.prefs.model ?? null);
-    if (!model) throw new TurnFailure(`${LOCAL[id].name} has no model.`, 'local-off');
-    turn.setOptions(localOptions(found, model));
-
-    const scrub = scrubberFor(turn.vault);
-    let content = message;
-    if (!session.started) {
-      const context = await hookContext(turn.vault, 'SessionStart', session.id, message);
-      session.messages.unshift({ role: 'system', content: [preamble(), context].filter(Boolean).join('\n\n') });
-      session.started = true;
-    } else {
-      const context = await hookContext(turn.vault, 'UserPromptSubmit', session.id, message);
-      if (context) content = `${context}\n\n---\n\n${message}`;
-    }
-    session.messages.push({ role: 'user', content });
-
+    // Stopped by the person, by the chat forgotten, or by the app closing: the hook, the request, all of it.
     const stop = new AbortController();
+    const stopped = () => stop.abort();
+    turn.signal.addEventListener('abort', stopped, { once: true });
+    if (turn.signal.aborted) stop.abort();
     running.set(turn.chatId, stop);
+    let session: Session | null = null;
     try {
-      const answerId = `turn-${turn.number}`;
-      const key = `${id}:${model}`;
-      // The tool's exchange in this turn: sent with the conversation while it lasts, never kept.
-      const exchange: Wire[] = [];
-      let answer = '';
-      let used: number | null = null;
-      for (let round = 0; ; round += 1) {
-        const tools = round < TOOL_ROUNDS && !toolless.has(key) ? TOOLS : undefined;
-        let result: { text: string; used: number | null; calls: ToolCall[] };
-        try {
-          result = await complete(
-            id,
-            model,
-            [...fitted(session.messages, found.contexts[model]), ...exchange],
-            stop.signal,
-            (piece) => turn.emit({ type: 'text', id: round ? `${answerId}:${round}` : answerId, text: scrub(piece) }),
-            (piece) => turn.emit({ type: 'thought', id: `${answerId}:thought`, text: scrub(piece) }),
-            tools,
-          );
-        } catch (err) {
-          // A model that takes no tools: asked again without it, and from then on.
-          if (tools && err instanceof TurnFailure && NO_TOOLS.test(err.message)) {
-            toolless.add(key);
-            round -= 1;
-            continue;
-          }
-          throw err;
-        }
-        used = result.used ?? used;
-        if (result.text) answer = answer ? `${answer}\n\n${result.text}` : result.text;
-        if (!result.calls.length || stop.signal.aborted) break;
-        exchange.push({ role: 'assistant', content: result.text || null, tool_calls: result.calls });
-        for (const [at, call] of result.calls.entries()) {
-          const outcome = await runTool(call, turn, `${answerId}:tool:${round}:${at}`);
-          exchange.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(outcome) });
-        }
+      const found = await unlessStopped(stop.signal, findLocal(id));
+      if (!found.models.length) throw new TurnFailure(`${LOCAL[id].name} is not running, or has no model. Open it, load a model, and write again.`, 'local-off');
+      // The conversation is the chat's, by its id: the hook's session and the file it is kept in.
+      session = sessions.get(turn.chatId) ?? loadSession(turn.chatId);
+      if (!session) {
+        session = { id: turn.chatId, chosen: null, started: false, messages: [] };
+        turn.setSession(session.id);
       }
-      if (answer) session.messages.push({ role: 'assistant', content: answer });
-      const size = found.contexts[model];
-      if (used !== null && size) turn.emit({ type: 'usage', used, size, cost: null, currency: null });
-      return stop.signal.aborted ? 'cancelled' : 'end_turn';
+      sessions.set(turn.chatId, session);
+      const pending = pendingChoice.get(turn.chatId);
+      if (pending) session.chosen = pending;
+      pendingChoice.delete(turn.chatId);
+      // The model chosen on this chat's chip while the server has it; else the one loaded in its app now.
+      const model = session.chosen && found.models.includes(session.chosen) ? session.chosen : localModel(found, turn.prefs.model ?? null);
+      if (!model) throw new TurnFailure(`${LOCAL[id].name} has no model.`, 'local-off');
+      turn.setOptions(localOptions(found, model));
+      return await answer(turn, message, session, found, model, stop.signal);
+    } catch (err) {
+      if (err instanceof Stopped) return 'cancelled';
+      throw err;
     } finally {
-      running.delete(turn.chatId);
-      saveSession(session);
+      turn.signal.removeEventListener('abort', stopped);
+      if (running.get(turn.chatId) === stop) running.delete(turn.chatId);
+      // A chat deleted while it answered leaves nothing behind: its conversation is not written again.
+      if (session && sessions.get(session.id) === session) saveSession(session);
     }
   },
 

@@ -7,10 +7,12 @@ import { acpBackend } from './acpChat';
 import { type Backend, type Card, ChatRefusal, type Turn, failureEvent, scrubberFor } from './chatKit';
 import { claudeBackend } from './claudeChat';
 import { codexBackend } from './codexChat';
+import { writeWhole } from './fileWrite';
 import { localBackend } from './localChat';
-import { LOCAL_IDS, isLocal, launchFor, listClis, protocolOf } from './clis';
+import { LOCAL_IDS, isLocal, launchFor, listClis, protocolOf, refreshPath } from './clis';
 import { findLocal } from './localModels';
 import { readSettings } from './settings';
+import { vaultSettled } from './setup';
 
 export { ChatRefusal } from './chatKit';
 export { scrubberFor, shownPath } from './chatKit';
@@ -56,6 +58,8 @@ interface Live {
   options: ConfigOption[];
   /** Answers awaited for steps the program asked leave for, by the card's id. */
   permissions: Map<string, (option: string | null) => void>;
+  /** The running turn's Stop (Turn.signal). */
+  stop: AbortController | null;
   turn: number;
   /** Its events counted since the app started (ChatPush.seq). */
   seq: number;
@@ -85,14 +89,6 @@ const folder = () => path.join(app.getPath('userData'), 'chats');
 const indexFile = () => path.join(folder(), 'index.json');
 const logFile = (id: string) => path.join(folder(), `${id}.json`);
 
-/** Written beside and renamed into place: a list half written is never left. */
-function writeWhole(file: string, value: unknown): void {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.${randomUUID()}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(value));
-  fs.renameSync(temp, file);
-}
-
 let index: Index | null = null;
 
 function readIndex(): Index {
@@ -118,13 +114,30 @@ function readIndex(): Index {
   return index;
 }
 
-const saveIndex = () => writeWhole(indexFile(), readIndex());
+/** Written beside and renamed into place, tried again while Windows holds the file (fileWrite.ts): a list half written is never left. */
+const saveIndex = () => writeWhole(indexFile(), JSON.stringify(readIndex()));
+
+/**
+ * The list saved for something a CLI said while it answered - its session, its name for the chat -
+ * where a failure to write is not thrown: thrown inside the handler reading the CLI's output, it
+ * stopped that handler and showed the main process's error dialog. The list is written again at
+ * the next save, with it.
+ */
+function saveIndexQuietly(): void {
+  try {
+    saveIndex();
+  } catch {
+    /* kept in memory; written with the next save */
+  }
+}
 
 /** A chat's events made short to keep: the pieces of one message joined, every word on one step joined into it. */
 export function compact(events: readonly ChatEvent[]): ChatEvent[] {
   const out: ChatEvent[] = [];
+  // The steps of one turn: a step's id is its turn's (a local model's restart at `turn-1` with every start of the app).
   const tools = new Map<string, Extract<ChatEvent, { type: 'tool' }>>();
   for (const event of events) {
+    if (event.type === 'user') tools.clear();
     const last = out[out.length - 1];
     if ((event.type === 'text' || event.type === 'thought') && last?.type === event.type && last.id === event.id) {
       out[out.length - 1] = { ...last, text: last.text + event.text };
@@ -173,7 +186,7 @@ function storedOf(id: unknown): Stored {
   return stored;
 }
 
-const fresh = (stored: Stored, events: ChatEvent[]): Live => ({ stored, events, running: false, options: [], permissions: new Map(), turn: 0, seq: 0 });
+const fresh = (stored: Stored, events: ChatEvent[]): Live => ({ stored, events, running: false, options: [], permissions: new Map(), stop: null, turn: 0, seq: 0 });
 
 function liveOf(id: unknown): Live {
   const stored = storedOf(id);
@@ -199,7 +212,7 @@ function setState(chat: Live, change: Partial<Pick<Live, 'running' | 'options'>>
 function saveLog(chat: Live): void {
   chat.events = compact(chat.events);
   try {
-    writeWhole(logFile(chat.stored.id), chat.events);
+    writeWhole(logFile(chat.stored.id), JSON.stringify(chat.events));
   } catch {
     /* What was shown stays on screen; it is kept again at the next turn's end. */
   }
@@ -216,8 +229,11 @@ async function askPerson(chat: Live, card: Card): Promise<string | null> {
   return chosen;
 }
 
+/** Whether the chat is still one of the chats: a chat deleted while it answered is not written back. */
+const kept = (chat: Live) => live.get(chat.stored.id) === chat;
+
 /** The turn a backend runs, told through this chat. */
-function turnOf(chat: Live): Turn {
+function turnOf(chat: Live, signal: AbortSignal): Turn {
   const stored = chat.stored;
   return {
     chatId: stored.id,
@@ -226,39 +242,55 @@ function turnOf(chat: Live): Turn {
     sessionId: stored.sessionId,
     number: chat.turn,
     prefs: readIndex().prefs[stored.cli] ?? {},
+    signal,
     emit: (event) => chat.running && emit(chat, event),
     setOptions: (options) => setState(chat, { options }),
     setSession: (sessionId) => {
-      if (stored.sessionId === sessionId) return;
+      if (stored.sessionId === sessionId || !kept(chat)) return;
       stored.sessionId = sessionId;
-      saveIndex();
+      saveIndexQuietly();
     },
     setTitle: (title) => {
+      // A name given late, for a chat deleted since, would put it back in the list.
+      if (!kept(chat)) return;
       stored.title = title.slice(0, TITLE_MAX);
-      saveIndex();
+      saveIndexQuietly();
       push({ chatId: stored.id, summary: summaryOf(stored) });
     },
-    ask: (card) => (chat.running ? askPerson(chat, card) : Promise.resolve(null)),
+    // After Stop nothing more is asked: a step that a CLI which does not stop asks leave for is refused, unshown.
+    ask: (card) => (chat.running && !signal.aborted ? askPerson(chat, card) : Promise.resolve(null)),
   };
 }
 
+/** A restart of the CLIs asked for while a turn went on, made when the last turn ends (restartIdleChats). */
+let restartWanted = false;
+
 async function run(chat: Live, message: string): Promise<void> {
+  const stop = new AbortController();
+  chat.stop = stop;
   try {
-    const reason = await backendOf(chat.stored.cli).run(turnOf(chat), message);
+    // The vault just opened is bound to where it is first, so its hooks point there (services/setup.ts); Stop ends the wait.
+    await Promise.race([vaultSettled(), new Promise((done) => stop.signal.addEventListener('abort', done, { once: true }))]);
+    // Stopped while it waited: the CLI is not started for a turn already ended.
+    const reason = stop.signal.aborted ? 'cancelled' : await backendOf(chat.stored.cli).run(turnOf(chat, stop.signal), message);
     emit(chat, { type: 'done', reason });
   } catch (err) {
     emit(chat, failureEvent(err, scrubberFor(chat.stored.vault)));
   } finally {
+    if (chat.stop === stop) chat.stop = null;
     for (const answer of chat.permissions.values()) answer(null);
     chat.permissions.clear();
     setState(chat, { running: false });
-    saveLog(chat);
+    // A chat deleted while it answered leaves nothing behind: its log is not written again.
+    if (kept(chat)) saveLog(chat);
+    if (restartWanted && ![...live.values()].some((one) => one.running)) shutdownChats();
   }
 }
 
 /** Every CLI, the model servers on this machine asked first: one is offered while it is up with a model. */
 export async function listChatClis(): Promise<CliInfo[]> {
-  await Promise.all(LOCAL_IDS.map((one) => findLocal(one)));
+  // A tool installed since the app started is found without opening it again.
+  await Promise.all([refreshPath(), ...LOCAL_IDS.map((one) => findLocal(one))]);
   return listClis();
 }
 
@@ -311,6 +343,8 @@ export function cancelChat(id: unknown): void {
   const chat = liveOf(id);
   if (!chat.running) return;
   for (const answer of chat.permissions.values()) answer(null);
+  // A turn still starting its CLI ends here; one under way is asked of its CLI to end.
+  chat.stop?.abort();
   backendOf(chat.stored.cli).cancel(chat.stored.id);
 }
 
@@ -357,7 +391,24 @@ export function removeChat(id: unknown): void {
 
 /** Every program ended: the app is closing, or another vault was chosen. */
 export function shutdownChats(): void {
+  restartWanted = false;
   for (const backend of Object.values(BACKENDS)) backend.shutdown();
+}
+
+/**
+ * A sign-in, a key or an install changed while CLIs were kept running: they are ended between
+ * turns, and each chat's next message starts its CLI again with it, its session resumed. A CLI
+ * started before kept the key or sign-in it started with, and the chat kept failing until the app
+ * was opened again. Not while a turn is going on - a card waiting on the person included - that
+ * one is not cut off: the restart is made when the last turn ends. Whether it was made now.
+ */
+export function restartIdleChats(): boolean {
+  if ([...live.values()].some((one) => one.running)) {
+    restartWanted = true;
+    return false;
+  }
+  shutdownChats();
+  return true;
 }
 
 /** For tests: forget what is held in memory, as a restart would. */

@@ -61,16 +61,21 @@ def _read(path, now):
 def _current(store, saved):
     if any(not isinstance(ref, dict) for ref in saved['refs']):
         return []
-    indexed = store._records()
     # Verify only the saved refs, through the same gates _retrieve applies to an empty
     # snapshot query: visibility, trust, rejection, project scope and source freshness
     # (_eligible), supersession resolved over every indexed record, so a hidden trusted
     # superseder still retires its target, and the default retired-status filter. The
     # previous whole-vault snapshot hashed every source to look up at most MAX_REFS ids,
     # and in a vault over its 10M-character packing budget could drop a valid anchor.
-    ids = {ref.get('id') for ref in saved['refs']}
-    eligible, _ = store._eligible('internal', saved['project'], records=[r for r in indexed if r['id'] in ids])
-    superseded = store._superseded_ids(indexed)
+    # Only the saved refs' payloads are read, and the retired ids come from the last sync's
+    # result (superseded_ids): decoding the whole index, a chat-history import included, on
+    # every "bunu düzelt" kept a large vault's turn waiting on records it never delivers.
+    ids = sorted({ref.get('id') for ref in saved['refs']} - {None}, key=str)
+    with store._connect() as db:
+        indexed = [json.loads(row[0]) for row in db.execute(
+            'SELECT payload FROM records WHERE id IN (' + ','.join('?' * len(ids)) + ') ORDER BY id', ids)]
+    eligible, _ = store._eligible('internal', saved['project'], records=indexed)
+    superseded = store.superseded_ids()
     allowed_statuses = _allowed_statuses(None)
     eligible = [record for record in eligible if record['id'] not in superseded
                 and _status_allowed(record, allowed_statuses)]

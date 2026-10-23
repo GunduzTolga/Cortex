@@ -8,7 +8,7 @@ import test from 'node:test';
 import { app } from 'electron';
 import type { ChatEvent, ConfigOption } from '../shared/chat';
 import type { Turn } from '../electron/services/chatKit';
-import { fitted, localBackend, localOptions, pythonOf, splitter } from '../electron/services/localChat';
+import { fitVersion, fitted, forgetPythonVerdicts, localBackend, localOptions, pythonOf, pythonWanting, splitter, usablePython } from '../electron/services/localChat';
 
 /**
  * The chat with a model on this machine's own server, talked to directly
@@ -28,7 +28,7 @@ test('thinking is told apart from the words, a <think> tag cut between pieces to
   assert.equal(thoughts.join(''), 'düşünüyorum biraz');
 });
 
-test('the conversation is cut to what the model holds: the session’s context kept, the oldest turns dropped', () => {
+test('the conversation is cut to what the model holds: the session’s context kept, the oldest turns dropped, the person always first', () => {
   const messages = [
     { role: 'system' as const, content: 's'.repeat(1000) },
     { role: 'user' as const, content: 'u'.repeat(3000) },
@@ -37,8 +37,22 @@ test('the conversation is cut to what the model holds: the session’s context k
   ];
   const kept = fitted(messages, 1500);
   assert.equal(kept[0].role, 'system');
-  assert.deepEqual(kept.slice(1).map((one) => one.content), ['a'.repeat(3000), 'son']);
+  // Not the model's answer first, with its question cut away: Gemma's and Mistral's templates in LM Studio refuse that.
+  assert.deepEqual(kept.slice(1).map((one) => one.content), ['son']);
   assert.equal(fitted(messages, 100_000).length, 4, 'all of it where it fits');
+  // Kept from a turn that failed, two of the person's messages in a row: made one, so the roles take turns.
+  const stuck = fitted(
+    [
+      { role: 'system', content: 's' },
+      { role: 'user', content: 'ilk' },
+      { role: 'user', content: 'ikinci' },
+      { role: 'assistant', content: 'cevap' },
+      { role: 'user', content: 'üçüncü' },
+    ],
+    100_000,
+  );
+  assert.deepEqual(stuck.map((one) => one.role), ['system', 'user', 'assistant', 'user']);
+  assert.equal(stuck[1].content, 'ilk\n\nikinci');
 });
 
 test('the model chip: the server’s models, the loaded ones first and said so', () => {
@@ -69,6 +83,53 @@ test('Python is the one the engine runs: BEYIN_PYTHON, else Windows’ py -3, ne
   fs.mkdirSync(path.join(local, 'Programs', 'Python', 'Launcher'));
   fs.writeFileSync(path.join(local, 'Programs', 'Python', 'Launcher', 'py.exe'), '');
   assert.deepEqual(pythonOf({ PATH: store, LOCALAPPDATA: local }), { command: path.join(local, 'Programs', 'Python', 'Launcher', 'py.exe'), args: ['-3'] });
+});
+
+/** A stand-in Python in a folder of its own, found on the PATH by its name: a shell script that does what it is given. */
+function fakePython(name: string, body: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'python-'));
+  fs.writeFileSync(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  return dir;
+}
+
+test('a Python is asked its version before the engine is run by it: one too old, or a launcher with nothing behind it, is passed over', { skip: process.platform === 'win32' }, async () => {
+  const old = fakePython('python3', 'echo 3.10');
+  // A `py` left behind when Python was uninstalled says this, and exits.
+  const broken = fakePython('python3', 'echo "No suitable Python runtime found" >&2; exit 103');
+  const fit = fakePython('python3', 'echo 3.12');
+  const env = { PATH: [old, broken, fit].join(path.delimiter) };
+  assert.equal(pythonOf(env)?.command, path.join(old, 'python3'), 'found by name, before it is asked');
+  assert.equal((await usablePython(env, 10_000))?.command, path.join(fit, 'python3'));
+  assert.equal(pythonOf(env)?.command, path.join(fit, 'python3'), 'and from then on the ones found wanting are passed over by every caller');
+  const wanting = { PATH: [old, broken].join(path.delimiter) };
+  assert.equal(await usablePython(wanting, 10_000), null, 'none fit: the setup offers the Python that came with the app');
+  assert.equal(pythonOf(wanting), null);
+  assert.equal(pythonWanting(wanting), '3.10', 'the one too old is named');
+  assert.equal(pythonWanting({ PATH: broken }), 'broken', 'a launcher with nothing behind it is said as such');
+  assert.equal(pythonWanting({ PATH: fakePython('python3', 'echo 3.12') }), null, 'nothing said against one not asked yet');
+  assert.ok(fitVersion('3.11') && fitVersion('3.13') && fitVersion('4.0') && !fitVersion('3.10') && !fitVersion('2.7'));
+  assert.deepEqual(await usablePython({ PATH: old, BEYIN_PYTHON: '/opt/python/bin/python3' }), { command: '/opt/python/bin/python3', args: [] }, 'BEYIN_PYTHON is the person’s own choice, taken as it is');
+});
+
+test('a Python slow to answer is not taken for a wrong one: it is used, the wait bounded', { skip: process.platform === 'win32' }, async () => {
+  const slow = fakePython('python3', 'exec sleep 30');
+  const env = { PATH: slow };
+  const started = Date.now();
+  assert.equal((await usablePython(env, 300))?.command, path.join(slow, 'python3'));
+  assert.ok(Date.now() - started < 10_000, 'not the thirty seconds it would take');
+  assert.equal(pythonOf(env)?.command, path.join(slow, 'python3'), 'still the one the engine is run by');
+  assert.equal(pythonWanting(env), null);
+});
+
+test('a Python installed meanwhile is found: what each one said is forgotten after an install', { skip: process.platform === 'win32' }, async () => {
+  const dir = fakePython('python3', 'echo 3.9');
+  const env = { PATH: dir };
+  assert.equal(await usablePython(env, 10_000), null);
+  // The same name now leads to a newer Python, as a `py` does once a Python is installed behind it.
+  fs.writeFileSync(path.join(dir, 'python3'), '#!/bin/sh\necho 3.12\n', { mode: 0o755 });
+  assert.equal(await usablePython(env, 10_000), null, 'asked again only after a while, not at every status');
+  forgetPythonVerdicts();
+  assert.equal((await usablePython(env, 10_000))?.command, path.join(dir, 'python3'));
 });
 
 /** A stand-in LM Studio: its model list, and an answer streamed in pieces with its thinking and its count. */
@@ -106,6 +167,7 @@ function fakeTurn(chatId: string, vault: string, number: number, prefs: Record<s
   const events: ChatEvent[] = [];
   let options: ConfigOption[] = [];
   let session: string | null = null;
+  const stop = new AbortController();
   const turn: Turn = {
     chatId,
     cli: 'lmstudio',
@@ -113,13 +175,14 @@ function fakeTurn(chatId: string, vault: string, number: number, prefs: Record<s
     sessionId: session,
     number,
     prefs,
+    signal: stop.signal,
     emit: (event) => events.push(event),
     setOptions: (next) => (options = next),
     setSession: (id) => (session = id),
     setTitle: () => undefined,
     ask: async () => null,
   };
-  return { turn, events, options: () => options, session: () => session };
+  return { turn, events, stop, options: () => options, session: () => session };
 }
 
 test('a message goes to the model loaded in LM Studio, streamed back; Pyn’s memory comes from the vault’s hook; the chat goes on where it was', async () => {
@@ -204,6 +267,105 @@ test('Stop ends an answer mid-way; what came so far is kept', async () => {
     assert.equal(await ran, 'cancelled');
     const kept = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'chats', 'local', `${chatId}.json`), 'utf8'));
     assert.deepEqual(kept.messages.at(-1), { role: 'assistant', content: 'yarım ' });
+  } finally {
+    delete process.env.CORTEX_TEST_LMSTUDIO;
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+/** A stand-in LM Studio that refuses its first answer, as a server that hiccups does, and answers the rest. */
+async function hiccup() {
+  const bodies: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+  const server = http.createServer((request, response) => {
+    let body = '';
+    request.on('data', (chunk) => (body += chunk));
+    request.on('end', () => {
+      if (request.url === '/api/v0/models') {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ data: [{ id: 'gemma', type: 'llm', state: 'loaded' }] }));
+        return;
+      }
+      bodies.push(JSON.parse(body));
+      if (bodies.length === 1) {
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ error: 'Model is busy' }));
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'Tamam.' } }] })}\n\n`);
+      response.end('data: [DONE]\n\n');
+    });
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  return { server, bodies, base: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+}
+
+test('a turn that failed is taken back: the next message goes as the conversation’s next, the roles taking turns', async () => {
+  const { server, bodies, base } = await hiccup();
+  process.env.CORTEX_TEST_LMSTUDIO = base;
+  const chatId = '00000000-0000-4000-8000-000000000004';
+  try {
+    await assert.rejects(localBackend.run(fakeTurn(chatId, os.tmpdir(), 1).turn, 'ilk soru'), /Model is busy/);
+    assert.equal(await localBackend.run(fakeTurn(chatId, os.tmpdir(), 2).turn, 'ikinci soru'), 'end_turn');
+    assert.deepEqual(bodies[1].messages.map((one) => [one.role, one.role === 'system' ? '' : one.content]), [['system', ''], ['user', 'ikinci soru']]);
+    const kept = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'chats', 'local', `${chatId}.json`), 'utf8'));
+    assert.deepEqual(kept.messages.map((one: { role: string }) => one.role), ['system', 'user', 'assistant']);
+  } finally {
+    delete process.env.CORTEX_TEST_LMSTUDIO;
+    server.close();
+  }
+});
+
+test('Stop while the vault’s hook is asked ends the turn at once, and nothing of it is kept', { skip: pythonOf() === null }, async () => {
+  const { server, bodies, base } = await standIn();
+  const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-'));
+  const state = fs.mkdtempSync(path.join(os.tmpdir(), 'durum-'));
+  fs.mkdirSync(path.join(vault, '.claude', 'scripts'), { recursive: true });
+  // A hook that takes its time, as the memory hook can on a slow laptop; it says when it has begun.
+  const begun = path.join(state, 'begun');
+  fs.writeFileSync(path.join(vault, '.claude', 'scripts', 'beyin_v3_hook.py'), `import time\nopen(${JSON.stringify(begun)}, "w").close()\ntime.sleep(30)\n`);
+  fs.writeFileSync(path.join(vault, '.beyin-runtime.json'), JSON.stringify({ state }));
+  process.env.CORTEX_TEST_LMSTUDIO = base;
+  const chatId = '00000000-0000-4000-8000-000000000005';
+  try {
+    const { turn, stop } = fakeTurn(chatId, vault, 1);
+    const ran = localBackend.run(turn, 'gönderilmeyecek');
+    for (let wait = 0; wait < 500 && !fs.existsSync(begun); wait += 1) await new Promise((done) => setTimeout(done, 20));
+    assert.ok(fs.existsSync(begun), 'the hook under way');
+    const at = Date.now();
+    stop.abort();
+    assert.equal(await ran, 'cancelled');
+    assert.ok(Date.now() - at < 10_000, 'without waiting for the hook');
+    assert.equal(bodies.length, 0, 'the model never asked');
+    const kept = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'chats', 'local', `${chatId}.json`), 'utf8'));
+    assert.deepEqual([kept.started, kept.messages], [false, []]);
+  } finally {
+    delete process.env.CORTEX_TEST_LMSTUDIO;
+    server.close();
+  }
+});
+
+test('a local chat deleted while it answers leaves no conversation behind', async () => {
+  const server = http.createServer((request, response) => {
+    if (request.url === '/api/v0/models') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ data: [{ id: 'm', type: 'llm', state: 'loaded' }] }));
+      return;
+    }
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'gizli ' } }] })}\n\n`);
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  process.env.CORTEX_TEST_LMSTUDIO = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const chatId = '00000000-0000-4000-8000-000000000006';
+  try {
+    const { turn, events } = fakeTurn(chatId, os.tmpdir(), 1);
+    const ran = localBackend.run(turn, 'gizli mesaj');
+    for (let at = 0; at < 100 && !events.some((one) => one.type === 'text'); at += 1) await new Promise((done) => setTimeout(done, 20));
+    localBackend.forget(chatId);
+    assert.equal(await ran, 'cancelled');
+    assert.equal(fs.existsSync(path.join(app.getPath('userData'), 'chats', 'local', `${chatId}.json`)), false);
   } finally {
     delete process.env.CORTEX_TEST_LMSTUDIO;
     server.closeAllConnections();

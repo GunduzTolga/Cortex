@@ -16,13 +16,27 @@ The guard takes nonblocking locks on existing legacy `.claude/scripts/.state/*.l
 files and rejects known `inflight`, `running` or `pending` writer states. If a
 worker is active, let it finish and rerun. An orphaned inflight sentinel needs
 explicit reconciliation; the migration never deletes it or declares it safe
-from its age alone. Source or legacy-state changes during cutover reject success.
+from its age alone. Source or legacy-state changes during cutover reject success
+(error code `migration_changed`). A retry does not replay the interrupted run's
+inventory: recovery takes the guard again and proves the cutover from the vault as
+it is then, so a note edited during the install, or after an interruption, stops
+one attempt and not every later one. What the interrupted install decided (the
+runners kept, the orphaned sentinels it reported) is carried over.
 These are local cooperating-worker protections, not a distributed filesystem lock.
 
 The installer also replaces hash-recognized stock legacy runners with reversible
 inert shims, so a cached old hook cannot start the retired writer afterward.
 Custom-modified runner files require explicit reconciliation. Finalization refuses
 a legacy runner without the retirement marker.
+
+A stock runner is recognized by digests the installer pins itself
+(`LEGACY_RUNNER_HASHES` in `scripts/install_v3.py`, the V2 2.3.0 bytes), never by the
+template files in this repository, so editing those files cannot turn every stock
+vault into a review case; `tests/v3_install_legacy_test.py` holds the template to
+the pinned digests. Line endings do not count: a runner that git's `autocrlf` or an
+editor turned into CRLF is still stock. A runner that already holds the retirement
+shim (a vault whose state was lost and is installed again) is recognized as retired
+and passes.
 
 ## Reviewing and accepting a customized legacy runner
 
@@ -34,8 +48,10 @@ python3 scripts/install_v3.py --vault "/absolute/path/to/vault" --plan
 ```
 
 A runner you edited yourself stops the install with
-`Customized legacy runner requires review <path>`. Read the file, keep a copy of
-anything you still need, then retire that one file by name:
+`Kasadaki eski Cortex (V2) dosyası <path> elle değiştirilmiş` (error code
+`legacy_review`; releases before 1.0.33 said `Customized legacy runner requires
+review <path>`). Read the file, keep a copy of anything you still need, then retire
+that one file by name:
 
 ```text
 python3 scripts/install_v3.py --vault "/absolute/path/to/vault" \
@@ -47,6 +63,14 @@ legacy runner paths (`.claude/scripts/flush.py`, `.claude/scripts/compile.py` an
 the legacy `.claude/hooks/` handlers). Accepting one path does not accept any other;
 there is no blanket override. The pre-install bytes go into the install manifest
 as the file's `original`, so `--uninstall` and `rollback` put your version back.
+
+To keep a copy without reviewing each file first, `--backup-customized-legacy` copies
+every customized runner byte for byte under `.claude/v2-backup/` (`.claude/scripts/flush.py`
+goes to `.claude/v2-backup/scripts/flush.py`; a copy already there is never written over,
+the next one gets `.1`, `.2`, ...) and then retires it. The install result lists them as
+`legacy_backups`. The copies are yours: updates and `--uninstall` never touch them (uninstall
+puts the runner back beside its copy); `rollback` of the very install that made them puts the
+runners back and takes the copies away with it.
 
 ## Keeping a customized legacy runner
 

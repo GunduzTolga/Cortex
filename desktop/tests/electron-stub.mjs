@@ -28,8 +28,14 @@ export const app = {
   quit: noop,
   isPackaged: false,
   loginItems: [],
+  // Whether Windows has the start-up entry (its Run value), as the last write left it; a test may set it.
+  loginEntry: false,
   setLoginItemSettings(settings) {
     this.loginItems.push(settings);
+    this.loginEntry = settings.openAtLogin;
+  },
+  getLoginItemSettings() {
+    return { openAtLogin: this.loginEntry };
   },
   // Whether a program is registered for a link's scheme; a test sets it.
   protocolApps: {},

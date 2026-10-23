@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
 import type { AppLanguage } from '../../shared/language';
+import { renameRetrying } from './fileWrite';
 
 /**
  * The app's own settings file: which vault is open, which language the
@@ -40,6 +41,10 @@ export interface Settings {
   onboarded: boolean;
   /** The window closed, Cortex stays in the notification area, and starts there with Windows; on by default. */
   background: boolean;
+  /** The person let voice typing use the microphone, asked before it is set up (src/ui/MicConsent.tsx). */
+  voiceConsent: boolean;
+  /** The person let the microphone listen all the time for the wake phrase, while Cortex runs (services/microphone.ts). */
+  wakeConsent: boolean;
 }
 
 /** The longest name kept: a way of addressing somebody, not a paragraph. */
@@ -52,7 +57,7 @@ export function tidyName(value: unknown): string | null {
   return name || null;
 }
 
-const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true };
+const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false };
 
 let cache: Settings | null = null;
 let keepOff = false;
@@ -71,6 +76,8 @@ function hydrate(raw: Record<string, unknown>): Settings {
     userName: tidyName(raw.userName),
     onboarded: raw.onboarded === true,
     background: raw.background !== false,
+    voiceConsent: raw.voiceConsent === true,
+    wakeConsent: raw.wakeConsent === true,
   };
 }
 
@@ -109,20 +116,6 @@ export function readSettings(): Settings {
 export function settingsUnreadable(): 'copied' | 'left' | null {
   readSettings();
   return unreadable;
-}
-
-/** A rename tried again for a moment while Windows says the file is busy: an antivirus or the indexer opens a file just written. */
-function renameRetrying(from: string, to: string): void {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      fs.renameSync(from, to);
-      return;
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code ?? '';
-      if (process.platform !== 'win32' || attempt >= 8 || !['EPERM', 'EACCES', 'EBUSY'].includes(code)) throw err;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25 * (attempt + 1));
-    }
-  }
 }
 
 /** Change the settings and write them at once: two small facts, written rarely, need no debounce. */

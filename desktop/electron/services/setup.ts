@@ -4,11 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { app } from 'electron';
-import { COMMAND_WORDS, VOICE_COMMANDS, WAKE_PHRASES } from '../../shared/setup';
-import type { SetupJob, SetupPush, SetupStatus, VoiceCommands, VoiceEngine, VoiceStatus, WakePhrase } from '../../shared/setup';
+import { type EngineCode, readEngineError, engineSentence } from '../../shared/engineError';
+import { COMMAND_WORDS, CPU_MODELS, HOTKEYS, VOICE_COMMANDS, WAKE_PHRASES, hotkeyLabel } from '../../shared/setup';
+import type { CpuModel, EngineStatus, Hotkey, SetupJob, SetupPush, SetupStatus, VoiceCommands, VoiceEngine, VoiceStatus, WakePhrase } from '../../shared/setup';
 import pythonPin from '../../python.json';
 import { childEnv } from './acp';
-import { pythonOf } from './localChat';
+import { refreshPath } from './clis';
+import { forgetPythonVerdicts, type PythonLaunch, pythonOf, pythonWanting, usablePython } from './localChat';
+import { readOwner, restartingListener, type YakalaOwner } from './microphone';
 import { readSettings } from './settings';
 
 /**
@@ -17,14 +20,24 @@ import { readSettings } from './settings';
  * command line does - the app only starts it, without a shell, and passes on
  * what it says:
  *
- * - Python, where the machine has none (Windows): python.org's signed
- *   installer that came with the app (desktop/python.json), checked by its
- *   SHA-256 and run quietly for this user only;
+ * - Python, where the machine has none fit for the engine - none that runs,
+ *   or none 3.11 or newer (Windows): python.org's signed installer that came
+ *   with the app (desktop/python.json), checked by its SHA-256 and run quietly
+ *   for this user only;
  * - the engine: the package that came with the app (`cortex/beyin-v3-X.Y.Z.zip`
  *   among its resources) installed into the vault by its own installer, or
- *   the vault's engine updated from it (`beyin.py update --package`);
+ *   the vault's engine updated from it (`beyin.py update --package`); the
+ *   installer again for an engine of the same version with other files, and
+ *   for the predecessor project's 2.x/3.x;
  * - voice typing: yakala set up if it is not (`beyin.py yakala kur`), then
  *   `beyin.py ses kur`, whose steps come one JSON line each (`{"adim": …}`).
+ * - yakala moved to the vault open now, where it served another (`yakala kur`
+ *   again, in the background), and set up again where its listener was found
+ *   not running or another app holds its key.
+ *
+ * A vault with an engine is bound to where it is now when it is opened
+ * (`beyin.py relocate`). A failure is said as the engine's sentence in the
+ * window's language, never its JSON (shared/engineError.ts).
  *
  * One job at a time. A job is not stopped when the window closes: an engine
  * update or a 2 GB download cut short is worse than one let finish.
@@ -36,6 +49,25 @@ const STATUS_TIMEOUT = 60_000;
 const JOB_TIMEOUT = 3 * 60 * 60_000;
 
 let current: SetupJob | null = null;
+/** Who waits for the job going on to end: the app, asked to quit when it is done (electron/main.ts). */
+let idleWaiters: Array<() => void> = [];
+
+/** The job going on, if one is: quitting now would cut it short (electron/main.ts asks first). */
+export function setupBusy(): SetupJob | null {
+  return current;
+}
+
+/** Resolves once no job is going on. */
+export function whenSetupIdle(): Promise<void> {
+  return current ? new Promise((done) => idleWaiters.push(done)) : Promise.resolve();
+}
+
+function jobEnded(): void {
+  current = null;
+  const waiting = idleWaiters;
+  idleWaiters = [];
+  for (const done of waiting) done();
+}
 
 /** The voice status last read, and who is told of a new one (the notification-area icon, electron/services/tray.ts). */
 let lastVoice: string | undefined;
@@ -71,13 +103,21 @@ const ENGINE_STEPS: Array<[RegExp, string]> = [
   [/^whisper\.cpp \(Vulkan\) indiriliyor…$/, 'Downloading whisper.cpp (Vulkan)…'],
   [/^whisper\.cpp \(Vulkan\) indirilemedi: (.+)$/, 'whisper.cpp (Vulkan) could not be downloaded: $1'],
   [/^İşlemciye geçiliyor\.$/, 'Going on with the processor.'],
+  // A card that would not start, or was slower than the processor's quick model: the processor writes (voice-2).
+  [/^Ekran kartı açılamadı; işlemciye geçiliyor\.$/, 'The graphics card would not start; going on with the processor.'],
+  [/^Ekran kartı bu bilgisayarda işlemciden yavaş kaldı \((\d+),(\d+) sn\); işlemciye geçiliyor\.$/, 'On this computer the graphics card was slower than the processor ($1.$2 s); going on with the processor.'],
+  [/^İşlemcinin modeli hazırlanamadı; ekran kartı kalıyor\.$/, 'The processor’s model could not be had; the graphics card stays.'],
   [/^whisper\.cpp modeli indiriliyor \(yaklaşık 1,6 GB\)…$/, 'Downloading the whisper.cpp model (about 1.6 GB)…'],
   [/^Sanal ortam kuruluyor…$/, 'Setting up its own environment…'],
   [/^Paketler yükleniyor \(ilk kurulumda birkaç dakika sürer\): (.+)$/, 'Installing packages (a few minutes the first time): $1'],
   [/^Uyandırma modeli indiriliyor \(yaklaşık 40 MB\)…$/, 'Downloading the wake-word model (about 40 MB)…'],
-  [/^Whisper modeli hazırlanıyor \(ilk seferde yaklaşık 1,6 GB iner\)…$/, 'Preparing the Whisper model (about 1.6 GB the first time)…'],
+  [/^Whisper modeli hazırlanıyor \(ilk seferde yaklaşık (\d+),(\d) GB iner\)…$/, 'Preparing the Whisper model (about $1.$2 GB the first time)…'],
   [/^Whisper modeli hazırlanıyor…$/, 'Preparing the Whisper model…'],
   [/^%(\d+) \((\d+) \/ (\d+) MB\)$/, '$1% ($2 / $3 MB)'],
+  // pip's downloads and installs, each as it goes, and a download that broke and goes on.
+  [/^İniyor: (.+) \(([^()]+)\)$/, 'Downloading: $1 ($2)'],
+  [/^Kuruluyor: (.+)$/, 'Installing: $1'],
+  [/^Bağlantı koptu; kaldığı yerden yeniden deneniyor \((\d+)\/(\d+)\)…$/, 'The connection broke; going on from where it stopped ($1/$2)…'],
 ];
 
 /** An engine step in the window's language. */
@@ -198,6 +238,95 @@ export function installedVersion(vault: string): string | null {
   }
 }
 
+/**
+ * Whether a stamp is the predecessor project's: Cortex began again at 1.0, after that project's 2.x and 3.x
+ * (beyin.md, 3a). Such a vault looked newer than any Cortex and was left on the old engine, whose updater
+ * refuses Cortex's package and which knows none of `ses`, `telegram` or `pyn` (install-update-4).
+ */
+export function isPredecessor(version: string, appVersion: string = app.getVersion()): boolean {
+  const major = (one: string) => Number(one.split('.')[0]) || 0;
+  return major(version) >= 2 && major(appVersion) < 2;
+}
+
+/**
+ * The state folder the vault's engine is pinned to (`.beyin-runtime.json`), where it is on this machine; null where
+ * the vault pins none, or one this machine does not have (a pin from another computer, through a synced vault).
+ */
+export function pinnedState(vault: string): string | null {
+  try {
+    const pin = JSON.parse(fs.readFileSync(path.join(vault, '.beyin-runtime.json'), 'utf8')) as { state?: unknown };
+    const state = typeof pin.state === 'string' && path.isAbsolute(pin.state) ? pin.state : null;
+    return state && fs.existsSync(state) ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Where the vault's package files go in it, as its installer writes them (scripts/install_v3.py, `add`); null for one compared otherwise. */
+export function installedNameOf(packaged: string): string | null {
+  if (packaged === 'scripts/beyin_entry.py') return 'beyin.py';
+  if (packaged === 'scripts/beyin_v3.py') return '.claude/scripts/beyin_v3_cli.py';
+  const script = /^template\/\.claude\/scripts\/(beyin_v3[^/]*\.py)$/.exec(packaged);
+  return script ? `.claude/scripts/${script[1]}` : null;
+}
+
+/**
+ * Whether the vault's engine is not the one in the package though their versions are one: a build given out under
+ * an unchanged version (several 1.0.32s went to testers), whose fixes `update` took for nothing to do (install-update-1).
+ * The package's digests of its code are held to what the vault's installer last wrote (`installed_hash` in
+ * `<state>/v3-install.json`), not to the files as they are now: a file edited by hand is no reason to install again
+ * and again. A file the installer did not write (an adapter left out) is not compared.
+ */
+export function staleAgainst(packageFiles: Record<string, unknown>, installedFiles: Record<string, unknown>): boolean {
+  for (const [name, digest] of Object.entries(packageFiles)) {
+    const there = installedNameOf(name);
+    const written = there ? (installedFiles[there] as { installed_hash?: unknown } | undefined) : undefined;
+    if (written && typeof digest === 'string' && written.installed_hash !== digest) return true;
+  }
+  return false;
+}
+
+/** The package's own list of its files and their digests, which `npm run cortex-paket` writes beside it (`beyin-v3-X.Y.Z.manifest.json`). */
+export const manifestOf = (packageFile: string) => packageFile.replace(/\.zip$/, '.manifest.json');
+
+/** A JSON file read once until it changes: the installer's record holds every file it wrote, a few MB, and the status is asked often. */
+const readCache = new Map<string, { stamp: string; value: Record<string, unknown> | null }>();
+function readJsonKept(file: string): Record<string, unknown> | null {
+  let stamp: string;
+  try {
+    const stat = fs.statSync(file);
+    stamp = `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return null;
+  }
+  const kept = readCache.get(file);
+  if (kept?.stamp === stamp) return kept.value;
+  let value: Record<string, unknown> | null = null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+    value = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    value = null;
+  }
+  readCache.set(file, { stamp, value });
+  return value;
+}
+
+/** Whether the vault's engine is stale against the package that came with the app; false where either side cannot say. */
+export function engineStale(vault: string, packageFile: string): boolean {
+  const state = pinnedState(vault);
+  const packaged = readJsonKept(manifestOf(packageFile))?.files;
+  const installed = state ? readJsonKept(path.join(state, 'v3-install.json'))?.files : null;
+  if (!packaged || typeof packaged !== 'object' || !installed || typeof installed !== 'object') return false;
+  return staleAgainst(packaged as Record<string, unknown>, installed as Record<string, unknown>);
+}
+
+/** An update of the vault's engine left half done: its journal is still in the state folder (install-update-5). */
+export function journalPending(vault: string): boolean {
+  const state = pinnedState(vault);
+  return state !== null && fs.existsSync(path.join(state, 'update-journal.json'));
+}
+
 /** One line of what a job says: a step (`{"adim": …}`) or its result (any other JSON object); null for anything else. */
 export function readLine(line: string): { step: string } | { result: Record<string, unknown> } | null {
   const text = line.trim();
@@ -229,6 +358,7 @@ export function voiceOf(result: Record<string, unknown>): VoiceStatus | null {
     wakePhrase: WAKE_PHRASES.includes(result.uyandirma_sozu as WakePhrase) ? (result.uyandirma_sozu as WakePhrase) : 'pyn not al',
     // An engine from before Telegram does not say: taken as able, so nothing is offered that it cannot use.
     readsFiles: result.dosya_okur !== false,
+    cpuModel: CPU_MODELS.includes(result.islemci_modeli as CpuModel) ? (result.islemci_modeli as CpuModel) : null,
   };
 }
 
@@ -280,16 +410,50 @@ export function trailingObject(text: string): Record<string, unknown> | null {
   return null;
 }
 
-/** The last line of what a process wrote to stderr: the sentence a failure ends with. */
-function lastWords(text: string): string {
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  return (lines[lines.length - 1] ?? '').slice(0, 400);
+/**
+ * A command of the vault's engine that failed, said as a sentence in the window's language
+ * (shared/engineError.ts): never the JSON line it ended with. What it was, where the engine named it
+ * or its words tell (`code`), is kept for the setup to act on - wait and try again while the engine is
+ * busy, finish an update left half done.
+ */
+export class EngineFailure extends Error {
+  constructor(
+    message: string,
+    readonly code: EngineCode | null,
+    /** How the program ended: its exit code; null when it was stopped (too long) or never started. */
+    readonly exitCode: number | null,
+    /** The last of what it wrote to stderr, as it came: for telling an engine that does not know a command. */
+    readonly said: string,
+  ) {
+    super(message);
+  }
+}
+
+/** What the engine's code was, for a failure that is one. */
+export const codeOf = (err: unknown): EngineCode | null => (err instanceof EngineFailure ? err.code : null);
+
+/** The failure a run ended with, read whole and only then cut short: an escaped pip error is longer than a toast. */
+function failureOf(errors: string, exitCode: number | null, timedOut: boolean): EngineFailure {
+  const language = readSettings().language === 'en' ? 'en' : 'tr';
+  // Stopped for taking too long, it never reached its last word: what it wrote last (a pip warning, a step) is not why.
+  const read = timedOut ? null : readEngineError(errors);
+  const sentence = timedOut
+    ? say('İşlem çok uzun sürdü ve durduruldu.', 'It took too long and was stopped.')
+    : read
+      ? engineSentence(read, language)
+      : exitCode === 0
+        ? say('Beklenen cevap gelmedi.', 'The answer that was expected did not come.')
+        : exitCode === null
+          ? say('İşlem bitmeden kesildi.', 'It was cut off before it finished.')
+          : say(`İşlem tamamlanamadı (çıkış kodu ${exitCode}).`, `It did not finish (exit code ${exitCode}).`);
+  return new EngineFailure(sentence, read?.code ?? null, exitCode, errors.slice(-2000));
 }
 
 /**
  * Python with these arguments, in the vault, without a shell: each step it
  * says handed to `onStep`, its result (the last JSON object it wrote that is
- * not a step) returned. A failure rejects with the last thing it said.
+ * not a step) returned. A failure rejects with an EngineFailure: the sentence
+ * the engine ended with, in the window's language.
  */
 export function runPython(
   args: string[],
@@ -297,7 +461,7 @@ export function runPython(
     cwd: string;
     timeout: number;
     onStep?: (step: string) => void;
-    python?: { command: string; args: string[] } | null;
+    python?: PythonLaunch | null;
     /** More of the environment, for this run only (the Telegram bot's key: services/telegram.ts). */
     env?: Record<string, string>;
   },
@@ -314,8 +478,12 @@ export function runPython(
     let buffer = '';
     let written = '';
     let errors = '';
+    let timedOut = false;
     let result: Record<string, unknown> | null = null;
-    const timer = setTimeout(() => child.kill(), options.timeout);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, options.timeout);
     const take = (line: string) => {
       const read = readLine(line);
       if (!read) return;
@@ -334,19 +502,22 @@ export function runPython(
       }
     });
     child.stderr.setEncoding('utf8');
+    // As much kept as of the result: the engine's last word is one JSON line, every letter past ASCII six characters
+    // long, and one cut at its start is no longer JSON (shared/engineError.ts reads what it can of it even so).
     child.stderr.on('data', (chunk: string) => {
-      errors = (errors + chunk).slice(-8000);
+      errors = (errors + chunk).slice(-64000);
     });
     child.on('error', (err) => {
       clearTimeout(timer);
-      reject(err);
+      const why = (err as NodeJS.ErrnoException).code ?? err.message;
+      reject(new EngineFailure(say(`Python başlatılamadı (${why}).`, `Python could not be started (${why}).`), null, null, ''));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
       if (buffer) take(buffer);
       result ??= trailingObject(written);
-      if (code === 0 && result) resolve(result);
-      else reject(new Error(lastWords(errors) || (code === 0 ? 'Beklenen cevap gelmedi.' : `Çıkış kodu ${code}.`)));
+      if (code === 0 && result && !timedOut) resolve(result);
+      else reject(failureOf(errors, code, timedOut));
     });
   });
 }
@@ -377,13 +548,25 @@ function vaultOrNull(): string | null {
   return vault && fs.existsSync(vault) ? vault : null;
 }
 
-export async function setupStatus(): Promise<SetupStatus> {
-  const vault = vaultOrNull();
-  const python = pythonOf();
+/** The vault's engine as the setup sees it: its version, the one that came with the app, and whether it is a predecessor's or stale. */
+function engineOf(vault: string | null): EngineStatus {
+  const bundled = bundledPackage(packageDirs());
   const installed = vault ? installedVersion(vault) : null;
+  const legacy = installed !== null && isPredecessor(installed);
+  const stale = Boolean(vault && installed && !legacy && bundled && compareVersions(installed, bundled.version) === 0 && engineStale(vault, bundled.file));
+  return { installed, bundled: bundled?.version ?? null, legacy, stale };
+}
+
+export async function setupStatus(): Promise<SetupStatus> {
+  // A Python installed while the app was open (python.org, winget) is found without opening it again.
+  await refreshPath();
+  const vault = vaultOrNull();
+  // Asked, not only found: a `py` left behind with no Python, or a Python 3.10, is no Python for the engine (desktop-shell-1).
+  const python = await usablePython();
+  const engine = engineOf(vault);
   const voiceSupported = process.platform === 'win32';
   let voice: VoiceStatus | null = null;
-  if (vault && python && installed && voiceSupported && current !== 'voice') {
+  if (vault && python && engine.installed && !engine.legacy && voiceSupported && current !== 'voice') {
     try {
       voice = voiceOf(await runPython([path.join(vault, 'beyin.py'), 'ses', 'durum'], { cwd: vault, timeout: STATUS_TIMEOUT, python }));
     } catch {
@@ -393,29 +576,36 @@ export async function setupStatus(): Promise<SetupStatus> {
   if (current !== 'voice') heardVoice(voice);
   return {
     python: python !== null,
+    pythonWanting: python ? null : pythonWanting(),
     pythonBundled: process.platform === 'win32' && pythonInstaller() ? pythonPin.version : null,
     vault: vault !== null,
-    engine: { installed, bundled: bundledPackage(packageDirs())?.version ?? null },
+    engine,
     voice,
     voiceSupported,
     job: current,
   };
 }
 
-/** A job, the only one going on: its steps and its end pushed to the window, the status after it returned. */
-async function job(kind: SetupJob, work: (vault: string, step: (text: string) => void) => Promise<void>): Promise<SetupStatus> {
+/**
+ * A job, the only one going on: its steps and its end pushed to the window, the status after it returned. A job that
+ * ended but not as wished - voice typing set up, its listener not running - returns what to say, and ends with it.
+ */
+async function job(kind: SetupJob, work: (vault: string, step: (text: string) => void) => Promise<string | void>): Promise<SetupStatus> {
   if (current) throw new Error(say('Başka bir kurulum sürüyor.', 'Another setup is going on.'));
   // Python is installed before there is a vault, or a Python, to need.
   const vault = vaultOrNull();
   if (kind !== 'python' && !vault) throw new Error(say('Önce bir kasa seç.', 'Choose a vault first.'));
-  if (kind !== 'python' && !pythonOf()) throw new Error(say('Python bulunamadı.', 'Python was not found.'));
   current = kind;
+  if (kind !== 'python' && !(await usablePython())) {
+    jobEnded();
+    throw new Error(say('Python bulunamadı.', 'Python was not found.'));
+  }
   try {
-    await work(vault ?? '', (text) => push({ job: kind, step: text }));
-    current = null;
-    push({ job: kind, done: true, ok: true });
+    const warning = await work(vault ?? '', (text) => push({ job: kind, step: text }));
+    jobEnded();
+    push({ job: kind, done: true, ok: true, ...(warning ? { warning } : {}) });
   } catch (err) {
-    current = null;
+    jobEnded();
     const error = err instanceof Error ? err.message : String(err);
     push({ job: kind, done: true, ok: false, error });
     throw err instanceof Error ? err : new Error(error);
@@ -423,11 +613,12 @@ async function job(kind: SetupJob, work: (vault: string, step: (text: string) =>
   return setupStatus();
 }
 
-/** The Python that came with the app, installed for this user where the machine has none. */
+/** The Python that came with the app, installed for this user where the machine has none fit for the engine. */
 export function installPython(): Promise<SetupStatus> {
   return job('python', async (_vault, step) => {
     if (process.platform !== 'win32') throw new Error(say("Python yalnız Windows'ta uygulamayla gelir.", 'Python comes with the app on Windows only.'));
-    if (pythonOf()) return;
+    // Not "a Python is there": one that runs and is new enough. A launcher left behind, or a 3.10, is not (desktop-shell-1).
+    if (await usablePython()) return;
     const file = pythonInstaller();
     if (!file) throw new Error(say('Uygulamayla gelen Python bulunamadı.', 'The Python that came with the app was not found.'));
     step(say(`Python ${pythonPin.version} doğrulanıyor…`, `Checking Python ${pythonPin.version}…`));
@@ -448,7 +639,10 @@ export function installPython(): Promise<SetupStatus> {
     }
     if (code === 1602) throw new Error(say('Python kurulumu iptal edildi.', 'The Python setup was cancelled.'));
     if (code !== 0 && code !== 3010) throw new Error(say(`Python kurulamadı (çıkış kodu ${code}).`, `Python could not be installed (exit code ${code}).`));
-    if (!pythonOf()) throw new Error(say('Python kuruldu ama bulunamadı; uygulamayı yeniden aç.', 'Python was installed but not found; open the app again.'));
+    // Each Python is asked again: a `py` that had nothing behind it finds this one now.
+    forgetPythonVerdicts();
+    await refreshPath(true);
+    if (!(await usablePython())) throw new Error(say('Python kuruldu ama bulunamadı; uygulamayı yeniden aç.', 'Python was installed but not found; open the app again.'));
   });
 }
 
@@ -463,42 +657,316 @@ const UNPACK = [
   'print(json.dumps({"status": "acildi"}))',
 ].join('\n');
 
-/** The engine that came with the app into the vault: its installer for a vault without one, its updater otherwise. */
+/** How long the setup waits, each time in turn, for an engine busy with other work (a chat's hook syncing) before it tries again. */
+let busyWaits = [3_000, 6_000, 12_000];
+
+/** For the tests: the waits made short. */
+export function setBusyWaits(waits: number[]): void {
+  busyWaits = waits;
+}
+
+const pause = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+/**
+ * A run of the engine's, asked again a little later while the engine says it is busy with other work, as it asks:
+ * `beyin.py update` and the package's own installer both take the runtime's lock, which a chat's hook holds while it
+ * syncs. Still busy after the waits, the busy failure is the one said.
+ */
+async function whileBusy<T>(work: () => Promise<T>, step: (text: string) => void): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await work();
+    } catch (err) {
+      if (codeOf(err) !== 'updater_busy' || attempt >= busyWaits.length) throw err;
+      step(say('Cortex başka bir işi bitiriyor; birazdan yeniden deneniyor…', 'Cortex is finishing other work; trying again in a moment…'));
+      await pause(busyWaits[attempt]);
+    }
+  }
+}
+
+/**
+ * The package's own installer run on the vault, from a copy of the package taken apart in a folder of its own: for a
+ * vault without an engine, a predecessor's, or one stale against the package (install-update-1, install-update-4).
+ * The state the vault is pinned to is given to it: without `--state` it pins this machine's default one, and a vault
+ * set up with another would be parted from its index, its receipts and its voice setup. Busy, it is asked again: a
+ * refresh is asked for in a vault in use, whose chat's hook may be syncing (`whileBusy`).
+ */
+async function runPackageInstaller(vault: string, bundled: { file: string; version: string }, step: (text: string) => void): Promise<Record<string, unknown>> {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-kurulum-'));
+  try {
+    await runPython(['-I', '-c', UNPACK, bundled.file, folder], { cwd: folder, timeout: STATUS_TIMEOUT });
+    const state = pinnedState(vault);
+    const args = ['-I', path.join(folder, 'scripts', 'install_v3.py'), '--vault', vault, ...(state ? ['--state', state] : [])];
+    const install = () => whileBusy(() => runPython(args, { cwd: vault, timeout: JOB_TIMEOUT }), step);
+    let result = await install();
+    // An update left half done is finished first, and that is all such a run does: the install is the next one.
+    if (result.install_resumed === true) result = await install();
+    return result;
+  } finally {
+    fs.rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The vault's engine updated from the package (`beyin.py update --package`). Busy with other work, it is asked again a
+ * little later, as it asks. Left half done before - the computer turned off, a file held by a scanner - every later
+ * `beyin.py` may fail on the half-written engine, recover and rollback with it, so the package's own installer, which
+ * finishes what its journal began, is run instead (install-update-5).
+ */
+async function updateEngine(vault: string, bundled: { file: string; version: string }, step: (text: string) => void): Promise<void> {
+  try {
+    await whileBusy(() => runPython([path.join(vault, 'beyin.py'), 'update', '--package', bundled.file], { cwd: vault, timeout: JOB_TIMEOUT }), step);
+  } catch (err) {
+    const code = codeOf(err);
+    // Still busy after the waits: another update holds the engine, its journal is its own, not one left half done.
+    if (code !== 'updater_busy' && (code === 'pending_journal' || journalPending(vault))) {
+      step(say('Yarım kalan güncelleme tamamlanıyor…', 'Finishing the update left half done…'));
+      await runPackageInstaller(vault, bundled, step);
+      return;
+    }
+    throw err;
+  }
+}
+
+/** The engine that came with the app into the vault: installed, updated, refreshed, or a predecessor's moved to Cortex. */
 export function installEngine(): Promise<SetupStatus> {
   return job('engine', async (vault, step) => {
     const bundled = bundledPackage(packageDirs());
     if (!bundled) throw new Error(say('Uygulamayla gelen Cortex paketi bulunamadı.', 'The Cortex package that came with the app was not found.'));
     const installed = installedVersion(vault);
-    if (installed) {
-      if (compareVersions(installed, bundled.version) >= 0) return;
-      step(say(`Cortex ${installed} → ${bundled.version} güncelleniyor…`, `Updating Cortex ${installed} → ${bundled.version}…`));
-      await runPython([path.join(vault, 'beyin.py'), 'update', '--package', bundled.file], { cwd: vault, timeout: JOB_TIMEOUT });
-      return;
+    if (installed && !isPredecessor(installed)) {
+      const order = compareVersions(installed, bundled.version);
+      if (order < 0) {
+        step(say(`Cortex ${installed} → ${bundled.version} güncelleniyor…`, `Updating Cortex ${installed} → ${bundled.version}…`));
+        await updateEngine(vault, bundled, step);
+      } else if (order === 0 && engineStale(vault, bundled.file)) {
+        // The same version, other files: `update` takes it for nothing to do, the installer writes what differs.
+        step(say(`Cortex ${installed}, uygulamayla gelen dosyalarla yenileniyor…`, `Refreshing Cortex ${installed} with the files that came with the app…`));
+        await runPackageInstaller(vault, bundled, step);
+      } else {
+        return;
+      }
+    } else {
+      step(
+        installed
+          ? say(`Kasadaki önceki kurulum (${installed}) Cortex ${bundled.version} sürümüne geçiriliyor…`, `Moving the vault’s earlier engine (${installed}) to Cortex ${bundled.version}…`)
+          : say(`Cortex ${bundled.version} kasaya kuruluyor…`, `Setting Cortex ${bundled.version} up in the vault…`),
+      );
+      await runPackageInstaller(vault, bundled, step);
+      const now = installedVersion(vault);
+      if (!now || isPredecessor(now)) throw new Error(say('Kurulum bitti ama kasada Cortex görünmüyor.', 'The setup ended but Cortex is not in the vault.'));
     }
-    // No engine yet: the package's own installer, from a copy of it taken apart in a folder of its own.
-    const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-kurulum-'));
-    try {
-      step(say(`Cortex ${bundled.version} kasaya kuruluyor…`, `Setting Cortex ${bundled.version} up in the vault…`));
-      await runPython(['-I', '-c', UNPACK, bundled.file, folder], { cwd: folder, timeout: STATUS_TIMEOUT });
-      await runPython(['-I', path.join(folder, 'scripts', 'install_v3.py'), '--vault', vault], { cwd: vault, timeout: JOB_TIMEOUT });
-    } finally {
-      fs.rmSync(folder, { recursive: true, force: true });
-    }
-    if (!installedVersion(vault)) throw new Error(say('Kurulum bitti ama kasada Cortex görünmüyor.', 'The setup ended but Cortex is not in the vault.'));
+    // A vault moved with an engine from before `relocate` is bound now, with the engine that knows how.
+    const failure = await relocateVault(vault);
+    if (failure) throw new Error(failure);
+    settling = { vault, done: Promise.resolve(null) };
   });
 }
 
-/** Yakala, if it is not set up yet, then voice typing; each step as the engine says it. */
+/**
+ * The vault's engine bound to where the vault is now (`beyin.py relocate`). Its hooks and its state name the folder
+ * it was set up in; moved - OneDrive taking Documents over, a rename, a copy on a second computer - every hook failed
+ * and the memory said "runtime belongs to another vault" with no way out (hooks-clients-2, hooks-clients-M1). The
+ * engine binds itself again where the old folder is gone, gives a copy a state of its own where it is not, and says
+ * so at once when nothing moved. Resolves to the failure's sentence, or null; an engine from before `relocate` does not
+ * know it (argparse's "invalid choice", exit 2) and is left as it is.
+ */
+async function relocateVault(vault: string): Promise<string | null> {
+  const installed = installedVersion(vault);
+  if (!installed || isPredecessor(installed)) return null;
+  const python = await usablePython();
+  if (!python) return null; // the setup offers Python first; there is nothing to bind before
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await runPython([path.join(vault, 'beyin.py'), 'relocate'], { cwd: vault, timeout: STATUS_TIMEOUT, python });
+      return null;
+    } catch (err) {
+      // Ended well without a word to read: nothing failed.
+      if (err instanceof EngineFailure && err.exitCode === 0) return null;
+      if (err instanceof EngineFailure && err.exitCode === 2 && !readEngineError(err.said)?.type) return null;
+      if (codeOf(err) === 'updater_busy' && attempt < busyWaits.length) {
+        await pause(busyWaits[attempt]);
+        continue;
+      }
+      return err instanceof Error ? err.message : String(err);
+    }
+  }
+}
+
+/** The vault opened last, and its binding (`relocateVault`) going on or done. */
+let settling: { vault: string; done: Promise<string | null> } | null = null;
+
+/**
+ * The vault just opened bound to where it is now: at the app's start with the vault kept, and after one is chosen,
+ * in the background, before the Telegram listener starts in it and before a chat's CLI does (`vaultSettled`). Once
+ * per vault: asked again, the same answer, unless it failed - then the next opening tries again - or there was no
+ * Python yet to run the engine with: then the one the setup installs binds it (electron/ipc.ts). Kept as bound, a
+ * copied vault opened on a computer without Python stayed tied to the other computer's folder until the app was
+ * opened again. Resolves to the failure's sentence (the window says it once, and goes on), or null.
+ */
+export function settleVault(): Promise<string | null> {
+  const vault = vaultOrNull();
+  if (!vault) return Promise.resolve(null);
+  if (settling?.vault === vault) return settling.done;
+  let noPython = false;
+  const done = usablePython()
+    .then((python) => {
+      noPython = python === null;
+      return noPython ? null : relocateVault(vault);
+    })
+    .catch((err: unknown) => (err instanceof Error ? err.message : String(err)));
+  const entry = { vault, done };
+  settling = entry;
+  void done.then((failure) => {
+    if ((failure || noPython) && settling === entry) settling = null;
+  });
+  return done;
+}
+
+/** Resolves once the vault opened last is bound, or could not be: its hooks then point where the vault is. */
+export function vaultSettled(): Promise<void> {
+  return settling ? settling.done.then(() => undefined) : Promise.resolve();
+}
+
+/**
+ * Yakala, if it is not set up yet, then voice typing; each step as the engine says it. Its end says whether yakala's
+ * listener runs after it (`dinleyici` in `ses kur`'s result): the voice, the key and "Pyn, not al" live in it, and a
+ * listener that did not start - the key held by another app at its first start, a first start slower than its wait -
+ * ended the setup with "Sesle yazma hazır" over nothing that listened (windows-e2e-5).
+ */
 export function installVoice(): Promise<SetupStatus> {
   return job('voice', async (vault, step) => {
     if (process.platform !== 'win32') throw new Error(say("Sesle yazma yalnız Windows'ta.", 'Voice typing is for Windows only.'));
     const beyin = path.join(vault, 'beyin.py');
-    const capture = await runPython([beyin, 'yakala', 'durum'], { cwd: vault, timeout: STATUS_TIMEOUT });
-    if (capture.kurulu !== true) {
-      step(say('Yakala kuruluyor (Ctrl+Alt+C)…', 'Setting up yakala (Ctrl+Alt+C)…'));
-      await runPython([beyin, 'yakala', 'kur'], { cwd: vault, timeout: STATUS_TIMEOUT * 5 });
+    return restartingListener(async () => {
+      const capture = await runPython([beyin, 'yakala', 'durum'], { cwd: vault, timeout: STATUS_TIMEOUT });
+      if (capture.kurulu !== true) {
+        step(say('Yakala kuruluyor (Ctrl+Alt+C)…', 'Setting up yakala (Ctrl+Alt+C)…'));
+        await runPython([beyin, 'yakala', 'kur'], { cwd: vault, timeout: STATUS_TIMEOUT * 5 });
+      }
+      const result = await runPython([beyin, 'ses', 'kur'], { cwd: vault, timeout: JOB_TIMEOUT, onStep: (line) => step(engineStep(line)) });
+      if (result.dinleyici !== false) return undefined;
+      const warning = say(
+        'Sesle yazma kuruldu, ama arka plandaki dinleyici başlamadı: kısayol, uyandırma sözü ve sesle yazma şimdilik çalışmıyor. Ayarlar → Sesle yazma\'dan dinleyiciyi yeniden başlat.',
+        'Voice typing is set up, but the listener in the background did not start: the key, the wake phrase and voice typing do not work for now. Start the listener again from Settings → Voice typing.',
+      );
+      step(warning);
+      return warning;
+    });
+  });
+}
+
+/** The platform yakala's key and listener are set up on: Windows. The tests stand in for it (`setYakalaPlatform`). */
+let yakalaPlatform: NodeJS.Platform = process.platform;
+
+export function setYakalaPlatform(platform: NodeJS.Platform): void {
+  yakalaPlatform = platform;
+}
+
+/** One folder, as the platform compares paths: Windows' in any letter case, either slash; a folder still there by where it really is. */
+export function sameFolder(one: string, other: string, platform: NodeJS.Platform = yakalaPlatform): boolean {
+  const real = (folder: string) => {
+    try {
+      return fs.realpathSync.native(folder);
+    } catch {
+      return path.resolve(folder);
     }
-    await runPython([beyin, 'ses', 'kur'], { cwd: vault, timeout: JOB_TIMEOUT, onStep: (line) => step(engineStep(line)) });
+  };
+  const plain = (folder: string) => {
+    const text = path.normalize(real(folder)).replace(/[\\/]+$/, '');
+    return platform === 'win32' ? text.replace(/\//g, '\\').toLowerCase() : text;
+  };
+  return plain(one) === plain(other);
+}
+
+/** `beyin.py yakala kur` in the vault open now, with these arguments; its result, or the engine's sentence. */
+async function yakalaKur(vault: string, args: string[], python: PythonLaunch): Promise<Record<string, unknown>> {
+  return restartingListener(() => runPython([path.join(vault, 'beyin.py'), 'yakala', 'kur', ...args], { cwd: vault, timeout: STATUS_TIMEOUT * 5, python }));
+}
+
+/** Yakala's work, one at a time: two vaults chosen quickly move it twice, in turn. */
+let yakalaQueue: Promise<unknown> = Promise.resolve();
+
+function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
+  const next = yakalaQueue.then(work, work);
+  yakalaQueue = next.catch(() => undefined);
+  return next;
+}
+
+/**
+ * Yakala - its key, "Pyn, not al" and the voice with it, the icon's "Not al", Send To - moved to the vault open now,
+ * where it serves another (`yakala-sahip.json`, which `yakala kur` writes): after another vault is chosen, and once an
+ * engine is installed in one. Before, all of it kept writing into the vault left - one that might be gone, and was made
+ * again - while the settings switched the voice of the new one, and nothing said so (yakala-3). The same key goes with
+ * it. Not where the vault has no engine yet (its install moves it after), nor where nothing set yakala up; not while a
+ * setup job runs, which may be setting the listener up itself: after it. Windows only, as yakala's key is. Resolves to
+ * the key it serves now, as a person reads it, or null when nothing was moved; rejects with the engine's sentence.
+ *
+ * `onlyWhereGone`, at the app's start: moved only from a vault no longer there. A vault moved (OneDrive took Documents
+ * along) or renamed is bound to where it is now when it opens (`settleVault`), and yakala, left on its old place, had
+ * nowhere to write and, after a restart, no listener at all; a vault still there may have been given yakala on purpose,
+ * from a terminal, and keeps it.
+ *
+ * Moved only once the vault open now is bound (`settleVault`), whoever asked: two vaults chosen one after the other,
+ * the first one's binding ended while the second's went on, and what its opening asked for set yakala up in the second
+ * before its engine stopped naming the folder it was set up in. What changed while it waited is looked at again: another
+ * vault opened meanwhile is left to its own opening, which moves yakala there once it is bound, and a setup job that set
+ * yakala up in this vault leaves nothing to move.
+ */
+export function repointYakala(onlyWhereGone = false): Promise<string | null> {
+  return oneAtATime(async () => {
+    if (yakalaPlatform !== 'win32') return null;
+    await whenSetupIdle();
+    const vault = vaultOrNull();
+    const servesAnother = (owner: YakalaOwner | null): owner is YakalaOwner =>
+      Boolean(vault && owner && !sameFolder(owner.vault, vault) && !(onlyWhereGone && fs.existsSync(owner.vault)));
+    if (!vault || !servesAnother(readOwner())) return null;
+    const installed = installedVersion(vault);
+    if (!installed || isPredecessor(installed)) return null;
+    const python = await usablePython();
+    if (!python) return null;
+    await settleVault();
+    await whenSetupIdle();
+    const owner = readOwner();
+    if (vaultOrNull() !== vault || !servesAnother(owner)) return null;
+    await yakalaKur(vault, owner.tus ? ['--tus', owner.tus] : [], python);
+    return hotkeyLabel(owner.tus ?? HOTKEYS[0]);
+  });
+}
+
+/** The vault open now, its engine, and a Python to run it with; the reason it cannot be, said, where one is missing. */
+async function yakalaPlace(): Promise<{ vault: string; python: PythonLaunch }> {
+  if (current) throw new Error(say('Başka bir kurulum sürüyor.', 'Another setup is going on.'));
+  const vault = vaultOrNull();
+  if (!vault) throw new Error(say('Önce bir kasa seç.', 'Choose a vault first.'));
+  const installed = installedVersion(vault);
+  if (!installed || isPredecessor(installed)) throw new Error(say("Önce Cortex'i kasaya kur (Ayarlar → Cortex).", 'Set Cortex up in the vault first (Settings → Cortex).'));
+  const python = await usablePython();
+  if (!python) throw new Error(say('Python bulunamadı.', 'Python was not found.'));
+  return { vault, python };
+}
+
+/**
+ * Yakala set up again in the vault open now, its key kept: the listener found not running (the settings' and the icon's
+ * "Dinleyici çalışmıyor") is started again with Windows and now. Rejects with the engine's sentence, or when it still
+ * does not run.
+ */
+export function restartListener(): Promise<void> {
+  return oneAtATime(async () => {
+    const { vault, python } = await yakalaPlace();
+    const result = await yakalaKur(vault, [], python);
+    if (result.dinleyici === false) {
+      throw new Error(say('Dinleyici yine başlamadı. Bilgisayarı yeniden başlatıp dene; sürerse sesle yazmayı yeniden kur.', 'The listener did not start this time either. Restart the computer and try again; if it goes on, set voice typing up again.'));
+    }
+  });
+}
+
+/** Yakala's key changed to one of HOTKEYS, where another app holds the one it has (`kisayol: 'mesgul'`). */
+export function changeHotkey(asked: unknown): Promise<void> {
+  return oneAtATime(async () => {
+    if (!HOTKEYS.includes(asked as Hotkey)) throw new Error(say('Bu kısayol seçilemez.', 'That key cannot be chosen.'));
+    const { vault, python } = await yakalaPlace();
+    await yakalaKur(vault, ['--tus', asked as Hotkey], python);
   });
 }
 
@@ -511,11 +979,18 @@ export async function setVoice(patch: unknown): Promise<SetupStatus> {
   if (typeof asked.auto === 'boolean') args.push('--otomatik', asked.auto ? 'ac' : 'kapat');
   if (asked.defaultCommands === true) args.push('--varsayilan-komutlar');
   if (WAKE_PHRASES.includes(asked.wakePhrase as WakePhrase)) args.push('--uyandirma-sozu', asked.wakePhrase as WakePhrase);
+  // The model the processor writes with: the listener starts again with it (the engine's own setting).
+  if (CPU_MODELS.includes(asked.cpuModel as CpuModel)) args.push('--islemci-modeli', asked.cpuModel as CpuModel);
   const commands = commandsPatch(asked.commands);
   if (commands) args.push('--komutlar', JSON.stringify(commands));
   const vault = vaultOrNull();
   if (!args.length || !vault) return setupStatus();
   if (current) throw new Error(say('Başka bir kurulum sürüyor.', 'Another setup is going on.'));
-  await runPython([path.join(vault, 'beyin.py'), 'ses', 'ayar', ...args], { cwd: vault, timeout: STATUS_TIMEOUT });
+  // The microphone listens all the time only once the person allowed it (src/ui/MicConsent.tsx, services/microphone.ts).
+  if (asked.wake === true && !readSettings().wakeConsent) {
+    throw new Error(say('Mikrofonun sürekli dinlemesine önce izin ver.', 'Allow the microphone to listen all the time first.'));
+  }
+  // A switch, a model or the engine changed starts the listener again: not "not running" meanwhile.
+  await restartingListener(() => runPython([path.join(vault, 'beyin.py'), 'ses', 'ayar', ...args], { cwd: vault, timeout: STATUS_TIMEOUT }));
   return setupStatus();
 }

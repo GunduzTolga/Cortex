@@ -64,18 +64,12 @@ export function NotesView({ visible, onGraph }: { visible: boolean; onGraph: () 
   const [fold, setFold] = useFold();
   const [switching, setSwitching] = useState(false);
   const makers = useMakers();
+  // A note open when another vault is chosen is read again, from that one: a path is the same in both, the note is not.
+  const vaultSeq = useApp((state) => state.vaultSeq);
 
-  // Read when first shown, whenever the vault changes on disk, and when the window comes back (where the platform cannot watch the vault).
+  // Read whenever shown. A change on disk and the window coming back are read again by the vault's screen, in every view (App.tsx).
   useEffect(() => {
-    if (!visible) return;
-    void useNotes.getState().refresh();
-    const changed = window.cortex.on.notesChanged(() => void useNotes.getState().refresh());
-    const back = () => void useNotes.getState().refresh();
-    window.addEventListener('focus', back);
-    return () => {
-      changed();
-      window.removeEventListener('focus', back);
-    };
+    if (visible) void useNotes.getState().refresh();
   }, [visible]);
 
   useEffect(() => {
@@ -169,7 +163,7 @@ export function NotesView({ visible, onGraph }: { visible: boolean; onGraph: () 
           {!tab.path ? (
             <NotesHome onSwitch={() => setSwitching(true)} onGraph={onGraph} onNew={() => void makers.newNote('')} onCapture={() => void makers.capture()} />
           ) : isNotePath(tab.path) ? (
-            <NotePane key={tab.path} path={tab.path} />
+            <NotePane key={`${vaultSeq}:${tab.path}`} path={tab.path} />
           ) : (
             <FileView key={tab.path} path={tab.path} />
           )}

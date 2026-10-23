@@ -30,6 +30,11 @@ test('no new window, no navigation away, and every permission refused', () => {
   assert.match(main, /onBeforeRequest/);
 });
 
+test('the page is reloaded from the menu only while developing: a reload drops what a note holds unsaved', () => {
+  assert.equal([...main.matchAll(/role: '(reload|forceReload)'/g)].length, 2);
+  assert.match(main, /\.\.\.\(isDev \? \[\{ role: 'reload' as const \}, \{ role: 'forceReload' as const \}/);
+});
+
 test("the spellchecker's dictionaries are never fetched from Google: their address is this machine", () => {
   const url = main.match(/setSpellCheckerDictionaryDownloadURL\('([^']+)'\)/)?.[1] ?? '';
   assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/$/);

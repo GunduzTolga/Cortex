@@ -447,9 +447,42 @@ def _cache_path(vault, digest):
     if root.is_symlink() or folder.is_symlink(): raise ValueError('cache_unsafe')
     folder.mkdir(parents=True,exist_ok=True,mode=0o700)
     os.chmod(folder,0o700)
+    _prune_cache(folder)
     path=folder/(digest+'.json')
     if path.is_symlink(): raise ValueError('cache_unsafe')
     return path
+
+
+# The longest cache_ttl a config may set: an entry older than this is never read again.
+CACHE_KEEP = 86400
+PRUNE_MARKER = '.pruned'
+
+
+def _prune_cache(folder, now=None):
+    """Entries past the longest TTL deleted, at most once a day (the marker's time says when it last ran).
+
+    Every request has an entry of its own, and with auto_context every prompt is a request: expiry
+    was checked only on reading, so a year of use left thousands of files nothing read. Temporaries
+    a write cut short left go too. Never a symlink; a cache problem never costs a call.
+    """
+    now = time.time() if now is None else now
+    marker = folder / PRUNE_MARKER
+    try:
+        if marker.is_symlink() or (marker.exists() and 0 <= now - marker.stat().st_mtime < CACHE_KEEP):
+            return
+        marker.touch()
+        os.utime(marker, (now, now))
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if entry.name == PRUNE_MARKER or not entry.is_file(follow_symlinks=False):
+                    continue
+                try:
+                    if now - entry.stat(follow_symlinks=False).st_mtime >= CACHE_KEEP:
+                        os.unlink(entry.path)
+                except OSError:
+                    pass
+    except OSError:
+        pass
 
 
 def evaluate(vault, query, candidates, *, source_versions=None, scope='user', facets=None, transport=None, purpose='retrieval', timeout_cap=None):

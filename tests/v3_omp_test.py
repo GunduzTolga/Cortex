@@ -13,6 +13,8 @@ from unittest.mock import patch
 from v3_package_helpers import inherited_env
 
 ROOT = Path(__file__).resolve().parents[1]
+# CI installs Bun on Ubuntu only (v3.yml): the hook is the same TypeScript on every system, and
+# the macOS and Windows jobs skip the cases that drive it.
 BUN = shutil.which('bun')
 
 # Drives the generated hook the way OMP does: import the TS module, register its
@@ -117,7 +119,10 @@ class OMPHarnessTest(unittest.TestCase):
                               input=json.dumps(payload), capture_output=True, text=True, encoding='utf-8')
 
     def drive(self, cwd=None):
-        env = inherited_env(PLUGIN_PATH=str(self.hook_file), OMP_CWD=str(cwd or self.vault),
+        # os.environ is already this test's own (setUp). Filtered again, it lost BEYIN_V3_NO_SPAWN
+        # wherever the suite inherited the same value (CI sets it): the hook then started the
+        # engine in the background, still writing to the state as the test removed it.
+        env = dict(os.environ, PLUGIN_PATH=str(self.hook_file), OMP_CWD=str(cwd or self.vault),
                    OMP_OUTSIDE=str(Path(self.temp.name) / 'elsewhere'))
         result = subprocess.run([BUN, 'run', str(self.driver)], env=env,
                                 capture_output=True, text=True, encoding='utf-8', cwd=self.vault)

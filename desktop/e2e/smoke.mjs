@@ -36,9 +36,13 @@ const check = (label, condition) => {
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-'));
 const vaultDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-vault-')));
 const vaultNote = (relative) => path.join(vaultDir, ...relative.split('/'));
-// The engine package the app came with, stood in for: the settings offer it, the run never installs it.
+// The engine package the app came with, stood in for: the settings offer it, the run never installs it. A Cortex
+// version (1.x): a stamp of 2.x or more is the predecessor project's, whose vault is moved to Cortex, not used (install-update-4).
 const enginePackages = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-paket-'));
-fs.writeFileSync(path.join(enginePackages, 'beyin-v3-9.9.9.zip'), '');
+fs.writeFileSync(path.join(enginePackages, 'beyin-v3-1.99.0.zip'), '');
+// Where the chat's stand-in waits before it asks leave, for a message with "kapı" (tests/fixtures/fake-acp-agent.mjs): the run opens it from another view.
+const agentGateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-gate-'));
+const agentGate = path.join(agentGateDir, 'open');
 /*
   Claude Code as installed, stood in for on the app's PATH: it says only that its sign-in is kept
   (`claude auth status --json`). The first-run screen lists the tools installed; without it the
@@ -66,8 +70,11 @@ const write = (relative, text) => {
 };
 
 /*
-  The vault: Cortex's template as the installer lays it out, the hidden parts
-  Obsidian, git and Cortex keep, and a few notes of the person's.
+  The vault: this repository's template, in the shape the owner's vault has
+  (its `📋 Templates/Note.md`, `📥 000-Inbox/Dump`, from the installer before
+  v3; a vault the v3 installer starts has neither, and a new note there starts
+  empty: misc-scripts-2), the hidden parts Obsidian, git and Cortex keep, and a
+  few notes of the person's.
 */
 fs.cpSync(path.resolve('..', 'template'), vaultDir, { recursive: true });
 write('.obsidian/workspace.json', '{"main":{}}\n');
@@ -82,6 +89,18 @@ const receipt = `receipts/${createHash('sha256').update('cortex-ad-karari-202610
 write(receipt, '---\n{\n  "kind": "receipt",\n  "event_id": "cortex-ad-karari-20261013"\n}\n---\nAd kararı verildi.\n');
 write('daily/v3/2026-10-13.md', `---\n{"generated": true, "kind": "receipt-index"}\n---\n# Recorded outcomes\n\nSource: [[${receipt}]]\n`);
 write('Notes/settings.json', '{\n  "theme": "ananas",\n  "count": 3\n}\n');
+// Notes for the writing checks below (src/notes/NotePane.tsx, NoteEditor.tsx): typed while the disk is slow, left while in conflict, a Windows note's line endings.
+write('Drafts/E2E Race.md', '# Race\n\nStart');
+write('Drafts/E2E Slow.md', '# Slow\n\nStart');
+write('Drafts/E2E Kept.md', '# Kept\n\nbase');
+write('Drafts/E2E Gone.md', '# Gone\n\nbase');
+write('Drafts/E2E Binned.md', '# Binned\n\nbase');
+write('Drafts/E2E Windows.md', '# Windows\r\n\r\n- [ ] task\r\nline');
+write('Drafts/E2E Mixed.md', 'one\r\ntwo\nthree\n');
+write('Drafts/İstanbul Gezisi.md', '# İstanbul Gezisi\n\n## Işık\nGün ışığı.\n');
+write('Drafts/E2E Embeds.md', '# Embeds\n\n![[İstanbul Gezisi#ışık]]\n');
+write('Drafts/E2E Closing.md', '# Closing\n\nStart');
+write('Drafts/E2E Switch.md', '# Switch\n\nbase');
 const receiptBefore = fs.readFileSync(vaultNote(receipt), 'utf8');
 
 /*
@@ -142,6 +161,7 @@ const launch = () =>
       CORTEX_TEST_AGENT: path.resolve('tests/fixtures/fake-acp-agent.mjs'),
       CORTEX_TEST_CLAUDE: path.resolve('tests/fixtures/fake-claude.mjs'),
       CORTEX_TEST_CODEX: path.resolve('tests/fixtures/fake-codex.mjs'),
+      FAKE_AGENT_GATE: agentGate,
       // The model servers: LM Studio's stand-in, and Ollama where nothing answers; never the machine's own.
       CORTEX_TEST_LMSTUDIO: lmStudioBase,
       CORTEX_TEST_OLLAMA: 'http://127.0.0.1:9',
@@ -443,6 +463,229 @@ check(
     fs.readFileSync(vaultNote(receipt), 'utf8') === receiptBefore,
 );
 await shoot('07-receipt.png');
+
+/*
+  Nothing typed is lost (src/notes/NotePane.tsx). The main process's handlers
+  are slowed or counted for these checks through Electron's own table of them
+  (`ipcMain._invokeHandlers`, an internal: a check that cannot reach it fails,
+  it does not pass by not running).
+*/
+const holdChannel = (channel, delay = 0) =>
+  app.evaluate(
+    ({ ipcMain }, { channel, delay }) => {
+      const table = ipcMain._invokeHandlers;
+      if (!(table instanceof Map) || !table.has(channel)) return false;
+      globalThis.cortexHeld ??= {};
+      globalThis.cortexCalls ??= {};
+      const original = globalThis.cortexHeld[channel] ?? table.get(channel);
+      globalThis.cortexHeld[channel] = original;
+      globalThis.cortexCalls[channel] = 0;
+      table.set(channel, async (...args) => {
+        globalThis.cortexCalls[channel] += 1;
+        if (delay) await new Promise((done) => setTimeout(done, delay));
+        return original(...args);
+      });
+      return true;
+    },
+    { channel, delay },
+  );
+const releaseChannel = (channel) =>
+  app.evaluate(({ ipcMain }, channel) => {
+    const original = globalThis.cortexHeld?.[channel];
+    if (original) ipcMain._invokeHandlers.set(channel, original);
+    delete globalThis.cortexHeld?.[channel];
+  }, channel);
+const callsOf = (channel) => app.evaluate((_electron, channel) => globalThis.cortexCalls?.[channel] ?? 0, channel);
+/** A note opened by its name with Ctrl+O, as the person would. */
+const openNote = async (name, at) => {
+  await page.keyboard.press('Control+o');
+  await notesView.locator('[data-notes-switcher-input]').fill(name);
+  // Enter once the note is the one offered first: pressed before, it chose nothing and left the switcher over the page.
+  await shownSoon(notesView.locator(`[data-switch-at="0"][data-switch-path="${at}"]`), 5_000);
+  await page.keyboard.press('Enter');
+  return shownSoon(notesView.locator(`[data-note-pane="${at}"]`));
+};
+/** The note in front, written in at its end. */
+const writeAtEnd = async (text, delay = 0) => {
+  if ((await notesView.locator('[data-note-mode="edit"]').getAttribute('aria-pressed')) !== 'true') await notesView.locator('[data-note-mode="edit"]').click();
+  await notesView.locator('.cm-content').click();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.type(text, { delay });
+};
+const savingIs = (state, timeout = 10_000) =>
+  page.waitForFunction((state) => document.querySelector('[data-note-saving]')?.getAttribute('data-note-saving') === state, state, { timeout }).then(() => true, () => false);
+const clearToasts = async () => {
+  for (let left = await page.locator('[data-toast-close]').count(); left > 0; left = await page.locator('[data-toast-close]').count()) await page.locator('[data-toast-close]').first().click();
+};
+const draft = (name) => vaultNote(`Drafts/${name}`);
+const keptAside = (title) => fs.readdirSync(vaultNote('Drafts')).find((name) => new RegExp(`^${title} \\((conflict|çakışma) \\d{4}-\\d\\d-\\d\\d \\d\\d\\.\\d\\d\\)\\.md$`).test(name));
+
+// Typed just after a save, while the index is still built again with the time before it (desktop-ui-1).
+await openNote('E2E Race', 'Drafts/E2E Race.md');
+const held = (await holdChannel('notes:index', 900)) && (await holdChannel('notes:read'));
+check('the main process’s handlers can be slowed and counted for the checks below', held);
+await writeAtEnd(' one');
+await onDiskSoon(() => fs.readFileSync(draft('E2E Race.md'), 'utf8') === '# Race\n\nStart one');
+const readsBefore = await callsOf('notes:read');
+await page.keyboard.type(' two three', { delay: 30 });
+const raced = await onDiskSoon(() => fs.readFileSync(draft('E2E Race.md'), 'utf8') === '# Race\n\nStart one two three', 8_000);
+await savingIs('saved');
+check(
+  'what is typed right after a save, while the vault is read again, all reaches the disk: the note is not read again over it, and nothing says it changed',
+  raced &&
+    (await callsOf('notes:read')) - readsBefore <= 1 &&
+    (await notesView.locator('[data-note-banner]').count()) === 0 &&
+    ((await notesView.locator('.cm-content').textContent()) ?? '').endsWith('Start one two three'),
+);
+await releaseChannel('notes:index');
+await releaseChannel('notes:read');
+fs.writeFileSync(draft('E2E Race.md'), '# Race\n\nFrom outside.');
+await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+check(
+  'and a note written elsewhere, with nothing unsaved here, is still read again',
+  await page.waitForFunction(() => document.querySelector('.cm-content')?.textContent?.includes('From outside.'), null, { timeout: 8_000 }).then(() => true, () => false),
+);
+
+// Typed while a slow save is running: saved once it ends (desktop-ui-5).
+await openNote('E2E Slow', 'Drafts/E2E Slow.md');
+await holdChannel('notes:save', 1_500);
+await writeAtEnd(' a');
+const wasSaving = await savingIs('saving', 5_000);
+await page.keyboard.type(' b');
+const slowSaved = await onDiskSoon(() => fs.readFileSync(draft('E2E Slow.md'), 'utf8') === '# Slow\n\nStart a b', 12_000);
+check(
+  'what is typed while a slow save runs is saved after it, with nothing more typed',
+  wasSaving && slowSaved && (await savingIs('saved')) && (await notesView.locator('[data-note-banner]').count()) === 0,
+);
+await releaseChannel('notes:save');
+
+// The window left: saved at once, not a second after the last key (desktop-ui-8).
+await writeAtEnd(' c');
+const blurred = await page.evaluate(() => {
+  const label = document.querySelector('[data-note-saving]');
+  const typed = performance.now();
+  return new Promise((done) => {
+    const seen = new MutationObserver(() => {
+      if (label?.getAttribute('data-note-saving') !== 'saving') return;
+      seen.disconnect();
+      done(performance.now() - typed);
+    });
+    if (label) seen.observe(label, { attributes: true });
+    window.dispatchEvent(new Event('blur'));
+    setTimeout(() => done(Infinity), 3_000);
+  });
+});
+check(
+  'the window left saves the note at once',
+  blurred < 500 && (await onDiskSoon(() => fs.readFileSync(draft('E2E Slow.md'), 'utf8') === '# Slow\n\nStart a b c')),
+);
+
+// Left while it says it changed on disk: what was typed is kept beside it, and said (desktop-ui-3).
+await openNote('E2E Kept', 'Drafts/E2E Kept.md');
+await writeAtEnd(' mine');
+fs.writeFileSync(draft('E2E Kept.md'), '# Kept\n\nfrom outside');
+const inConflict = await shownSoon(notesView.locator('[data-note-banner="conflict"]'));
+await openNote('E2E Race', 'Drafts/E2E Race.md');
+const keptToast = page.locator('[data-toast="info"]', { hasText: 'kept in a note of its own' });
+check(
+  'a note left while it is in conflict keeps what was typed in a note beside it, and says which',
+  inConflict &&
+    (await onDiskSoon(() => Boolean(keptAside('E2E Kept')))) &&
+    fs.readFileSync(draft(keptAside('E2E Kept')), 'utf8') === '# Kept\n\nbase mine' &&
+    fs.readFileSync(draft('E2E Kept.md'), 'utf8') === '# Kept\n\nfrom outside' &&
+    (await shownSoon(keptToast)),
+);
+check('a toast’s close button is named, for a screen reader', await shownSoon(keptToast.locator('[data-toast-close][aria-label="Close"]'), 3_000));
+await shoot('04b-kept-aside.png');
+await clearToasts();
+
+// Gone from where it was while something was unsaved in it: kept beside where it was.
+await openNote('E2E Gone', 'Drafts/E2E Gone.md');
+await writeAtEnd(' kept');
+fs.rmSync(draft('E2E Gone.md'));
+await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+check(
+  'a note taken away while something in it is unsaved keeps that in a note where it was',
+  (await onDiskSoon(() => Boolean(keptAside('E2E Gone')))) && fs.readFileSync(draft(keptAside('E2E Gone')), 'utf8') === '# Gone\n\nbase kept',
+);
+await shownSoon(page.locator('[data-toast="info"]', { hasText: 'kept in a note of its own' }));
+await clearToasts();
+
+// Deleted a moment after the last key: the bin has what was typed, and nothing fails after.
+await openNote('E2E Binned', 'Drafts/E2E Binned.md');
+await writeAtEnd(' last');
+await notesView.locator('[data-note-pane="Drafts/E2E Binned.md"] button[aria-label="More"]').click();
+await page.getByRole('menuitem', { name: 'Move to trash' }).click();
+const binned = () => (fs.existsSync(vaultNote('.trash')) ? fs.readdirSync(vaultNote('.trash')).find((name) => name.startsWith('E2E Binned')) : undefined);
+check(
+  'a note deleted a moment after the last key goes to the bin with what was typed, and nothing says a save failed',
+  (await onDiskSoon(() => Boolean(binned()) && !fs.existsSync(draft('E2E Binned.md')))) &&
+    fs.readFileSync(vaultNote(`.trash/${binned()}`), 'utf8') === '# Binned\n\nbase last' &&
+    (await shownSoon(page.locator('[data-toast="success"]', { hasText: 'in the trash' }))) &&
+    (await page.locator('[data-toast="error"]').count()) === 0,
+);
+// Taken back, so the bin is as the checks further on expect it: empty but for what they put in it.
+await page.locator('[data-toast="success"]', { hasText: 'in the trash' }).locator('[data-toast-action]').click();
+await onDiskSoon(() => fs.existsSync(draft('E2E Binned.md')));
+await clearToasts();
+
+// A note written on Windows, with \r\n: opened to write in, it is not saved; written in, it keeps them (desktop-ui-6).
+await holdChannel('notes:save');
+await openNote('E2E Windows', 'Drafts/E2E Windows.md');
+await notesView.locator('.cm-content').waitFor();
+const openedQuiet = await page.evaluate(
+  () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(document.querySelector('[data-note-saving]')?.getAttribute('data-note-saving'))))),
+);
+check(
+  'a Windows note opened to write in is not saved, nor said unsaved',
+  openedQuiet === 'saved' && (await callsOf('notes:save')) === 0 && fs.readFileSync(draft('E2E Windows.md'), 'utf8') === '# Windows\r\n\r\n- [ ] task\r\nline',
+);
+check('its task box is named in the window’s language', await shownSoon(notesView.locator('.cm-lp-task[aria-label="To do"]'), 3_000));
+await writeAtEnd('!');
+check(
+  'and written in, it is saved with \\r\\n on every line still',
+  await onDiskSoon(() => fs.readFileSync(draft('E2E Windows.md'), 'utf8') === '# Windows\r\n\r\n- [ ] task\r\nline!'),
+);
+const savesBefore = await callsOf('notes:save');
+await openNote('E2E Mixed', 'Drafts/E2E Mixed.md');
+await notesView.locator('.cm-content').waitFor();
+const mixedQuiet = await page.evaluate(
+  () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(document.querySelector('[data-note-saving]')?.getAttribute('data-note-saving'))))),
+);
+check(
+  'a note with both kinds of line break is left as it is until written in',
+  mixedQuiet === 'saved' && (await callsOf('notes:save')) === savesBefore && fs.readFileSync(draft('E2E Mixed.md'), 'utf8') === 'one\r\ntwo\nthree\n',
+);
+await releaseChannel('notes:save');
+
+// A name with a dotted or dotless I is the same name in the switcher and in an embed (desktop-ui-12).
+await page.keyboard.press('Control+o');
+await notesView.locator('[data-notes-switcher-input]').fill('istanbul gezisi');
+check(
+  'Ctrl+O does not offer to make a note the vault has under a dotted İ',
+  (await shownSoon(notesView.locator('[data-switch-at="0"]', { hasText: 'İstanbul Gezisi' }))) && (await notesView.locator('[data-switch-make]').count()) === 0,
+);
+await page.keyboard.press('Escape');
+await openNote('E2E Embeds', 'Drafts/E2E Embeds.md');
+await notesView.locator('[data-note-mode="read"]').click();
+check(
+  'and an embed finds the heading a link finds, Işık by ışık',
+  await shownSoon(notesView.locator('[data-note-embed="Drafts/İstanbul Gezisi.md"]', { hasText: 'Gün ışığı.' })),
+);
+const menuRoles = await app.evaluate(({ Menu }) => {
+  const roles = [];
+  const walk = (items) => {
+    for (const item of items) {
+      roles.push(String(item.role ?? '').toLowerCase());
+      if (item.submenu) walk(item.submenu.items);
+    }
+  };
+  walk(Menu.getApplicationMenu()?.items ?? []);
+  return roles;
+});
+check('the page cannot be reloaded from the menu, where a reload drops what a note holds unsaved', menuRoles.includes('zoomin') && !menuRoles.includes('reload') && !menuRoles.includes('forcereload'));
+// The folder these notes are in closed again, as the tree was: the drag further on reaches its folder without scrolling.
+if ((await notesView.locator('[data-tree-path="Drafts"]').getAttribute('aria-expanded')) === 'true') await notesView.locator('[data-tree-path="Drafts"]').click();
 /*
   The settings (src/ui/SettingsDialog.tsx): what is not a note or what a note
   shows is out of the tree until every kind is asked for, and a name's leading
@@ -455,6 +698,7 @@ check(
 );
 await page.locator('[data-settings-open]').click();
 check('the gear in the top bar opens the settings', await shownSoon(page.locator('[data-settings]')));
+check('its close button is named, for a screen reader', (await page.locator('[role="dialog"] header button[aria-label="Close"]').count()) === 1);
 check(
   'Cortex stays at the bottom right when the window is closed, unless told otherwise',
   (await page.locator('[data-settings-background]').getAttribute('aria-checked')) === 'true',
@@ -468,6 +712,10 @@ check(
   'a vault without Cortex’s memory is offered it, from the package the app came with (or told Python is needed)',
   (await shownSoon(page.locator('[data-settings-section="cortex"] [data-setup-note="none"], [data-settings-section="cortex"] [data-setup-note="no-python"]'))) &&
     ((await page.locator('[data-setup-note="no-python"]').count()) === 1 || (await page.locator('[data-setup-engine]').count()) === 1),
+);
+check(
+  'opening a vault binds its engine to where the vault is now; this one has none, so nothing is done or said',
+  (await page.evaluate(() => window.cortex.setup.settle())) === null && (await page.locator('[data-toast="error"]').count()) === 0,
 );
 check(
   'and voice typing waits for the memory',
@@ -510,7 +758,7 @@ check('and the emoji go again', await page.waitForFunction(() => document.queryS
 if (process.platform === 'win32' && (await page.evaluate(() => window.cortex.setup.status())).python) {
   const askedLog = path.join(enginePackages, 'istenen.log');
   fs.writeFileSync(vaultNote('beyin.py'), voiceStandIn(enginePackages));
-  fs.writeFileSync(vaultNote('.beyin-version'), '9.9.9\n');
+  fs.writeFileSync(vaultNote('.beyin-version'), '1.99.0\n');
   await page.keyboard.press('Control+,');
   const saveWords = page.locator('[data-setup-voice-command="kaydet"]');
   check(
@@ -546,6 +794,25 @@ if (process.platform === 'win32' && (await page.evaluate(() => window.cortex.set
   );
   await page.waitForTimeout(300);
   await shoot('07e-voice-phrase.png');
+  // Listening all the time is asked for first, in the app's own words; "not now" leaves the engine unasked.
+  const wake = page.locator('[data-setup-voice-wake]');
+  await wake.scrollIntoViewIfNeeded();
+  await wake.click();
+  const asking = await shownSoon(page.locator('[data-consent="wake"]'));
+  await shoot('07f-microphone-consent.png');
+  await page.locator('[data-consent-no]').click();
+  await page.waitForTimeout(500);
+  check(
+    'the microphone listens all the time only once allowed: asked first, and "not now" turns nothing on',
+    asking && (await page.locator('[data-consent]').count()) === 0 && !fs.readFileSync(askedLog, 'utf8').includes('ses ayar --uyandirma ac'),
+  );
+  await wake.click();
+  await page.locator('[data-consent-yes]').click();
+  check(
+    'allowed, it is turned on with the engine’s own setting, and the leave is kept',
+    (await soon(() => fs.readFileSync(askedLog, 'utf8').includes('ses ayar --uyandirma ac'))) &&
+      (await page.waitForFunction(async () => (await window.cortex.bootstrap()).settings.wakeConsent === true, null, { timeout: 5_000 }).then(() => true, () => false)),
+  );
   await page.keyboard.press('Escape');
   fs.rmSync(vaultNote('beyin.py'));
   fs.rmSync(vaultNote('.beyin-version'));
@@ -657,6 +924,65 @@ await shoot('11-permission.png');
 await page.locator('[data-chat-answer-option="allow_once"]').click();
 check('and the answer reaches the CLI', await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: once' })));
 await page.locator('[data-chat-send]').waitFor();
+/*
+  The card and the keyboard (src/chat/permissionKey.ts). Asked while the person
+  is in the notes - the stand-in holds its question until the gate opens - the
+  card is said by a notice and a mark on Pyn's tab; Enter typed in a note writes
+  a line and answers nothing; the notice leads back; Enter on "Reject" rejects.
+  Had the note's Enter answered, the stand-in would have said "once".
+*/
+const waitingNotice = page.locator('[data-toast="info"]', { hasText: 'Pyn is waiting for you' });
+await page.locator('[data-chat-input]').fill('izin iste, kapıda bekle');
+await page.keyboard.press('Enter');
+await page.locator('[data-chat-stop]').waitFor();
+await page.locator('[data-app-view="notes"]').click();
+fs.writeFileSync(agentGate, '');
+check(
+  'a step asked while the chat is not in front is said by a notice and a mark on Pyn’s tab',
+  (await shownSoon(waitingNotice)) && (await shownSoon(page.locator('[data-app-view="pyn"] [data-app-view-waiting]'))),
+);
+await shoot('11b-waiting.png');
+await notesView.locator('[data-tree-path="Untitled.md"]').click();
+await notesView.locator('[data-note-mode="edit"]').click();
+await notesView.locator('.cm-content').click();
+await page.keyboard.press('Control+End');
+const enterInNote = await page.evaluate(() => Boolean(document.activeElement?.closest('.cm-content')));
+await page.keyboard.press('Enter');
+await notesView.locator('[data-note-mode="read"]').click();
+// An Enter that had answered would have taken the notice and the card with it: then the run goes on to say so, not stop.
+const ledBack = await waitingNotice
+  .locator('[data-toast-action]')
+  .click({ timeout: 5_000 })
+  .then(
+    () => true,
+    () => page.locator('[data-app-view="pyn"]').click().then(() => false),
+  );
+check(
+  'and the notice leads back to the chat and its card, and goes; the chat is marked in the list',
+  ledBack &&
+    (await page.locator('[data-app-view="pyn"]').getAttribute('aria-pressed')) === 'true' &&
+    (await shownSoon(page.locator('[data-chat-permission]'), 3_000)) &&
+    (await waitingNotice.count()) === 0 &&
+    (await page.locator('[data-chat-item] [data-chat-waiting]').count()) === 1,
+);
+if (await page.locator('[data-chat-permission]').count()) {
+  await page.locator('[data-chat-answer-option="reject_once"]').focus();
+  await page.keyboard.press('Enter');
+}
+check(
+  'Enter in a note answered nothing, and Enter on “Reject” rejects',
+  enterInNote && (await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: reject' }))) && (await page.locator('[data-chat-text]', { hasText: 'izin: once' }).count()) === 1,
+);
+check('the mark on Pyn’s tab goes with the card', await page.locator('[data-app-view-waiting]').waitFor({ state: 'detached', timeout: 5_000 }).then(() => true, () => false));
+await page.locator('[data-chat-send]').waitFor();
+// With the chat in front and nothing focused, Enter is "once", as the card says.
+await page.locator('[data-chat-input]').fill('izin iste');
+await page.keyboard.press('Enter');
+await page.locator('[data-chat-permission]').waitFor();
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press('Enter');
+check('with the chat in front and nothing focused, Enter allows once', await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: once' }).nth(1)));
+await page.locator('[data-chat-send]').waitFor();
 await page.locator('[data-chat-input]').fill('yavaş olsun');
 await page.keyboard.press('Enter');
 await page.locator('[data-chat-stop]').click();
@@ -699,6 +1025,12 @@ await page.locator('[data-chat-text] .kg-wikilink', { hasText: 'Ideas' }).first(
 check(
   'a note an answer links to opens beside the chat, and the chat stays',
   (await shownSoon(page.locator('[data-chat-side-note="Personal/Ideas.md"]'))) && (await page.locator('[data-app-view="pyn"]').getAttribute('aria-pressed')) === 'true',
+);
+// Changed on disk with the chat in front, as the AI writes a note: read again beside the chat, the notes never opened.
+fs.appendFileSync(vaultNote('Personal/Ideas.md'), '\nPyn added this line.\n');
+check(
+  'a note changed on disk is read again beside the chat, with the notes not in front',
+  await shownSoon(page.locator('[data-chat-side-note="Personal/Ideas.md"]', { hasText: 'Pyn added this line.' })),
 );
 await page.locator('[data-chat-side-back]').click();
 check('the panel lists the notes the chat touched', await shownSoon(page.locator('[data-chat-side-item="Personal/Ideas.md"]')));
@@ -828,7 +1160,8 @@ check(
   'nothing was written into what is hidden',
   fs.readFileSync(vaultNote('.hidden/Secret.md'), 'utf8') === hiddenBefore && fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'utf8') === obsidianBefore,
 );
-await page.locator('[data-app-view="notes"]').click();
+// The graph left in front: the app opens on it again, with neither the notes nor the chat drawn to read the vault for it.
+await page.locator('[data-app-view="graph"]').click();
 
 /*
   Last before the restart, because Playwright waits for a navigation it saw
@@ -854,7 +1187,19 @@ page = await app.firstWindow();
 await page.waitForLoadState('domcontentloaded');
 await holdBrowser();
 listen(page);
-check('the vault chosen is opened again, with nothing to choose', await shownSoon(page.locator('[data-notes-view]'), 30_000));
+check('the vault chosen is opened again, with nothing to choose', await shownSoon(page.locator('[data-vault-screen]'), 30_000));
+check(
+  'on the graph, as it was left, and it draws the vault’s notes with nothing else opened to read them',
+  (await page.locator('[data-app-view="graph"]').getAttribute('aria-pressed')) === 'true' &&
+    (await page
+      .waitForFunction(() => Number(document.querySelector('[data-notes-graph="vault"]')?.getAttribute('data-graph-nodes')) >= 4, null, { timeout: 10_000 })
+      .then(
+        () => true,
+        () => false,
+      )) &&
+    (await page.locator('[data-notes-view]').count()) === 0 &&
+    (await page.locator('[data-chat-view]').count()) === 0,
+);
 check('in the language chosen', (await page.evaluate(() => document.documentElement.lang)) === 'en');
 check('and the settings file is in the app’s data, not in the vault', fs.existsSync(path.join(userData, 'settings.json')) && !fs.readdirSync(vaultDir).includes('settings.json'));
 
@@ -863,9 +1208,120 @@ const unexpected = consoleErrors.filter((text) => !text.includes('https://exampl
 check('the window logged no errors but the refusals asked for', unexpected.length === 0 && consoleErrors.length >= 2);
 if (unexpected.length) console.log(unexpected.map((e) => `       ${e}`).join('\n'));
 
+await page.locator('[data-app-view="notes"]').click();
+const notesAgain = page.locator('[data-notes-view]');
+await notesAgain.waitFor();
+
+/*
+  Another vault chosen while the note open is in conflict (src/notes/NotePane.tsx):
+  what was typed is kept beside the note in the vault it was read from, and the
+  pane left writes nothing into the vault chosen - here a copy of this one, its
+  note at the same path as this one was read, which a save over that version
+  would have gone through.
+*/
+const otherVault = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-other-')));
+fs.mkdirSync(path.join(otherVault, 'Drafts'));
+fs.writeFileSync(path.join(otherVault, 'Drafts', 'E2E Switch.md'), '# Switch\n\nbase');
+const chooseVaultTo = async (dir) => {
+  await app.evaluate(({ dialog }, dir) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
+  }, dir);
+  await page.locator('[data-settings-open]').click();
+  await page.locator('[data-settings-vault-change]').click();
+  const named = await page
+    .waitForFunction((name) => document.querySelector('[data-settings-vault]')?.textContent === name, path.basename(dir), { timeout: 10_000 })
+    .then(() => true, () => false);
+  await page.keyboard.press('Escape');
+  return named;
+};
+await page.keyboard.press('Control+o');
+await notesAgain.locator('[data-notes-switcher-input]').fill('E2E Switch');
+await page.keyboard.press('Enter');
+await shownSoon(notesAgain.locator('[data-note-pane="Drafts/E2E Switch.md"]'));
+if ((await notesAgain.locator('[data-note-mode="edit"]').getAttribute('aria-pressed')) !== 'true') await notesAgain.locator('[data-note-mode="edit"]').click();
+await notesAgain.locator('.cm-content').click();
+await page.keyboard.press('Control+End');
+await page.keyboard.type(' mine');
+fs.writeFileSync(vaultNote('Drafts/E2E Switch.md'), '# Switch\n\nfrom outside');
+const switchConflict = await shownSoon(notesAgain.locator('[data-note-banner="conflict"]'));
+const counted = (await holdChannel('notes:save')) && (await holdChannel('notes:read'));
+const switched = await chooseVaultTo(otherVault);
+/*
+  The pane left goes before the one for the vault chosen reads its note, and
+  the window's calls reach the main process in order: once that read is asked,
+  a save from the pane left would have been asked too. The one save counted is
+  the one made before the vault was chosen.
+*/
+for (const end = Date.now() + 8_000; Date.now() < end && (await callsOf('notes:read')) === 0; ) await new Promise((done) => setTimeout(done, 100));
+check(
+  'another vault chosen while a note is in conflict: what was typed is kept beside it in the vault it was read from, and nothing is written into the vault chosen',
+  switchConflict &&
+    counted &&
+    switched &&
+    (await callsOf('notes:read')) >= 1 &&
+    (await callsOf('notes:save')) === 1 &&
+    fs.readFileSync(path.join(otherVault, 'Drafts', 'E2E Switch.md'), 'utf8') === '# Switch\n\nbase' &&
+    Boolean(keptAside('E2E Switch')) &&
+    fs.readFileSync(draft(keptAside('E2E Switch') ?? 'none'), 'utf8') === '# Switch\n\nbase mine' &&
+    fs.readFileSync(vaultNote('Drafts/E2E Switch.md'), 'utf8') === '# Switch\n\nfrom outside',
+);
+await releaseChannel('notes:save');
+await releaseChannel('notes:read');
+check('and the vault left, chosen again, is open again', await chooseVaultTo(vaultDir));
+await clearToasts();
+fs.rmSync(otherVault, { recursive: true, force: true });
+
+// Quit a moment after the last key: what was typed is saved before the window goes (electron/main.ts, desktop-ui-8).
+await page.keyboard.press('Control+o');
+await notesAgain.locator('[data-notes-switcher-input]').fill('E2E Closing');
+await page.keyboard.press('Enter');
+const closingOpen = await shownSoon(notesAgain.locator('[data-note-pane="Drafts/E2E Closing.md"]'));
+if ((await notesAgain.locator('[data-note-mode="edit"]').getAttribute('aria-pressed')) !== 'true') await notesAgain.locator('[data-note-mode="edit"]').click();
+await notesAgain.locator('.cm-content').click();
+await page.keyboard.press('Control+End');
+await page.keyboard.type(' closed');
+await app.close();
+check(
+  'a note written a moment before Cortex quits is saved before the window goes',
+  closingOpen && fs.readFileSync(vaultNote('Drafts/E2E Closing.md'), 'utf8') === '# Closing\n\nStart closed',
+);
+
+/*
+  The page dying - out of memory on a large vault, the GPU process gone on a laptop - is loaded again by itself
+  (electron/main.ts, desktop-shell-9): before, the window stayed a blank sheet, and the icon's "Cortex'i aç" brought
+  the same blank page back. Opened again for it: a page that crashed cannot be driven further.
+*/
+console.log('\nThe page dying');
+app = await launch();
+page = await app.firstWindow();
+await page.waitForLoadState('domcontentloaded');
+const beforeCrash = await shownSoon(page.locator('[data-vault-screen]'), 30_000);
+// Its end and the page loaded after it are heard in the main process: a question put to the dying page is never answered.
+await app.evaluate(({ BrowserWindow }) => {
+  const contents = BrowserWindow.getAllWindows()[0].webContents;
+  globalThis.cortexPage = { gone: null, loaded: 0 };
+  contents.on('render-process-gone', (_event, details) => {
+    globalThis.cortexPage.gone = details.reason;
+  });
+  contents.on('did-finish-load', () => {
+    if (globalThis.cortexPage.gone) globalThis.cortexPage.loaded += 1;
+  });
+  contents.forcefullyCrashRenderer();
+});
+const answered = (promise, ms = 5_000) => Promise.race([promise.catch(() => null), new Promise((done) => setTimeout(() => done(null), ms))]);
+let backAfterCrash = false;
+for (const end = Date.now() + 30_000; Date.now() < end && !backAfterCrash; await new Promise((done) => setTimeout(done, 250))) {
+  const seen = await answered(app.evaluate(() => globalThis.cortexPage));
+  if (!seen?.gone || !seen.loaded) continue;
+  backAfterCrash = Boolean(
+    await answered(app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.executeJavaScript('Boolean(document.querySelector("[data-vault-screen]"))'))),
+  );
+}
+check('a page that dies is loaded again by itself, the vault on screen again', beforeCrash && backAfterCrash);
 await app.close();
 fs.rmSync(userData, { recursive: true, force: true });
 fs.rmSync(vaultDir, { recursive: true, force: true });
+fs.rmSync(agentGateDir, { recursive: true, force: true });
 
 console.log(`\n${failures.length ? `${failures.length} check(s) failed` : 'All smoke checks passed'}`);
 process.exit(failures.length ? 1 : 0);

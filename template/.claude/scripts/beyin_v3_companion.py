@@ -777,7 +777,11 @@ def context(store, budget, session, harness, query='', receipt='', warning='', p
     retrieval_share = max(0, budget - int(budget * .83) - len(extra))
     if query:
         retrieval_budget = min(remaining, retrieval_share) if companion_clipped else remaining
-        ranked = store.context_for(harness, query, project=project, budget_chars=max(0, retrieval_budget - 100))
+        # The per-turn path's cached passages: the companion files above answer a continuity
+        # question, and ranking whole notes counted every note's words on each such prompt
+        # (seconds on a large vault, past the hook's limit).
+        ranked = store.context_for(harness, query, project=project, budget_chars=max(0, retrieval_budget - 100),
+                                   strict=True)
     elif not companion_clipped and remaining > 200:
         ranked = store.snapshot_context(project=project, budget_chars=min(1500, max(0, remaining - 100)))
     else:

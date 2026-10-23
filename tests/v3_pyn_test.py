@@ -302,7 +302,9 @@ class PynShellTest(unittest.TestCase):
         text = profile.read_text(encoding='utf-8-sig')
         self.assertEqual(text.count(pyn.BEGIN), 1)
         self.assertTrue(text.startswith('Set-Alias ll Get-ChildItem'))
-        self.assertIn('function pyn { & "C:/Python/python.exe" "' + str(vault / 'beyin.py') + '" pyn @args }', text)
+        # Single-quoted literals: inside double quotes PowerShell would expand `$`, a backtick and a
+        # typographic quote of the path (security-5).
+        self.assertIn("function pyn { & 'C:/Python/python.exe' '" + str(vault / 'beyin.py') + "' pyn @args }", text)
         self.assertEqual(profile.read_bytes()[:3], b'\xef\xbb\xbf')  # BOM: PowerShell 5.1 reads UTF-8
         self.assertEqual(pyn.uninstall_shell([profile])['status'], 'kaldirildi')
         self.assertEqual(profile.read_text(encoding='utf-8-sig'), 'Set-Alias ll Get-ChildItem\n')
@@ -326,6 +328,38 @@ class PynShellTest(unittest.TestCase):
         (bin_dir / 'pyn.cmd').write_bytes(b'@echo off\r\necho baska\r\n')
         pyn.install_shell(vault, [], python='C:/Python/python.exe', windows=True, cmd=bin_dir)
         pyn.uninstall_shell([], cmd=bin_dir)
+        self.assertEqual((bin_dir / 'pyn.cmd').read_bytes(), b'@echo off\r\necho baska\r\n')
+
+    def test_with_pyn_cmd_on_path_the_powershell_profile_is_left_alone(self):
+        # Windows' default Restricted policy refuses any profile script, with an error in every new PowerShell window;
+        # PowerShell finds pyn.cmd on PATH anyway.
+        bin_dir = self.root / 'WindowsApps'
+        bin_dir.mkdir()
+        own = self.root / 'WindowsPowerShell/Microsoft.PowerShell_profile.ps1'
+        mine = self.root / 'PowerShell/Microsoft.PowerShell_profile.ps1'
+        own.parent.mkdir()
+        mine.parent.mkdir()
+        vault = self.root / 'Pyn Kasası'
+        # An earlier `pyn kur` wrote the block, into a profile of its own and one the person keeps.
+        pyn.install_shell(vault, [own], python='C:/Python/python.exe', windows=True)
+        mine.write_text('Set-Alias ll Get-ChildItem\n', encoding='utf-8')
+        pyn.install_shell(vault, [mine], python='C:/Python/python.exe', windows=True)
+        result = pyn.install_shell(vault, [own, mine], python='C:/Python/python.exe', windows=True, cmd=bin_dir)
+        self.assertTrue((bin_dir / 'pyn.cmd').is_file())
+        self.assertFalse(own.exists(), 'a profile only the block was in goes: even an empty one is refused')
+        self.assertEqual(mine.read_text(encoding='utf-8-sig'), 'Set-Alias ll Get-ChildItem\n')
+        self.assertEqual(result['profil'], [])
+        # Again: nothing written, no profile made.
+        self.assertEqual(pyn.install_shell(vault, [own, mine], python='C:/Python/python.exe', windows=True, cmd=bin_dir)['yazilan'], [])
+        self.assertFalse(own.exists())
+        self.assertEqual(pyn.uninstall_shell([own, mine], cmd=bin_dir)['status'], 'kaldirildi')
+        self.assertFalse((bin_dir / 'pyn.cmd').exists())
+        # Someone else's pyn.cmd: the profile is the way `pyn` is found.
+        (bin_dir / 'pyn.cmd').write_bytes(b'@echo off\r\necho baska\r\n')
+        pyn.install_shell(vault, [own], python='C:/Python/python.exe', windows=True, cmd=bin_dir)
+        self.assertIn(pyn.BEGIN, own.read_text(encoding='utf-8-sig'))
+        self.assertEqual(pyn.uninstall_shell([own], cmd=bin_dir)['status'], 'kaldirildi')
+        self.assertFalse(own.exists())
         self.assertEqual((bin_dir / 'pyn.cmd').read_bytes(), b'@echo off\r\necho baska\r\n')
 
     def test_pyn_cmd_goes_only_to_windowsapps_already_on_path(self):

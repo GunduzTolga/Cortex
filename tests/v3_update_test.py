@@ -1,10 +1,13 @@
 """Tests-first offline semver package update and recovery contract."""
+import base64
 import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import stat
 from pathlib import Path
+import re
 import sys
 import tempfile
 import time
@@ -18,6 +21,13 @@ from v3_package_helpers import ROOT, build_package, clean_environ, install, isol
 MODULE = ROOT / 'template/.claude/scripts/beyin_v3_update.py'
 
 
+def hook_text(hooks):
+    """Hook commands as their shells read them: a Windows -EncodedCommand decoded beside the JSON it sits in."""
+    text = json.dumps(hooks)
+    scripts = [base64.b64decode(found).decode('utf-16le') for found in re.findall(r'-EncodedCommand\s+([A-Za-z0-9+/=]+)', text, re.I)]
+    return '\n'.join([text] + scripts)
+
+
 def load_updater():
     if not MODULE.is_file():
         raise AssertionError('Versioned updater not implemented')
@@ -29,6 +39,22 @@ def load_updater():
 
 
 class OfflineUpdateTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # The 3.0.1 package every test updates to, built once for the class: a release build and a
+        # rewrite in every test's setUp made the same bytes over again (tests-ci-4). Each test gets
+        # its own copy, so one that rewrites its package changes no other test's.
+        built = tempfile.TemporaryDirectory(prefix='v3-update-package-')
+        cls.addClassCleanup(built.cleanup)
+        cls.built = build_package(Path(built.name) / 'release.zip', '3.0.1', isolated_env(Path(built.name) / 'home'))
+        def changed_runtime(files):
+            name = 'template/.claude/scripts/beyin_v3.py'
+            files[name] += b'\n# Synthetic offline release change.\n'
+            metadata = json.loads(files['manifest.json'])
+            metadata['files'][name] = hashlib.sha256(files[name]).hexdigest()
+            files['manifest.json'] = json.dumps(metadata).encode()
+        rewrite_zip(cls.built, cls.built, changed_runtime)
+
     def setUp(self):
         self.module = load_updater()
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-update-test-')
@@ -42,14 +68,7 @@ class OfflineUpdateTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
         self.assertEqual(self.version(), '0.0.0')
         self.note = self.vault / 'user-note.md';self.note.write_text('Synthetic original user note.\n')
-        self.package = build_package(self.base / 'release.zip', '3.0.1', self.env)
-        def changed_runtime(files):
-            name = 'template/.claude/scripts/beyin_v3.py'
-            files[name] += b'\n# Synthetic offline release change.\n'
-            metadata = json.loads(files['manifest.json'])
-            metadata['files'][name] = hashlib.sha256(files[name]).hexdigest()
-            files['manifest.json'] = json.dumps(metadata).encode()
-        rewrite_zip(self.package, self.package, changed_runtime)
+        self.package = Path(shutil.copyfile(self.built, self.base / 'release.zip'))
 
     def version(self):
         return (self.vault / '.beyin-version').read_text(encoding='utf-8').strip()
@@ -550,7 +569,9 @@ class OfflineUpdateTest(unittest.TestCase):
             'asset_sha256': '11' * 32,
             'checksum_url': None,
         }
-        with patch.object(self.module, '_download', return_value=(self.package, '3.0.1', fake_meta, '"etag-301"')):
+        # The release is read first (an engine ahead of it downloads nothing), then its package.
+        with patch.object(self.module, '_release', return_value=(fake_meta, '"etag-301"')), \
+                patch.object(self.module, '_download', return_value=(self.package, '3.0.1')):
             self.module.update(self.vault, self.state)
         self.assertTrue(cache_file.exists())
         st = releases.status(self.vault, self.state)
@@ -585,6 +606,10 @@ class OfflineUpdateTest(unittest.TestCase):
         self.assertEqual(doctor()['status'], 'ahead')
 
     def test_windows_permission_error_restores_write_mode_during_apply(self):
+        if hasattr(os, 'geteuid') and os.geteuid() == 0:
+            # os.access says every file is writable to root, so neither the emulated refusal nor
+            # the updater's own read-only check (made for Windows' attribute) sees the lock.
+            self.skipTest('root writes a file whatever its mode')
         file_path = self.vault / 'readonly_file.txt'
         file_path.write_text('new content', encoding='utf-8')
         os.chmod(file_path, stat.S_IREAD)
@@ -614,6 +639,8 @@ class OfflineUpdateTest(unittest.TestCase):
         self.assertFalse(os.access(file_path, os.W_OK), 'the read-only flag is the user\'s lock')
 
     def test_update_and_rollback_keep_a_read_only_managed_file_locked(self):
+        if hasattr(os, 'geteuid') and os.geteuid() == 0:
+            self.skipTest('root writes a file whatever its mode')
         version = self.vault / '.beyin-version'
         os.chmod(version, stat.S_IREAD)
         original_replace = os.replace
@@ -628,6 +655,392 @@ class OfflineUpdateTest(unittest.TestCase):
             self.module.rollback(self.vault, self.state)
         self.assertEqual(self.version(), '0.0.0')
         self.assertFalse(os.access(version, os.W_OK))
+
+    # --- install-update-5, -6, -7, -9, -1 and the C1 codes ---
+
+    def crash_after_first_replacement(self, package=None, vault=None, state=None):
+        def crash(phase, index=None):
+            if phase == 'after_replace' and index == 0:
+                raise OSError('Synthetic interruption after first managed replacement')
+        with patch.object(self.module, 'transaction_hook', side_effect=crash):
+            with self.assertRaises(OSError):
+                self.module.update(vault or self.vault, state or self.state, package or self.package)
+        self.assertTrue(((state or self.state) / 'update-journal.json').exists())
+
+    def test_the_cli_is_written_before_the_entry_that_loads_it(self):
+        installer = load_installer()
+        names = list(installer.install(self.vault, self.state, plan_only=True)['planned'])
+        entry = names.index('beyin.py')
+        self.assertLess(names.index('.claude/scripts/beyin_v3_cli.py'), entry)
+        for name in names:
+            if name.startswith('.claude/scripts/beyin_v3'):
+                self.assertLess(names.index(name), entry, name)
+
+    def test_recover_runs_under_an_entry_newer_than_its_cli(self):
+        # An update cut short between beyin.py and beyin_v3_cli.py left an entry calling a
+        # resolve_state the older CLI did not have: every command failed, recover too.
+        vault, state = self.base / 'Eski CLI Kasasi', self.base / 'eski-cli-state'
+        vault.mkdir()
+        def without_resolve_state(files):
+            name = 'scripts/beyin_v3.py'
+            files[name] = files[name].replace(b'def resolve_state(', b'def resolve_state_not_yet(')
+            metadata = json.loads(files['manifest.json'])
+            metadata['files'][name] = hashlib.sha256(files[name]).hexdigest()
+            files['manifest.json'] = json.dumps(metadata).encode()
+        older = rewrite_zip(build_package(self.base / 'cli-old.zip', '3.0.1', self.env), self.base / 'cli-old-patched.zip',
+                            without_resolve_state)
+        unpacked = self.base / 'cli-old'
+        with zipfile.ZipFile(older) as archive:
+            archive.extractall(unpacked)
+        installed = run_python(unpacked / 'scripts/install_v3.py', ['--vault', vault, '--state', state], unpacked, self.env)
+        self.assertEqual(installed.returncode, 0, installed.stderr.decode('utf-8', errors='replace'))
+        doctor = run_python(vault / 'beyin.py', ['doctor'], vault, self.env)
+        self.assertNotEqual(doctor.returncode, 0, 'the fixture CLI really lacks resolve_state')
+        self.crash_after_first_replacement(build_package(self.base / 'cli-new.zip', '3.0.2', self.env), vault, state)
+        recovered = run_python(vault / 'beyin.py', ['recover'], vault, self.env)
+        self.assertEqual(recovered.returncode, 0, recovered.stderr.decode('utf-8', errors='replace'))
+        self.assertEqual(json.loads(recovered.stdout)['status'], 'recovered')
+        self.assertEqual((vault / '.beyin-version').read_text(encoding='utf-8').strip(), '3.0.2')
+        self.assertEqual(run_python(vault / 'beyin.py', ['doctor'], vault, self.env).returncode, 0)
+
+    def test_recover_keeps_a_permission_granted_after_the_interruption(self):
+        # "Her zaman izin ver" in a chat between the interruption and the retry wrote to
+        # .claude/settings.local.json, and recover then failed forever on it (install-update-6).
+        self.crash_after_first_replacement()
+        config = self.vault / '.claude/settings.local.json'
+        data = json.loads(config.read_text(encoding='utf-8'))
+        data.setdefault('permissions', {}).setdefault('allow', []).append('Bash(git status:*)')
+        config.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        agents = self.vault / 'AGENTS.md'
+        agents.write_text(agents.read_text(encoding='utf-8') + '\nKesintiden sonra eklenen satır.\n', encoding='utf-8')
+        self.assertEqual(self.module.recover(self.vault, self.state)['status'], 'recovered')
+        self.assertEqual(self.version(), '3.0.1')
+        merged = json.loads(config.read_text(encoding='utf-8'))
+        self.assertIn('Bash(git status:*)', merged['permissions']['allow'])
+        self.assertIn('beyin_v3_hook.py', hook_text(merged['hooks']))
+        self.assertIn('Kesintiden sonra eklenen satır.', agents.read_text(encoding='utf-8'))
+        record = json.loads((self.state / 'v3-install.json').read_text(encoding='utf-8'))['files']
+        for path in (config, agents):
+            self.assertEqual(record[path.relative_to(self.vault).as_posix()]['installed_hash'],
+                             hashlib.sha256(path.read_bytes()).hexdigest())
+        self.assertEqual(self.module.rollback(self.vault, self.state)['status'], 'rolled_back')
+        self.assertIn('Bash(git status:*)', json.loads(config.read_text(encoding='utf-8'))['permissions']['allow'])
+        self.assertIn('Kesintiden sonra eklenen satır.', agents.read_text(encoding='utf-8'))
+
+    def test_recover_keeps_edits_to_files_the_update_had_already_written(self):
+        # Cut short after AGENTS.md, the settings and the install record were written; the person
+        # then added a line and granted a permission. The new block in AGENTS.md is no edit of
+        # theirs, a record rewritten under a file already written stopped every retry, and the
+        # journal's "before" must still hold the old managed part, or rollback keeps the new one.
+        def changed_managed_parts(files):
+            name = 'scripts/install_v3.py'
+            files[name] = files[name].replace(b'Use Markdown source files as truth;',
+                                              b'Use the Markdown source files as truth;')
+            files[name] = files[name].replace(b'else posix, "timeout": timeout}', b'else posix, "timeout": timeout + 1}')
+            metadata = json.loads(files['manifest.json'])
+            metadata['files'][name] = hashlib.sha256(files[name]).hexdigest()
+            files['manifest.json'] = json.dumps(metadata).encode()
+        package = rewrite_zip(self.package, self.base / 'changed-managed-parts.zip', changed_managed_parts)
+        agents = self.vault / 'AGENTS.md'
+        config = self.vault / '.claude/settings.local.json'
+        def timeouts():
+            hooks = json.loads(config.read_text(encoding='utf-8'))['hooks']
+            return sorted({handler['timeout'] for groups in hooks.values() for group in groups for handler in group['hooks']})
+        before = timeouts()
+        def crash(phase, index=None):
+            journal = json.loads((self.state / 'update-journal.json').read_text(encoding='utf-8'))
+            if phase == 'after_replace' and journal['operations'][index]['name'] == 'v3-install.json':
+                raise OSError('Synthetic interruption after the install record')
+        with patch.object(self.module, 'transaction_hook', side_effect=crash):
+            with self.assertRaises(OSError):
+                self.module.update(self.vault, self.state, package)
+        self.assertEqual(self.version(), '0.0.0')
+        self.assertIn('Use the Markdown source files as truth;', agents.read_text(encoding='utf-8'))
+        self.assertEqual(timeouts(), [value + 1 for value in before])
+        agents.write_text(agents.read_text(encoding='utf-8') + '\nKesintiden sonra eklenen satır.\n', encoding='utf-8')
+        data = json.loads(config.read_text(encoding='utf-8'))
+        data.setdefault('permissions', {}).setdefault('allow', []).append('Bash(git status:*)')
+        config.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        self.assertEqual(self.module.recover(self.vault, self.state)['status'], 'recovered')
+        self.assertEqual(self.version(), '3.0.1')
+        text = agents.read_text(encoding='utf-8')
+        self.assertIn('Kesintiden sonra eklenen satır.', text)
+        self.assertIn('Use the Markdown source files as truth;', text)
+        self.assertIn('Bash(git status:*)', json.loads(config.read_text(encoding='utf-8'))['permissions']['allow'])
+        self.assertEqual(timeouts(), [value + 1 for value in before])
+        self.assertEqual(self.module.rollback(self.vault, self.state)['status'], 'rolled_back')
+        text = agents.read_text(encoding='utf-8')
+        self.assertIn('Kesintiden sonra eklenen satır.', text)
+        self.assertIn('Use Markdown source files as truth;', text)
+        self.assertNotIn('Use the Markdown source files as truth;', text)
+        self.assertIn('Bash(git status:*)', json.loads(config.read_text(encoding='utf-8'))['permissions']['allow'])
+        self.assertEqual(timeouts(), before)
+
+    def interrupted_first_install(self, vault, state, during=None, at='beyin.py'):
+        """A first install whose write of `at` fails (a file held by a scanner, a power cut)."""
+        installer = load_installer()
+        real = os.replace
+        def replace(source, destination, *args, **kwargs):
+            if Path(destination).name == at:
+                if during is None:
+                    raise OSError('Synthetic interruption')
+                during()
+            return real(source, destination, *args, **kwargs)
+        with patch('os.replace', side_effect=replace):
+            try:
+                return installer.install(vault, state)
+            except OSError:
+                return None
+
+    def test_an_interrupted_first_install_completes_after_a_note_changes(self):
+        vault, state = self.base / 'Yarim Kurulum', self.base / 'yarim-state'
+        vault.mkdir()
+        note = vault / 'eski-not.md'
+        note.write_text('Kurulumdan önceki not.\n', encoding='utf-8')
+        self.assertIsNone(self.interrupted_first_install(vault, state))
+        self.assertTrue((state / 'update-journal.json').exists())
+        self.assertFalse((vault / '.beyin-version').exists())
+        note.write_text('Kesintiden sonra değişen not.\n', encoding='utf-8')
+        result = load_installer().install(vault, state)
+        self.assertEqual(result['status'], 'recovered')
+        self.assertTrue(result['install_resumed'])
+        self.assertTrue((vault / '.beyin-version').exists())
+        receipt = json.loads((state / 'v2-migration.json').read_text(encoding='utf-8'))
+        self.assertEqual(receipt['sources']['eski-not.md'], hashlib.sha256(note.read_bytes()).hexdigest())
+
+    def test_an_interrupted_first_install_completes_after_its_client_wrote_the_settings_file(self):
+        # Claude Code creates .claude/settings.local.json for a permission granted in a chat. The
+        # install had not written that file yet, and every retry stopped on it as "changed".
+        vault, state = self.base / 'Izinli Kurulum', self.base / 'izinli-state'
+        vault.mkdir()
+        self.assertIsNone(self.interrupted_first_install(vault, state))
+        config = vault / '.claude/settings.local.json'
+        self.assertFalse(config.exists())
+        granted = {'permissions': {'allow': ['Bash(git status:*)']}}
+        config.write_text(json.dumps(granted, indent=2), encoding='utf-8')
+        # The person's own AGENTS.md, written before the install reached it, gets the block appended.
+        agents = vault / 'AGENTS.md'
+        self.assertFalse(agents.exists())
+        agents.write_text('# Kendi talimatlarım\n', encoding='utf-8')
+        result = load_installer().install(vault, state)
+        self.assertEqual(result['status'], 'recovered')
+        data = json.loads(config.read_text(encoding='utf-8'))
+        self.assertEqual(data['permissions'], granted['permissions'])
+        self.assertIn('beyin_v3_hook.py', hook_text(data['hooks']))
+        text = agents.read_text(encoding='utf-8')
+        self.assertTrue(text.startswith('# Kendi talimatlarım\n\n<!-- beyin-v3:start -->'), text[:80])
+        # Taking the install back leaves both files as their writers left them.
+        self.assertEqual(self.module.rollback(vault, state)['status'], 'uninstalled')
+        self.assertEqual(json.loads(config.read_text(encoding='utf-8')), granted)
+        self.assertEqual(agents.read_text(encoding='utf-8'), '# Kendi talimatlarım\n')
+
+    def test_rollback_of_a_first_install_recovered_over_edits_takes_out_only_its_own_part(self):
+        # Cut short after every file and the install record were written, before the version
+        # stamp; the person then added a line to the AGENTS.md the install created and granted a
+        # permission in the settings it created. Rollback (here: uninstall) must take out the block
+        # and the hooks, not put them back as "the file before the update".
+        vault, state = self.base / 'Neredeyse Kurulu', self.base / 'neredeyse-state'
+        vault.mkdir()
+        self.assertIsNone(self.interrupted_first_install(vault, state, at='.beyin-version'))
+        self.assertTrue((state / 'v3-install.json').exists())
+        self.assertFalse((vault / '.beyin-version').exists())
+        agents = vault / 'AGENTS.md'
+        agents.write_text(agents.read_text(encoding='utf-8') + '\nKendi satırım.\n', encoding='utf-8')
+        config = vault / '.claude/settings.local.json'
+        data = json.loads(config.read_text(encoding='utf-8'))
+        data['permissions'] = {'allow': ['Bash(git status:*)']}
+        config.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        result = load_installer().install(vault, state)
+        self.assertEqual(result['status'], 'recovered')
+        self.assertIn('Kendi satırım.', agents.read_text(encoding='utf-8'))
+        self.assertIn('Bash(git status:*)', config.read_text(encoding='utf-8'))
+        self.assertEqual(self.module.rollback(vault, state)['status'], 'uninstalled')
+        self.assertEqual(agents.read_text(encoding='utf-8').strip(), 'Kendi satırım.')
+        self.assertEqual(json.loads(config.read_text(encoding='utf-8')), {'permissions': {'allow': ['Bash(git status:*)']}})
+        self.assertFalse((vault / 'CLAUDE.md').exists())
+
+    def test_a_note_edited_during_the_first_install_stops_it_once_and_the_retry_completes(self):
+        vault, state = self.base / 'Yarisan Kurulum', self.base / 'yarisan-state'
+        vault.mkdir()
+        note = vault / 'eski-not.md'
+        note.write_text('Kurulumdan önceki not.\n', encoding='utf-8')
+        installer = load_installer()
+        real = os.replace
+        def replace(source, destination, *args, **kwargs):
+            if Path(destination).name == 'beyin.py':
+                note.write_text('OneDrive başka cihazdan güncelledi.\n', encoding='utf-8')
+            return real(source, destination, *args, **kwargs)
+        with patch('os.replace', side_effect=replace):
+            with self.assertRaises(RuntimeError) as raised:
+                installer.install(vault, state)
+        self.assertEqual(raised.exception.code, 'migration_changed')
+        self.assertFalse((vault / '.beyin-version').exists())
+        result = load_installer().install(vault, state)
+        self.assertEqual(result['status'], 'recovered')
+        self.assertTrue((vault / '.beyin-version').exists())
+
+    def test_rollback_keeps_text_and_settings_added_outside_the_managed_parts(self):
+        self.assertEqual(self.module.update(self.vault, self.state, self.package)['status'], 'updated')
+        added = {'AGENTS.md': '\nGüncellemeden sonra eklenen talimat.\n',
+                 'CLAUDE.md': '\nClaude için kendi notum.\n',
+                 '.codex/config.toml': '\n[profiles.benim]\nmodel = "gpt-5"\n'}
+        for name, text in added.items():
+            path = self.vault / name
+            path.write_text(path.read_text(encoding='utf-8') + text, encoding='utf-8')
+        gemini = self.vault / '.gemini/settings.json'
+        settings = json.loads(gemini.read_text(encoding='utf-8'))
+        settings['ui'] = {'theme': 'Atom One'}
+        gemini.write_text(json.dumps(settings, indent=2), encoding='utf-8')
+        self.assertEqual(self.module.rollback(self.vault, self.state)['status'], 'rolled_back')
+        self.assertEqual(self.version(), '0.0.0')
+        for name, text in added.items():
+            self.assertIn(text.strip(), (self.vault / name).read_text(encoding='utf-8'), name)
+        self.assertEqual(json.loads(gemini.read_text(encoding='utf-8'))['ui'], {'theme': 'Atom One'})
+
+    def test_an_engine_ahead_of_the_latest_release_is_ahead_not_a_downgrade(self):
+        newer = build_package(self.base / 'newer.zip', '3.0.5', self.env)
+        self.assertEqual(self.module.update(self.vault, self.state, newer)['status'], 'updated')
+        latest = {'version': '3.0.1'}
+        with patch.object(self.module, '_release', return_value=(latest, None)), \
+                patch.object(self.module, '_download') as download:
+            self.assertEqual(self.module.update(self.vault, self.state),
+                             {'status': 'ahead', 'current_version': '3.0.5', 'version': '3.0.1'})
+            self.assertEqual(self.module.update(self.vault, self.state, check=True)['status'], 'ahead')
+        download.assert_not_called()
+        self.assertEqual(self.module.update(self.vault, self.state, self.package, check=True)['status'], 'ahead')
+        # Only an explicit older package, applied, is refused, and it says how to go back.
+        with self.assertRaisesRegex(ValueError, 'beyin.py rollback'):
+            self.module.update(self.vault, self.state, self.package)
+        self.assertEqual(self.version(), '3.0.5')
+        entry = load_entry()
+        self.assertIn('ileride', entry.human_result({'status': 'ahead', 'current_version': '3.0.5', 'version': '3.0.1'}, 'update'))
+
+    def test_a_package_of_the_installed_version_with_other_code_refreshes_it(self):
+        # Several 1.0.32 builds went to testers; the updater took each for "noop" (install-update-1).
+        self.assertEqual(self.module.update(self.vault, self.state, self.package)['status'], 'updated')
+        voice = self.vault / '.claude/scripts/beyin_v3_ses.py'
+        def fixed(files):
+            name = 'template/.claude/scripts/beyin_v3_ses.py'
+            files[name] += b'\n# The same version, a later build.\n'
+            metadata = json.loads(files['manifest.json'])
+            metadata['files'][name] = hashlib.sha256(files[name]).hexdigest()
+            files['manifest.json'] = json.dumps(metadata).encode()
+        later = rewrite_zip(self.package, self.base / 'same-version-later.zip', fixed)
+        check = self.module.update(self.vault, self.state, later, check=True)
+        self.assertEqual((check['status'], check.get('refresh')), ('available', True))
+        report = self.module.update(self.vault, self.state, later)
+        self.assertEqual((report['status'], report['from_version'], report['version']), ('refreshed', '3.0.1', '3.0.1'))
+        self.assertTrue(voice.read_bytes().endswith(b'# The same version, a later build.\n'))
+        self.assertEqual(self.module.update(self.vault, self.state, later)['status'], 'noop')
+        self.assertEqual(self.module.update(self.vault, self.state, later, check=True)['status'], 'noop')
+        # A script edited by hand is not a reason to refresh: the record says what was written.
+        voice.write_bytes(voice.read_bytes() + b'# benim\n')
+        self.assertEqual(self.module.update(self.vault, self.state, later)['status'], 'noop')
+        self.assertTrue(voice.read_bytes().endswith(b'# benim\n'))
+
+    def test_update_refreshes_an_installed_theme_and_leaves_its_switch_alone(self):
+        sys.path.insert(0, str(ROOT / 'template/.claude/scripts'))
+        self.addCleanup(sys.path.remove, str(ROOT / 'template/.claude/scripts'))
+        import beyin_v3_tema as tema
+        tema.install(self.vault)
+        snippet = self.vault / '.obsidian/snippets/ananas.css'
+        appearance = self.vault / '.obsidian/appearance.json'
+        appearance.write_text('{"enabledCssSnippets": []}\n', encoding='utf-8')  # switched off in Obsidian
+        snippet.write_text(tema.OURS + ' an older edition */\n', encoding='utf-8')
+        report = self.module.update(self.vault, self.state, self.package)
+        self.assertEqual(report['theme'], 'yenilendi')
+        self.assertEqual(snippet.read_text(encoding='utf-8'), tema.css())
+        self.assertEqual(appearance.read_text(encoding='utf-8'), '{"enabledCssSnippets": []}\n')
+
+    def test_a_busy_engine_is_named_for_the_desktop_app(self):
+        import sqlite3
+        holder = sqlite3.connect(self.state / 'update-lock.sqlite3')
+        holder.execute('BEGIN IMMEDIATE')
+        try:
+            result = run_python(self.vault / 'beyin.py', ['update', '--package', self.package], self.vault, self.env)
+        finally:
+            holder.close()
+        self.assertEqual(result.returncode, 1)
+        error = json.loads(result.stderr.decode('utf-8').strip().splitlines()[-1])
+        self.assertEqual(error['code'], 'updater_busy')
+        self.assertIn('birkaç saniye sonra yeniden dene', error['message'])
+        self.assertEqual(self.version(), '0.0.0')
+
+
+def load_installer():
+    spec = importlib.util.spec_from_file_location('beyin_update_test_installer', ROOT / 'scripts/install_v3.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_entry():
+    spec = importlib.util.spec_from_file_location('beyin_update_test_entry', ROOT / 'scripts/beyin_entry.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class UserRegionTest(unittest.TestCase):
+    """The splice and merge recovery and rollback use for files the person shares with the engine."""
+
+    def setUp(self):
+        self.module = load_updater()
+
+    def test_markers_and_files_match_the_installer(self):
+        installer = load_installer()
+        self.assertEqual((self.module.START, self.module.END), (installer.START, installer.END))
+        self.assertEqual(set(self.module.USER_REGION_FILES), set(installer.USER_REGION_FILES))
+
+    def block(self, text):
+        return self.module.START + '\n' + text + '\n' + self.module.END
+
+    def test_a_block_is_replaced_in_place_around_the_persons_text(self):
+        base = ('# Benim\n\n' + self.block('eski') + '\n').encode()
+        current = ('# Benim\nyeni satırım\n\n' + self.block('eski') + '\n\nsonra da bu\n').encode().replace(b'\n', b'\r\n')
+        target = ('# Benim\n\n' + self.block('yeni') + '\n').encode()
+        self.assertEqual(self.module._splice_block(base, current, target),
+                         ('# Benim\nyeni satırım\n\n' + self.block('yeni') + '\n\nsonra da bu\n').encode())
+
+    def test_an_appended_block_is_appended_and_taken_back(self):
+        base, target = b'# Benim\n', ('# Benim\n\n' + self.block('blok') + '\n').encode()
+        current = b'# Benim\nyeni\n'
+        spliced = self.module._splice_block(base, current, target)
+        self.assertEqual(spliced, ('# Benim\nyeni\n\n' + self.block('blok') + '\n').encode())
+        # Rollback runs the same step backwards: the block goes, the person's line stays.
+        self.assertEqual(self.module._splice_block(target, spliced, base), b'# Benim\nyeni\n')
+
+    def test_an_edited_block_or_an_unknown_step_is_no_splice(self):
+        base = (self.block('eski') + '\n').encode()
+        self.assertIsNone(self.module._splice_block(base, (self.block('elle') + '\n').encode(),
+                                                    (self.block('yeni') + '\n').encode()))
+        self.assertIsNone(self.module._splice_block(b'a\n', b'b\n', b'c\n'))
+
+    def test_settings_merge_keeps_the_persons_keys_and_refuses_overlap(self):
+        base = b'{"hooks": {"Stop": [1]}, "permissions": {"allow": ["a"]}}'
+        current = b'{"hooks": {"Stop": [1]}, "permissions": {"allow": ["a", "b"]}}'
+        target = b'{"hooks": {"Stop": [2]}, "permissions": {"allow": ["a"]}}'
+        merged = json.loads(self.module._user_region_merge('.claude/settings.local.json', base, current, target))
+        self.assertEqual(merged, {'hooks': {'Stop': [2]}, 'permissions': {'allow': ['a', 'b']}})
+        self.assertIsNone(self.module._user_region_merge('.claude/settings.local.json', base,
+                                                         b'{"hooks": {"Stop": [3]}}', target))
+        self.assertIsNone(self.module._user_region_merge('.claude/scripts/beyin_v3.py', b'a', b'b', b'c'))
+
+    def test_a_single_line_managed_part_must_still_be_there(self):
+        merge = self.module._user_region_merge
+        self.assertEqual(merge('CLAUDE.md', b'@AGENTS.md\n', b'@AGENTS.md\nbenim\n', b'@AGENTS.md\n'), b'@AGENTS.md\nbenim\n')
+        self.assertIsNone(merge('CLAUDE.md', b'@AGENTS.md\n', b'yalniz benim\n', b'@AGENTS.md\n'))
+        toml = b'[features]\nhooks = true\n'
+        self.assertEqual(merge('.codex/config.toml', toml, toml + b'model = "x"\n', toml), toml + b'model = "x"\n')
+        self.assertIsNone(merge('.codex/config.toml', toml, b'model = "x"\n', toml))
+
+
+class ReleaseVersionTest(unittest.TestCase):
+    def test_the_app_and_the_engine_it_carries_are_one_version(self):
+        # The installer is named after the first, the vault's engine told apart by the second;
+        # release.yml refuses to publish them apart (install-update-2).
+        version = (ROOT / 'VERSION').read_text(encoding='utf-8').strip()
+        self.assertEqual(json.loads((ROOT / 'desktop/package.json').read_text(encoding='utf-8'))['version'], version)
 
 
 if __name__ == '__main__':

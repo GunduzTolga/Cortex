@@ -9,6 +9,7 @@ import { useApp } from '../store/app';
 import { Button, Spinner } from '../ui/ui';
 import { folderLabel, nameLabel, useNotes } from './notesStore';
 import { useConfirm } from './NotesMenus';
+import { leaveOpenNotes } from './openNotes';
 
 /**
  * The vault's bin on this screen (electron/services/vaultNotes.ts keeps it in
@@ -45,6 +46,8 @@ export function useTrash() {
   return async (path: string, folder?: { count: number }) => {
     const name = nameOf(path);
     if (folder && !(await confirm({ title: t('notes.trash.title', { name }), detail: t('notes.trash.folder', { count: folder.count }), action: t('notes.trash.action') }))) return;
+    // A note open on screen is saved first, so the bin holds what was typed last, and its pane, emptied, finds nothing left to save.
+    await leaveOpenNotes(path);
     try {
       const { id } = await window.cortex.notes.trash(path);
       useNotes.getState().removed(path);
