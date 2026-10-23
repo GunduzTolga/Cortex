@@ -1,11 +1,14 @@
 """Optional Ananas Obsidian theme (beyin.py tema): generated data, safe install, installed entry."""
+import contextlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from v3_package_helpers import inherited_env
 
@@ -23,14 +26,33 @@ def generator():
 
 
 class TemaDataTest(unittest.TestCase):
+    def check(self, gen):
+        """`ananas_tema.py kontrol` in this process: (exit code, what it said on stderr)."""
+        said = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(said):
+            code = gen.main(['kontrol'])
+        return code, said.getvalue()
+
     def test_packaged_data_matches_the_design_source(self):
-        # tema/ananas/ is the design source; the packaged module must be regenerated from it.
+        # tema/ananas/ is the design source; every module generated from it (the theme, Pyn's brand,
+        # the yakala window's fonts) must be regenerated from it. The generator's own check walks the
+        # targets it writes, so a module it gains is compared here too (misc-scripts-4).
         gen = generator()
-        self.assertEqual(gen.MODULE.read_text(encoding='utf-8'), gen.module_text(),
-                         'Run: py -3 scripts/ananas_tema.py uret')
-        self.assertEqual(gen.BRAND_MODULE.read_text(encoding='utf-8'), gen.brand_text(),
-                         'Run: py -3 scripts/ananas_tema.py uret')
+        code, said = self.check(gen)
+        self.assertEqual(code, 0, said)
         self.assertEqual(tema.css(), gen.css())
+
+    def test_the_check_covers_every_generated_module(self):
+        # The fonts were the module no test compared: same-size TTFs with other bytes went unseen.
+        gen = generator()
+        with tempfile.TemporaryDirectory(prefix='v3-tema-kontrol-') as tmp:
+            for name in ('MODULE', 'BRAND_MODULE', 'FONT_MODULE'):
+                stale = Path(tmp) / getattr(gen, name).name
+                stale.write_text('# eski\n', encoding='utf-8')
+                with mock.patch.object(gen, name, stale):
+                    code, said = self.check(gen)
+                self.assertEqual(code, 1, name)
+                self.assertIn(stale.name, said)
 
     def test_brand_marks_are_real_images(self):
         import base64

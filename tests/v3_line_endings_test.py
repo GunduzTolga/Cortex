@@ -97,33 +97,78 @@ class LineEndingGateTest(unittest.TestCase):
     def rollback(self):
         return self.updater.rollback(self.vault, self.state)
 
+    def gates(self):
+        return (('install', self.reinstall), ('uninstall', self.uninstall), ('rollback', self.rollback))
+
+    def sample(self):
+        """The managed files the whole matrix of cases and gates runs on: every file the installer or
+        the updater handles by its name (a block in AGENTS.md and CLAUDE.md, the hooks in a JSON
+        settings file, config.toml's one line, the runtime pin, the launchers and plugins carrying a
+        machine's paths, the CRLF launcher on Windows), and one of each other kind, by its client
+        folder and extension (an engine script, each client's skills). Running every file on every
+        gate grew with each file the engine gained and made this the slowest test of the suite
+        (tests-ci-4); a file of a kind already sampled goes through the same code."""
+        named = (set(self.installer.USER_REGION_FILES) | set(self.installer.MACHINE_FILES)
+                 | set(self.updater.USER_REGION_FILES) | {'beyin.py', '.beyin-version', '.beyin-runtime.json'})
+        chosen, kinds = [], set()
+        for name in self.managed:
+            kind = (Path(name).parts[0], Path(name).suffix)
+            if name in named or kind not in kinds:
+                chosen.append(name)
+                kinds.add(kind)
+        return chosen
+
     def test_managed_set_is_not_empty(self):
         self.assertGreater(len(self.managed), 30)
 
-    def test_crlf_rewrite_keeps_every_gate_open(self):
+    def test_the_sample_covers_every_kind_of_managed_file(self):
+        sample = self.sample()
+        for name in ('AGENTS.md', 'CLAUDE.md', 'beyin.py', '.claude/settings.local.json', '.codex/config.toml',
+                     '.claude/scripts/beyin_v3.py', '.claude/skills/beyin/SKILL.md'):
+            self.assertIn(name, sample)
+        launchers = [name for name in self.managed if name.startswith('Beyni G')]  # the CRLF one on Windows
+        self.assertTrue(launchers)
+        self.assertLessEqual(set(launchers), set(sample))
+        kinds = {(Path(name).parts[0], Path(name).suffix) for name in sample}
         for name in self.managed:
-            for gate, run in (('install', self.reinstall), ('uninstall', self.uninstall), ('rollback', self.rollback)):
-                with self.subTest(file=name, gate=gate):
+            self.assertIn((Path(name).parts[0], Path(name).suffix), kinds, name)
+        self.assertLess(len(sample), len(self.managed) / 2, 'a sample, or this test is the slowest again')
+
+    def test_crlf_rewrite_keeps_every_gate_open(self):
+        # Every managed file rewritten at once, each gate run once: a gate that refused any one
+        # file's rewrite raises here and names that file, as it did when run on that file alone.
+        for gate, run in self.gates():
+            with self.subTest(gate=gate):
+                for name in self.managed:
                     self.crlf(name)
-                    try:
-                        run()
-                    finally:
-                        self.restore()
+                try:
+                    run()
+                finally:
+                    self.restore()
 
     def test_real_change_still_conflicts_on_every_gate(self):
-        for name in self.managed:
+        for name in self.sample():
             for case in ('edited', 'edited_crlf', 'deleted'):
-                for gate, run in (('install', self.reinstall), ('uninstall', self.uninstall), ('rollback', self.rollback)):
+                for gate, run in self.gates():
                     with self.subTest(file=name, case=case, gate=gate):
-                        self.mutate(name, case)
-                        before = self.fingerprint()
-                        try:
-                            with self.assertRaises(ValueError):
-                                run()
-                            # A conflict must stop the gate before it writes anything.
-                            self.assertEqual(self.fingerprint(), before)
-                        finally:
-                            self.restore()
+                        self.conflicts(name, case, run)
+
+    def test_every_managed_file_is_compared(self):
+        # Outside the sample each file still has its own check: rewritten, it stops a reinstall.
+        for name in self.managed:
+            with self.subTest(file=name):
+                self.conflicts(name, 'edited', self.reinstall)
+
+    def conflicts(self, name, case, run):
+        self.mutate(name, case)
+        before = self.fingerprint()
+        try:
+            with self.assertRaises(ValueError):
+                run()
+            # A conflict must stop the gate before it writes anything.
+            self.assertEqual(self.fingerprint(), before)
+        finally:
+            self.restore()
 
     def test_conflict_message_names_the_case(self):
         # Install and rollback say it in Turkish, named for the desktop app (C1); uninstall is a

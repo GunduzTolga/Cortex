@@ -23,6 +23,8 @@ import unittest
 from unittest import mock
 import zipfile
 
+from v3_package_helpers import require_numpy
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'template/.claude/scripts'
 sys.path.insert(0, str(SCRIPTS))
@@ -1795,8 +1797,7 @@ class VulkanServerTest(unittest.TestCase):
         self.assertEqual(len([entry for entry in self.seen() if 'argv' in entry]), 1, 'whisper.cpp not started on the processor')
 
     def test_a_cards_speed_is_measured_on_the_whole_window(self):
-        if importlib.util.find_spec('numpy') is None:
-            self.skipTest('numpy yok')
+        require_numpy(self)
         asked = []
 
         class Model:
@@ -2459,11 +2460,7 @@ class RecorderTest(unittest.TestCase):
     """The helper's microphone on real sample arrays (numpy, which the engine's own Python may lack)."""
 
     def setUp(self):
-        try:
-            import numpy
-        except ImportError:
-            self.skipTest('numpy yok')
-        self.np = numpy
+        self.np = require_numpy(self)
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-kayit-')
         self.addCleanup(self.tmp.cleanup)
         spec = importlib.util.spec_from_file_location('isci_kayit_testi', ses.write_worker(Path(self.tmp.name) / 'state'))

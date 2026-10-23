@@ -19,7 +19,7 @@ from unittest import mock
 from urllib.error import URLError
 import wave
 
-from v3_package_helpers import inherited_env
+from v3_package_helpers import inherited_env, require_numpy
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'template/.claude/scripts'
@@ -987,11 +987,7 @@ class WorkerFileTest(unittest.TestCase):
     """The helper's `--dosya`: a recorded file read and written out (numpy, which the engine's own Python may lack)."""
 
     def setUp(self):
-        try:
-            import numpy
-        except ImportError:
-            self.skipTest('numpy yok')
-        self.np = numpy
+        self.np = require_numpy(self)
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-dosya-isci-')
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / 'state'
@@ -1006,7 +1002,7 @@ class WorkerFileTest(unittest.TestCase):
             sink.setnchannels(1)
             sink.setsampwidth(2)
             sink.setframerate(16000)
-            sink.writeframes((numpy.sin(numpy.arange(16000) / 8) * 8000).astype('<i2').tobytes())
+            sink.writeframes((self.np.sin(self.np.arange(16000) / 8) * 8000).astype('<i2').tobytes())
 
     def test_a_file_is_read_with_ffmpeg_when_pyav_is_not_there(self):
         import shutil

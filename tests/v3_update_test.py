@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import stat
 from pathlib import Path
 import sys
@@ -29,6 +30,22 @@ def load_updater():
 
 
 class OfflineUpdateTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # The 3.0.1 package every test updates to, built once for the class: a release build and a
+        # rewrite in every test's setUp made the same bytes over again (tests-ci-4). Each test gets
+        # its own copy, so one that rewrites its package changes no other test's.
+        built = tempfile.TemporaryDirectory(prefix='v3-update-package-')
+        cls.addClassCleanup(built.cleanup)
+        cls.built = build_package(Path(built.name) / 'release.zip', '3.0.1', isolated_env(Path(built.name) / 'home'))
+        def changed_runtime(files):
+            name = 'template/.claude/scripts/beyin_v3.py'
+            files[name] += b'\n# Synthetic offline release change.\n'
+            metadata = json.loads(files['manifest.json'])
+            metadata['files'][name] = hashlib.sha256(files[name]).hexdigest()
+            files['manifest.json'] = json.dumps(metadata).encode()
+        rewrite_zip(cls.built, cls.built, changed_runtime)
+
     def setUp(self):
         self.module = load_updater()
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-update-test-')
@@ -42,14 +59,7 @@ class OfflineUpdateTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr.decode('utf-8', errors='replace'))
         self.assertEqual(self.version(), '0.0.0')
         self.note = self.vault / 'user-note.md';self.note.write_text('Synthetic original user note.\n')
-        self.package = build_package(self.base / 'release.zip', '3.0.1', self.env)
-        def changed_runtime(files):
-            name = 'template/.claude/scripts/beyin_v3.py'
-            files[name] += b'\n# Synthetic offline release change.\n'
-            metadata = json.loads(files['manifest.json'])
-            metadata['files'][name] = hashlib.sha256(files[name]).hexdigest()
-            files['manifest.json'] = json.dumps(metadata).encode()
-        rewrite_zip(self.package, self.package, changed_runtime)
+        self.package = Path(shutil.copyfile(self.built, self.base / 'release.zip'))
 
     def version(self):
         return (self.vault / '.beyin-version').read_text(encoding='utf-8').strip()
@@ -587,6 +597,10 @@ class OfflineUpdateTest(unittest.TestCase):
         self.assertEqual(doctor()['status'], 'ahead')
 
     def test_windows_permission_error_restores_write_mode_during_apply(self):
+        if hasattr(os, 'geteuid') and os.geteuid() == 0:
+            # os.access says every file is writable to root, so neither the emulated refusal nor
+            # the updater's own read-only check (made for Windows' attribute) sees the lock.
+            self.skipTest('root writes a file whatever its mode')
         file_path = self.vault / 'readonly_file.txt'
         file_path.write_text('new content', encoding='utf-8')
         os.chmod(file_path, stat.S_IREAD)
@@ -616,6 +630,8 @@ class OfflineUpdateTest(unittest.TestCase):
         self.assertFalse(os.access(file_path, os.W_OK), 'the read-only flag is the user\'s lock')
 
     def test_update_and_rollback_keep_a_read_only_managed_file_locked(self):
+        if hasattr(os, 'geteuid') and os.geteuid() == 0:
+            self.skipTest('root writes a file whatever its mode')
         version = self.vault / '.beyin-version'
         os.chmod(version, stat.S_IREAD)
         original_replace = os.replace

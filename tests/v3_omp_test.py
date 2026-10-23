@@ -13,6 +13,8 @@ from unittest.mock import patch
 from v3_package_helpers import inherited_env
 
 ROOT = Path(__file__).resolve().parents[1]
+# CI installs Bun on Ubuntu only (v3.yml): the hook is the same TypeScript on every system, and
+# the macOS and Windows jobs skip the cases that drive it.
 BUN = shutil.which('bun')
 
 # Drives the generated hook the way OMP does: import the TS module, register its

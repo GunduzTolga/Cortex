@@ -20,6 +20,13 @@ HEAD = '# Kullanıcının düzeltmeleri\n\n## Özet\nSUMMARY_CANARY: kısa yaz, 
 MARKER = re.compile(r'\[truncated: rules (\d+)-(\d+) \((\d+) of (\d+)\) omitted here; read source\]')
 
 
+# The engine and the companion import their siblings by name, beyin_v3 among them only when a
+# call needs it: the folder stays on the path, so this file also runs on its own (tests-ci-3).
+SCRIPTS = str(ROOT / 'template/.claude/scripts')
+if SCRIPTS not in sys.path:
+    sys.path.insert(0, SCRIPTS)
+
+
 def load(name, relative):
     spec = importlib.util.spec_from_file_location(name, ROOT / relative)
     module = importlib.util.module_from_spec(spec)

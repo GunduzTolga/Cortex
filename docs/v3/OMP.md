@@ -50,6 +50,8 @@ mutates or deletes the file.
 
 `tests/v3_omp_test.py` installs a synthetic vault, imports the generated hook in Bun with a
 fake OMP `pi` object and drives every mapped handler; the Bun cases skip when `bun` is absent.
+CI installs Bun on its Ubuntu jobs (`.github/workflows/v3.yml`), so they run there; the macOS and
+Windows jobs skip them, as the generated TypeScript is the same text on every system.
 One real OMP 18.2.8 session in a temporary synthetic vault returned a canary fact from
 injected context with tool use prohibited by the prompt, and the queue acknowledged the
 lifecycle events with no hook error. This does not establish other OMP delivery surfaces.

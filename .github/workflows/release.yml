@@ -22,9 +22,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request stops the run its older one started (tests-ci-5); a release run
+# by hand is never cut short.
 concurrency:
   group: v3-release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -116,10 +118,19 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: v3-release-bundle
+      # On a pull request v3.yml has just run the same suite and gates on the same systems and
+      # Pythons (its paths hold all of these), so here they run before a release only: twice per
+      # push doubled the wait and gave a flaky test two chances (tests-ci-5). The package's own
+      # install, upgrade and rollback below run on pull requests too.
+      - name: numpy for the voice helper's tests
+        if: github.event_name == 'workflow_dispatch'
+        run: python -m pip install --disable-pip-version-check numpy
       - name: Offline contracts
+        if: github.event_name == 'workflow_dispatch'
         # A hang writes where every thread stands, a few minutes before the job's own limit would only cancel it.
         run: python scripts/run_v3_tests.py --hang-after ${{ matrix.os == 'windows-latest' && 3000 || 1500 }}
       - name: Retrieval gates
+        if: github.event_name == 'workflow_dispatch'
         run: python scripts/evaluate_v3.py
       - name: Exact ZIP installation, upgrade from 0.9.0, rollback and recovery
         shell: bash
