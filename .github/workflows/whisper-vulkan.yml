@@ -5,9 +5,17 @@ name: whisper-vulkan
 # for Windows, none for Vulkan, so Cortex builds this one itself from a pinned release.
 #
 # A push that changes this file builds and keeps the archive as the run's artifact. Run by hand
-# with "publish", the archive goes to a pre-release of its own (whisper-vulkan-<version>): a
-# pre-release is never "latest", so Cortex's updater, which reads the latest release, does not
-# take it for a Cortex version.
+# with "publish", the archive goes to a pre-release of its own
+# (whisper-vulkan-<version>-vk<Vulkan SDK version>): a pre-release is never "latest", so Cortex's
+# updater, which reads the latest release, does not take it for a Cortex version.
+#
+# A published build is never replaced. Cortex pins each one by its SHA-256 (VULKAN_BUILD in
+# template/.claude/scripts/beyin_v3_ses.py), and an MSVC build zipped again is never the same
+# bytes: replaced under the same name, every AMD and Intel card in every shipped version would
+# refuse it and write on the processor, the slow path. The tag names what changes the bytes; a
+# build that is there already makes the publish fail, and taking up a new one is an explicit
+# change of the url and sha256 there. (whisper-vulkan-1.9.5, published before the tag carried the
+# SDK's version, stays as it is: shipped versions pin it.)
 
 on:
   push:
@@ -90,9 +98,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="whisper-vulkan-${WHISPER_VERSION}"
+          set -euo pipefail
+          tag="whisper-vulkan-${WHISPER_VERSION}-vk${VULKAN_SDK_VERSION}"
+          # grep reads all of it (no -q): one that stops at the match could leave gh a broken pipe,
+          # which pipefail would take for "not there".
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -x 'whisper-vulkan-win-x64.zip' >/dev/null; then
+            echo "$tag already has whisper-vulkan-win-x64.zip; refusing to replace a published build (Cortex pins its SHA-256)." >&2
+            exit 1
+          fi
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
-              --title "whisper.cpp ${WHISPER_VERSION} (Vulkan, Windows)" \
-              --notes "Yakala'da sesle yazma için, AMD ve Intel ekran kartlarında: whisper.cpp v${WHISPER_VERSION}, Vulkan ile derlendi. beyin.py ses kur bunu kendisi indirir; elle bir şey yapman gerekmez. Lisans: MIT (LICENSE-whisper.cpp.txt)."
-          gh release upload "$tag" whisper-vulkan-win-x64.zip whisper-vulkan-win-x64.zip.sha256 --repo "$GITHUB_REPOSITORY" --clobber
+              --title "whisper.cpp ${WHISPER_VERSION} (Vulkan ${VULKAN_SDK_VERSION}, Windows)" \
+              --notes "Yakala'da sesle yazma için, AMD ve Intel ekran kartlarında: whisper.cpp v${WHISPER_VERSION}, Vulkan SDK ${VULKAN_SDK_VERSION} ile derlendi. beyin.py ses kur bunu kendisi indirir; elle bir şey yapman gerekmez. Lisans: MIT (LICENSE-whisper.cpp.txt)."
+          # Never with the clobber flag: without it gh refuses an asset name that is there already.
+          gh release upload "$tag" whisper-vulkan-win-x64.zip whisper-vulkan-win-x64.zip.sha256 --repo "$GITHUB_REPOSITORY"

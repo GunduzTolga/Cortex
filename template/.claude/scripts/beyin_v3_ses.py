@@ -7,20 +7,23 @@ has (`engine_for`):
 - an NVIDIA card: faster-whisper on CUDA, its libraries from pip, no CUDA install needed;
 - an AMD or Intel card: whisper.cpp's own server, built for Vulkan by Cortex's whisper-vulkan
   workflow (whisper.cpp ships no Vulkan build for Windows), the model held warm on the card;
-- neither: faster-whisper on the processor, a few seconds a sentence.
+- neither: faster-whisper on the processor, a few seconds a sentence. So does a card that would
+  not start, or one `kur` found slower than the processor's quick model.
 
 A small Turkish Vosk model listens only for the wake phrase, so the processor is not kept busy by
 Whisper while nobody is talking to Pyn.
 
 The engine stays standard-library only: the voice runs in its own virtual environment, as a
 helper process that yakala's resident listener talks to one JSON line at a time. The helper's
-source is WORKER_SOURCE below, a string: written out into state/ses with the environment it
-runs in, so its packages are never imported by the engine. Nothing is installed unless the
-user runs `ses kur`; everything it installs (the environment, whisper.cpp, the models) lives
-under state/ses, outside the vault, so a synced vault never carries gigabytes of models or one
-machine's packages to another.
+source is WORKER_SOURCE below, a string: written out into the voice folder with the environment
+it runs in, so its packages are never imported by the engine. Nothing is installed unless the
+user runs `ses kur`; everything it installs (the environment, whisper.cpp, the models) lives in
+one voice folder for the person (`ses_dir`: %LOCALAPPDATA%\\beyin-v3\\ses, shared by every vault),
+outside the vault, so a synced vault never carries gigabytes of models or one machine's packages
+to another.
 """
 import argparse
+import collections
 import contextlib
 import difflib
 import json
@@ -49,7 +52,9 @@ BASE_PACKAGES = ('sounddevice>=0.5', 'numpy', 'vosk>=0.3.45')
 # Reading a recorded file (a Telegram voice note is Ogg Opus): faster-whisper brings PyAV itself,
 # whisper.cpp's environment needs it on its own.
 DECODE_PACKAGES = ('av',)
-# Writing on CUDA or on the processor; the Vulkan engine is whisper.cpp and needs neither.
+# Writing on CUDA or on the processor. The Vulkan engine writes with whisper.cpp, and has it too:
+# where the card cannot start, the processor writes with the quick model (CPU_MODELS), not with
+# whisper.cpp's large-v3-turbo, which took 15-30 seconds a sentence there.
 FASTER_PACKAGES = ('faster-whisper>=1.2',)
 # Only with an NVIDIA card: CUDA's own libraries, from pip, so no CUDA install is needed.
 NVIDIA_PACKAGES = ('nvidia-cublas-cu12', 'nvidia-cudnn-cu12>=9,<10')
@@ -65,7 +70,8 @@ GGML_MODEL = {
     'boyut': 1624555275,
 }
 # whisper.cpp built for Vulkan by .github/workflows/whisper-vulkan.yml, a pre-release of its own
-# (published 2026-10-15). A build already in state/ses/whisper-vulkan is used as it is.
+# (published 2026-10-15), never replaced once published: another build gets a tag of its own and is
+# taken up by changing the url and sha256 here. A build already in the voice folder is used as it is.
 VULKAN_BUILD = {
     'surum': '1.9.5',
     'url': 'https://github.com/GunduzTolga/Cortex/releases/download/whisper-vulkan-1.9.5/whisper-vulkan-win-x64.zip',
@@ -133,8 +139,105 @@ def download_size(engine, config):
     return ('%.1f' % gb).replace('.', ',')
 
 
+# Another folder for the voice than the person's own (SES_DIR beside every vault's state).
+SES_ENV = 'BEYIN_SES_DIR'
+
+
+def user_base():
+    """The person's folder every vault's state sits in (beyin_v3.default_state's parent)."""
+    if sys.platform == 'win32':
+        base = Path(os.environ.get('LOCALAPPDATA', str(Path.home() / 'AppData/Local')))
+    elif sys.platform == 'darwin':
+        base = Path.home() / 'Library/Application Support'
+    else:
+        base = Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state')))
+    return base / 'beyin-v3'
+
+
+def _beside_others(state):
+    """Whether a state is one of the person's default ones, beside every other vault's."""
+    return os.path.normcase(os.path.abspath(str(Path(state).parent))) == os.path.normcase(os.path.abspath(str(user_base())))
+
+
+def _shared_home(state):
+    """The person's voice folder for this state, or None for a state kept somewhere of its own (a
+    pinned one elsewhere, a test's): that one keeps its voice beside it, as every state did."""
+    chosen = os.environ.get(SES_ENV)
+    if chosen:
+        return Path(os.path.abspath(chosen))  # the helper works in it (chdir): never relative
+    return user_base() / SES_DIR if _beside_others(state) else None
+
+
+def _installed_in(folder):
+    return (folder / 'venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')).is_file() and (folder / MARKER).is_file()
+
+
+# A state's own install this process could not move to the person's folder: used where it is.
+_KEPT = set()
+
+
+def _earlier_installs(state):
+    """Installs a vault's own state holds from before the voice had one folder: this state's, then
+    another vault's beside it (the vault opened first after the update need not be the one voice
+    was set up in)."""
+    own = Path(state) / SES_DIR
+    found = [own] if _installed_in(own) else []
+    if _beside_others(state):
+        try:
+            found += [folder for folder in sorted(user_base().glob('*/' + SES_DIR))
+                      if folder != own and re.fullmatch('[0-9a-f]{16}', folder.parent.name) and _installed_in(folder)]
+        except OSError:
+            pass
+    return found
+
+
+def _adopt(own, home):
+    """A state's own install made the person's, in one rename on the same disk; False where it
+    cannot be (another disk, a helper running from it). What the person's folder held without an
+    install (a settings file, a failed install's leftovers) is set aside and removed."""
+    if _installed_in(home):
+        return True  # another process (the listener, the desktop app's `ses durum`) moved one there just now
+    aside = None
+    try:
+        home.parent.mkdir(parents=True, exist_ok=True)
+        if home.exists():
+            aside = home.with_name(home.name + '.onceki')
+            shutil.rmtree(aside, ignore_errors=True)
+            os.replace(home, aside)
+        os.replace(own, home)
+    except OSError:
+        if aside is not None and not home.exists():
+            with contextlib.suppress(OSError):
+                os.replace(aside, home)
+        return False
+    if aside is not None:
+        shutil.rmtree(aside, ignore_errors=True)
+    return True
+
+
 def ses_dir(state):
-    return Path(state) / SES_DIR
+    """Where the voice lives: its environment, whisper.cpp, the models, the settings and the logs.
+
+    One folder for the person, beside every vault's state (%LOCALAPPDATA%\\beyin-v3\\ses), or
+    BEYIN_SES_DIR: kept in a vault's own state, a vault opened next said voice was not set up and
+    downloaded gigabytes again. An install a state holds from before is moved there the first time
+    it is looked for; where it cannot be, it is used where it is, never downloaded again.
+    """
+    own = Path(state) / SES_DIR
+    home = _shared_home(state)
+    if home is None:
+        return own
+    if _installed_in(home):
+        return home
+    for earlier in _earlier_installs(state):
+        key = (str(earlier), str(home))
+        if key not in _KEPT:
+            if _adopt(earlier, home):
+                return home
+            _KEPT.add(key)  # tried once in this process: not again and again while it runs
+        # Not moved by this process, perhaps by another one meanwhile: then it is gone from here.
+        return home if _installed_in(home) else earlier
+    return home
 
 
 def venv_python(state):
@@ -179,10 +282,16 @@ MOST_PHRASES, LONGEST_PHRASE = 8, 40
 LIVE_SETTINGS = ('komutlar', 'adla_kaydet', 'sessizlik_sn', 'en_uzun_sn', 'surekli_bekle_sn', 'ipucu', 'uyandirma_sozu')
 
 
+# The settings file's own version. Without one it was written whole, every default in it, by a
+# version before 1.0.33: its processor model is the old default, large-v3-turbo, not a choice.
+CONFIG_VERSION = 2
+
+
 def load_config(state):
     config = json.loads(json.dumps(DEFAULTS))
+    path = ses_dir(state) / CONFIG
     try:
-        saved = json.loads((ses_dir(state) / CONFIG).read_text(encoding='utf-8'))
+        saved = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return config
     if isinstance(saved, dict):
@@ -192,6 +301,15 @@ def load_config(state):
                                            if isinstance(v, list) and list(v) not in OLD_COMMANDS.get(k, ())})
             elif key in DEFAULTS:
                 config[key] = value
+        if saved.get('surum') is None:
+            # Earlier versions wrote every default into the file, so the processor model they
+            # wrote, large-v3-turbo, kept every install on 15-30 seconds a sentence after the
+            # default became `small`. Taken as the old default once and written back with the
+            # version: one chosen from now on stays (`ses ayar --islemci-modeli`).
+            if config.get('cpu_model') == 'large-v3-turbo':
+                config['cpu_model'] = DEFAULTS['cpu_model']
+            with contextlib.suppress(OSError):
+                save_config(state, config)
     return config
 
 
@@ -241,9 +359,19 @@ def commands_from(text, config):
 
 
 def save_config(state, config):
+    """Only what differs from the defaults is written (and the file's version): a default changed
+    in a later version reaches every install, as `small` on the processor did not."""
     path = ses_dir(state) / CONFIG
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    kept = {'surum': CONFIG_VERSION}
+    for key, value in config.items():
+        if key == 'komutlar' and isinstance(value, dict):
+            changed = {name: phrases for name, phrases in value.items() if DEFAULTS['komutlar'].get(name) != phrases}
+            if changed:
+                kept['komutlar'] = changed
+        elif key in DEFAULTS and value != DEFAULTS[key]:
+            kept[key] = value
+    path.write_text(json.dumps(kept, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
 
 def installed(state):
@@ -281,7 +409,10 @@ def listener_file():
 
 
 def say_listener(path=None, **fields):
-    """The listener's word on its voice (`ses`: yok, yukleniyor, hazir, hata, kapali), written whole."""
+    """The listener's word on its voice, written whole: `ses` (yok, yukleniyor, hazir, hata, kapali),
+    `model`, `mesaj`, a download's `mb` and `toplam`; `uyandirma` true only while the wake phrase is
+    really listened for, else `uyandirma_sorun` (None, 'mikrofon', 'sessiz', 'model') and
+    `uyandirma_mesaj` say why; `kisayol` 'tamam', or 'mesgul' when another app holds the key."""
     import time
     path = Path(path) if path is not None else listener_file()
     word = dict(fields, surum=1, pid=os.getpid(), at=time.time())
@@ -322,7 +453,9 @@ def wake_allowed(config, path=None, moment=None):
 # --------------------------------------------------------------- words --
 _FOLD = str.maketrans('ışğüöç', 'isguoc')
 # How recognizers spell the name they hear as "pin" or "payn" (Whisper: "Payn", "Pain", "Payın").
-NAME_SPELLINGS = {'pyn', 'pin', 'pinn', 'pen', 'pine', 'bin', 'fin', 'pay', 'bayan', 'payn', 'pain', 'payin', 'bayin', 'pyne'}
+# "Paine" and "Bayn" by name: a letter further off than the loose match (_name_like) now allows.
+NAME_SPELLINGS = {'pyn', 'pin', 'pinn', 'pen', 'pine', 'bin', 'fin', 'pay', 'bayan', 'payn', 'pain', 'payin', 'bayin', 'pyne',
+                  'payne', 'paine', 'bayn'}
 # How the name is said: a heard word close to it is the name, as one close to how it is written is.
 NAME_SAID = 'payn'
 # Words of the small Turkish model's own vocabulary that sound like "Pyn" said as "payn" or "pin".
@@ -349,11 +482,15 @@ def words(text):
 
 def _name_like(word, head):
     """Whether a heard word is the phrase's name: one of its spellings, or close to how it is
-    written or, for Pyn, said."""
+    written or, for Pyn, said: a short word that starts as the name does (p, or b and f as a
+    recognizer hears p) and differs from it by a letter or so ("Py", "Pyne", "Payne"). Matched
+    looser, "Hey Aynur", "hey aynen" and "Hey plan" were the wake phrase."""
     if word == head or word in NAME_SPELLINGS:
         return True
+    if not word or word[0] not in 'pbf' or len(word) > 5:
+        return False
     forms = (head, NAME_SAID) if head == 'pyn' else (head,)
-    return any(difflib.SequenceMatcher(None, word, form).ratio() >= 0.6 for form in forms)
+    return any(difflib.SequenceMatcher(None, word, form).ratio() > 0.75 for form in forms)
 
 
 def phrase_label(phrase):
@@ -459,6 +596,13 @@ def without_wake(text, phrase=DEFAULTS['uyandirma_sozu']):
     at_name = _name_at(said)
     got, ends = _apart(words(text), said, [m.end() for m in re.finditer(r'\w+', tr_lower(text))])
     for size in range(len(said), 0, -1):
+        if size == 1 and len(said) - 1 == at_name:
+            # The name alone ("Pyn," of "Hey Pyn"): only as Whisper writes Pyn's name, never a
+            # word it sounds like, which is the note's own first word: "Bin beş yüz lira" lost its
+            # thousand, "Bayan Ayşe aradı" and "Pin kodunu değiştir" their first word.
+            if got and _named(got[0]) and got[0] != 'pin':
+                return text[ends[0]:].lstrip(' ,.;:!?…-').strip()
+            continue
         if _matches(got[:size], said[len(said) - size:], at_name, len(said) - size):
             return text[ends[size - 1]:].lstrip(' ,.;:!?…-').strip()
     return text.strip()
@@ -587,20 +731,30 @@ def clean_spoken(text, prompt=None):
 
 # ------------------------------------------------------------- install --
 def _run(command, timeout=None, run=subprocess.run):
-    return run(command, capture_output=True, text=True, timeout=timeout, creationflags=NO_WINDOW)
+    # Every Python child (the `py` probe, venv, pip) told to write UTF-8 and read as UTF-8. Read
+    # with the locale's code page, a Python path under a Turkish user name came back garbled
+    # ("C:\Users\GÃ¼ndÃ¼z\…") or not at all (an "Ş" is no letter of cp1254's), and the
+    # environment was never built: the desktop app starts the engine with PYTHONIOENCODING=utf-8,
+    # which the probe inherited, a terminal does not. Anything else (nvidia-smi, PowerShell's card
+    # names) is ASCII; a letter that is not UTF-8 is replaced, never an error.
+    env = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONUTF8='1')
+    return run(command, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout,
+               env=env, creationflags=NO_WINDOW)
 
 
 def python_for_env(which=shutil.which, run=subprocess.run):
     """The Python the voice environment is built with: a 3.10-3.13 the system knows, for which
-    the voice packages have wheels, else the one running this."""
+    the voice packages have wheels, else the one running this. A path that is not a file there
+    (read back wrong, whatever the reason) is not taken: the next one is."""
     if os.name == 'nt' and which('py'):
         for version in PYTHON_VERSIONS:
             try:
                 done = _run(['py', '-' + version, '-c', 'import sys; print(sys.executable)'], timeout=30, run=run)
-            except (OSError, subprocess.TimeoutExpired):
+            except (OSError, ValueError, subprocess.TimeoutExpired):
                 continue
-            if done.returncode == 0 and done.stdout.strip():
-                return done.stdout.strip().splitlines()[-1]
+            found = done.stdout.strip().splitlines()[-1].strip() if done.returncode == 0 and done.stdout.strip() else ''
+            if found and Path(found).is_file():
+                return found
     for version in PYTHON_VERSIONS:
         found = which('python' + version)
         if found:
@@ -676,7 +830,7 @@ def ggml_model(state):
 
 def packages_for(engine):
     if engine == 'vulkan':
-        return list(BASE_PACKAGES) + list(DECODE_PACKAGES)
+        return list(FASTER_PACKAGES) + list(BASE_PACKAGES) + list(DECODE_PACKAGES)
     return list(FASTER_PACKAGES) + list(BASE_PACKAGES) + (list(NVIDIA_PACKAGES) if engine == 'cuda' else [])
 
 
@@ -704,29 +858,72 @@ def _download(url, target):
         return Path(out.name)
 
 
-def _download_checked(url, target, sha256, say=print):
-    """A file over HTTPS, its digest checked before it takes its name; a wrong one is removed."""
-    import hashlib
-    from urllib.request import urlopen
+def network_error(exc):
+    """Whether an error is the network's: no connection, one cut, a server that could not answer."""
+    import http.client
+    import socket
+    import ssl
+    from urllib.error import HTTPError, URLError
+    if isinstance(exc, HTTPError):
+        return exc.code >= 500 or exc.code == 429
+    return isinstance(exc, (URLError, ConnectionError, TimeoutError, socket.timeout, socket.gaierror, ssl.SSLError,
+                            http.client.HTTPException))
+
+
+def _fetch_part(url, part, say):
+    """The file into `part`, from where an earlier try stopped when the server can (a 206 answer
+    to a Range request), else from its start."""
+    from urllib.error import HTTPError
+    from urllib.request import Request, urlopen
+    have = part.stat().st_size if part.is_file() else 0
+    try:
+        response = urlopen(Request(url, headers={'Range': 'bytes=%d-' % have} if have else {}), timeout=60)
+    except HTTPError as exc:
+        if have and exc.code == 416:
+            return  # nothing after what is there: all of it came; the digest says whether rightly
+        raise
+    with response:
+        headers = getattr(response, 'headers', None) or {}
+        resumed = bool(have) and getattr(response, 'status', 200) == 206
+        done = have if resumed else 0
+        length = int(headers.get('Content-Length') or 0)
+        total = done + length if length else 0
+        told = done * 10 // total if total else 0
+        with open(part, 'ab' if resumed else 'wb') as out:
+            while True:
+                chunk = response.read(1 << 20)
+                if not chunk:
+                    break
+                out.write(chunk)
+                done += len(chunk)
+                if total and done * 10 // total > told:  # every tenth: a big model is not silence for minutes
+                    told = done * 10 // total
+                    say('  %%%d (%d / %d MB)' % (told * 10, done >> 20, total >> 20))
+    if total and done < total:
+        raise ConnectionError('bağlantı dosya bitmeden kapandı (%d / %d MB)' % (done >> 20, total >> 20))
+
+
+def _download_checked(url, target, sha256, say=print, tries=4, pause=None):
+    """A file over HTTPS, its digest checked before it takes its name; a wrong one is removed.
+
+    A dropped connection (1.6 GB over a home line) does not start it over: it is asked again a
+    few times from where it stopped, and a later `kur` goes on from the part already there."""
+    import time
     if not url.startswith('https://'):
         raise ValueError('Yalnız HTTPS adresinden indirilir: ' + url)
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     part = target.with_name(target.name + '.part')
-    digest, done, told = hashlib.sha256(), 0, 0
-    with urlopen(url, timeout=60) as response, open(part, 'wb') as out:
-        total = int(response.headers.get('Content-Length') or 0) if getattr(response, 'headers', None) else 0
-        while True:
-            chunk = response.read(1 << 20)
-            if not chunk:
-                break
-            digest.update(chunk)
-            out.write(chunk)
-            done += len(chunk)
-            if total and done * 10 // total > told:  # every tenth: a big model is not silence for minutes
-                told = done * 10 // total
-                say('  %%%d (%d / %d MB)' % (told * 10, done >> 20, total >> 20))
-    if sha256 and digest.hexdigest() != sha256:
+    for attempt in range(tries):
+        try:
+            _fetch_part(url, part, say)  # the address asked again each time: a CDN's redirect expires
+            break
+        except Exception as exc:
+            if attempt == tries - 1 or not network_error(exc):
+                raise
+            say('  Bağlantı koptu; kaldığı yerden yeniden deneniyor (%d/%d)…' % (attempt + 2, tries))
+            (pause or time.sleep)(min(30, 3 * 2 ** attempt))
+    if sha256 and _sha256(part) != sha256:
         part.unlink(missing_ok=True)
         raise ValueError('İndirilen dosya beklenen dosya değil (SHA-256 tutmadı): ' + target.name)
     os.replace(part, target)
@@ -763,9 +960,12 @@ def _unpack(archive, folder):
 
 
 def worker_env(state):
-    """The helper's environment: Hugging Face's cache under state/ses, UTF-8 pipes."""
+    """The helper's environment: Hugging Face's cache in the voice folder, UTF-8 pipes, and the
+    voice folder itself (SES_ENV): the helper uses the one it was started from, and never tries
+    to move an install from before (ses_dir) while it runs out of it."""
+    folder = ses_dir(state)
     env = dict(os.environ)
-    env.update(HF_HOME=str(ses_dir(state) / 'hf'), PYTHONIOENCODING='utf-8', PYTHONUTF8='1',
+    env.update({SES_ENV: str(folder)}, HF_HOME=str(folder / 'hf'), PYTHONIOENCODING='utf-8', PYTHONUTF8='1',
                HF_HUB_DISABLE_TELEMETRY='1', PYTHONDONTWRITEBYTECODE='1')
     return env
 
@@ -823,27 +1023,156 @@ def relayed_progress(path, say, every=1.0):
         thread.join(every * 2)
 
 
-def install(state, say=print, run=subprocess.run, download=_download, which=shutil.which, download_checked=_download_checked, system=None):
+# A card that took longer than this for a second of sound, its pipelines already built (`--indir`
+# measures it), writes slower than the processor's quick model does: a Radeon inside a laptop's
+# processor (Vega, 610M), an NVIDIA MX250. `kur` sets up the processor there instead.
+SLOW_CARD_SN = 2.0
+SETUP_LOG = 'kurulum.log'
+ENGINE_NAMES = {'cuda': 'NVIDIA ekran kartı (CUDA)', 'vulkan': 'AMD/Intel ekran kartı (Vulkan, whisper.cpp)', 'islemci': 'işlemci'}
+
+
+def physical_cores(run=subprocess.run):
+    """The processor's cores (not its threads), as Windows knows them; None where it cannot say."""
+    if os.name != 'nt':
+        return None
+    try:
+        done = _run(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+                     '(Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfCores -Sum).Sum'], timeout=30, run=run)
+        cores = int((done.stdout or '').strip().splitlines()[-1]) if done.returncode == 0 else 0
+    except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
+        return None
+    return cores if cores > 0 else None
+
+
+def cpu_threads(state=None):
+    """How many threads Whisper writes with on the processor: one a core, at most 8. The cores as
+    `kur` found them (kurulum.json); else the logical processors, halved only past four: halving
+    them gave a 2-core Celeron, which has no second thread a core, one thread and twice the wait."""
+    cores = None
+    if state is not None:
+        try:
+            cores = json.loads((ses_dir(state) / MARKER).read_text(encoding='utf-8')).get('cekirdek')
+        except (OSError, ValueError, AttributeError):
+            cores = None
+    if isinstance(cores, bool) or not isinstance(cores, int) or cores < 1:
+        count = os.cpu_count() or 4
+        cores = count if count <= 4 else count // 2
+    return max(1, min(8, cores))
+
+
+def _venv_works(state, run=subprocess.run):
+    """Whether the voice environment is whole: its Python starts and has pip. A venv whose ensurepip
+    failed or timed out, one half deleted while its helper ran, or one whose base Python was
+    uninstalled still has its python.exe, and every `kur` after it failed at pip."""
+    python = venv_python(state)
+    if not python.is_file():
+        return False
+    try:
+        return _run([str(python), '-m', 'pip', '--version'], timeout=120, run=run).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+PIP_DOWNLOAD = re.compile(r'^\s*Downloading\s+(\S+)\s+\(([^)]*)\)')
+PIP_INSTALLING = re.compile(r'^\s*Installing collected packages:\s*(.+)')
+
+
+def pip_step(line):
+    """A line of pip's as a step a person reads ("  İniyor: numpy-2.1.0-….whl (12.6 MB)"); None for
+    one that says nothing new to them."""
+    got = PIP_DOWNLOAD.match(line)
+    if got:
+        name = got.group(1).rsplit('/', 1)[-1]
+        return None if name.endswith('.metadata') else '  İniyor: %s (%s)' % (name, got.group(2))
+    got = PIP_INSTALLING.match(line)
+    if got:
+        names = got.group(1).strip()
+        return '  Kuruluyor: ' + (names[:120] + '…' if len(names) > 120 else names)
+    return None
+
+
+def _streamed(command, say, timeout, popen=subprocess.Popen):
+    """A long command (pip) whose lines are said as steps while it runs (pip_step): about 1.1 GB of
+    CUDA's wheels were minutes of one unchanging line. (Its return code, its last lines) once it
+    ends; past `timeout` seconds in all it is stopped (TimeoutExpired)."""
+    proc = popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                 encoding='utf-8', errors='replace', env=dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONUTF8='1'),
+                 creationflags=NO_WINDOW)
+    kept = collections.deque(maxlen=400)
+
+    def read():
+        for line in proc.stdout:
+            kept.append(line)
+            step = pip_step(line)
+            if step:
+                say(step)
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    try:
+        code = proc.wait(timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise
+    finally:
+        reader.join(10)
+    return code, ''.join(kept)
+
+
+def _trial_load(state, marker, say, run, previous):
+    """The helper loads the model once on the engine `marker` names, so the install fetches it, not
+    the first word: (what it loaded, how long a second of sound took on a card, or None). Failed,
+    the marker is put back as it was: a working install stays working."""
+    folder = ses_dir(state)
+    (folder / MARKER).write_text(json.dumps(marker, ensure_ascii=False) + '\n', encoding='utf-8')
+    say('Whisper modeli hazırlanıyor' + (' (ilk seferde yaklaşık %s GB iner)…' % download_size(marker['motor'], load_config(state))
+                                         if marker['motor'] != 'vulkan' else '…'))
+    try:
+        with relayed_progress(folder / PROGRESS_FILE, say):
+            done = run(worker_command(state, '--indir'), capture_output=True, text=True, encoding='utf-8', errors='replace',
+                       timeout=7200, env=worker_env(state), creationflags=NO_WINDOW)
+        if done.returncode:
+            raise RuntimeError('Whisper modeli hazırlanamadı: ' + (done.stderr or done.stdout).strip()[-4000:])
+    except Exception:
+        if previous is None:
+            (folder / MARKER).unlink(missing_ok=True)
+        else:
+            (folder / MARKER).write_text(previous, encoding='utf-8')
+        raise
+    lines = (done.stdout or '').strip().splitlines()
+    seconds = None
+    for line in lines[:-1]:
+        try:
+            said = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(said, dict) and isinstance(said.get('sure_sn'), (int, float)) and not isinstance(said['sure_sn'], bool):
+            seconds = float(said['sure_sn'])
+    return (lines[-1] if lines else ''), seconds
+
+
+def install(state, say=print, run=subprocess.run, download=_download, which=shutil.which, download_checked=_download_checked,
+            system=None, popen=subprocess.Popen):
     """Build the environment, install the packages, fetch the models. Each step says what it does."""
     plan = install_plan(state, which, run, system)
     folder = ses_dir(state)
     folder.mkdir(parents=True, exist_ok=True)
     say('Python: ' + plan['python'])
-    say('Motor: ' + {'cuda': 'NVIDIA ekran kartı (CUDA)', 'vulkan': 'AMD/Intel ekran kartı (Vulkan, whisper.cpp)',
-                     'islemci': 'işlemci'}[plan['motor']])
+    say('Motor: ' + ENGINE_NAMES[plan['motor']])
     if plan['motor'] == 'vulkan' and not _vulkan_ready(state, say, download_checked):
         say('İşlemciye geçiliyor.')
         plan.update(motor='islemci', paketler=packages_for('islemci'), ekran_karti=False)
-    if not venv_python(state).is_file():
+    if not _venv_works(state, run):
         say('Sanal ortam kuruluyor…')
-        done = _run([plan['python'], '-m', 'venv', str(folder / 'venv')], timeout=600, run=run)
+        # --clear: a broken one left from before is built anew, not reused.
+        done = _run([plan['python'], '-m', 'venv', '--clear', str(folder / 'venv')], timeout=600, run=run)
         if done.returncode:
-            raise RuntimeError('Sanal ortam kurulamadı: ' + (done.stderr or done.stdout).strip()[-400:])
+            raise RuntimeError('Sanal ortam kurulamadı: ' + (done.stderr or done.stdout).strip()[-4000:])
     say('Paketler yükleniyor (ilk kurulumda birkaç dakika sürer): ' + ', '.join(plan['paketler']))
-    done = _run([str(venv_python(state)), '-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', *plan['paketler']],
-                timeout=3600, run=run)
-    if done.returncode:
-        raise RuntimeError('Paketler yüklenemedi: ' + (done.stderr or done.stdout).strip()[-600:])
+    code, output = _streamed([str(venv_python(state)), '-m', 'pip', 'install', '--disable-pip-version-check', '--progress-bar', 'off',
+                              '--upgrade', *plan['paketler']], say, 3600, popen)
+    if code:
+        raise RuntimeError('Paketler yüklenemedi: ' + output.strip()[-4000:])
     if not (folder / VOSK_DIR).is_dir():
         say('Uyandırma modeli indiriliyor (yaklaşık 40 MB)…')
         archive = download(VOSK_MODEL_URL, folder / 'vosk.zip')
@@ -851,30 +1180,103 @@ def install(state, say=print, run=subprocess.run, download=_download, which=shut
             _unpack(archive, folder / VOSK_DIR)
         finally:
             Path(archive).unlink(missing_ok=True)
-    # The marker first, so the helper's trial load below writes with the engine just set up.
     if not (folder / CONFIG).is_file():
         save_config(state, load_config(state))
     marker = {'schema': 1, 'python': plan['python'], 'motor': plan['motor'], 'ekran_karti': plan['ekran_karti']}
+    cores = physical_cores(run)
+    if cores:
+        marker['cekirdek'] = cores
     try:
         previous = (folder / MARKER).read_text(encoding='utf-8')  # a working install stays working if this one fails
     except OSError:
         previous = None
+    model, seconds = _trial_load(state, marker, say, run, previous)
+    # A card that would not start, or one slower than the processor's quick model, is not kept: the
+    # processor writes, with its quick model and the wake phrase's own small checker. Not when the
+    # engine was chosen by hand (`ses ayar --motor`).
+    if plan['ekran_karti'] and load_config(state).get('motor') not in ENGINES and (
+            '(işlemci' in model or (seconds is not None and seconds > SLOW_CARD_SN)):
+        say(('Ekran kartı açılamadı' if '(işlemci' in model else
+             'Ekran kartı bu bilgisayarda işlemciden yavaş kaldı (%.1f sn)' % seconds).replace('.', ',') + '; işlemciye geçiliyor.')
+        card = (dict(plan), dict(marker), model)
+        plan.update(motor='islemci', paketler=packages_for('islemci'), ekran_karti=False)
+        marker.update(motor='islemci', ekran_karti=False)
+        try:
+            model, _seconds = _trial_load(state, marker, say, run, previous)
+        except Exception:
+            if '(işlemci' in card[2]:
+                raise
+            # A slow card that works is better than none: the processor's models could not be
+            # had (no network for them), and the card stays.
+            say('İşlemcinin modeli hazırlanamadı; ekran kartı kalıyor.')
+            plan, marker, model = card
+    marker['model'] = model
     (folder / MARKER).write_text(json.dumps(marker, ensure_ascii=False) + '\n', encoding='utf-8')
-    say('Whisper modeli hazırlanıyor' + (' (ilk seferde yaklaşık %s GB iner)…' % download_size(plan['motor'], load_config(state))
-                                         if plan['motor'] != 'vulkan' else '…'))
-    with relayed_progress(folder / PROGRESS_FILE, say):
-        done = run(worker_command(state, '--indir'), capture_output=True, text=True, encoding='utf-8', errors='replace',
-                   timeout=7200, env=worker_env(state), creationflags=NO_WINDOW)
-    if done.returncode:
-        if previous is None:
-            (folder / MARKER).unlink(missing_ok=True)
-        else:
-            (folder / MARKER).write_text(previous, encoding='utf-8')
-        raise RuntimeError('Whisper modeli hazırlanamadı: ' + (done.stderr or done.stdout).strip()[-600:])
-    model = (done.stdout or '').strip().splitlines()[-1:] or ['']
-    marker['model'] = model[0]
-    (folder / MARKER).write_text(json.dumps(marker, ensure_ascii=False) + '\n', encoding='utf-8')
-    return {'status': 'kuruldu', 'klasor': str(folder), 'motor': plan['motor'], 'ekran_karti': plan['ekran_karti'], 'model': model[0]}
+    return {'status': 'kuruldu', 'klasor': str(folder), 'motor': plan['motor'], 'ekran_karti': plan['ekran_karti'], 'model': model}
+
+
+class SetupError(RuntimeError):
+    """`kur` that did not finish, said in one sentence for a person. `code` names the trouble for
+    the desktop app (voice_network, voice_disk_full, voice_failed); what happened in full is in
+    kurulum.log in the voice folder."""
+
+    def __init__(self, message, code):
+        super().__init__(message)
+        self.code = code
+
+
+# How pip, Hugging Face and urllib say the network was not there or broke off, in the output that
+# reaches the install only as text; and how a full disk is said.
+NETWORK_WORDS = (
+    'failed to establish a new connection', 'max retries exceeded', 'retrying (retry(', 'read timed out', 'connecttimeout',
+    'connection timed out', 'getaddrinfo failed', 'temporary failure in name resolution', 'name or service not known',
+    'nodename nor servname', 'proxyerror', 'sslerror', 'certificate verify failed', 'connectionerror', 'connection reset',
+    'connection aborted', 'connection broken', 'remotedisconnected', 'incompleteread', 'urlopen error',
+    'localentrynotfounderror', 'cannot find an appropriate cached snapshot', 'network is unreachable', "couldn't connect",
+    'could not fetch url', 'bağlantı dosya bitmeden kapandı',
+)
+DISK_WORDS = ('no space left on device', 'errno 28', 'winerror 112', 'not enough space on the disk', 'yeterli boş alan yok',
+              'disk is full')
+
+
+def setup_error(exc, state):
+    """A failed `kur` as one sentence for a person (SetupError): pip's, urllib's or Hugging Face's
+    English, raw, was all the settings page showed. The whole of it goes to kurulum.log."""
+    import time
+    import traceback
+    folder = ses_dir(state)
+    log = folder / SETUP_LOG
+    detail = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        with open(log, 'a', encoding='utf-8') as out:
+            out.write(time.strftime('%Y-%m-%d %H:%M:%S') + ' ses kur yarım kaldı\n' + detail + '\n')
+    except OSError:
+        pass
+    text = detail.lower()
+    if (isinstance(exc, OSError) and (exc.errno == 28 or getattr(exc, 'winerror', None) in (39, 112))) or \
+            any(word in text for word in DISK_WORDS):
+        return SetupError('Sesle yazma kurulamadı: diskte yer kalmadı (%s; ses için yaklaşık 3 GB gerekir); yer açıp yeniden dene.'
+                          % folder, 'voice_disk_full')
+    timed_out = isinstance(exc, subprocess.TimeoutExpired)
+    building = timed_out and 'venv' in [str(part) for part in (exc.cmd or [])]
+    if not building and (timed_out or network_error(exc) or any(word in text for word in NETWORK_WORDS)):
+        return SetupError('Sesle yazma kurulamadı: indirirken internete bağlanılamadı ya da bağlantı koptu; bağlantını '
+                          'denetleyip yeniden dene, inenler korunur.', 'voice_network')
+    first = (str(exc).strip().splitlines() or [''])[0]
+    if 'no matching distribution' in text:
+        what = 'bu bilgisayardaki Python için ses paketleri bulunamadı (Python 3.10-3.13 gerekir)'
+    elif building:
+        what = 'sanal ortamın kurulması çok uzun sürdü'
+    elif isinstance(exc, RuntimeError) and ': ' in first:
+        what = first.split(': ', 1)[0]
+    elif isinstance(exc, ValueError) and first:
+        what = first[:200]
+    else:
+        what = 'beklenmeyen bir hata (%s)' % type(exc).__name__
+    if not what.startswith('Whisper'):
+        what = tr_lower(what[:1]) + what[1:]
+    return SetupError('Sesle yazma kurulamadı: %s; ayrıntılar %s dosyasında.' % (what, log), 'voice_failed')
 
 
 def reads_files(state):
@@ -907,10 +1309,15 @@ def status(state):
 
 
 def uninstall(state):
-    """The environment and both models, all under state/ses, go; the vault is not touched."""
+    """The environment and both models, all in the voice folder, go; the vault is not touched. What
+    could not be deleted (a file still in use) is said, never called gone: a half-deleted venv was
+    taken as installed by the next `kur`, whose pip then failed for good."""
     folder = ses_dir(state)
     existed = folder.exists()
     shutil.rmtree(folder, ignore_errors=True)
+    if folder.exists():
+        left = sorted(str(path.relative_to(folder)) for path in folder.rglob('*') if path.is_file())
+        return {'status': 'yarim', 'klasor': str(folder), 'kalan': left[:10]}
     return {'status': 'kaldirildi' if existed else 'zaten-yok', 'klasor': str(folder)}
 
 
@@ -946,19 +1353,86 @@ def transcribe_file(state, path, run=subprocess.run, timeout=1800):
     return clean_spoken(str(answer.get('metin') or ''), load_config(state).get('ipucu')), None
 
 
-def restart_listener(state):
-    """Yakala's resident listener started again, so it takes up the voice now (Windows)."""
-    if os.name != 'nt' or os.environ.get('BEYIN_V3_NO_SPAWN') == '1':
-        return False
+def _startup_shortcut():
+    """The Startup shortcut `yakala kur` leaves, which starts the resident listener (Windows)."""
     import beyin_v3_yakala as yakala
     programs, _sendto = yakala._windows_dirs()
-    startup = programs / 'Startup' / yakala.STARTUP_NAME
-    if not startup.is_file():
+    return programs / 'Startup' / yakala.STARTUP_NAME
+
+
+def _listener_may_restart():
+    return os.name == 'nt' and os.environ.get('BEYIN_V3_NO_SPAWN') != '1'
+
+
+def stop_listener():
+    """Yakala's resident listener asked to leave, where it can be started again (its Startup
+    shortcut): its voice helper loads models and holds files of the voice folder, which `kur`
+    replaces and `kaldir` deletes. Not where no listener may run (tests, CI): the stop event is the
+    whole Windows session's."""
+    if not _listener_may_restart():
         return False
-    yakala.stop_windows_listener()
-    subprocess.Popen(['explorer.exe', str(startup)], close_fds=True, stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return True
+    try:
+        import beyin_v3_yakala as yakala
+        return _startup_shortcut().is_file() and yakala.stop_windows_listener()
+    except Exception:
+        return False
+
+
+def _key_said_since(moment):
+    """What a listener started after `moment` said of its key (dinleyici.json): 'tamam', 'mesgul'
+    when another app holds it, None while it has said nothing yet (the one asked to leave wrote
+    its last, 'kapali', before; a new one says its key once RegisterHotKey has answered)."""
+    try:
+        said = json.loads(listener_file().read_text(encoding='utf-8'))
+        at = said.get('at')
+        if isinstance(at, (int, float)) and not isinstance(at, bool) and at >= moment and said.get('ses') != 'kapali':
+            return said.get('kisayol') if said.get('kisayol') in ('tamam', 'mesgul') else None
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
+# How long `kur` waits for the listener it started again: pythonw, Tk and the fonts on a fresh,
+# slow laptop with the virus scanner reading each file took longer than yakala's own 8 seconds.
+LISTENER_WAIT_SN = 20.0
+
+
+def restart_listener(state, wait=0.0):
+    """Yakala's resident listener started again, so it takes up the voice now (Windows). With
+    `wait`, True only once it runs within that many seconds (its lock held and its word on its key
+    said since), False as soon as it has left over a key another app holds: `kur` says whether a
+    listener runs after it, not only that one was asked to start."""
+    if not _listener_may_restart():
+        return False
+    import time
+    try:
+        import beyin_v3_yakala as yakala
+        startup = _startup_shortcut()
+        if not startup.is_file():
+            return bool(wait) and bool(yakala.windows_listener_running())
+        yakala.stop_windows_listener()
+        asked = time.time()
+        subprocess.Popen(['explorer.exe', str(startup)], close_fds=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if not wait:
+            return True
+        deadline, taken = time.monotonic() + wait, None
+        while time.monotonic() < deadline:
+            key, running = _key_said_since(asked), yakala.windows_listener_running()
+            if key == 'tamam' and running:
+                return True
+            if key == 'mesgul':
+                # Another app holds the key: a listener that leaves over it is gone in a moment,
+                # one that stays without it (for the voice) still runs.
+                if not running:
+                    return False
+                taken = taken or time.monotonic()
+                if time.monotonic() - taken >= 2:
+                    return True
+            time.sleep(0.25)
+        return False
+    except Exception:
+        return False
 
 
 # --------------------------------------------------------------- helper --
@@ -1035,7 +1509,9 @@ def human(result, command):
     if command == 'kur':
         return ('Sesle yazma kuruldu (' + (result.get('model') or 'Whisper') + ').\n'
                 'Ctrl+Alt+C ile Not al\'ı aç: dinler halde açılır; konuş, bitince "Pyn, kaydet" de.\n'
-                '"Pyn, not al" ile açmak için: beyin.py ses ayar --uyandirma ac')
+                '"Pyn, not al" ile açmak için: beyin.py ses ayar --uyandirma ac' +
+                ('\nUyarı: Yakala dinleyicisi çalışmıyor; Ctrl+Alt+C ve "Pyn, not al" için: beyin.py yakala kur'
+                 if os.name == 'nt' and result.get('dinleyici') is False else ''))
     if command == 'durum':
         if not result['kurulu']:
             return 'Sesle yazma kurulu değil. Kurmak için: beyin.py ses kur'
@@ -1043,6 +1519,9 @@ def human(result, command):
                 ' · motor ' + {'cuda': 'NVIDIA (CUDA)', 'vulkan': 'Vulkan (whisper.cpp)', 'islemci': 'işlemci'}.get(result.get('motor'), '?') +
                 ' · uyandırma ' + ('açık ("' + result['uyandirma_sozu'] + '")' if result['uyandirma'] else 'kapalı'))
     if command == 'kaldir':
+        if result['status'] == 'yarim':
+            return ('Sesle yazma tam kaldırılamadı: bazı dosyalar kullanımda (' + result['klasor'] + '). '
+                    'Bilgisayarı yeniden başlatıp yeniden dene.')
         return 'Sesle yazma kaldırıldı.' if result['status'] == 'kaldirildi' else 'Sesle yazma zaten kurulu değil.'
     if command == 'ayar':
         return ('Ayar kaydedildi.' + (' Yakala dinleyicisi yeniden başlatıldı.' if result.get('dinleyici') else '') +
@@ -1137,11 +1616,21 @@ def main(argv=None, vault=None, state=None):
             say = lambda text: print(json.dumps({'adim': text.strip()}, ensure_ascii=not utf8), flush=True)
         else:
             say = lambda text: print(text, flush=True)
-        result = install(state, say=say)
-        result['dinleyici'] = restart_listener(state)
+        # The listener's helper is stopped for the install (one model load at a time, no file in
+        # use that pip replaces) and the listener started again however the install ended.
+        stop_listener()
+        try:
+            result = install(state, say=say)
+        except Exception as exc:
+            # One sentence a person reads, with a code the desktop app knows (beyin.py prints both).
+            raise setup_error(exc, state) from None
+        finally:
+            running = restart_listener(state, wait=LISTENER_WAIT_SN)
+        result['dinleyici'] = running
     elif args.command == 'durum':
         result = status(state)
     elif args.command == 'kaldir':
+        stop_listener()  # on Windows nothing in use can be deleted: its helper runs from the folder
         result = uninstall(state)
         result['dinleyici'] = restart_listener(state)
     elif args.command == 'ayar':
@@ -1189,9 +1678,9 @@ def main(argv=None, vault=None, state=None):
     return 0
 
 
-# The voice helper, run by state/ses/venv's Python (see worker_command). Kept here as text so
+# The voice helper, run by the voice folder's venv Python (see worker_command). Kept here as text so
 # that the packaged engine imports nothing outside the standard library.
-WORKER_SOURCE = r'''"""Voice helper for yakala: runs in state/ses/venv, never in the engine's own Python.
+WORKER_SOURCE = r'''"""Voice helper for yakala: runs in the voice folder's venv, never in the engine's own Python.
 
 Commands arrive on stdin and events leave on stdout, one JSON object a line (see
 beyin_v3_ses.Worker). It loads Whisper on the engine `ses kur` set up (whisper.cpp's server on a
@@ -1228,6 +1717,11 @@ RATE = 16000
 # A sentence is kept from a little before its speech to a little after: Whisper given a long
 # silence makes words up ("Altyazı M.K."), and quiet word endings are below the speech level.
 LEAD_SN, TAIL_SN = 0.3, 0.4
+# What of the wake listener's last moment begins a dictation the wake phrase opened: the words
+# said straight after the phrase, before the dictation's own stream was open, are its first.
+SEED_SN = 0.8
+# How many threads Whisper writes with on the processor (ses.cpu_threads: the cores `kur` found).
+THREADS = None
 now = time.time
 _writing = threading.Lock()
 
@@ -1249,6 +1743,38 @@ def join_audio(*parts):
     import numpy as np
     parts = [part for part in parts if part is not None and len(part)]
     return np.concatenate(parts) if parts else np.zeros(0, dtype='float32')
+
+
+def split_clip(clip):
+    """The wake listener's last seconds as (what Whisper checks the phrase on, the dictation's
+    start): the last SEED_SN seconds begin the dictation, and the check hears them there."""
+    cut = max(0, len(clip) - int(SEED_SN * RATE))
+    return clip[:cut], clip[cut:]
+
+
+def _threads():
+    if THREADS:
+        return THREADS
+    count = os.cpu_count() or 4
+    return max(1, min(8, count if count <= 4 else count // 2))
+
+
+def _here(path):
+    """A path the voice's native libraries can open: relative to the voice folder, the helper's
+    working folder (main), when it is under it and spelled with letters Windows' ANSI code page
+    may lack. Vosk (Kaldi) and whisper.cpp open files by narrow paths, which cannot spell a user
+    name such as "Şule": a model under C:\\Users\\Şule\\… would not load. The relative path is
+    plain ASCII; elsewhere the path is given as it is."""
+    path = str(path)
+    if path.isascii():
+        return path
+    try:
+        # Both as the disk spells them: a folder reached through a link (macOS's /var, which is
+        # /private/var) is still the working folder's own.
+        relative = os.path.relpath(os.path.realpath(path), os.path.realpath(os.getcwd()))
+    except (ValueError, OSError):  # another drive
+        return path
+    return relative if relative.isascii() and not relative.startswith('..') else path
 
 
 def _cuda_dirs():
@@ -1307,15 +1833,42 @@ def _fetch(name, report):
         done.set()
 
 
-def _open(name, device, compute, report=None):
-    """From disk without the network when it is there; else fetched once, saying how far it has come."""
-    from faster_whisper import WhisperModel
-    threads = max(1, min(8, (os.cpu_count() or 4) // 2))
+def _on_disk(name):
+    """A model's folder when it is on disk already (no network asked); None when it is not. A
+    download cut off (the network gone, `kur` closed) leaves the snapshot's folder with its small
+    files and without model.bin, and an older huggingface_hub gives that folder all the same: taken
+    for the model, it failed to load at every start and was never fetched to its end."""
+    if os.path.isdir(name):
+        return name
     try:
-        return WhisperModel(name, device=device, compute_type=compute, cpu_threads=threads, local_files_only=True)
+        from faster_whisper.utils import download_model
+        path = download_model(name, local_files_only=True)
     except Exception:
+        return None
+    return path if all(os.path.isfile(os.path.join(path, one)) for one in ('model.bin', 'config.json')) else None
+
+
+def _open(name, device, compute, report=None):
+    """From disk without the network when it is there; else fetched once, saying how far it has come.
+    A model on disk that will not load (a card that cannot compute that way) fails as it is: it was
+    fetched again, 1.6 GB for nothing, at every start."""
+    from faster_whisper import WhisperModel
+    path = _on_disk(name)
+    if path is None:
         path = _fetch(name, report) if report is not None else name
-        return WhisperModel(path, device=device, compute_type=compute, cpu_threads=threads)
+    return WhisperModel(_here(path), device=device, compute_type=compute, cpu_threads=_threads())
+
+
+def _cuda_compute():
+    """How the card computes Whisper: float16 where it can (compute capability 7.0 and later), else
+    int8 on the card, else float32. Asked for float16, a GTX 10xx or an MX150-MX350 refused, and the
+    processor wrote after 3 GB of downloads for nothing."""
+    try:
+        import ctranslate2
+        kinds = set(ctranslate2.get_supported_compute_types('cuda'))
+    except Exception:
+        return 'float16'
+    return next((kind for kind in ('float16', 'int8_float32', 'int8', 'float32') if kind in kinds), 'float32')
 
 
 def _tie(process):
@@ -1366,10 +1919,9 @@ class Server:
             self.port = probe.getsockname()[1]
         self.url = 'http://127.0.0.1:%d' % self.port
         self.opener = build_opener(ProxyHandler({}))  # a system proxy never sees speech
-        threads = max(1, min(8, (os.cpu_count() or 4) // 2))
         start = list(exe) if isinstance(exe, (list, tuple)) else [str(exe)]
-        command = start + ['-m', str(model), '--host', '127.0.0.1', '--port', str(self.port),
-                           '-l', config.get('dil') or 'auto', '-t', str(threads), '-nt']
+        command = start + ['-m', _here(model), '--host', '127.0.0.1', '--port', str(self.port),
+                           '-l', config.get('dil') or 'auto', '-t', str(_threads()), '-nt']
         if config.get('ipucu'):
             command += ['--prompt', config['ipucu']]
         command += ['-dev', str(int(config.get('gpu') or 0))] if gpu else ['-ng']
@@ -1446,6 +1998,22 @@ def _silence():
     return np.zeros(RATE, dtype='float32')
 
 
+def _processor_model(config, report):
+    """(model, what it is) on the processor: the quick model chosen (cpu_model). One that cannot be
+    had (chosen while offline, its download blocked) leaves another of CPU_MODELS already on disk
+    writing, not the voice down until the network is back; what it is says which."""
+    try:
+        return _open(config['cpu_model'], 'cpu', 'int8', report), config['cpu_model'] + ' (işlemci)'
+    except ImportError:
+        raise
+    except Exception as exc:
+        for other in ses.CPU_MODELS:
+            if other != config['cpu_model'] and _on_disk(other) is not None:
+                log('%s açılamadı (%s); diskteki %s yazıyor' % (config['cpu_model'], str(exc)[:200], other))
+                return _open(other, 'cpu', 'int8'), other + ' (işlemci)'
+        raise
+
+
 def load_model(state, config, report=None):
     """(model, what it is), on the engine `ses kur` set up; a failed card says why on stderr (isci.log)."""
     engine = ses.engine_in_use(state, config)
@@ -1456,24 +2024,30 @@ def load_model(state, config, report=None):
             return Server(exe, model, config, log), name + ' (ekran kartı, Vulkan)'
         except Exception as exc:
             print('Vulkan açılamadı, işlemciye geçiliyor: ' + str(exc)[:400], file=sys.stderr, flush=True)
-        # This environment has no faster-whisper: whisper.cpp itself writes on the processor.
+        # The processor writes with its quick model, as without a card: whisper.cpp's large-v3-turbo
+        # took 15-30 seconds a sentence there. Only an environment without faster-whisper (set up
+        # before 1.0.33), or with no quick model to be had, leaves whisper.cpp writing on it.
+        try:
+            return _processor_model(config, report)
+        except Exception as exc:
+            print('İşlemci modeli açılamadı, whisper.cpp işlemcide yazıyor: ' + str(exc)[:300], file=sys.stderr, flush=True)
         return Server(exe, model, config, log, gpu=False), name + ' (işlemci, whisper.cpp)'
     if engine == 'cuda':
         try:
             _cuda_dirs()
-            model = _open(config['model'], 'cuda', 'float16', report)
+            model = _open(config['model'], 'cuda', _cuda_compute(), report)
             list(model.transcribe(_silence(), language=config['dil'])[0])  # CUDA loads on first use
             return model, config['model'] + ' (ekran kartı, CUDA)'
         except Exception as exc:
             print('CUDA açılamadı, işlemciye geçiliyor: ' + str(exc)[:400], file=sys.stderr, flush=True)
-    return _open(config['cpu_model'], 'cpu', 'int8', report), config['cpu_model'] + ' (işlemci)'
+    return _processor_model(config, report)
 
 
 def checker_for(config, what, report=None):
     """On the processor, the model that checks the wake phrase (ses.CHECK_MODEL): the dictation's
     took 15-30 seconds a check on a laptop, and the window opened that late. None on a card, for
     a model quick enough to check it itself, or where it cannot be had (the dictation's checks)."""
-    if not what.endswith('(işlemci)') or config.get('cpu_model') in ses.QUICK_MODELS:
+    if '(işlemci' not in what or what.split(' ', 1)[0] in ses.QUICK_MODELS:
         return None
     try:
         return _open(ses.CHECK_MODEL, 'cpu', 'int8', report)
@@ -1501,6 +2075,18 @@ def server_fields(config):
     if config.get('ipucu'):
         fields.append(('prompt', config['ipucu']))
     return fields
+
+
+def card_seconds(model, config):
+    """How long the card takes for a second of sound, its pipelines already built: the whole
+    30-second window read, as for every check and sentence (no voice detection skipping the
+    silence, which faster-whisper's `transcribe` here would)."""
+    started = time.time()
+    if isinstance(model, Server):
+        model.write(_silence(), config)
+    else:
+        list(model.transcribe(_silence(), language=config['dil'] or None, beam_size=BEAM_SIZE)[0])
+    return time.time() - started
 
 
 def transcribe(model, audio, config, lock):
@@ -1570,6 +2156,12 @@ def transcribe_path(state, config, path):
 # The wake listener's microphone: no sound for this long and it is opened again. Nothing at all
 # comes from a stream whose device went away; only exact zeros come from one that is not a microphone.
 WAKE_STALL_SN, WAKE_SILENT_SN = 5.0, 30.0
+# The wake listener's trouble as the listener says it (after "Uyandırma açılamadı: ").
+WAKE_TROUBLE = {
+    'mikrofon': 'mikrofondan ses gelmiyor; bağlı ve seçili mi?',
+    'sessiz': ('mikrofon yalnız sessizlik veriyor; Windows Ayarlar → Gizlilik ve güvenlik → Mikrofon → '
+               '"Masaüstü uygulamalarının mikrofona erişmesine izin ver" açık olmalı, mikrofonun sesi de kapalı olmamalı'),
+}
 # How often Windows' list of microphones is looked at while the wake listener listens.
 INPUTS_EVERY_SN = 3.0
 CAPTURE_KEY = r'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
@@ -1666,6 +2258,7 @@ class Recorder:
         self.config = config
         self.stream = None
         self.level = 0.0
+        self.held = self.held_since = None
         self.guard = threading.Lock()  # the stream's thread appends while the loop cuts
         self._sentence(now())
 
@@ -1675,39 +2268,65 @@ class Recorder:
         self.spoke, self.started, self.last_voice = False, at, at
         self.voice_from = self.voice_to = None
 
-    def start(self, on_chunk=None):
+    def start(self, on_chunk=None, held=False):
+        """The microphone open. `held`: what it records is held back until `go_on` gives the sound
+        that comes before it (the wake listener's last moment), so the two are one in order;
+        `held_since` is when its first sound came, where the sound before it ends."""
         import sounddevice as sd
         self.level, self.floor, self.loud = 0.0, 1.0, 0
         self._sentence(now())
         self.on_chunk = on_chunk
+        self.held = [] if held else None
+        self.held_since = None
 
         def take(data, _frames, _time, _status):
             if self.on_chunk is not None:
                 self.on_chunk(data.copy())
                 return
-            rms = float((data ** 2).mean() ** 0.5)
             with self.guard:
-                at = self.count
-                self.chunks.append(data.copy())
-                self.count += len(data)
-                self.level = float(abs(data).max())
-                self.floor = min(rms, self.floor * 1.02 + 1e-6)
-                # Clearly above the room's noise: speech. Low enough for a headset mic with little gain.
-                if rms > max(0.0025, self.floor * 5):
-                    self.loud += 1
-                    if self.loud == 1:
-                        self.run_from = at
-                    if self.loud >= 3:
-                        self.spoke = True
-                        if self.voice_from is None:
-                            self.voice_from = self.run_from
-                    self.voice_to = self.count
-                    self.last_voice = now()
+                if self.held is not None:
+                    if self.held_since is None:
+                        self.held_since = now()
+                    self.held.append(data.copy())
                 else:
-                    self.loud = 0
+                    self._take(data.copy())
 
         self.stream = sd.InputStream(samplerate=RATE, channels=1, dtype='float32', device=_device(self.config), callback=take)
         self.stream.start()
+
+    def _take(self, data):
+        # Under the guard: a block of sound kept, its level, and whether it is speech.
+        rms = float((data ** 2).mean() ** 0.5)
+        at = self.count
+        self.chunks.append(data)
+        self.count += len(data)
+        self.level = float(abs(data).max()) if len(data) else 0.0
+        self.floor = min(rms, self.floor * 1.02 + 1e-6)
+        # Clearly above the room's noise: speech. Low enough for a headset mic with little gain.
+        if rms > max(0.0025, self.floor * 5):
+            self.loud += 1
+            if self.loud == 1:
+                self.run_from = at
+            if self.loud >= 3:
+                self.spoke = True
+                if self.voice_from is None:
+                    self.voice_from = self.run_from
+            self.voice_to = self.count
+            self.last_voice = now()
+        else:
+            self.loud = 0
+
+    def go_on(self, before=None):
+        """A held stream (start(held=True)) records from `before` on: that sound (samples), then
+        what it held, then what comes; each counted as if it had just been heard."""
+        with self.guard:
+            held, self.held = self.held or [], None
+            if before is not None and len(before):
+                block = int(0.03 * RATE)
+                for at in range(0, len(before), block):
+                    self._take(before[at:at + block].reshape(-1, 1).astype('float32'))
+            for data in held:
+                self._take(data)
 
     def _speech(self, chunks, start, end):
         """The sentence's sound; only its speech, a little either side, when someone spoke."""
@@ -1741,7 +2360,7 @@ class Recorder:
             self.stream = None
         with self.guard:
             chunks, start, end = self.chunks, self.voice_from, self.voice_to
-            self.chunks = []
+            self.chunks, self.held = [], None
         return self._speech(chunks, start, end)
 
 
@@ -1756,7 +2375,8 @@ class Wake:
         from vosk import KaldiRecognizer, Model, SetLogLevel
         SetLogLevel(-1)
         self.phrase = config['uyandirma_sozu']
-        self.model = Model(str(ses.ses_dir(state) / ses.VOSK_DIR))
+        # Relative to the helper's own folder where the absolute path has letters Kaldi cannot open.
+        self.model = Model(_here(ses.ses_dir(state) / ses.VOSK_DIR))
         # A grammar, not free listening: the model knows no "Pyn" and would never write it.
         self.recognizer = KaldiRecognizer(self.model, RATE, ses.wake_grammar(self.phrase))
         self.audio = queue.Queue()
@@ -1769,20 +2389,29 @@ class Wake:
         self.recent.clear()
         self.kept = 0
         self.last_audio = self.last_sound = now()
+        self.sounded = False  # more than digital silence has come since it opened: it really hears
         self.recorder.start(on_chunk=self._took)
 
     def _took(self, chunk):
         # The stream's thread: when sound last came, and when it was more than digital silence.
+        # Each block is kept with the moment it came (clip's `until`).
         moment = now()
         self.last_audio = moment
         if len(chunk) and float(abs(chunk).max()) > 0.0:
             self.last_sound = moment
-        self.audio.put(chunk)
+            self.sounded = True
+        self.audio.put((moment, chunk))
 
     def stalled(self, moment):
-        """Whether its microphone has gone quiet in a way no room is: nothing from the stream for
-        WAKE_STALL_SN (its device went away), or only exact zeros for WAKE_SILENT_SN."""
-        return moment - self.last_audio > WAKE_STALL_SN or moment - self.last_sound > WAKE_SILENT_SN
+        """Whether its microphone has gone quiet in a way no room is, and how: 'mikrofon' when nothing
+        came from the stream for WAKE_STALL_SN (its device went away), 'sessiz' when only exact zeros
+        came for WAKE_SILENT_SN (Windows' privacy setting keeps desktop apps from the microphone, or
+        a muted one); None while it hears."""
+        if moment - self.last_audio > WAKE_STALL_SN:
+            return 'mikrofon'
+        if moment - self.last_sound > WAKE_SILENT_SN:
+            return 'sessiz'
+        return None
 
     def stop(self):
         self.recorder.stop()
@@ -1792,11 +2421,12 @@ class Wake:
     def running(self):
         return self.recorder.stream is not None
 
-    def _keep(self, chunk):
-        self.recent.append(chunk)
-        self.kept += len(chunk)
-        while self.recent and self.kept - len(self.recent[0]) >= ses.WAKE_CLIP_SN * RATE:
-            self.kept -= len(self.recent.popleft())
+    def _keep(self, item):
+        # item: (when it came, the block)
+        self.recent.append(item)
+        self.kept += len(item[1])
+        while self.recent and self.kept - len(self.recent[0][1]) >= ses.WAKE_CLIP_SN * RATE:
+            self.kept -= len(self.recent.popleft()[1])
 
     def _drain(self):
         while True:
@@ -1805,10 +2435,11 @@ class Wake:
             except queue.Empty:
                 return
 
-    def clip(self):
-        """The last few seconds it heard."""
+    def clip(self, until=None):
+        """The last few seconds it heard; with `until`, only what came before that moment (what a
+        stream opened then has itself, it does not have twice)."""
         self._drain()
-        return join_audio(*[chunk[:, 0] for chunk in self.recent])
+        return join_audio(*[chunk[:, 0] for at, chunk in self.recent if until is None or at < until])
 
     def forget(self):
         """A candidate dealt with: the next one is judged on its own sound."""
@@ -1822,10 +2453,11 @@ class Wake:
         import numpy as np
         while True:
             try:
-                chunk = self.audio.get_nowait()
+                item = self.audio.get_nowait()
             except queue.Empty:
                 return None
-            self._keep(chunk)
+            self._keep(item)
+            chunk = item[1]
             pcm = (np.clip(chunk[:, 0], -1, 1) * 32767).astype('<i2').tobytes()
             if self.recognizer.AcceptWaveform(pcm):
                 text = json.loads(self.recognizer.Result()).get('text', '')
@@ -1899,15 +2531,21 @@ def serve(state, config, lines=None):
         try:
             started = now()
             loaded['model'], what = load_model(state, config, downloading)
-            checker = checker_for(config, what, downloading)
-            if checker is not None:
-                loaded['checker'] = checker
             # How long it took, for a slow machine to be seen in isci.log (never what is said).
-            log('süre: model hazır, %s, %.1f sn%s' % (what, now() - started, '; uyandırmayı %s doğrular' % ses.CHECK_MODEL if checker is not None else ''))
+            log('süre: model hazır, %s, %.1f sn' % (what, now() - started))
             out(olay='hazir', aciklama=what)
         except Exception as exc:
             log('model açılamadı: %s' % str(exc)[:300])
             out(olay='hata', neden='model', mesaj=str(exc)[:300])
+            return
+        # The wake phrase's own small checker after it: dictation does not wait for it (nor for its
+        # download), and until it is there the dictation's model checks the phrase.
+        started = now()
+        checker = checker_for(config, what, downloading)
+        if checker is not None:
+            loaded['checker'] = checker
+            log('süre: uyandırmayı %s doğrular, %.1f sn' % (ses.CHECK_MODEL, now() - started))
+        out(olay='denetci', hazir=checker is not None)
 
     def write():
         while True:
@@ -1937,8 +2575,19 @@ def serve(state, config, lines=None):
     # Each recording is a turn. What Whisper writes back names its turn: a turn ended by what
     # was said in it ("kaydet") is gone from `turns`, and nothing it still writes is news.
     turn, turns = 0, {}
-    # When the wake listener may try its microphone again, how long it waits after the next trouble.
-    wake_retry = {'at': 0.0, 'wait': 5.0, 'failed': False}
+    # When the wake listener may try its microphone again, how long it waits after the next trouble;
+    # `broken`: its small model would not load, tried again when the phrase or the switch changes.
+    wake_retry = {'at': 0.0, 'wait': 5.0, 'failed': False, 'broken': False}
+    # What the listener was last told of the wake listener (`uyandirma`), so each change is said once.
+    wake_said = [None]
+
+    def wake_health(durum, neden=None, mesaj=''):
+        """The wake listener's health, for the listener to show (dinleyici.json): 'dinliyor' once its
+        microphone really hears, 'sorun' and why ('mikrofon', 'sessiz', 'model'), 'kapali' when let
+        go. Before, every trouble was only logged, while the tray said the microphone listened."""
+        if wake_said[0] != (durum, neden):
+            wake_said[0] = (durum, neden)
+            out(olay='uyandirma', durum=durum, neden=neden, mesaj=mesaj)
 
     def inputs_changed(moment):
         """Whether Windows' microphones are not the ones the last stream was opened on."""
@@ -1947,24 +2596,38 @@ def serve(state, config, lines=None):
 
     def begin(continuous=False, woke=False, checking=None):
         """Recording. `checking`: begun on a heard "not al" Whisper has yet to confirm; nobody is
-        told until it does, and the sound since is already the dictation's start."""
+        told until it does. The wake listener's stream is let go only once this one records (unless
+        the devices must be listed anew, which no open stream allows), and its last moment begins
+        the dictation (split_clip): words said straight after the phrase, in one breath, were lost
+        between the two streams."""
         nonlocal mode, turn
-        if wake is not None and wake.running:
+        held = checking is not None and wake is not None
+        refresh = inputs_changed(now())
+        if wake is not None and wake.running and (refresh or not held):
             wake.stop()
-        if inputs_changed(now()):
+        if refresh:
             _refresh_audio()  # a headset plugged in, or made the default, since: recorded from it
             inputs['seen'] = _inputs_now()
         try:
-            recorder.start()
+            recorder.start(held=held)
         except Exception:
             # A microphone that was not there when the helper started (a headset as Windows signs
-            # in): the device list made anew, and once more.
+            # in), or one that would not open twice: the device list made anew, and once more.
+            if wake is not None and wake.running:
+                wake.stop()
             _refresh_audio()
             try:
-                recorder.start()
+                recorder.start(held=held)
             except Exception as exc:
                 out(olay='hata', neden='mikrofon', mesaj=str(exc)[:300])
                 return False
+        if held:
+            if wake.running:
+                wake.stop()
+            # The two streams heard the same moment while both were open: the wake listener's
+            # sound is taken up to where the dictation's own begins, not twice.
+            checking['clip'], before = split_clip(wake.clip(until=recorder.held_since))
+            recorder.go_on(before)
         mode, turn = 'kayit', turn + 1
         turns[turn] = {'continuous': continuous, 'woke': woke, 'first': True, 'checking': checking}
         if checking is None:
@@ -2078,7 +2741,12 @@ def serve(state, config, lines=None):
                 else:
                     end(keep=name == 'bitir')
             elif name == 'uyandirma':
-                wake_on = bool(command.get('acik'))
+                allowed = bool(command.get('acik'))
+                if allowed and not wake_on:
+                    wake_retry.update(broken=False, at=0.0, wait=5.0)  # switched on again: tried anew
+                wake_on = allowed
+                if not wake_on:
+                    wake_health('kapali')
             elif name == 'ayar':
                 # The settings file changed: the commands and pauses count from the next sentence.
                 try:
@@ -2092,6 +2760,8 @@ def serve(state, config, lines=None):
                     if wake.running:
                         wake.stop()
                     wake = None
+                if config.get('uyandirma_sozu') != phrase:
+                    wake_retry['broken'] = False
         moment = now()
         if mode == 'kayit' and checking is not None:
             if not checking['sent'] and moment - recorder.started >= ses.WAKE_AFTER_SN:
@@ -2113,11 +2783,21 @@ def serve(state, config, lines=None):
                 end()
             elif not recorder.spoke and moment - recorder.started > 12:
                 end(keep=False)  # nothing said: let the microphone go
-        elif mode == 'bos' and wake_on and 'model' in loaded and moment >= wake_retry['at']:
+        elif mode == 'bos' and wake_on and 'model' in loaded and moment >= wake_retry['at'] and not wake_retry['broken']:
+            if wake is None:
+                try:
+                    wake = Wake(state, config)
+                except Exception as exc:
+                    # The small model would not load (its folder damaged, or a path its library
+                    # cannot open): no microphone is to blame and trying again changes nothing.
+                    # Said, and tried again when the wake phrase or always-listen changes.
+                    log('uyandırma: model açılamadı (%s)' % str(exc)[:200])
+                    wake_retry['broken'] = True
+                    wake_health('sorun', 'model', 'uyandırma modeli açılamadı (%s)' % str(exc)[:160])
             try:
                 if wake is None:
-                    wake = Wake(state, config)
-                if not wake.running:
+                    pass  # its small model would not load: said above
+                elif not wake.running:
                     wake.start()
                     inputs.update(seen=_inputs_now(), at=moment)
                     if wake_retry['failed']:
@@ -2132,22 +2812,26 @@ def serve(state, config, lines=None):
                     wake.stop()
                     _refresh_audio()
                 elif wake.stalled(moment):
-                    # A headset that went away, or a device that is not the microphone: opened again
-                    # a little later, the device list made anew.
-                    log('uyandırma: mikrofondan ses gelmiyor; %d sn sonra yeniden açılacak' % wake_retry['wait'])
+                    # A headset that went away, a device that is not the microphone, or one Windows
+                    # gives only silence (its privacy setting): opened again a little later, the
+                    # device list made anew, and the listener told.
+                    why = 'sessiz' if wake.stalled(moment) == 'sessiz' else 'mikrofon'
+                    log('uyandırma: mikrofondan %s; %d sn sonra yeniden açılacak'
+                        % ('yalnız sessizlik geliyor' if why == 'sessiz' else 'ses gelmiyor', wake_retry['wait']))
                     wake.stop()
                     _refresh_audio()
                     wake_retry.update(at=moment + wake_retry['wait'], wait=min(60.0, wake_retry['wait'] * 2), failed=True)
+                    wake_health('sorun', why, WAKE_TROUBLE[why])
                 else:
                     if moment - wake.last_sound < 1.0:
                         wake_retry['wait'] = 5.0  # it hears: the next trouble starts the waits over
+                    if wake.sounded:
+                        wake_health('dinliyor')
                     # Whatever the small model heard, the phrase whole or only "not al", Whisper
                     # checks it before a window opens: held to a grammar, the small model takes
                     # talk for the phrase (seen during a game), and a window must not open over it.
                     if wake.heard():
-                        clip = wake.clip()
-                        wake.stop()
-                        begin(continuous=True, woke=True, checking={'clip': clip, 'sent': False})
+                        begin(continuous=True, woke=True, checking={'sent': False})
             except Exception as exc:
                 # The microphone could not be opened (a wireless headset not ready as Windows signs
                 # in). It used to switch the wake phrase off until always-listen was switched off and
@@ -2160,8 +2844,10 @@ def serve(state, config, lines=None):
                     pass
                 _refresh_audio()
                 wake_retry.update(at=moment + wake_retry['wait'], wait=min(60.0, wake_retry['wait'] * 2), failed=True)
+                wake_health('sorun', 'mikrofon', 'mikrofon açılamadı (%s)' % str(exc)[:160])
         elif wake is not None and wake.running and not wake_on:
             wake.stop()
+            wake_health('kapali')
 
 
 def trial_wake(state, config, seconds):
@@ -2200,12 +2886,19 @@ def main(argv=None):
     parser.add_argument('--dene-uyandirma', type=float)
     parser.add_argument('--dosya')
     args = parser.parse_args(argv)
-    global ses
+    global ses, THREADS
     sys.path.insert(0, args.scripts)
     import beyin_v3_ses as engine_ses  # standard library only
     ses = engine_ses
     state = Path(args.state)
     config = ses.load_config(state)
+    THREADS = ses.cpu_threads(state)
+    dosya = os.path.abspath(args.dosya) if args.dosya else None
+    # The voice folder is this helper's working folder: the models in it are opened by paths
+    # relative to it where the absolute ones have letters the native libraries cannot open (_here).
+    home = ses.ses_dir(state)
+    home.mkdir(parents=True, exist_ok=True)
+    os.chdir(home)
     if args.indir:
         progress = ses.ses_dir(state) / ses.PROGRESS_FILE
 
@@ -2218,6 +2911,13 @@ def main(argv=None):
         try:
             model, what = load_model(state, config, downloading)
             checker_for(config, what, downloading)  # fetched now, with the model, not when the listener first starts
+            if '(ekran kartı' in what:
+                # How long the card takes for a second of sound, its pipelines built: one slower than
+                # the processor's quick model is not kept (`kur`, SLOW_CARD_SN).
+                try:
+                    print(json.dumps({'sure_sn': round(card_seconds(model, config), 2)}), flush=True)
+                except Exception as exc:
+                    print('Kartın hızı ölçülemedi: ' + str(exc)[:200], file=sys.stderr, flush=True)
         finally:
             progress.unlink(missing_ok=True)
         release(model)
@@ -2238,8 +2938,8 @@ def main(argv=None):
         return 0
     if args.dene_uyandirma:
         return trial_wake(state, config, args.dene_uyandirma)
-    if args.dosya:
-        return transcribe_path(state, config, args.dosya)
+    if dosya:
+        return transcribe_path(state, config, dosya)
     return serve(state, config)
 
 

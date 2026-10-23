@@ -110,6 +110,27 @@ class ClientTests(unittest.TestCase):
         path=next((self.vault/'.cache/jev').glob('*.json'));v=json.loads(path.read_text());v['created_at']=0;path.write_text(json.dumps(v))
         self.assertFalse(self.run_client()['cache_hit'])
 
+    def test_entries_past_the_longest_ttl_are_pruned_once_a_day(self):
+        # With auto_context every prompt is an entry of its own; expiry was checked only on reading, and nothing went.
+        self.config()
+        folder=self.vault/'.cache/jev';folder.mkdir(parents=True)
+        old,fresh,stray=folder/('a'*64+'.json'),folder/('b'*64+'.json'),folder/'tmpyarim'
+        for path in (old,fresh,stray): path.write_text('{}')
+        day_ago=time.time()-j.CACHE_KEEP-60
+        for path in (old,stray): os.utime(path,(day_ago,day_ago))
+        self.assertFalse(self.run_client()['degraded'])
+        self.assertEqual((old.exists(),stray.exists(),fresh.exists()),(False,False,True))
+        self.assertEqual(len(list(folder.glob('*.json'))),2,'the entry still young, and the new one')
+        # Later the same day: the folder is not looked through again.
+        os.utime(fresh,(day_ago,day_ago))
+        with patch.object(j.os,'scandir',wraps=os.scandir) as scan:
+            self.assertFalse(self.run_client(source_versions={'a':'2'})['degraded'])
+        self.assertEqual(scan.call_count,0);self.assertTrue(fresh.exists())
+        # A day on, it is.
+        marker=folder/j.PRUNE_MARKER;os.utime(marker,(day_ago,day_ago))
+        self.run_client(source_versions={'a':'3'})
+        self.assertFalse(fresh.exists());self.assertEqual(len(list(folder.glob('*.json'))),3)
+
     def test_invalid_answer_diagnostics_preserve_usage_without_raw_content(self):
         self.config()
         variants = [

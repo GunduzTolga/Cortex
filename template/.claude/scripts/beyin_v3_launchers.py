@@ -1,8 +1,19 @@
 """Native clickable wrappers around the single installed updater."""
+import importlib.util
 import os
 from pathlib import Path
 import shlex
 import sys
+
+
+def _powershell():
+    """The shared quoting (beyin_v3_powershell), loaded beside this file: the installer loads this
+    module by its path, without the scripts folder on sys.path."""
+    spec = importlib.util.spec_from_file_location('beyin_launchers_powershell',
+                                                  Path(__file__).resolve().with_name('beyin_v3_powershell.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _cmd_quote(value):
@@ -28,7 +39,7 @@ def plan_launchers(vault, state):
         # The update this file starts rewrites it, and cmd.exe resumes at the old byte
         # offset: changing this layout ends the first update before pause and exit /b.
         import base64
-        script = '& ' + ' '.join("'" + str(v).replace("'", "''") + "'" for v in [sys.executable, entry, 'update'])
+        script = _powershell().call([sys.executable, entry, 'update'])
         script += '; exit $LASTEXITCODE'
         encoded = base64.b64encode(script.encode('utf-16le')).decode('ascii')
         system = os.environ.get('SYSTEMROOT') or os.environ.get('WINDIR') or r'C:\Windows'

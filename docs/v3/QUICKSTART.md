@@ -225,11 +225,19 @@ URLs and links that leave the vault are skipped. It is information only: it
 makes no model call, writes nothing and does not change the doctor status.
 
 Hooks enqueue only event metadata, never raw prompts or transcripts. They start
-an opportunistic detached Python worker. Startup waits at most 1.5 seconds for
+an opportunistic detached Python worker; a file edit (PostToolUse) only queues its
+metadata, and the turn's Stop drains it. Startup waits at most 1.5 seconds for
 source synchronization before context; a slower sync keeps running and the turn
-reads the previous index, labeled as such, never as fresh context. Before the
-first index exists the hook reports pending only. Stop and edit hooks return promptly. If a
-worker fails, metadata stays queued and the next event retries. Explicit repeated
+reads the previous index, labeled as such, never as fresh context. A worker that
+fails is read the same way: the turn gets the last committed index with a warning
+to run doctor, never an empty context. Before the first index exists the hook
+reports pending only. Stop and edit hooks return promptly, and the Stop worker
+warms the per-turn passage index for the next prompt. A sync that leaves a copied
+note's duplicated id out of the index acknowledges its events and names both files
+on the next prompt; a failure that a retry may clear keeps the metadata queued and
+the next event retries. A preferences file that cannot be read (UTF-16 from
+PowerShell 5.1) leaves the defaults in force with a one-line notice; a UTF-8 BOM is
+read as usual. Explicit repeated
 `event_id` values deduplicate queue acknowledgement; client events without an ID
 receive new local IDs. This is not a blanket exactly-once transport guarantee. There is no
 always-on daemon or guarantee of updates while every client is closed.

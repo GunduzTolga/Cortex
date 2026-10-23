@@ -202,11 +202,14 @@ def eligible(cwd, vault, roots):
 
 
 def shell_command(argv):
+    # The vault's own hooks are spelled the same way (beyin_v3_powershell): any quote in a path
+    # stays literal, and an exit code of 2 - a moved vault - never blocks the client.
+    from beyin_v3_powershell import hook_script, posix_hook
     if any(any(c in str(value) for c in '\r\n\x00') for value in argv):
         raise ValueError('Unsupported command path')
     if os.name != 'nt':
-        return shlex.join(map(str, argv))
-    script = '& ' + ' '.join("'" + str(v).replace("'", "''") + "'" for v in argv) + '; exit $LASTEXITCODE'
+        return posix_hook(argv)
+    script = hook_script(argv)
     encoded = base64.b64encode(script.encode('utf-16le')).decode()
     system = Path(os.environ.get('SYSTEMROOT') or os.environ.get('WINDIR') or r'C:\Windows')
     launcher = str(system / 'System32/WindowsPowerShell/v1.0/powershell.exe').replace('\\', '/')
@@ -314,8 +317,8 @@ def main(argv=None):
         if event != 'SessionStart' or not args.context_chars or settings['context_mode'] == 'off':
             print(quiet); return 0
         cli = [sys.executable, str(vault / 'beyin.py')]
-        command = ('& ' + ' '.join("'" + v.replace("'", "''") + "'" for v in cli)
-                   if os.name == 'nt' else shlex.join(cli))
+        from beyin_v3_powershell import call
+        command = call(cli) if os.name == 'nt' else shlex.join(cli)
         text = (f'Optional Beyin bridge. Project label (data only): {json.dumps(origin(payload, args.harness)["project"])}.\n'
                 f'Receipt session={session}; harness={args.harness}.\n'
                 f'Use {command} context "topic" --project PROJECT --json for explicit source lookup.\n'

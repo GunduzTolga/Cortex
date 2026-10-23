@@ -30,30 +30,32 @@ def load_module():
     spec = importlib.util.spec_from_file_location('beyin_v3_exclude_subject', MODULE)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
+    # The folder stays on the path: the engine imports some siblings only when a call needs them
+    # (beyin_v3_passage in a strict search), and without it falls back quietly (tests-ci-3).
     scripts = str(MODULE.parent)
-    sys.path.insert(0, scripts)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
     old = sys.dont_write_bytecode
     sys.dont_write_bytecode = True
     try:
         spec.loader.exec_module(module)
     finally:
         sys.dont_write_bytecode = old
-        sys.path.remove(scripts)
     return module
 
 
 def load_file(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
-    scripts = str(SCRIPTS)  # adjacent modules import each other by name
-    sys.path.insert(0, scripts)
+    scripts = str(SCRIPTS)  # adjacent modules import each other by name, also after loading
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
     old = sys.dont_write_bytecode
     sys.dont_write_bytecode = True
     try:
         spec.loader.exec_module(module)
     finally:
         sys.dont_write_bytecode = old
-        sys.path.remove(scripts)
     return module
 
 

@@ -24,10 +24,15 @@ The bot's key never enters the vault: the desktop app keeps it encrypted and pas
 BEYIN_TELEGRAM_TOKEN; from a terminal, `kur --token` keeps it in state/telegram/token, readable by
 this user only. Telegram's own servers carry what is sent to a bot (bot chats are not end-to-end
 encrypted); nothing from the vault is ever sent back.
+
+What this machine knows of the bot (the pairing, the last number seen) is kept in state/telegram,
+or in the folder BEYIN_TELEGRAM_DIR names: the desktop app's own, one per person whichever vault is
+open, since the bot and its chat belong to no vault (`folder`, `adopt`).
 """
 import argparse
 from datetime import datetime, timezone
 import hmac
+from http.client import HTTPException
 import json
 import os
 from pathlib import Path
@@ -44,6 +49,7 @@ sys.dont_write_bytecode = True
 
 API = 'https://api.telegram.org'
 DIR = 'telegram'
+DIR_ENV = 'BEYIN_TELEGRAM_DIR'
 STATE_FILE = 'durum.json'
 TOKEN_FILE = 'token'
 TOKEN_ENV = 'BEYIN_TELEGRAM_TOKEN'
@@ -57,8 +63,14 @@ AUDIO_LIMIT_SN = 600
 GAP_LIMIT = 500
 # A bot's undelivered messages last 24 hours: away for longer than this, the chat is looked through at start.
 PROBE_AFTER_SN = 23 * 3600
+# Telegram busy or failing on one message's file or forward for this long: taken as its answer, so the queue goes on.
+GIVE_UP_SN = 3600
 KEEP_IDS = 500
+# Private chats whose earliest message is kept while no phone is paired (the owner's notes queued before pairing).
+WAITING_CHATS = 20
 CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+# What a guess at the pairing code looks like when it is not the link's `/start KOD`: one word of the code's letters.
+CODE_SHAPE = re.compile('^[' + CODE_ALPHABET + ']{6,12}$')
 TOKEN_PATTERN = re.compile(r'^\d{5,15}:[A-Za-z0-9_-]{30,60}$')
 URL_PATTERN = re.compile(r'https?://[^\s<>"]+')
 NOT_FOUND = re.compile(r'message to (?:forward|copy) not found|message_id_invalid|message not found', re.I)
@@ -75,6 +87,22 @@ class TelegramError(Exception):
         self.code = code
         self.description = description
         self.retry_after = retry_after
+
+
+def _transient(exc):
+    """Telegram busy or failing for now (too many requests, its own server's failure, an answer not understood):
+    tried again later, never taken as its refusal of that one message."""
+    code = exc.code if isinstance(exc.code, int) else 0
+    return code == 429 or code >= 500 or code == 0
+
+
+class Refusal(ValueError):
+    """A command that cannot go on, and what it was by name (`code`): beyin.py writes the name beside the
+    sentence in its error JSON, so the desktop app says it in the window's language."""
+
+    def __init__(self, message, code):
+        super().__init__(message)
+        self.code = code
 
 
 class Bot:
@@ -115,7 +143,8 @@ class Bot:
                         break
                     written += len(chunk)
                     if written > limit:
-                        raise TelegramError(0, 'Dosya beklenenden büyük')
+                        # 413, as a server says it: a file larger than said is no passing failure to wait out.
+                        raise TelegramError(413, 'Dosya beklenenden büyük')
                     sink.write(chunk)
         except HTTPError as exc:
             raise TelegramError(exc.code, 'HTTP ' + str(exc.code)) from None
@@ -124,7 +153,30 @@ class Bot:
 
 # ---------------------------------------------------------------- state --
 def folder(state):
+    """state/telegram, or the folder BEYIN_TELEGRAM_DIR names (an absolute path): the desktop app keeps one per
+    person there, beside the key, so choosing another vault neither unpairs the phone nor starts a second listener."""
+    chosen = Path((os.environ.get(DIR_ENV) or '').strip()).expanduser()
+    if str(chosen) not in ('', '.') and chosen.is_absolute():
+        return chosen
     return Path(state) / DIR
+
+
+def adopt(state):
+    """BEYIN_TELEGRAM_DIR used for the first time: the vault's own Telegram state copied there, the pairing with it.
+
+    Only while that folder has no durum.json, and without the listener's lock. durum.json is written
+    last, so a copy cut short is made again next time. True when something was copied.
+    """
+    where, own = folder(state), Path(state) / DIR
+    if where == own or (where / STATE_FILE).exists() or not (own / STATE_FILE).is_file():
+        return False
+    where.mkdir(parents=True, exist_ok=True)
+    for item in own.iterdir():
+        if item.name in (LOCK_FILE, STATE_FILE) or item.name.startswith('.telegram-') or item.is_symlink() or not item.is_file():
+            continue
+        shutil.copy2(item, where / item.name)  # the key's file keeps its owner-only mode
+    _private_write(where / STATE_FILE, (own / STATE_FILE).read_text(encoding='utf-8'))
+    return True
 
 
 def load(state):
@@ -151,7 +203,16 @@ def _private_write(path, text):
             os.chmod(temporary, 0o600)
         except OSError:
             pass
-        os.replace(temporary, path)
+        for attempt in range(3):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                # Windows refuses the rename while another program has the file open for a moment (the app's
+                # `telegram durum`, a virus scanner): tried again shortly, not taken for a lost connection.
+                if os.name != 'nt' or attempt == 2:
+                    raise
+                time.sleep(0.1)
     finally:
         try:
             os.unlink(temporary)
@@ -213,17 +274,25 @@ def setup(state, token=None, keep_token=False, again=False, bot=None, env=None):
         me = bot.call('getMe')
     except TelegramError as exc:
         if exc.code in (401, 404):
-            raise ValueError('Telegram bu anahtarı tanımadı. @BotFather\'dan anahtarı yeniden kopyala.') from None
+            raise Refusal('Telegram bu anahtarı tanımadı. @BotFather\'dan anahtarı yeniden kopyala.', 'anahtar_gecersiz') from None
         raise
     if not me.get('is_bot'):
-        raise ValueError('Bu anahtar bir bota ait değil.')
+        raise Refusal('Bu anahtar bir bota ait değil.', 'bot_degil')
     hook = bot.call('getWebhookInfo') or {}
     if hook.get('url'):
-        raise ValueError('Bu bot başka bir yere bağlı (webhook). Cortex için @BotFather\'dan ayrı bir bot aç.')
+        raise Refusal('Bu bot başka bir yere bağlı (webhook). Cortex için @BotFather\'dan ayrı bir bot aç.', 'webhook')
     data = load(state)
     same_bot = (data.get('bot') or {}).get('id') == me.get('id')
+    if (not same_bot or again or not data.get('sohbet')) and running(state):
+        # A running listener writes back the state it read at the start of its round, within the 50 seconds it
+        # waits for messages: a new pairing link (a new code is handed out whenever no phone is paired) would be
+        # undone and the phone's /start taken for a stranger's.
+        raise Refusal('Telegram dinleyicisi çalışıyor; önce onu kapat (masaüstünde Telegram\'ı kapat).', 'calisiyor')
     if not same_bot or again:
         data = {'schema': 1}
+    # A key given anew (the old one revoked in BotFather) ends what the old one's refusal said.
+    for key in ('son_hata', 'son_hata_kod', 'son_hata_zaman'):
+        data.pop(key, None)
     data['bot'] = {'id': me.get('id'), 'kullanici_adi': me.get('username'), 'ad': me.get('first_name')}
     if not data.get('sohbet'):
         data['eslesme_kodu'] = ''.join(secrets.choice(CODE_ALPHABET) for _ in range(8))
@@ -244,8 +313,9 @@ def status(state, env=None):
     return {'kurulu': bool(bot.get('id')) and bool(token_for(state, env)), 'anahtar': bool(token_for(state, env)),
             'bot': bot.get('kullanici_adi'), 'eslesti': bool(data.get('sohbet')), 'kisi': data.get('ad'),
             'baglanti': None if data.get('sohbet') else pairing_link(data), 'kod': None if data.get('sohbet') else data.get('eslesme_kodu'),
-            'son_bakis': data.get('son_bakis'), 'son_hata': data.get('son_hata'), 'yakalanan': int(data.get('yakalanan') or 0),
-            'calisiyor': running(state), 'sesli_not': _voice_notes(state), 'klasor': str(folder(state))}
+            'son_bakis': data.get('son_bakis'), 'son_hata': data.get('son_hata'), 'son_hata_kod': data.get('son_hata_kod'),
+            'yakalanan': int(data.get('yakalanan') or 0), 'calisiyor': running(state), 'sesli_not': _voice_notes(state),
+            'klasor': str(folder(state))}
 
 
 def _voice_notes(state):
@@ -256,12 +326,22 @@ def _voice_notes(state):
 
 
 def forget(state):
-    """`kaldir`: the bot's key and this machine's memory of the chat go; the cards in the vault stay."""
-    where = folder(state)
-    existed = where.exists()
-    if running(state):
-        raise ValueError('Telegram dinleyicisi çalışıyor; önce onu kapat (masaüstünde Telegram\'ı kapat).')
-    shutil.rmtree(where, ignore_errors=True)
+    """`kaldir`: the bot's key and this machine's memory of the chat go; the cards in the vault stay.
+
+    With BEYIN_TELEGRAM_DIR the vault's own state/telegram goes too, and the folder keeps an empty
+    durum.json: no vault's own copy is taken over again (`adopt`), bringing back the pairing just removed.
+    """
+    where, own = folder(state), Path(state) / DIR
+    places = [where] if where == own else [where, own]
+    if any(_held(place) for place in places):
+        raise Refusal('Telegram dinleyicisi çalışıyor; önce onu kapat (masaüstünde Telegram\'ı kapat).', 'calisiyor')
+    data = load(state)
+    existed = (where.exists() if where == own else
+               bool(own.exists() or (data.get('bot') or {}).get('id') or (where / TOKEN_FILE).exists()))
+    for place in places:
+        shutil.rmtree(place, ignore_errors=True)
+    if where != own:
+        save(state, {'schema': 1, 'kaldirildi': _iso(_now())})
     return {'status': 'kaldirildi' if existed else 'zaten-yok', 'klasor': str(where)}
 
 
@@ -303,10 +383,15 @@ def _unlock(handle):
 
 
 def running(state):
-    if not (folder(state) / LOCK_FILE).exists():
+    return _held(folder(state))
+
+
+def _held(where):
+    """Whether a listener holds the lock of this Telegram folder."""
+    if not (where / LOCK_FILE).exists():
         return False
     try:
-        handle = open(folder(state) / LOCK_FILE, 'a+b')
+        handle = open(where / LOCK_FILE, 'a+b')
     except OSError:
         return False
     with handle:
@@ -439,9 +524,26 @@ class Context:
         self.sleep = sleep
         self.now = now
         self.data = load(state)
+        # What Telegram kept failing on for now (`_transient`), and since when: this listener's run only.
+        self.failing = {}
 
     def save(self):
         save(self.state, self.data)
+
+    def refused(self, what, exc):
+        """Whether Telegram's error on `what` (one file, one forward) is its answer, so the message goes on without
+        it: a refusal is; a passing failure is not, until it has gone on for GIVE_UP_SN. Otherwise the caller
+        raises it and the round is tried again, the message taken again from the start.
+
+        A key Telegram no longer takes (401, /revoke in BotFather) is no answer about this message: the
+        listener stops on it (`listen`) and the message waits for the new key. Taken as one, a recovery
+        under way marked the rest of its gap done, nothing fetched and nobody told."""
+        if exc.code == 401:
+            return False
+        if not _transient(exc):
+            return True
+        since = self.failing.setdefault(what, self.now())
+        return self.now() - since >= GIVE_UP_SN
 
     def send(self, text, reply_to=None):
         """A quiet answer in the chat, its number kept as the bot's own."""
@@ -499,6 +601,7 @@ def capture_messages(context, messages, recovered=False):
     when = (sent_at if own else None) or first.get('date')
     extra = {'telegram_mesaj': first.get('message_id'), 'gonderildi': _iso(when) if when else None}
     notes, files, spoken, voiced = [], [], [], False
+    missing = []  # files that did not come, named in the bot's answer too: a plain ✓ would say they did
     if sender:
         extra['iletildi'] = sender
         notes.append('İletildi: ' + sender)
@@ -517,18 +620,26 @@ def capture_messages(context, messages, recovered=False):
             size = int(item.get('file_size') or 0)
             if size > FILE_LIMIT:
                 notes.append('Telegram\'da kaldı: %s (%.0f MB); botlar 20 MB\'tan büyük dosyayı indiremiyor.' % (name, size / 1048576))
+                missing.append(name + ' (20 MB\'tan büyük, Telegram\'da kaldı)')
                 continue
             target = workdir / safe_name(name, stamp)
             if target.exists():
                 target = target.with_name(target.stem + '-' + str(len(files) + 1) + target.suffix)
+            what = ('dosya', item.get('file_unique_id') or item.get('file_id'))
             try:
                 info = context.call('getFile', file_id=item['file_id'])
                 context.bot.download(info['file_path'], target)
             except TelegramError as exc:
-                # Telegram will not hand this file over (gone, too big): said on the card, never retried for ever.
                 target.unlink(missing_ok=True)
+                if not context.refused(what, exc):
+                    # Telegram busy or failing for now (a 502, too many requests): the message is taken again later,
+                    # nothing of it kept yet. Said done, the voice note was lost with a ✓ on the phone.
+                    raise
+                # Telegram will not hand this file over (gone, too big): said on the card, never retried for ever.
                 notes.append('Telegram dosyayı vermedi: %s (%s)' % (name, exc.description[:120]))
+                missing.append(name)
                 continue
+            context.failing.pop(what, None)
             files.append(target)
             if kind == 'ses':
                 words, why_not = context.transcribe(context.state, target)
@@ -570,6 +681,7 @@ def capture_messages(context, messages, recovered=False):
                                     tool='telegram', extra=extra)
         result['sesli'] = bool(spoken)
         result['ozet'] = _first_line(spoken[0], 120) if spoken else None
+        result['alinamayan'] = missing
         return result
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -582,11 +694,32 @@ def _unsupported(message):
     return None
 
 
+def _command(message):
+    """The bot command a message is (`/yardim`, `/start KOD`), by its name; None for anything else."""
+    text = (message.get('text') or '').strip()
+    if not text.startswith('/'):
+        return None
+    command = text.split()[0][1:].split('@')[0].lower()
+    return command if command in ('start', 'yardim', 'help') else None
+
+
+def _code_try(text):
+    """Whether a note from before pairing was the person's try at the code, typed as the code is shown: one word of
+    its letters in capitals, or with one of its digits. A word such as "market" or "yumurta" is a note and is kept;
+    it still counts as a guess while nothing is paired (`try_pair`), where a stranger's guesses are what matter."""
+    text = (text or '').strip()
+    return bool(CODE_SHAPE.match(text.upper()) and (text.isupper() or any(char.isdigit() for char in text)))
+
+
 def _answer(result):
     if not result:
         return None
     if result.get('status') == 'mevcut_karta_eklendi':
         return '✓ Bu bağlantı zaten gelen kutusundaydı; notunu ekledim.'
+    missing = result.get('alinamayan') or []
+    if missing:
+        return ('✓ Gelen kutusuna eklendi, ama ' + ('dosyayı' if len(missing) == 1 else 'şu dosyaları') + ' alamadım: '
+                + '; '.join(missing))
     if result.get('sesli') and result.get('ozet'):
         return '✓ Gelen kutusuna eklendi: «' + result['ozet'] + '»'
     return '✓ Gelen kutusuna eklendi'
@@ -631,125 +764,202 @@ def try_pair(context, message):
     if chat.get('type') != 'private' or not code or sender.get('is_bot'):
         return False
     said = (message.get('text') or '').strip()
-    said = said[len('/start'):].strip() if said.startswith('/start') else said
+    started = said.startswith('/start')
+    said = said[len('/start'):].strip() if started else said
     if not said:
         return False
     if not hmac.compare_digest(said.upper().encode(), code.encode()):
-        context.data['yanlis_kod'] = int(context.data.get('yanlis_kod') or 0) + 1
-        if context.data['yanlis_kod'] >= 20:
-            context.data['eslesme_kodu'] = None  # guessed at: a new link is made with `kur`
+        # Only a guess at the code counts against it: the link's `/start …`, or one word of the code's letters.
+        # The owner's notes queued on the phone before pairing (a key revoked, Telegram set up again) are no
+        # guesses, and twenty of them made the new code unusable before its `/start` arrived.
+        if started or CODE_SHAPE.match(said.upper()):
+            context.data['yanlis_kod'] = int(context.data.get('yanlis_kod') or 0) + 1
+            if context.data['yanlis_kod'] >= 20:
+                context.data['eslesme_kodu'] = None  # guessed at: a new link is made with `kur`
         return False
     name = ' '.join(part for part in (sender.get('first_name'), sender.get('last_name')) if part)
+    waiting = context.data.pop('bekleyen', None)
+    lowest = (waiting if isinstance(waiting, dict) else {}).get(str(chat['id']))
     context.data.update(sohbet=chat['id'], kisi_id=sender['id'], ad=sender.get('first_name') or name or None,
                         kisi_adi_tam=name or None, eslesme_kodu=None, yanlis_kod=0, eslesti=_iso(context.now()),
                         son_bakis=_iso(context.now()), son_bakis_sn=context.now(), son_id=message.get('message_id'))
+    if isinstance(lowest, int) and isinstance(message.get('message_id'), int) and lowest < message['message_id']:
+        context.data['eslesme_oncesi'] = [lowest, message['message_id'] - 1]
     _remember(context.data, 'islenen', message.get('message_id'))
+    # Written down before the answer and before the notes from before pairing are fetched: cut short there (Telegram
+    # busy, the app quit), the next round paired the phone again and said "Eşleştik" once more each time.
+    context.save()
     context.send('Eşleştik ✓ ' + HELP, reply_to=message.get('message_id'))
     return True
 
 
+def _waiting(context, message, numbers):
+    """Unpaired: the earliest message of each private chat kept, so the one that pairs gets what it sent before."""
+    chat, sender = message.get('chat') or {}, message.get('from') or {}
+    numbers = [number for number in numbers if isinstance(number, int)]
+    if chat.get('type') != 'private' or sender.get('is_bot') or not isinstance(chat.get('id'), int) or not numbers:
+        return
+    waiting = context.data.get('bekleyen')
+    waiting = dict(waiting) if isinstance(waiting, dict) else {}
+    key = str(chat['id'])
+    if key in waiting or len(waiting) < WAITING_CHATS:  # bounded: strangers cannot grow the state
+        kept = waiting.get(key)
+        waiting[key] = min(numbers + ([kept] if isinstance(kept, int) else []))
+        context.data['bekleyen'] = waiting
+
+
+def _before_pairing(context):
+    """What the person sent before pairing, fetched as a gap is; until done, it is looked at again on their next message."""
+    span = context.data.get('eslesme_oncesi')
+    if not (isinstance(span, list) and len(span) == 2 and all(isinstance(one, int) for one in span)):
+        context.data.pop('eslesme_oncesi', None)
+        return 0
+    found = recover(context, span[0], span[1], pairing=True)
+    context.data.pop('eslesme_oncesi', None)
+    context.save()
+    return found
+
+
+def _done(context, numbers):
+    """Numbers handled, written down at once, before the bot answers: a listener stopped while its answer is on
+    the way (the app quit, the vault switched) made the card a second time when Telegram gave the message again."""
+    for number in numbers:
+        _remember(context.data, 'islenen', number)
+    context.save()
+
+
 def handle_messages(context, messages):
     first = messages[0]
+    numbers = [m.get('message_id') for m in messages]
     if not context.data.get('sohbet'):
-        return {'yok_sayilan': 0 if try_pair(context, first) else 1}
+        if not try_pair(context, first):
+            _waiting(context, first, numbers)
+            return {'yok_sayilan': 1}
+        return {'kurtarilan': _before_pairing(context)} if context.data.get('eslesme_oncesi') else {}
     if not _from_partner(context, first):
         return {'yok_sayilan': 1}  # not the person's chat: no answer, so the bot gives nothing away
-    numbers = [m.get('message_id') for m in messages]
+    outcome = {}
+    if context.data.get('eslesme_oncesi'):
+        outcome['kurtarilan'] = _before_pairing(context)  # cut short when it was first fetched
     done = set(context.data.get('islenen') or [])
     if all(number in done for number in numbers):
-        return {}
-    outcome = {}
+        return outcome
     start = min(numbers)
     if start > int(context.data.get('son_id') or 0) + 1:
-        outcome['kurtarilan'] = recover(context, int(context.data.get('son_id') or 0) + 1, start - 1)
+        outcome['kurtarilan'] = outcome.get('kurtarilan', 0) + recover(context, int(context.data.get('son_id') or 0) + 1, start - 1)
     for number in numbers:
         _saw(context.data, number)
-    text = (first.get('text') or '').strip()
-    if text.startswith('/'):
-        command = text.split()[0][1:].split('@')[0].lower()
-        if command in ('start', 'yardim', 'help'):
-            context.send(HELP, reply_to=first.get('message_id'))
-            for number in numbers:
-                _remember(context.data, 'islenen', number)
-            return outcome
+    if _command(first):
+        _done(context, numbers)
+        context.send(HELP, reply_to=first.get('message_id'))
+        return outcome
     word = _unsupported(first)
     if word:
+        _done(context, numbers)
         context.send('Bunu (' + word + ') kaydedemiyorum.', reply_to=first.get('message_id'))
-        for number in numbers:
-            _remember(context.data, 'islenen', number)
         return outcome
     try:
         result = capture_messages(context, messages)
     except ValueError as exc:
+        _done(context, numbers)
         context.send('Kaydedemedim: ' + str(exc), reply_to=first.get('message_id'))
-        result = None
-    for number in numbers:
-        _remember(context.data, 'islenen', number)
-    if result and result.get('status') != 'bos':
+        return outcome
+    kept = bool(result and result.get('status') != 'bos')
+    if kept:
         context.data['yakalanan'] = int(context.data.get('yakalanan') or 0) + 1
         outcome['yakalanan'] = 1
+    _done(context, numbers)
+    if kept:
         context.send(_answer(result), reply_to=first.get('message_id'))
     return outcome
 
 
 # ------------------------------------------------------------- recovery --
-def recover(context, low, high):
+def recover(context, low, high, newest=None, pairing=False):
     """Each number from `low` to `high` fetched by forwarding it into the chat and deleting the copy.
 
     Returns how many messages became cards. What could not be fetched (Telegram refused the
     forward, or there were more numbers than one round looks through) is asked for once.
+
+    Cut short (the connection lost, the app quit, Telegram busy), it goes on where it stopped: each
+    number is written down as handled once its card is, and the highest number seen (the copies',
+    `newest` that `probe` found) only when the whole gap is done. Moved on with each copy, the gap
+    looked closed on the next round and the rest of it was never fetched. `pairing`: the person's
+    messages from before the pairing, not from while the computer was off.
     """
     if high < low:
+        _saw(context.data, newest)
         return 0
     chat = context.data['sohbet']
     asked_again = max(0, high - low + 1 - GAP_LIMIT)
     low = max(low, high - GAP_LIMIT + 1)
     found, failed = 0, 0
-    album = []
+    album, waiting, copies = [], [], []
 
     def flush():
-        nonlocal found
+        nonlocal found, failed
         if album:
-            result = capture_messages(context, list(album), recovered=True)
+            try:
+                result = capture_messages(context, list(album), recovered=True)
+            except ValueError:
+                result = None
+                failed += 1  # yakala would not take it: asked for again, never tried for ever
             if result and result.get('status') not in ('bos', None):
                 found += 1
                 context.data['yakalanan'] = int(context.data.get('yakalanan') or 0) + 1
             album.clear()
+        for number in waiting:
+            _remember(context.data, 'islenen', number)
+        waiting.clear()
+        context.save()
 
     for number in range(low, high + 1):
         if number in set(context.data.get('islenen') or []):
             continue
+        what = ('ilet', number)
         try:
             copy = context.call('forwardMessage', chat_id=chat, from_chat_id=chat, message_id=number, disable_notification=True)
         except TelegramError as exc:
+            if not context.refused(what, exc):
+                raise  # Telegram busy for now: the round is tried again, this number with it
             if not NOT_FOUND.search(exc.description or ''):
                 failed += 1
-            _remember(context.data, 'islenen', number)
+            waiting.append(number)
+            if not album:
+                flush()
             continue
-        _saw(context.data, (copy or {}).get('message_id'))
+        context.failing.pop(what, None)
+        copies.append(copy.get('message_id') if isinstance(copy, dict) else None)
         try:
             context.call('deleteMessage', chat_id=chat, message_id=copy['message_id'])
         except (TelegramError, OSError, KeyError, TypeError):
             pass
-        _remember(context.data, 'islenen', number)
-        if not isinstance(copy, dict):
+        if not isinstance(copy, dict) or _command(copy) or (pairing and _code_try(copy.get('text'))):
+            # Nothing to keep: a command, or (before pairing) a try at the code.
+            waiting.append(number)
+            if not album:
+                flush()
             continue
         copy = dict(copy, message_id=number)  # the card names the message, not its deleted copy
         if album and copy.get('media_group_id') != album[0].get('media_group_id'):
             flush()
         album.append(copy)
+        waiting.append(number)
         if not copy.get('media_group_id'):
             flush()
-        context.save()
     flush()
+    for number in copies + [newest]:
+        _saw(context.data, number)
     context.save()
+    when = 'Eşleşmeden önce' if pairing else 'Bilgisayar kapalıyken'
     if found:
-        context.send('Bilgisayar kapalıyken gönderdiğin %d mesajı aldım ✓' % found)
+        context.send(when + ' gönderdiğin %d mesajı aldım ✓' % found)
     missed = failed + asked_again
     if missed:
-        context.send(('Bilgisayar kapalıyken gönderdiğin mesajlardan %d tanesini alamadım. '
+        context.send((when + ' gönderdiğin mesajlardan %d tanesini alamadım. '
                       'Onları sohbette seçip bana yeniden iletir misin?') % missed if failed or not found else
-                     ('Kapalıyken gönderdiklerinin bir kısmını alamamış olabilirim. Eksik varsa onları seçip bana yeniden ilet.'))
+                     (('Eşleşmeden önce' if pairing else 'Kapalıyken') + ' gönderdiklerinin bir kısmını alamamış olabilirim. '
+                      'Eksik varsa onları seçip bana yeniden ilet.'))
     return found
 
 
@@ -777,9 +987,9 @@ def probe(context):
         break
     if not newest:
         return 0
+    # The copy's number is taken as seen when the gap below it is done (`recover`): cut short, the next start looks again.
     before = int(data['son_id'])
-    _saw(data, newest)
-    return recover(context, before + 1, newest - 1)
+    return recover(context, before + 1, newest - 1, newest=newest)
 
 
 # --------------------------------------------------------------- listen --
@@ -791,11 +1001,12 @@ def poll_once(context, timeout=POLL_SN):
     context.data['son_bakis'] = _iso(context.now())
     context.data['son_bakis_sn'] = context.now()
     context.data['son_hata'] = None
+    context.data['son_hata_kod'] = None
     context.save()
     return handled
 
 
-def listen(vault, state, token=None, bot=None, stop=None, sleep=time.sleep, transcribe=None, say=None):
+def listen(vault, state, token=None, bot=None, stop=None, sleep=time.sleep, transcribe=None, say=None, now=_now):
     """`dinle`: until stopped, one long poll after another; a lost connection waits longer each time."""
     token = token or token_for(state)
     if not token:
@@ -806,9 +1017,10 @@ def listen(vault, state, token=None, bot=None, stop=None, sleep=time.sleep, tran
         return {'status': 'zaten-calisiyor'}
     say = say or (lambda text: None)
     try:
-        context = Context(vault, state, bot or Bot(token), transcribe=transcribe, sleep=sleep)
+        context = Context(vault, state, bot or Bot(token), transcribe=transcribe, sleep=sleep, now=now)
         if not (context.data.get('bot') or {}).get('id'):
-            raise ValueError('Telegram kurulmamış. Önce: beyin.py telegram kur')
+            # Its own answer, not an error: started again, it would end again (the app does not start it again).
+            return {'status': 'kurulmamis'}
         wait = 5
         first = True
         while not (stop and stop()):
@@ -817,8 +1029,9 @@ def listen(vault, state, token=None, bot=None, stop=None, sleep=time.sleep, tran
                 if first:
                     try:
                         probe(context)
-                    except TelegramError:
-                        pass
+                    except TelegramError as exc:
+                        if _transient(exc):
+                            raise  # Telegram busy for now: waited out below, and the look is tried again
                     first = False  # a connection lost on the way: looked at again on the next round
                 handled = poll_once(context)
                 if any(handled.values()):
@@ -826,17 +1039,18 @@ def listen(vault, state, token=None, bot=None, stop=None, sleep=time.sleep, tran
                 wait = 5
             except TelegramError as exc:
                 if exc.code == 401:
-                    _fail(state, 'Telegram anahtarı geçersiz; Ayarlar → Telegram\'dan yeniden gir.')
+                    _fail(state, 'Telegram anahtarı geçersiz; Ayarlar → Telegram\'dan yeniden gir.', 'anahtar_gecersiz')
                     return {'status': 'anahtar_gecersiz'}
                 if exc.code == 409:
-                    _fail(state, 'Bu bot başka bir yerde de dinleniyor; Cortex için ayrı bir bot kullan.')
+                    _fail(state, 'Bu bot başka bir yerde de dinleniyor; Cortex için ayrı bir bot kullan.', 'cakisma')
                     sleep(60)
                     continue
-                _fail(state, 'Telegram: ' + exc.description[:200])
+                _fail(state, 'Telegram: ' + exc.description[:200], 'telegram')
                 sleep(min(max(float(exc.retry_after or 0), wait), 300))
                 wait = min(wait * 2, 300)
-            except (URLError, OSError, TimeoutError) as exc:
-                _fail(state, 'Bağlantı yok: ' + (str(getattr(exc, 'reason', '') or exc) or type(exc).__name__)[:200])
+            except (URLError, OSError, TimeoutError, HTTPException) as exc:
+                # HTTPException: an answer cut off mid-way (IncompleteRead), as a lost connection is.
+                _fail(state, 'Bağlantı yok: ' + (str(getattr(exc, 'reason', '') or exc) or type(exc).__name__)[:200], 'baglanti')
                 sleep(wait)
                 wait = min(wait * 2, 300)
         return {'status': 'durdu'}
@@ -847,9 +1061,12 @@ def listen(vault, state, token=None, bot=None, stop=None, sleep=time.sleep, tran
             handle.close()
 
 
-def _fail(state, text):
+def _fail(state, text, code):
+    """The last thing that went wrong: its sentence for `durum`, and its name (`son_hata_kod`: anahtar_gecersiz,
+    cakisma, baglanti, telegram) for the desktop app, which says it in the window's language."""
     data = load(state)
     data['son_hata'] = text
+    data['son_hata_kod'] = code
     data['son_hata_zaman'] = _iso(_now())
     save(state, data)
 
@@ -877,7 +1094,8 @@ def human(result, command):
     if command == 'kaldir':
         return 'Telegram ayarı silindi: ' + str(result.get('klasor')) + ' (gelen kutusundaki kartlar duruyor)'
     if command == 'dinle':
-        return {'zaten-calisiyor': 'Telegram dinleyicisi zaten çalışıyor.', 'anahtar_gecersiz': 'Telegram anahtarı geçersiz.'}.get(
+        return {'zaten-calisiyor': 'Telegram dinleyicisi zaten çalışıyor.', 'anahtar_gecersiz': 'Telegram anahtarı geçersiz.',
+                'kurulmamis': 'Telegram kurulmamış. Önce: beyin.py telegram kur --token <anahtar>'}.get(
             result.get('status'), 'Telegram dinleyicisi durdu.')
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -899,6 +1117,10 @@ def main(argv=None, vault=None, state=None):
     if state is None or vault is None:
         raise SystemExit('Kasa bilinmiyor; beyin.py telegram ile çalıştırın.')
     state, vault = Path(state), Path(vault)
+    try:
+        adopt(state)
+    except OSError:
+        pass  # the vault's own state could not be copied: tried again by the next command
     if args.command == 'kur':
         result = setup(state, token=args.token, keep_token=bool(args.token), again=args.yeniden_esle)
     elif args.command == 'durum':
@@ -914,7 +1136,8 @@ def main(argv=None, vault=None, state=None):
         print(json.dumps(result, ensure_ascii=not utf8))
     else:
         print(human(result, args.command))
-    return 0 if result.get('status') != 'anahtar_gecersiz' else 2
+    # 2: a key Telegram does not take; 3: not set up. Neither is worth starting the listener again for.
+    return {'anahtar_gecersiz': 2, 'kurulmamis': 3}.get(result.get('status'), 0)
 
 
 if __name__ == '__main__':

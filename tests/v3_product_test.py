@@ -258,6 +258,13 @@ class ProductInstallationTest(unittest.TestCase):
         config.write_bytes(original_config)
         legacy = self.vault / '.claude/scripts/flush.py';legacy.parent.mkdir()
         original_runner = (ROOT / 'template/.claude/scripts/flush.py').read_bytes()
+        # The stock runner as V2 shipped it: the template copy is held to the installer's pinned
+        # digest, so an edit to it fails here instead of passing on both sides (misc-scripts-1).
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('beyin_product_installer', ROOT / 'scripts/install_v3.py')
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        self.assertIn(hashlib.sha256(original_runner).hexdigest(), installer.LEGACY_RUNNER_HASHES['.claude/scripts/flush.py'])
         legacy.write_bytes(original_runner)
         self.installed()
         new_note = self.vault / 'created-after-upgrade.md';new_note.write_text('New user note must survive rollback.\n')

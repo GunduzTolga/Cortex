@@ -26,17 +26,55 @@ Kısayol ek paket istemez; Python'un kendisiyle çalışır. Mac'te bir oturum a
 (LaunchAgent) tuşu dinler.
 
 Windows'ta küçük bir **dinleyici** tuşu tutar ve pencereyi önceden hazır bekletir; tuşa basınca
-pencere anında (yaklaşık 50 ms) açılır. Dinleyici Windows açılırken Başlangıç klasöründeki
+pencere anında açılır. Boştayken saniyede on kez bakar (önceden kırk kez bakıyor, dizüstünün
+işlemcisini gün boyu uyandırıyordu); bir pencere açıkken ya da bir şey olduktan sonraki iki saniye
+saniyede kırk kez. Dinleyici Windows açılırken Başlangıç klasöründeki
 "Pyn Yakala" kısayoluyla başlar, kullanıcı başına bir tanedir ve yaklaşık 40-45 MB bellek kullanır.
 Cortex güncellenince kendini yeni kodla yeniden başlatır. `yakala kaldir` onu durdurur ve
-Başlangıç kısayolunu siler. Tuşu başka bir uygulama tutuyorsa dinleyici çekilir ve eski yönteme,
-Başlat menüsü kısayolunun tuşuna dönülür (o yol her basışta Python'u yeniden açtığı için daha yavaştır).
+Başlangıç kısayolunu siler.
+
+Tuşu başka bir uygulama tutuyorsa dinleyici yine çalışır: ses, "Pyn, not al" ve masaüstü
+uygulamasının "Not al"ı tuşa bağlı değildir. Tuşu yarım dakikada bir yeniden ister, o uygulama
+bırakınca alır. `yakala kur` bunu söyler, dinleyici de `dinleyici.json` dosyasına
+`kisayol: "mesgul"` yazar (masaüstü uygulaması "kısayolu değiştir" der); başka bir tuş için
+`beyin.py yakala kisayol ctrl+alt+x`. Önceden dinleyici çekiliyordu ve sesle "Pyn, not al" da
+onunla birlikte, bir sonraki oturuma kadar hiçbir şey söylemeden gidiyordu. Başlat menüsü
+kısayolu tuş almaz: başka bir uygulamanın tuttuğu tuşu Explorer da alamaz, alırsa dinleyiciye
+hiç bırakmaz.
+
+Dinleyicinin kendi hataları state klasöründeki `yakala/dinleyici.log` dosyasına yazılır (aynı
+hata dakikada en çok bir kez). Bir pencere açılırken bir hata olursa (panoda bozuk bir bağlantı
+gibi) yarım kalan pencere kapatılır ve dinleyici bir sonraki basışı dinlemeyi sürdürür; önceden
+böyle bir hata dinleyiciyi sessizce durduruyordu: tuş bir şey açmıyor, `kur` onu durduramıyor,
+mikrofon uygulama kapandıktan sonra da açık kalıyordu.
+
+İlk açılışı yavaşsa (yeni bir bilgisayarda virüs tarayıcısı her dosyayı okurken) `yakala kur` onu
+durdurmaz, Başlangıç kısayolunu da silmez: dinleyici açılmayı sürdürür ve Windows açılışında da
+başlar (`"dinleyici": null`, "Dinleyici açılıyor"). Önceden sekiz saniye içinde haber vermeyen
+dinleyici durduruluyordu; sonra hiçbir şey dinlemiyor, bunu da hiçbir şey söylemiyordu.
 
 Pencere Ananas yazı tipleriyle çizilir: Fraunces başlık, Schibsted Grotesk metin, JetBrains Mono
 etiketler. Fontlar Windows'a kurulmaz; yakala onları bu makinenin state klasörüne yazar ve
 yalnız kendi sürecine yükler. Başka programlar etkilenmez.
 
 Yalnız şablon ve skill istiyorsan: `python3 beyin.py yakala kur --kisayol-yok`.
+
+### Kasa değiştirince (Windows)
+
+Kısayol, dinleyici ve Başlat menüsü, Gönder ve Başlangıç kısayolları kişinindir: bütün kasalar
+için bir tane. Hangi kasaya yazdıklarını `%LOCALAPPDATA%\beyin-v3\yakala-sahip.json` söyler
+(`vault`, `state`, `tus`); `yakala kur` yazar.
+
+- Başka bir kasada `yakala kur` çalışınca kısayol oraya taşınır; eski kasanın dinleyicisi iki
+  saniye içinde kendiliğinden çekilir. Masaüstü uygulaması kasa değiştirince bunu kendisi yapar.
+- Masaüstü uygulamasının "Not al"ı (`yakala pencere`) çalışan dinleyiciye yalnız o dinleyici bu
+  kasanınsa gider; değilse pencere bu kasada kendisi açılır. Önceden notlar eski kasaya gidiyordu.
+- Eski bir kasada `yakala kaldir` kısayola, dinleyiciye ve kısayol dosyalarına dokunmaz; yalnız
+  o kasanın kendi parçalarını kaldırır ve tuşun hangi kasada olduğunu söyler. `yakala durum` da
+  dinleyiciyi yalnız kendi kasası için "çalışıyor" gösterir.
+- Kasa klasörü taşındıysa ya da silindiyse yakalama "Kasa bulunamadi" der; gelen kutusunu eski
+  yolda yeniden açmaz.
+- 1.0.33'ten önce kurulmuş bir dinleyici ilk açılışında bu kaydı kendi kasası için yazar.
 
 ### Kısayolu değiştir
 
@@ -69,28 +107,56 @@ Kart adları kısayolla yakalananlarla aynı biçimde, boşluksuz ve kesme işar
 2. **İşlet.** Ajanına "yakalananları işle" de. Oturum başında bekleyen kaynak sayısı da görünür.
 
 Her yakalama `📥 000-Inbox/Yakala/` içinde bir kart olur. Aynı videoyu ya da sayfayı ikinci kez
-yakalarsan yeni kart açılmaz; yeni notun aynı karta eklenir.
+yakalarsan yeni kart açılmaz; yeni notun aynı karta eklenir. Kart daha önce işlendiyse (ya da
+hata aldıysa) yeniden kuyruğa girer (`durum: bekliyor`, `yeniden_yakalandi`): oturum bildirimi onu
+sayar, `isle` metni yeniden indirmez (yöntem `onceki`), ajan yalnız yeni isteği işler. Önceden yeni
+not işlenmiş kartın sonunda kalıyor, kimse görmüyordu.
+
+Kartlara Obsidian'da etiket, takma ad ya da başka bir özellik ekleyebilirsin: `isle`, `bitti` ve
+yeniden yakalama yalnız kendi alanlarını değiştirir, seninkileri yazdığın gibi bırakır (listeler,
+`true`, sayılar, çok satırlı değerler). Önceden her yeniden yazışta listeler siliniyordu.
+
+**Gönder > Beyne At (Windows):** dosya kaydedilince ekranın sağ altında kısa bir "Beyne atıldı"
+notu çıkar ve kendiliğinden kaybolur; kaydedilemezse (dosyayı Outlook gibi başka bir program
+kullanıyorsa) nedenini söyleyen bir uyarı açılır. Klasör gönderilemez; içindeki dosyaları seç.
 
 **Ekran görüntüsü (Windows):** `Win+Shift+S` ile alan seç, sonra kısayola bas. Pencere görüntüyü
 küçük resmiyle bir **GÖRSEL** kartı olarak gösterir ve Enter onu kartın dosyası olarak kaydeder.
 Son 10 dakikada alınmış görüntü ekli gelir; daha eski ya da kaynağı bilinmeyen bir görüntü
-pencerede görünür ama `Tab` ile eklemeden karta girmez. Panoda metin ya da bağlantı varsa
-pencere eskisi gibi onu yakalar.
+pencerede görünür ama `Tab` ile eklemeden karta girmez. "Pyn, not al" ile açılan pencerede
+görüntü de işaretsiz gelir. Panoda metin ya da bağlantı varsa pencere görüntüyü değil onu
+gösterir (aşağıda).
 
 **Açık sayfa (Windows):** Chrome, Edge, Brave, Vivaldi ya da Opera öndeyken kısayola basarsan
 açık sayfanın bağlantısı da gelir; tarayıcının adres çubuğundan okunur, yazıp Enter'a basmadığın
 taslak adres sayılmaz. Pencerede **Bu sayfayı nota bağla** işaretli gelir: tıklarsan ya da `Alt+S`
-ile kaldırırsan not, sayfa olmadan düz not olarak kaydedilir. "Pyn, not al" ile açılan pencere
+ile kaldırırsan not, sayfa olmadan düz not olarak kaydedilir; panodaki bir bağlantı onun yerine
+geçmez (önceden pencerede görünmeyen pano bağlantısı sessizce sayfanın yerini alıyordu), o
+**Panodaki metni de ekle** seçeneği olarak görünür. "Pyn, not al" ile açılan pencere
 sayfayı okumaz, hemen açılır. Okuma en çok bir saniye sürer; tarayıcı cevap vermezse pencere
 sayfasız açılır.
 
-**Panodaki metin (Windows):** yalnız son kayıttan sonra (ya da dinleyici açıldıktan sonra)
-kopyaladığın metin nota işaretli gelir. Daha önce kopyalanmış, yaşı bilinmeyen metin
-**Panodaki metni de ekle** seçeneği olarak görünür, `Tab` ya da tıklamayla eklenir. Saatler önce
-kopyaladığın bir parola, Enter'a bastın diye nota girmez.
+**Panodaki metin ve bağlantı (Windows):** son beş dakikada kopyaladığın metin nota işaretli gelir;
+altındaki kutu ya da `Tab` onu çıkarır. Daha eski bir kopya, dinleyici açılmadan önce kopyalanmış
+olan ya da bir pencerede görünüp eklenmeden kaydedilmiş olan **Panodaki metni de ekle** seçeneği
+olarak görünür, `Tab` ya da tıklamayla eklenir. "Pyn, not al" ile açılan pencere panodan hiçbir şeyi kendiliğinden almaz:
+karşıdan konuşurken pencereye kimse bakmaz. Saatler önce kopyaladığın bir parola, Enter'a bastın ya
+da "Pyn, kaydet" dedin diye nota girmez; önceden dinleyici açıldıktan sonra kopyalanan her metin,
+saatler önce kopyalanmış olsa da giriyordu, kartın başlığı ve dosya adı da oluyordu.
+- Panodaki bir bağlantı kendi satırında **Panodaki bağlantıyı nota bağla** kutusuyla görünür;
+  kopyalanmasının üstünden beş dakika geçtiyse işaretsiz gelir. Önceden her pencere onu sormadan
+  alıyor, not o bağlantının eski kartına ekleniyordu.
+- Yerel ya da bozuk bir bağlantı (`http://localhost:3000`, `http://192.168.1.1`, `http://intranet`)
+  sayfa sayılmaz, düz metin olarak eklenir. Önceden pencere ondan hiçbir notu kaydedemiyordu.
+- Panodaki metni eklediğin bir notta kartın başlığı ve dosya adı senin yazdığın ya da söylediğin
+  cümleden gelir, kopyaladığın metinden gelmez.
+- Kopyalamanın zamanını dinleyici panonun değiştiğini görerek bilir; aynı metni yeniden yazan bir
+  pano yöneticisi onu yeni bir kopya gibi gösterebilir.
 
 **Pencere:** boş bir yerinden tutup sürükleyebilirsin. Kısayola hangi ekrandaki pencerede
-bastıysan o ekranda açılır.
+bastıysan o ekranda açılır. Kaydedip hemen yeniden kısayola basarsan kapanmakta olan pencere değil
+yeni bir pencere açılır. Masaüstü uygulaması İngilizceye ayarlıysa (`masaustu.json`'da `dil: "en"`)
+pencere İngilizce açılır; sesli komutlar Türkçe kalır ve pencerede söylenecekleri gibi yazılır.
 
 ## Sesle yazma (Windows, isteğe bağlı)
 
@@ -98,9 +164,15 @@ Pencereye konuşarak yazarsın; ses bilgisayardan çıkmaz, çeviriyi yerelde Wh
 
 **Kurulum (bir kez):** `py -3 beyin.py ses kur`
 - Bilgisayardaki en hızlı yolu kendisi seçer (aşağıda **Hız**), kendi sanal ortamını kurar, paketleri yükler ve modelleri indirir: yaklaşık 2 GB, NVIDIA kart varsa onun kütüphaneleriyle daha fazla.
-- Hepsi durum klasöründe (`state/ses/`) durur, kasaya ve senkrona girmez.
+- Hepsi senin kullanıcı klasöründe tek bir ses klasöründe durur (`%LOCALAPPDATA%\beyin-v3\ses`; macOS ve Linux'ta durum klasörlerinin yanındaki `ses`), kasaya ve senkrona girmez. Bütün kasalar aynı kurulumu kullanır: başka bir kasaya geçince ses yeniden inmez. Başka bir klasör için `BEYIN_SES_DIR` ortam değişkeni.
+- 1.0.33'ten önce her kasa sesini kendi durum klasöründe (`state/ses/`) tutuyordu. İlk kullanımda o kurulum tek ses klasörüne taşınır (aynı diskte bir taşıma, yeniden indirme yok); taşınamıyorsa (başka disk, ses yardımcısı o an çalışıyor) olduğu yerde kullanılır.
 - Motorun kendisi yine yalnız Python'un standart kütüphanesini kullanır; ses ayrı bir süreçte çalışır.
-- Kurulum bitince yakala dinleyicisi yeniden başlar.
+- Kurulum sürerken yakala dinleyicisi durur (bir model aynı anda iki kez yüklenmesin, pip'in değiştireceği dosyalar kullanımda olmasın), kurulum bitince ya da yarım kalınca yeniden başlar. `ses kur` sonucu dinleyicinin sonra gerçekten çalışıp çalışmadığını söyler (`"dinleyici": true|false`); çalışmıyorsa `beyin.py yakala kur`.
+- Paketler inerken her paket adım olarak görünür ("İniyor: … (679.1 MB)"); NVIDIA kütüphaneleri yaklaşık 1,1 GB.
+- Yarım kalmış ya da bozuk bir sanal ortam (pip'i yok, ana Python'u kaldırılmış) yeniden kullanılmaz, baştan kurulur.
+- 1,6 GB'lık whisper.cpp modelinin inişi bağlantı koparsa kaldığı yerden sürer; birkaç kez yeniden denenir, sonraki `ses kur` da yarım kalan parçadan devam eder. Yarım inmiş bir Whisper modeli (`model.bin`'i yok) diskte sayılmaz: sonraki `ses kur` ya da yardımcının açılışı onu tamamlar.
+- **Kurulum olmazsa** hata tek bir Türkçe cümleyle söylenir ve masaüstü uygulaması onu tanır: internet yok ya da bağlantı koptu (`voice_network`), diskte yer kalmadı (`voice_disk_full`), başka bir sorun (`voice_failed`). Ayrıntının tamamı ses klasöründeki `kurulum.log` dosyasındadır.
+- Kullanıcı adında Türkçe harf olan bir hesapta da kurulur (`C:\Users\Şule\…`): Python'un yolu UTF-8 okunur, modeller ses klasörüne göre açılır.
 
 **Kullanım:**
 1. Ctrl+Alt+C ile **Not al** penceresini aç. Pencere dinler halde açılır ("● Dinliyorum" ve dinlenen mikrofonun adı); konuş.
@@ -129,11 +201,14 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
 - "Pyn, not al" deyince pencere Ctrl+Alt+C'ye basmışsın gibi açılır ve dinlemeye başlar. Bitince "Pyn, kaydet" de: tuşsuz not.
 - Başta kapalıdır, çünkü açıkken mikrofon sürekli dinler.
 - Sözü küçük bir Türkçe Vosk modeli yakalar, böylece kimse konuşmazken Whisper çalışmaz ve işlemci boşuna yorulmaz.
-- Küçük model "Pyn"i bilmez: gerçek bir sesle çoğu zaman yalnız "not al"ı duyar, önündeki kelimeyi tanımaz ("[unk] not al"); başka bir konuşmayı da sözün kendisi sanabilir. Bu yüzden ne duyarsa duysun son birkaç saniyeyi Whisper dinler; Pyn'in adını ("Pyn", "Payn", "Pain"…) duyarsa pencere açılır. "Bunu not al", tek başına "not al" ya da oyunda konuşurken söylenenler açmaz. Whisper bakarken kayıt başlamıştır: sözden sonra söylediğin kaybolmaz.
+- Küçük model "Pyn"i bilmez: gerçek bir sesle çoğu zaman yalnız "not al"ı duyar, önündeki kelimeyi tanımaz ("[unk] not al"); başka bir konuşmayı da sözün kendisi sanabilir. Bu yüzden ne duyarsa duysun son birkaç saniyeyi Whisper dinler; Pyn'in adını ("Pyn", "Payn", "Pain"…) duyarsa pencere açılır. "Bunu not al", tek başına "not al" ya da oyunda konuşurken söylenenler açmaz. Ad yalnız Pyn'e benzeyen kısa bir kelimeyse sayılır: "Hey aynen", "Hey Aynur", "Hey plan" açmaz.
+- Whisper bakarken kayıt başlamıştır, ve sözü dinleyen akış ancak kayıt açıldıktan sonra bırakılır; sözden hemen sonra, tek nefeste söylediğin ("Pyn, not al yarın saat üçte dişçi") notun başı olur, kaybolmaz.
+- Notun başındaki söz kalıntısı ("al.", "Pyn,") yazılmaz; ama Pyn'e yalnız benzeyen bir kelime notun kendi kelimesidir: "Bin beş yüz lira market", "Bayan Ayşe aradı", "Pin kodunu değiştir" olduğu gibi yazılır.
 - Oyun oynarken ya da uzun konuşmalarda mikrofonun dinlemesini istemezsen masaüstü uygulamasının sağ alttaki simgesinden "Sürekli dinle"yi kapat.
-- **Tutmuyorsa:** `py -3 beyin.py ses dene --uyandirma` 20 saniye dinler; her denemede küçük modelin ne duyduğunu, Whisper'ın ne yazdığını ve pencerenin açılıp açılmayacağını söyler. `state/ses/isci.log` her uyandırma kararını yazar (söylediklerini değil).
+- **Tutmuyorsa:** `py -3 beyin.py ses dene --uyandirma` 20 saniye dinler; her denemede küçük modelin ne duyduğunu, Whisper'ın ne yazdığını ve pencerenin açılıp açılmayacağını söyler. Ses klasöründeki `isci.log` her uyandırma kararını yazar (söylediklerini değil).
+- **Gerçekten dinliyor mu:** dinleyici `%LOCALAPPDATA%\beyin-v3\dinleyici.json` dosyasına `uyandirma: true` yazdığında mikrofon sözü gerçekten dinliyor demektir (mikrofondan ses geldi). Dinleyemiyorsa nedenini yazar (`uyandirma_sorun`): `mikrofon` (açılamadı ya da hiç ses gelmiyor), `sessiz` (yalnız sessizlik geliyor: Windows Ayarlar → Gizlilik ve güvenlik → Mikrofon → "Masaüstü uygulamalarının mikrofona erişmesine izin ver" kapalı olabilir), `model` (uyandırma modeli açılamadı; "Sürekli dinle" kapatılıp açılınca yeniden denenir). Masaüstü simgesi ve Ayarlar bunu gösterir. Kısayol dinleyicininse `kisayol: "tamam"`, başka bir uygulamadaysa `kisayol: "mesgul"` yazar (dinleyici açılırken, tuş kaydedilene kadar bu alan yoktur).
 - Bluetooth kulaklıkta mikrofon açıkken müzik ve video sesi kötüleşir; bu özelliği USB ya da dahili mikrofonla kullan.
-- Mikrofon açılamazsa (Windows açılırken kablosuz kulaklık henüz hazır değilse) dinleyici birkaç saniye sonra yeniden dener, ses aygıtlarını yeniden tarar; mikrofondan uzun süre hiç ses gelmezse akışı yeniden açar. Ne olduğunu `state/ses/isci.log` yazar.
+- Mikrofon açılamazsa (Windows açılırken kablosuz kulaklık henüz hazır değilse) dinleyici birkaç saniye sonra yeniden dener, ses aygıtlarını yeniden tarar; mikrofondan uzun süre hiç ses gelmezse akışı yeniden açar. Ne olduğunu ses klasöründeki `isci.log` yazar.
 
 **Kısayol:** 1.0.12'den beri Ctrl+Alt+C. Eskiden varsayılan olan Ctrl+Alt+B kendiliğinden Ctrl+Alt+C olur; kendin seçtiğin bir tuş değişmez. Değiştirmek için: `beyin.py yakala kisayol ctrl+alt+x`.
 
@@ -142,27 +217,31 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
 | Kart | Motor | Cümle başına |
 |---|---|---|
 | NVIDIA | faster-whisper, CUDA ile | bir saniyenin altında |
-| AMD Radeon, Intel Arc | whisper.cpp, Vulkan ile | bir saniyenin altında (RX 7800 XT'de 11 saniyelik kayıt 0,3 saniyede) |
+| AMD Radeon, Intel Arc | whisper.cpp, Vulkan ile | bir saniyenin altında (RX 7800 XT'de 11 saniyelik kayıt 0,3 saniyede); işlemcinin içindeki zayıf bir Radeon'da (Vega, 610M) kurulum işlemciyi seçer |
 | Hiçbiri (Intel'in dahili grafiği de) | faster-whisper, işlemcide, `small` | birkaç saniye |
 
-- **NVIDIA:** CUDA'nın kütüphaneleri pip'ten gelir; ayrıca CUDA kurman gerekmez. Kart açılamazsa işlemciye geçilir ve nedeni `state/ses/isci.log` dosyasına yazılır.
+- **NVIDIA:** CUDA'nın kütüphaneleri pip'ten gelir; ayrıca CUDA kurman gerekmez. Kart float16 hesaplayamıyorsa (GTX 9xx/10xx, MX150-MX350) int8 ya da float32 ile kartta yazar. Kart açılamazsa işlemciye geçilir ve nedeni ses klasöründeki `isci.log` dosyasına yazılır.
+- **Kart yavaşsa:** `ses kur` modeli yükledikten sonra kartın bir saniyelik sesi ne kadar sürede yazdığını ölçer. 2 saniyeden uzunsa ya da kart hiç açılamadıysa işlemciyi (hızlı model ve küçük doğrulayıcı) kurar ve bunu söyler. İşlemcinin modelleri o an inemezse çalışan yavaş kart kalır. Motoru elle seçtiysen (`ses ayar --motor`) seçimine dokunmaz.
 - **AMD ve Intel Arc:**
-  - whisper.cpp Windows için Vulkan sürümü yayımlamıyor; Cortex onu kendi GitHub iş akışında (`whisper-vulkan`) derler. `ses kur` derlemeyi bu ön sürümden indirir ve SHA-256'sıyla doğrular.
+  - whisper.cpp Windows için Vulkan sürümü yayımlamıyor; Cortex onu kendi GitHub iş akışında (`whisper-vulkan`) derler. `ses kur` derlemeyi bu ön sürümden indirir ve SHA-256'sıyla doğrular. Yayımlanmış bir derleme hiçbir zaman değiştirilmez (yenisi kendi etiketiyle yayımlanır), yoksa önceki sürümler onu reddedip işlemciye düşerdi.
   - Model (yaklaşık 1,6 GB) ekran kartında hazır tutulur; ilk cümle de beklemesin diye açılışta bir kez ısıtılır.
   - whisper.cpp yalnız bu bilgisayardan erişilen bir adreste (127.0.0.1) çalışır ve yakala kapanınca onunla kapanır.
-  - Kart açılamazsa whisper.cpp işlemcide yazar.
+  - Kart açılamazsa işlemcide hızlı model (`small`) yazar; whisper.cpp'nin büyük modeli işlemcide cümle başına 15-30 saniye sürüyordu. 1.0.33'ten önce kurulmuş bir ortamda (faster-whisper yok) whisper.cpp işlemcide yazar; `ses kur` yeniden çalıştırılınca faster-whisper da gelir.
 - **İşlemcide:**
   - Whisper her sesi 30 saniyelik bir pencere olarak okur; bu yüzden modelin büyüklüğü her cümlenin süresini belirler. `large-v3-turbo` bir laptop işlemcisinde cümle başına 15-30 saniye sürdü, "Hey Pyn" de pencereyi o kadar geç açtı.
-  - Bu yüzden işlemcide varsayılan model `small`.
+  - Bu yüzden işlemcide varsayılan model `small`. Eski sürümlerin ayar dosyasına yazdığı `large-v3-turbo` bir kez `small`'a döner; ayar dosyası artık yalnız varsayılandan farklı olanları tutar, sonradan seçtiğin model kalır.
+  - İş parçacığı sayısı çekirdek sayısıdır (en çok 8): 2 çekirdekli bir Celeron artık tek iş parçacığıyla yazmaz.
+  - Seçtiğin model inemiyorsa (internet yokken seçildiyse) diskte olan öbür model yazar ve hangisinin yazdığı söylenir.
   - Uyandırma sözünü ayrı, küçük bir `base` modeli doğrular: söz duyulduktan kısa süre sonra pencere açılır.
   - Daha doğru ama işlemcide yavaş modeli seçmek için: Ayarlar → Sesle yazma → Yazı modeli → **En doğru**, ya da `beyin.py ses ayar --islemci-modeli large-v3-turbo`.
 - **Hazırlık süresi:**
   - Model, yakala dinleyicisi başlarken yüklenir. İşlemcide bu birkaç saniyeden yarım dakikaya kadar sürebilir.
   - Masaüstü uygulaması bu sırada Ayarlar → Sesle yazma'da bir çubuk gösterir (model iniyorsa ne kadarının indiği). Sağ alttaki simgede "Ses hazırlanıyor…" der. Hazırlık uzarsa bildirim gönderir, hazır olunca "Pyn hazır" der.
+  - Yazı modeli yüklenince ses hazırdır; uyandırma sözünün küçük doğrulayıcısı ondan sonra yüklenir, o gelene kadar sözü yazı modeli doğrular.
   - `ses kur` Whisper modelinin inişini yüzdeyle söyler.
   - Dinleyici durumunu `%LOCALAPPDATA%\beyin-v3\dinleyici.json` dosyasına yazar.
   - Model yüklenemezse (ilk inişte internet yoksa gibi) ses yardımcısı 10 saniye sonra yeniden denenir; bekleme her seferinde iki katına çıkar, en çok beş dakika olur.
-  - Yükleme ve yazma süreleri `state/ses/isci.log` dosyasına yazılır (söylenenler yazılmaz).
+  - Yükleme ve yazma süreleri ses klasöründeki `isci.log` dosyasına yazılır (söylenenler yazılmaz).
 - **Motoru elle seçmek:** `beyin.py ses ayar --motor islemci` (ya da `cuda`, `vulkan`, `otomatik`), ardından `beyin.py ses kur`.
 - Daha hızlı ama daha az doğru bir model için (CUDA): `beyin.py ses ayar --model small`.
 
@@ -175,9 +254,9 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
 | `ses ayar --ses kapat` | Sesi kapatır |
 | `ses ayar --komutlar '{"kelime_sil": ["geri al"]}'` | Bir komutun sözlerini değiştirir (`kaydet`, `adla_kaydet`, `kelime_sil`, `cumle_sil`, `sil`, `iptal`) |
 | `ses ayar --varsayilan-komutlar` | Komutları ilk hallerine döndürür |
-| `ses kaldir` | Ortamı ve modelleri siler |
+| `ses kaldir` | Ortamı ve modelleri siler (bütün kasalar için); önce dinleyiciyi durdurur, silinemeyen bir dosya kalırsa söyler |
 
-Ayarlar `state/ses/ayar.json` içinde; sorun olursa `state/ses/isci.log` dosyasına bak.
+Ayarlar ses klasöründeki `ayar.json` içinde; sorun olursa aynı klasördeki `isci.log` (çalışırken) ve `kurulum.log` (kurulum) dosyalarına bak.
 
 ## İşleme nasıl çalışır
 
@@ -214,10 +293,12 @@ Hiçbiri zorunlu değil; varsa işleme genişler, yoksa elde olanla devam edilir
 - Yakalama ağa çıkmaz; yalnız vault'a bir dosya yazar.
 - Ağ yalnız `isle` adımında ve yalnız yakaladığın kaynaklar için kullanılır. Defuddle,
   X gönderisi sayfada yoksa gönderi adresini FxTwitter API'sine sorar.
-- Mail, pano metni ve dosya kartları `visibility: private` ile yazılır. Windows'ta pano metni,
-  görüntüsü ya da dosyası eklenen sayfa kartı da (daha önce yakalanmış bir sayfanınki dahil) private olur.
+- Mail, pano metni ve dosya kartları `visibility: private` ile yazılır. Pano metni, görüntüsü ya da
+  dosyası eklenen sayfa kartı da (daha önce yakalanmış bir sayfanınki dahil) private olur; 1.0.33'ten
+  önce bu yalnız Windows'taydı. Ajanların otomatik bağlamı private kayıtları almaz.
 - Sesle yazmada ses yalnız bellekte tutulur, yazıya çevrilince atılır; hiçbir yere gönderilmez ve diske yazılmaz.
 - Kaldırmak için `python3 beyin.py yakala kaldir`: kısayol, skill ve bildirim gider, kartların kalır.
+  Windows'ta kısayol ve dinleyici yalnız onların ait olduğu kasada kaldırılır (yukarıda **Kasa değiştirince**).
 
 ## Güvenlik
 

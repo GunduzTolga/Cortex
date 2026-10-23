@@ -585,7 +585,10 @@ def shell_block(vault, python=None, windows=None):
     windows = os.name == 'nt' if windows is None else windows
     entry = Path(vault) / 'beyin.py'
     if windows:
-        body = 'function pyn { & "' + str(python) + '" "' + str(entry) + '" pyn @args }'
+        # Single-quoted literals (beyin_v3_powershell): inside double quotes PowerShell expands `$`,
+        # a backtick and the typographic double quotes of a path (security-5).
+        from beyin_v3_powershell import call
+        body = 'function pyn { ' + call([python, entry]) + ' pyn @args }'
     else:
         body = 'pyn() { "' + str(python) + '" "' + str(entry) + '" pyn "$@"; }'
     return BEGIN + '\n# Cortex: Pyn\'i istediğin istemciyle aç. Kaldırmak için: pyn kaldir\n' + body + '\n' + END + '\n'
@@ -627,14 +630,37 @@ def _without_block(text):
     return re.sub(re.escape(BEGIN) + r'.*?' + re.escape(END) + r'\n?', '', text, flags=re.S)
 
 
+def _drop_block(path):
+    """The block taken out of a profile; True when it was there. A PowerShell profile left empty goes:
+    under Windows' default Restricted policy PowerShell refuses even an empty profile, in red, in every
+    new window."""
+    text = path.read_text(encoding='utf-8-sig')
+    if BEGIN not in text:
+        return False
+    updated = _without_block(text).rstrip('\n')
+    if not updated.strip() and path.suffix == '.ps1':
+        path.unlink()
+    else:
+        path.write_text(updated + '\n' if updated else '', encoding='utf-8-sig' if path.suffix == '.ps1' else 'utf-8',
+                        newline='\n')
+    return True
+
+
 def install_shell(vault, paths=None, python=None, windows=None, cmd=None):
     """Profiles for PowerShell and bash/zsh, and on Windows `pyn.cmd` for cmd.exe. `cmd` is the
-    folder for it; by default WindowsApps, but only on a real install (no explicit `paths`)."""
+    folder for it; by default WindowsApps, but only on a real install (no explicit `paths`).
+
+    With `pyn.cmd` in place the PowerShell profiles get no block, and lose one an earlier `pyn kur`
+    wrote: PowerShell finds `pyn.cmd` on PATH as well, and under Windows' default Restricted policy a
+    profile script is refused with an error in every new PowerShell window. The profile is only the
+    fallback where WindowsApps is not on PATH (or its `pyn.cmd` is someone else's).
+    """
     block = shell_block(vault, python, windows)
     windows = os.name == 'nt' if windows is None else windows
     if cmd is None and paths is None and windows:
         cmd = cmd_dir()
     written = []
+    via_cmd = False
     if cmd is not None:
         target = Path(cmd) / 'pyn.cmd'
         if target.exists() and not _ours(target):
@@ -645,8 +671,13 @@ def install_shell(vault, paths=None, python=None, windows=None, cmd=None):
             if not target.exists() or target.read_bytes() != data:
                 target.write_bytes(data)
                 written.append(str(target))
-    for path in paths if paths is not None else profile_paths():
-        path = Path(path)
+            via_cmd = windows
+    profiles = [Path(path) for path in (paths if paths is not None else profile_paths())]
+    for path in profiles:
+        if via_cmd:
+            if path.exists() and _drop_block(path):
+                written.append(str(path))
+            continue
         text = path.read_text(encoding='utf-8-sig') if path.exists() else ''
         updated = _without_block(text)
         updated = (updated.rstrip('\n') + '\n\n' if updated.strip() else '') + block
@@ -655,7 +686,7 @@ def install_shell(vault, paths=None, python=None, windows=None, cmd=None):
             # PowerShell 5.1 reads a BOM-less file in the ANSI code page: keep the BOM there.
             path.write_text(updated, encoding='utf-8-sig' if path.suffix == '.ps1' else 'utf-8', newline='\n')
             written.append(str(path))
-    return {'status': 'kuruldu', 'yazilan': written, 'profil': [str(p) for p in (paths or profile_paths())]}
+    return {'status': 'kuruldu', 'yazilan': written, 'profil': [] if via_cmd else [str(path) for path in profiles]}
 
 
 def uninstall_shell(paths=None, cmd=None):
@@ -668,15 +699,8 @@ def uninstall_shell(paths=None, cmd=None):
         removed.append(str(target))
     for path in paths if paths is not None else profile_paths():
         path = Path(path)
-        if not path.exists():
-            continue
-        text = path.read_text(encoding='utf-8-sig')
-        if BEGIN not in text:
-            continue
-        updated = _without_block(text).rstrip('\n')
-        path.write_text(updated + '\n' if updated else '', encoding='utf-8-sig' if path.suffix == '.ps1' else 'utf-8',
-                        newline='\n')
-        removed.append(str(path))
+        if path.exists() and _drop_block(path):
+            removed.append(str(path))
     return {'status': 'kaldirildi' if removed else 'kurulu_degil', 'silinen': removed}
 
 
@@ -709,7 +733,8 @@ def _powershell(argv):
     """The installer's hook form: Claude Code runs Windows commands through Git Bash or cmd, and
     an encoded PowerShell call is the one spelling that survives both with any path."""
     import base64
-    script = '& ' + ' '.join("'" + str(value).replace("'", "''") + "'" for value in argv) + '; exit $LASTEXITCODE'
+    from beyin_v3_powershell import hook_script
+    script = hook_script(argv)
     root = os.environ.get('SYSTEMROOT') or os.environ.get('WINDIR') or 'C:\\Windows'
     launcher = str(Path(root) / 'System32/WindowsPowerShell/v1.0/powershell.exe').replace('\\', '/')
     return (subprocess.list2cmdline([launcher]) + ' -NoProfile -NonInteractive -EncodedCommand '

@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -165,7 +166,10 @@ class HookInstallerTest(unittest.TestCase):
     def test_degraded_sync_acknowledges_event_and_keeps_explicit_health_warning(self):
         self.seed()
         broken = self.vault / 'notes/broken.md'
-        broken.write_text('---\nunsupported:\n  nested:\n    deeper: metadata\n---\nExcluded synthetic note.\n', encoding='utf-8')
+        # A gate-like key keeps a header parse() cannot read out of the index (without one the
+        # text alone would be indexed).
+        broken.write_text('---\nvisibility: internal\nunsupported:\n  nested:\n    deeper: metadata\n---\n'
+                          'Excluded synthetic note.\n', encoding='utf-8')
         self.hook.enqueue_event(self.vault, self.state, self.payload, 'codex')
         result = self.hook.drain_queue(self.vault, self.state)
         self.assertEqual(result['processed'], 1)
@@ -379,7 +383,8 @@ class HookInstallerTest(unittest.TestCase):
             self.assertEqual(first['decision'], 'block')
             self.assertIn('receipt --harness ' + harness + ' --session ' + hashlib.sha256(session.encode()).hexdigest()[:24], first['reason'])
             self.assertIn('--event-id EVENT_ID --summary "Work result" --ref PATH', first['reason'])
-            self.assertIn('python3 beyin.py receipt --file RECEIPT_JSON --harness ' + harness, first['reason'])
+            self.assertIn(self.hook.PYTHON_COMMAND + ' beyin.py receipt --file RECEIPT_JSON --harness ' + harness,
+                          first['reason'])
             self.assertIn('Receipt session=' + hashlib.sha256(session.encode()).hexdigest()[:24] + ';', first['reason'])
             # The Stop checkpoint is queued before any reminder work.
             self.assertEqual(len(list((self.state / 'hook-queue').glob('*.json'))), queued + 1)
@@ -1176,7 +1181,164 @@ runpy.run_path({str(HOOK)!r}, run_name='__main__')
         # The hook bounds its own wait to HOOK_BUDGET; the margin covers a slow runner's interpreter start.
         self.assertLess(time.monotonic() - started, 8)
         self.assertIn('V3 source sync is pending', context)
-        self.assertNotIn('failed or conflicted', context)
+        self.assertNotIn(self.hook.HOOK_FAILED_NOTICE, context)
+        self.assertFalse((self.state / 'hook-error.json').exists())
+
+    def wrapped_hook(self, name, worker_source):
+        """The hook with subprocess.Popen replaced by `worker_source` (a class named Worker) and
+        every automatic check due, so a test sees what the foreground does with its worker."""
+        wrapper = self.root / name
+        wrapper.write_text(f'''import runpy, subprocess, sys
+sys.path.insert(0, {str(SCRIPTS)!r})
+{worker_source}
+subprocess.Popen = Worker
+import beyin_v3_preferences
+beyin_v3_preferences.claim_check = lambda *args, **kwargs: True
+sys.argv[0] = {str(HOOK)!r}
+runpy.run_path({str(HOOK)!r}, run_name='__main__')
+''', encoding='utf-8')
+        self.env.pop('BEYIN_V3_NO_SPAWN', None)
+        return wrapper
+
+    def test_a_copied_task_note_keeps_memory_and_names_both_files(self):
+        # Explorer's "görev - Kopya.md" keeps the task's id: both copies leave the index, and the
+        # rest of the vault keeps answering, writable, with the files to fix named on the prompt.
+        engine = self.seed()
+        (self.vault / 'notes/plan.md').write_text('Quasar launch window opens in October.\n', encoding='utf-8')
+        companion = self.vault / '🔮 850-Companion'
+        companion.mkdir()
+        (companion / 'Core.md').write_text('SYNTHETIC_CORE_CANARY: the user prefers short answers.\n', encoding='utf-8')
+        copy = self.vault / 'notes/task - Kopya.md'
+        copy.write_bytes((self.vault / 'notes/task.md').read_bytes())
+        self.lifecycle('Stop', 'copied', 'claude')
+        drained = self.invoke({}, 'claude', extra=['--drain-queue'])
+        self.assertEqual((drained['processed'], drained['failed'], drained['pending']), (1, 0, 0))
+        health = json.loads((self.state / 'hook-health.json').read_text(encoding='utf-8'))['sync']
+        self.assertEqual(health['conflicts'], [{'id': 'nebula-task', 'sources': ['notes/task - Kopya.md', 'notes/task.md'],
+                                                'reason': 'duplicate source id; all copies quarantined'}])
+        context = self.lifecycle('UserPromptSubmit', 'copied', 'claude',
+                                 prompt='Quasar launch window')['hookSpecificOutput']['additionalContext']
+        self.assertIn('Quasar launch window opens in October.', context)
+        self.assertIn('V3 sync needs attention: notes/task - Kopya.md, notes/task.md (duplicate source id', context)
+        self.assertNotIn('failed', context)
+        opening = self.lifecycle('SessionStart', 'copied-next', 'claude')['hookSpecificOutput']['additionalContext']
+        self.assertIn('SYNTHETIC_CORE_CANARY', opening)
+        self.assertIn('V3 sync needs attention: notes/task - Kopya.md, notes/task.md', opening)
+        # A receipt for another source is stored and reported as stored.
+        self.assertEqual(engine.receipt('copied-1', 'Planned the launch.', ['notes/plan.md'], 'claude')['status'],
+                         'succeeded')
+        # Removing the copy brings the task back.
+        copy.unlink()
+        self.lifecycle('Stop', 'copied', 'claude')
+        self.invoke({}, 'claude', extra=['--drain-queue'])
+        context = self.lifecycle('UserPromptSubmit', 'copied', 'claude',
+                                 prompt='Nebula calibration owner')['hookSpecificOutput']['additionalContext']
+        self.assertIn('Synthetic Reviewer', context)
+        self.assertNotIn('needs attention', context)
+
+    def test_a_failed_worker_still_delivers_the_last_index(self):
+        self.seed()
+        script = self.wrapped_hook('failed_worker_hook.py', '''class Worker:
+    returncode = 1
+    def __init__(self, *args, **kwargs):
+        pass
+    def wait(self, timeout=None):
+        return 1''')
+        payload = {'hook_event_name': 'UserPromptSubmit', 'session_id': 'failed-sync', 'event_id': 'failed-sync-1',
+                   'cwd': str(self.vault), 'prompt': 'Nebula calibration owner'}
+        context = self.invoke(payload, 'claude', script=script)['hookSpecificOutput']['additionalContext']
+        self.assertIn('Synthetic Reviewer', context)
+        self.assertIn('did not finish cleanly; this context comes from the last committed index', context)
+        self.assertNotIn('no memory context', context)
+        self.assertFalse((self.state / 'hook-error.json').exists())
+
+    def test_a_failed_worker_before_any_index_says_so(self):
+        script = self.wrapped_hook('failed_first_hook.py', '''class Worker:
+    returncode = 1
+    def __init__(self, *args, **kwargs):
+        pass
+    def wait(self, timeout=None):
+        return 1''')
+        payload = {'hook_event_name': 'UserPromptSubmit', 'session_id': 'failed-first', 'event_id': 'failed-first-1',
+                   'cwd': str(self.vault), 'prompt': 'Nebula calibration owner'}
+        context = self.invoke(payload, 'claude', script=script)['hookSpecificOutput']['additionalContext']
+        self.assertIn('V3 source sync failed and no index exists yet', context)
+
+    def test_a_file_edit_queues_without_starting_a_worker(self):
+        # One agent turn can edit many files; each used to start a full sync of its own.
+        spawned = self.root / 'spawned.json'
+        script = self.wrapped_hook('recording_hook.py', f'''import json
+class Worker:
+    returncode = 0
+    def __init__(self, command, **kwargs):
+        with open({str(spawned)!r}, 'a', encoding='utf-8') as out:
+            out.write(json.dumps(command) + '\\n')
+    def wait(self, timeout=None):
+        return 0''')
+        for event in ('PostToolUse', 'Stop'):
+            payload = {'hook_event_name': event, 'session_id': 'edits', 'event_id': 'edits-' + event,
+                       'cwd': str(self.vault), 'tool_name': 'Edit'}
+            self.invoke(payload, 'claude', script=script)
+        commands = [json.loads(line) for line in spawned.read_text(encoding='utf-8').splitlines()]
+        self.assertEqual(len(commands), 1, commands)
+        self.assertEqual(commands[0][commands[0].index('--event') + 1], 'Stop')
+        self.assertIn('--worker', commands[0])
+        self.assertEqual(len(list((self.state / 'hook-queue').glob('*.json'))), 2)
+
+    def test_the_ledger_lookup_never_costs_the_turn_under_a_sync_lock(self):
+        # Claude Code sends no event_id, so its events cannot have been acknowledged: no lookup.
+        self.seed()
+        # Closed explicitly: sqlite3's context manager only ends the transaction, and an open
+        # handle keeps the database locked against the temporary folder's removal on Windows.
+        writer = sqlite3.connect(self.state / 'memory.sqlite3', isolation_level=None)
+        self.addCleanup(writer.close)
+        writer.execute('BEGIN EXCLUSIVE')  # a first sync spilling its cache
+        try:
+            payload = {'hook_event_name': 'PostToolUse', 'session_id': 'locked-ledger', 'cwd': str(self.vault),
+                       'tool_name': 'Edit'}
+            started = time.monotonic()
+            self.assertEqual(self.invoke(payload, 'claude'), {})
+            # Interpreter start on a slow runner; the lookup alone used to wait its full second and fail.
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertEqual(len(list((self.state / 'hook-queue').glob('*.json'))), 1)
+            digest = hashlib.sha256(b'locked-ledger').hexdigest()
+            self.assertTrue((self.state / 'receipt-reminders' / (digest + '.edited')).exists())
+            self.assertFalse((self.state / 'hook-error.json').exists())
+            # A client's own event id is still looked up; a locked ledger queues it anyway.
+            self.hook.enqueue_event(self.vault, self.state, {'hook_event_name': 'Stop', 'session_id': 'locked-ledger',
+                                                             'event_id': 'locked-ledger-stop'}, 'codex')
+            self.assertEqual(len(list((self.state / 'hook-queue').glob('*.json'))), 2)
+        finally:
+            writer.execute('ROLLBACK')
+
+    def test_the_stop_reminder_names_the_windows_launcher(self):
+        # The desktop installs Python on Windows with the py launcher only; python3 is the Store stub there.
+        with patch.object(sys, 'platform', 'win32'):
+            hook = load_hook()
+        self.assertEqual(hook.PYTHON_COMMAND, 'py -3')
+        payload = {'session_id': 'windows-reminder'}
+        self.assertIsNone(hook.receipt_reminder(dict(payload, hook_event_name='PostToolUse'), self.state, 'claude', 'PostToolUse'))
+        block = hook.receipt_reminder(dict(payload, hook_event_name='Stop'), self.state, 'claude', 'Stop')
+        self.assertIn('py -3 beyin.py receipt --harness claude', block['reason'])
+        self.assertNotIn('python3', block['reason'])
+
+    def test_preferences_with_a_bom_or_in_utf16_keep_the_turn_its_memory(self):
+        self.seed()
+        preferences = self.vault / '.beyin-preferences.json'
+        preferences.write_bytes(b'\xef\xbb\xbf' + json.dumps({'context_chars': 4000}).encode('utf-8'))
+        context = self.lifecycle('UserPromptSubmit', 'bom', 'claude',
+                                 prompt='Nebula calibration owner')['hookSpecificOutput']['additionalContext']
+        self.assertIn('Synthetic Reviewer', context)
+        self.assertNotIn('preferences', context)
+        # PowerShell 5.1's Out-File writes UTF-16: defaults apply and the prompt names the file.
+        preferences.write_bytes(json.dumps({'context_chars': 4000}).encode('utf-16'))
+        context = self.lifecycle('UserPromptSubmit', 'utf16', 'claude',
+                                 prompt='Nebula calibration owner')['hookSpecificOutput']['additionalContext']
+        self.assertIn('Synthetic Reviewer', context)
+        self.assertIn('.beyin-preferences.json is unreadable', context)
+        # beyin.py preferences refuses to overwrite a file it cannot read, so it is not offered as the fix.
+        self.assertIn('fixed or deleted', context)
+        self.assertNotIn('beyin.py preferences', context)
         self.assertFalse((self.state / 'hook-error.json').exists())
 
     def test_user_prompt_submit_without_index_keeps_pending_notice(self):

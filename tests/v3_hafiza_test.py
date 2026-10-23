@@ -61,7 +61,28 @@ class QuestionWordsTest(unittest.TestCase):
         self.assertEqual(beyin_v3.query_words("elif'in neye alerjisi vardı"), {"elif", "alerj"})
 
     def test_nouns_that_end_like_a_verb_stay(self):
-        for word in ("geçmiş", "yiyecek", "quantum", "dostum", "radyo", "stüdyo"):
+        for word in ("geçmiş", "yiyecek", "quantum", "dostum", "radyo", "stüdyo",
+                     "yiyecekler", "içecekler", "geçmişler", "gelecekler"):
+            self.assertTrue(beyin_v3.query_words(word), word)
+        # Their past and reported forms are still verbs.
+        for word in ("yapacaklardı", "yapacaktı", "yapmışlar"):
+            self.assertEqual(beyin_v3.query_words(word), set(), word)
+
+    def test_how_much_and_when_are_how_it_is_asked(self):
+        self.assertEqual(beyin_v3.query_words("kira ne kadar"), {"kira"})
+        self.assertEqual(beyin_v3.query_words("toplantı ne zamandı"), {"toplant"})
+        self.assertEqual(beyin_v3.query_words("maaşım ne kadarmış"), {"maas"})
+        self.assertEqual(beyin_v3.query_words("ne zamana kadar sürer tadilat"), beyin_v3.query_words("sürer tadilat"))
+        self.assertEqual(beyin_v3.query_words("o kadar para"), {"para"})
+        # Only after "ne": a note about time management is still found by its own words.
+        self.assertEqual(beyin_v3.query_words("zaman yönetimi"), beyin_v3._tokens("zaman yönetimi"))
+
+    def test_spoken_question_words_are_whole_words(self):
+        self.assertEqual(beyin_v3.query_words("sevdiği yiyecekler neler"), beyin_v3.query_words("sevdiği yiyecekler"))
+        self.assertEqual(beyin_v3.query_words("hakan nerde"), {"hakan"})
+        self.assertEqual(beyin_v3.query_words("toplantı kaçta"), {"toplant"})
+        self.assertEqual(beyin_v3.query_words("kimin arabası"), beyin_v3.query_words("arabası"))
+        for word in ("kimya", "kaçak", "nerf"):
             self.assertTrue(beyin_v3.query_words(word), word)
 
     def test_a_suffix_after_an_apostrophe_is_the_names(self):
@@ -101,6 +122,15 @@ class StoreTest(unittest.TestCase):
 
     def ids(self, query, today=WEDNESDAY):
         return [one["id"] for one in self.store.context_for("claude", query, strict=True, today=today)["records"]]
+
+    def test_a_two_word_how_much_or_when_question_finds_its_note(self):
+        # Two words make a passage search want two shared words; "kadar" and "zaman" are in no note.
+        self.ingest("kira", "Ev kirası 25.000 TL, her ayın beşinde ödenir.", "notes/ev/kira.md")
+        self.ingest("toplanti", "Haftalık ekip toplantısı salı 14:00.", "notes/is/toplanti.md")
+        self.ingest("tatil", "Yaz tatili 10-20 Temmuz arası Ayvalık.", "notes/tatil.md")
+        self.assertEqual(self.ids("kira ne kadar"), ["kira"])
+        self.assertEqual(self.ids("toplantı ne zaman"), ["toplanti"])
+        self.assertEqual(self.ids("tatil ne zamandı"), ["tatil"])
 
     def test_a_question_that_names_a_day_gets_that_days_log_first(self):
         self.ingest("dun", "Zeynep çizimlerin ilk taslağını gönderdi. Akşam koşu.", "daily/2026-10-20.md")

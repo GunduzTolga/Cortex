@@ -267,7 +267,7 @@ class InstructionBlockTest(unittest.TestCase):
         path = self.vault / 'AGENTS.md'
         path.write_text(path.read_text(encoding='utf-8').replace('beyin.py sync', 'beyin.py sync # benim'), encoding='utf-8')
         self.downgrade_record_only()
-        self.assertIn('managed file changed', self.install_conflict())
+        self.assertIn('AGENTS.md dosyası elle değiştirilmiş', self.install_conflict())
 
     def test_reinstall_over_previous_block_adopts_the_clause_and_keeps_user_text(self):
         self.seed('CLAUDE.md', CLAUDE)
@@ -394,11 +394,11 @@ class InstructionBlockTest(unittest.TestCase):
         self.install()
         path = self.vault / 'CLAUDE.md'
         path.write_bytes(b'# Kendi Claude dosyam, import yok\n')
-        self.assertIn('Reinstall conflict: managed file changed CLAUDE.md', self.install_conflict())
+        self.assertIn("Cortex'in yönettiği CLAUDE.md dosyası elle değiştirilmiş", self.install_conflict())
         created = self.as_previous_install(None)
         edited = created.replace(b'## V3 companion', b'## Edited companion')
         path.write_bytes(edited)
-        self.assertIn('Reinstall conflict: managed file changed CLAUDE.md', self.install_conflict())
+        self.assertIn("Cortex'in yönettiği CLAUDE.md dosyası elle değiştirilmiş", self.install_conflict())
         self.assertEqual(path.read_bytes(), edited)
         # Text the user added around the block is theirs: the block is refreshed, the file is not replaced.
         path.write_bytes(created + NOTE.encode())
@@ -407,7 +407,7 @@ class InstructionBlockTest(unittest.TestCase):
         self.assertIn(NOTE.strip(), text)
         self.assertEqual(text.count(START), 1)
         importing = self.seed('CLAUDE.md', CLAUDE + '\n@AGENTS.md\n\n' + START + '\nkullanıcı düzenlemesi\n' + END + '\n')
-        self.assertIn('Reinstall conflict: managed file changed CLAUDE.md', self.install_conflict())
+        self.assertIn("Cortex'in yönettiği CLAUDE.md dosyası elle değiştirilmiş", self.install_conflict())
         self.assertEqual(path.read_bytes(), importing)
 
     def test_managed_file_matching_planned_content_survives_reinstall(self):
@@ -438,7 +438,7 @@ class InstructionBlockTest(unittest.TestCase):
                                                installed_content=base64.b64encode(older[names[0]]).decode())
             (self.state / 'v3-install.json').write_text(json.dumps(manifest), encoding='utf-8')
             hook.write_bytes(edited)
-            self.assertIn('Reinstall conflict: managed file changed ' + names[0], self.install_conflict())
+            self.assertIn("Cortex'in yönettiği " + names[0] + ' dosyası', self.install_conflict())
             self.assertEqual(hook.read_bytes(), edited)
 
 if __name__ == '__main__':

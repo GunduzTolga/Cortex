@@ -28,6 +28,13 @@ def read_fixture():
 def load_runtime():
     if not RUNTIME.is_file():
         return None
+    # The engine imports its siblings (beyin_v3_passage, beyin_v3_esanlam, ...) by name, some of them
+    # only when a search needs them, and falls back to a plainer answer when one cannot be imported.
+    # Without their folder on the path this gate, and every test that loads the engine through it,
+    # would measure that fallback rather than the engine as installed (tests-ci-3).
+    scripts = str(RUNTIME.parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
     spec = importlib.util.spec_from_file_location('beyin_v3_evaluation_runtime', RUNTIME)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

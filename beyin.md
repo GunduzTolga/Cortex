@@ -95,12 +95,16 @@ Buldugun ayni Python yorumlayicisiyla:
 ```
 
 Damgasiz veya `2.` damgali eski kurulumda once ayni komutu sonuna `--plan` ekleyerek calistir; bu hicbir sey
-degistirmez, nelerin yazilacagini ve emekli edilecegini gosterir. Kullanici eski bir
-runner'i elle degistirmisse installer `Customized legacy runner requires review <yol>`
-mesajiyla 1 cikis kodu dondurur. O dosyayi silme veya ezme; icerigini kisaca ozetle,
-kullanicinin acik onayini al ve ancak o zaman tek dosya icin
-`--accept-customized-legacy <vault-goreli-yol>` kullan. Toplu gecis yoktur. Ayrintilar:
-`https://github.com/GunduzTolga/Cortex/blob/main/docs/v3/MIGRATION.md`
+degistirmez, nelerin yazilacagini ve emekli edilecegini gosterir. Stok V2 runner'lari
+installer'in kendi icinde sabit tuttugu parmak izleriyle taninir; yalniz satir sonlari
+CRLF'e donmus bir runner da stoktur. Kullanici eski bir runner'i elle degistirmisse
+installer `Kasadaki eski Cortex (V2) dosyasi <yol> elle degistirilmis` diye baslayan
+mesajla (hata JSON'unda `"code": "legacy_review"`) 1 cikis kodu dondurur. O dosyayi
+silme veya ezme; icerigini kisaca ozetle, kullanicinin acik onayini al ve ancak o zaman
+tek dosya icin `--accept-customized-legacy <vault-goreli-yol>` kullan. Kullanici dosyanin
+bir kopyasini saklamak isterse `--backup-customized-legacy` her degistirilmis runner'i
+bayt bayt `.claude/v2-backup/` altina kopyalayip emekliye ayirir. Toplu ve sessiz gecis
+yoktur. Ayrintilar: `https://github.com/GunduzTolga/Cortex/blob/main/docs/v3/MIGRATION.md`
 
 ### 3b. `.beyin-version` `1.` ile basliyorsa: kurulu updater
 
@@ -112,8 +116,10 @@ Vault kokunde, indirip dogruladigin ZIP ile calistir:
 <python> beyin.py update --package <indirdigin-zip>
 ```
 
-Sonuc `updated` ise surum degismistir, `noop` ise vault zaten gunceldir; ikisi de
-basaridir. Bu yol gereksiz yere yeni bir istemci guven incelemesi zorlamaz ve gerekirse
+Sonuc `updated` ise surum degismistir, `refreshed` ise ayni surumun farkli dosyalari
+yazilmistir, `noop` ise vault zaten gunceldir, `ahead` ise kurulu surum yayimlanmis son
+surumden ileridir (ornegin masaustu uygulamasiyla gelen surum henuz yayimlanmamistir);
+hepsi basaridir. `ahead` bir geri alma onerisi degildir: `rollback` calistirma. Bu yol gereksiz yere yeni bir istemci guven incelemesi zorlamaz ve gerekirse
 `<python> beyin.py rollback` ile tam geri alinir. Ag erisimi varsa `--package` olmadan da
 calisir; ag hatasi (ornegin `http_403`) "guncel" anlamina gelmez. `update` komutu
 taninmiyorsa 3a yoluna dus. `beyin.py --help` ciktisi `update`,
@@ -127,11 +133,17 @@ korur. Yeni kurulumda state macOS, Linux veya Windows icin uygun yerel uygulama 
 dizinine, vault disina yazilir. State'i iCloud, OneDrive, Dropbox veya vault icine tasima.
 
 Yonetilen bir dosya elle degistirilmisse her iki yol da
-`Reinstall conflict: managed file changed <yol>` hatasi verip 1 cikis kodu dondurur.
-Kullanici dosyasini ezme. Cakisan dosyayi ve neden otomatik devam edilemedigini kisa
-bicimde bildir. Yarim kalan resmi kurulum veya guncelleme isleminde once mevcut vault'taki `beyin.py recover`
-yolunu kullan; basarisiz olmadan yeniden kopyalama yapma. Kendi curl, kopyalama veya
-`git pull` zincirinle kurulu bir vault'u guncelleme.
+`Cortex'in yonettigi <yol> dosyasi elle degistirilmis` diye baslayan bir hata verip
+(hata JSON'unda `"code": "update_conflict"`) 1 cikis kodu dondurur. Kullanici dosyasini
+ezme. Cakisan dosyayi ve neden otomatik devam edilemedigini kisa bicimde bildir. Yarim
+kalan resmi kurulum veya guncelleme isleminde once mevcut vault'taki `beyin.py recover`
+yolunu kullan (ya da paketin `install_v3.py` komutunu ayni `--vault` ile yeniden
+calistir; yarim kalan isi o da tamamlar); basarisiz olmadan yeniden kopyalama yapma. Kendi
+curl, kopyalama veya `git pull` zincirinle kurulu bir vault'u guncelleme.
+
+Hata `"code": "vault_moved"` ise vault tasinmis ya da kopyalanmistir: once vault kokunde
+`<python> beyin.py relocate` calistir. Komut hafizayi, hook komutlarini ve guncelleme
+kisayolunu vault'un yeni yerine baglar; kopyaya kendi state klasorunu verir.
 
 ## 4. Kurulumu dogrula
 

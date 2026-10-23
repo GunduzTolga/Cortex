@@ -89,6 +89,24 @@ class KiroIntegrationTest(unittest.TestCase):
         self.assertEqual(doctor["hook_paths"]["status"], "ok")
         self.assertGreaterEqual(doctor["acknowledged_events"], 0)
 
+    def test_context_reaches_kiro_as_utf8_under_a_windows_code_page(self):
+        # A piped stdout on Windows uses the ANSI code page: printing the companion folder's
+        # emoji raised there, the adapter exited 1 and the prompt got no memory at all.
+        self.install()
+        note = self.vault / "notes/pusula.md"
+        note.parent.mkdir()
+        note.write_text("Mor pusula kütüphaneyi gösterir; ışık şeridi Ağustos'ta yenilendi.\n", encoding="utf-8")
+        self.run_python(self.vault / "beyin.py", "sync")
+        adapter = self.vault / ".claude/scripts/beyin_v3_kiro.py"
+        args = ("--vault", self.vault, "--state", self.state)
+        env = dict(self.env, PYTHONIOENCODING="cp1254", USER_PROMPT="mor pusula kütüphane")
+        output = self.run_python(adapter, *args, "--event", "UserPromptSubmit",
+                                 payload={"session_id": "kiro-codepage", "cwd": str(self.vault)}, env=env)
+        self.assertIn("kütüphaneyi gösterir; ışık şeridi", output)
+        opening = self.run_python(adapter, *args, "--event", "SessionStart",
+                                  payload={"session_id": "kiro-codepage", "cwd": str(self.vault)}, env=env)
+        self.assertIn("🔮", opening)
+
     def test_kiro_skill_edit_syncs_and_divergence_is_preserved(self):
         self.install()
         cli = self.vault / "beyin.py"
@@ -119,8 +137,12 @@ class KiroIntegrationTest(unittest.TestCase):
         if os.name != "nt":
             # Exercise Windows transport parsing on POSIX too. This fixture is
             # only inspected by doctor/reconcile, never executed as PowerShell.
-            code = "& " + " ".join("'" + value.replace("'", "''") + "'" for value in shlex.split(old_command))
-            code += "; exit $LASTEXITCODE"
+            # The installed call's arguments, the /bin/sh -c wrapper and its exit-code rule taken off.
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("kiro_test_powershell", ROOT / "template/.claude/scripts/beyin_v3_powershell.py")
+            powershell = importlib.util.module_from_spec(spec); spec.loader.exec_module(powershell)
+            argv = powershell.posix_arguments(old_command)
+            code = powershell.hook_script(argv[:argv.index("||")])
             old_command = "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + base64.b64encode(code.encode("utf-16le")).decode("ascii")
         match = re.search(r"(-EncodedCommand\s+)([A-Za-z0-9+/=]+)", old_command, re.IGNORECASE)
         decoded = base64.b64decode(match.group(2)).decode("utf-16le") if match else old_command
@@ -195,7 +217,9 @@ class KiroIntegrationTest(unittest.TestCase):
                                  "--state", str(self.state)], text=True, capture_output=True,
                                 cwd=self.vault, env=self.env, timeout=30)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Unmanaged file conflict .kiro/hooks/beyin-v3.json", result.stderr)
+        error = json.loads(result.stderr.strip().splitlines()[-1])
+        self.assertEqual(error["code"], "update_conflict")
+        self.assertIn(" .kiro/hooks/beyin-v3.json dosyası zaten var", error["message"])
         self.assertEqual(hook_file.read_bytes(), original)
 
 

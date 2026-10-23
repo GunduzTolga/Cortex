@@ -42,6 +42,11 @@ def main():
     args = parser.parse_args()
     if hasattr(sys.stdin, "reconfigure"):
         sys.stdin.reconfigure(encoding="utf-8-sig", errors="replace")
+    if hasattr(sys.stdout, "reconfigure"):
+        # Kiro inserts stdout verbatim. A piped stdout on Windows uses the ANSI code page
+        # (cp1254, cp1252), which cannot encode the companion folder's emoji or, in cp1252,
+        # ı/ş/ğ: the print raised, the hook exited 1 and the prompt got no memory at all.
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     try:
         payload = json.loads(sys.stdin.read(1_000_000).lstrip("\ufeff").strip() or "{}")
     except ValueError:

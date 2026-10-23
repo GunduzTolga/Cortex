@@ -80,8 +80,9 @@ class RuntimeContractTest(unittest.TestCase):
     def test_read_only_reopen_rejects_wrong_and_unbound_vault(self):
         other_vault = self.root / 'another-vault'
         other_vault.mkdir()
-        with self.assertRaisesRegex(ValueError, 'another vault'):
+        with self.assertRaisesRegex(ValueError, 'başka bir klasördeki kasaya bağlı') as raised:
             self.module.MemoryStore(self.state, other_vault, read_only=True)
+        self.assertEqual(raised.exception.code, 'vault_moved')
         with self.store._connect() as db:
             db.execute("DELETE FROM metadata WHERE key='vault_root'")
         before = self.store.database.read_bytes()

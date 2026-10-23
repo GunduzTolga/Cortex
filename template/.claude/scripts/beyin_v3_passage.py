@@ -26,11 +26,13 @@ import math
 import os
 from pathlib import Path
 import re
+import sqlite3
 import tempfile
 import time
 import unicodedata
 
-from beyin_v3 import HARNESSES, STOPWORDS, _allowed_statuses, _json, _name_match_score, _status_allowed, _strict_terms, _tokens, pack_context, query_words
+from beyin_v3 import (HARNESSES, STOPWORDS, _allowed_statuses, _json, _name_match_score, _status_allowed, _strict_terms,
+                      _tokens, pack_context, query_words, records_generation)
 
 # #83 chose 0.15 on one 263-note Turkish vault without a coverage cap. With the cap, on a
 # second 1,285-note vault 0.20 is the lowest floor that keeps everyday and agent-command
@@ -47,6 +49,10 @@ BLOCK_OVERLAP = 200
 DEFAULT_EXCLUDE = ("daily/", "receipts/")
 CONFIG_NAME = "retrieval.json"
 CACHE_NAME = "passages.json"
+# What the sync worker last warmed the cache for (warm); a prompt never reads it.
+WARM_NAME = "passages-warm.json"
+# A pool the cache file could not take is built again after this long, not after every change.
+WARM_RETRY_SECONDS = 86400
 CACHE_VERSION = 1
 CACHE_MAX_BYTES = 64 * 1024 * 1024
 MAX_EXCLUDES = 64
@@ -56,7 +62,14 @@ BUILD_SECONDS = 1.0
 
 
 class IndexPending(RuntimeError):
-    """The index is still being built; the caller falls back to the note-level path."""
+    """The index is still being built; the caller falls back to the note-level path.
+
+    pending_total is the size of the pool being built, so the caller can tell a small pool
+    (the note-level path is quick) from a large one (it is not)."""
+
+    def __init__(self, message, pending_total=0):
+        super().__init__(message)
+        self.pending_total = pending_total
 
 
 # Only the opening "#" run is a pattern; the title and its optional closing "#" sequence are
@@ -252,11 +265,12 @@ def _read_cache(path):
 
 
 def _write_cache(path, blob):
+    """True when the cache was written."""
     temporary = None
     try:
         data = json.dumps(blob, ensure_ascii=False, separators=(",", ":"))
         if len(data) > CACHE_MAX_BYTES or path.is_symlink():
-            return
+            return False
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=".passages-",
                                          suffix=".tmp", delete=False) as handle:
             temporary = handle.name
@@ -264,8 +278,9 @@ def _write_cache(path, blob):
             handle.write(data)
         os.replace(temporary, path)
         temporary = None
+        return True
     except OSError:
-        pass  # a cache that cannot be written (or is locked on Windows) is a slow path
+        return False  # a cache that cannot be written (or is locked on Windows) is a slow path
     finally:
         if temporary:
             try:
@@ -275,13 +290,15 @@ def _write_cache(path, blob):
 
 
 class Index:
-    def __init__(self, passages, block_df, source_df, sources):
+    def __init__(self, passages, block_df, source_df, sources, saved=None):
         # [(record, head, start, end, " token token ... ")]: tokens stay one padded string,
         # so matching a query is a few substring probes instead of a set per passage.
         self.passages = passages
         self.block_df = block_df
         self.source_df = source_df
         self.sources = sources
+        # True or False when this build wrote the cache file, None when it had nothing to write.
+        self.saved = saved
 
 
 def build(state_dir, pool, write=True, deadline=None):
@@ -316,6 +333,7 @@ def build(state_dir, pool, write=True, deadline=None):
             for token in seen:
                 source_df[token] = source_df.get(token, 0) + 1
         changed = True
+    saved = None
     if write and changed:
         # Keep other pools' entries (another audience or project) within a bound.
         records = dict(cached) if len(cached) <= 2 * len(fresh) + 256 else {}
@@ -323,12 +341,12 @@ def build(state_dir, pool, write=True, deadline=None):
         state = {"version": CACHE_VERSION, "params": _PARAMS, "records": records}
         if complete:
             state.update(pool=fingerprint, block_df=block_df, source_df=source_df)
-        _write_cache(path, state)
+        saved = _write_cache(path, state)
     if not complete:
-        raise IndexPending(f"passage index pending: {len(fresh)}/{len(keys)} records")
+        raise IndexPending(f"passage index pending: {len(fresh)}/{len(keys)} records", pending_total=len(keys))
     passages = [(record, head, start, end, " " + tokens + " ")
                 for key, record in zip(keys, pool) for head, start, end, tokens in fresh[key]]
-    return Index(passages, block_df, source_df, len(pool))
+    return Index(passages, block_df, source_df, len(pool), saved)
 
 
 def _weight(shared, frequency, total, size):
@@ -398,26 +416,107 @@ def _covers(tokens, terms, variants=None):
     return min(1.0, shared / max(1, min(len(terms), COVERAGE_CAP)))
 
 
+def _left_out(store, exclude):
+    """source -> True when pool() never admits a record of that source, whatever its fields."""
+    prefixes = tuple(_path_key(prefix) for prefix in exclude)
+    log_prefixes = tuple(_path_key(prefix) for prefix in exclude if prefix not in DEFAULT_EXCLUDE)
+
+    def left_out(source):
+        if _DAY_LOG.match(source):
+            return bool(log_prefixes) and _path_key(source).startswith(log_prefixes)
+        return source.startswith(store.STRICT_EXCLUDE) or _path_key(source).startswith(prefixes)
+    return left_out
+
+
 def pool(store, eligible, statuses=None, exclude=DEFAULT_EXCLUDE, superseded=None):
     """The strict candidate set of MemoryStore._retrieve, minus configured record paths; a
     person's day logs stay in (DAY_LOGS)."""
     if superseded is None:
         superseded = store._superseded_ids()
-    prefixes = tuple(_path_key(prefix) for prefix in exclude)
-    log_prefixes = tuple(_path_key(prefix) for prefix in exclude if prefix not in DEFAULT_EXCLUDE)
+    left_out = _left_out(store, exclude)
     allowed_statuses = _allowed_statuses(statuses)
     result = []
     for record in eligible:
         source = str(record.get("source", ""))
-        if record["id"] in superseded or not _status_allowed(record, allowed_statuses):
-            continue
-        if _DAY_LOG.match(source):
-            if log_prefixes and _path_key(source).startswith(log_prefixes):
-                continue
-        elif source.startswith(store.STRICT_EXCLUDE) or _path_key(source).startswith(prefixes):
+        if record["id"] in superseded or not _status_allowed(record, allowed_statuses) or left_out(source):
             continue
         result.append(record)
     return result
+
+
+def strict_records(store, exclude=DEFAULT_EXCLUDE):
+    """The records the strict path can deliver, without reading the payloads pool() leaves out.
+
+    A chat-history import (daily/import-*.md) or another excluded folder can be most of the
+    index; decoding it and hashing its sources on every prompt made each turn wait on bytes it
+    never delivers. Markdown-owned records are left out by their source in markdown_sources;
+    records without one (ingest) are read and left to pool(). Day logs stay, for _dated().
+    """
+    left_out = _left_out(store, exclude)
+    with store._connect() as db:
+        try:
+            owned = db.execute("SELECT id, source FROM markdown_sources").fetchall()
+        except sqlite3.OperationalError:
+            owned = []  # a store that never synced Markdown
+        skipped = sorted(ident for ident, source in owned if left_out(str(source)))
+        if not skipped:
+            return [json.loads(row[0]) for row in db.execute("SELECT payload FROM records ORDER BY id")]
+        try:
+            rows = db.execute("SELECT payload FROM records WHERE id NOT IN (SELECT value FROM json_each(?)) "
+                              "ORDER BY id", (json.dumps(skipped),)).fetchall()
+        except sqlite3.OperationalError:
+            # SQLite built without JSON functions: the same rows, filtered here.
+            skip = set(skipped)
+            return [json.loads(payload) for ident, payload in db.execute("SELECT id, payload FROM records ORDER BY id")
+                    if ident not in skip]
+    return [json.loads(row[0]) for row in rows]
+
+
+def warm(store):
+    """Build the per-turn index after a sync, in a sync worker no prompt waits for (the Stop at the
+    end of an agent turn). True when it built.
+
+    A prompt builds what the cache lacks for at most BUILD_SECONDS and then falls back, and a
+    prompt that reads the previous index (its sync still running) never saves what it built: a
+    large vault, or every vault after a release that changes the stemmer, stayed cold turn after
+    turn. Here the same pool the hook reads (internal, no project, the configured exclusions) is
+    built with no deadline. Nothing is done while the index is unchanged since the last warm. A
+    pool the cache file could not take (over CACHE_MAX_BYTES) is not built again for
+    WARM_RETRY_SECONDS whatever changes: each change would otherwise cost a slow laptop the whole
+    build for nothing after every agent turn.
+    """
+    config, stamp = _warm_stamp(store)
+    if not _warm_due(store, stamp):
+        return False
+    records = strict_records(store, config["exclude"])
+    eligible, _stale = store._eligible("internal", None, records=records)
+    candidates = pool(store, eligible, None, config["exclude"], superseded=store.superseded_ids())
+    index = build(store.state_dir, candidates, write=True)
+    if stamp["generation"] is not None:
+        _write_cache(Path(store.state_dir) / WARM_NAME, dict(stamp, saved=index.saved, at=time.time()))
+    return True
+
+
+def _warm_stamp(store):
+    config = settings(store.state_dir)
+    with store._connect() as db:
+        generation = records_generation(db)
+    return config, {"generation": generation, "params": _PARAMS, "exclude": list(config["exclude"])}
+
+
+def _warm_due(store, stamp):
+    if stamp["generation"] is None:
+        return True
+    try:
+        noted = json.loads((Path(store.state_dir) / WARM_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    if not isinstance(noted, dict) or (noted.get("params"), noted.get("exclude")) != (stamp["params"], stamp["exclude"]):
+        return True
+    if noted.get("saved") is False:
+        at = noted.get("at")
+        return not (isinstance(at, (int, float)) and 0 <= time.time() - at < WARM_RETRY_SECONDS)
+    return not (noted.get("generation") == stamp["generation"] and (Path(store.state_dir) / CACHE_NAME).is_file())
 
 
 def _dated(eligible, query, terms, today=None):
@@ -463,9 +562,11 @@ def context_for(store, harness, query, project=None, audience="internal", status
     if isinstance(statuses, str):
         statuses = [statuses]
     config = settings(store.state_dir)
-    records = store._records()
+    records = strict_records(store, config["exclude"])
     eligible, stale_count = store._eligible(audience, project, records=records)
-    candidates = pool(store, eligible, statuses, config["exclude"], superseded=store._superseded_ids(records))
+    # Retired by any trusted record, the left-out ones included (#201): the last sync's result
+    # while the index is unchanged, so the left-out payloads are not decoded for it either.
+    candidates = pool(store, eligible, statuses, config["exclude"], superseded=store.superseded_ids())
     index = build(store.state_dir, candidates, write=not store.read_only,
                   deadline=time.monotonic() + BUILD_SECONDS)
     if candidates and not index.passages:

@@ -43,7 +43,7 @@ class LegacySyncEngine(subject.SyncEngine):
 
     def _scan(self):
         records, warnings, conflicts = {}, [], []
-        duplicate = set()
+        duplicate, owners = set(), {}
         for directory, dirs, files in os.walk(self.root, followlinks=False):
             dirs[:] = sorted(d for d in dirs if not d.startswith('.') and d.casefold() not in EXCLUDED_DIRS and not (Path(directory) / d).is_symlink())
             for name in sorted(files):
@@ -54,10 +54,21 @@ class LegacySyncEngine(subject.SyncEngine):
                 try:
                     self._path(relative, existing=True)
                     raw = path.read_bytes()
-                    text = raw.decode('utf-8')
+                    try:
+                        text = raw.decode('utf-8')
+                    except UnicodeDecodeError as exc:
+                        raise ValueError('not UTF-8 text; save the file as UTF-8') from exc
                     if _has_conflict_markers(text):
                         raise ValueError('unresolved git conflict markers; resolve the merge before sync')
-                    metadata, body = parse(text)
+                    ignored = False
+                    try:
+                        metadata, body = parse(text)
+                    except ValueError:
+                        # A header parse() rejects without a gate-like key: the text alone is indexed.
+                        body = subject.body_without_metadata(text)
+                        if body is None:
+                            raise
+                        metadata, ignored = {}, True
                     if metadata.get('kind') == 'task' and body.lstrip().startswith('---'):
                         raise ValueError('task has embedded frontmatter; reconcile metadata and body explicitly')
                     if metadata.get('kind') == 'receipt' or metadata.get('generated') is True:
@@ -65,26 +76,31 @@ class LegacySyncEngine(subject.SyncEngine):
                     record = dict(metadata, source=relative, text=body)
                     record.setdefault('id', 'md-' + _hash(relative)[:24])
                     record.setdefault('kind', 'note')
+                    if ignored:
+                        record['metadata_ignored'] = True
                     record = self.store._validate(record)
                     if record['source_sha256'] != _hash(raw):
                         raise ValueError('source changed while scanning')
                     if record['id'] in records:
                         duplicate.add(record['id'])
                     records[record['id']] = record
+                    owners.setdefault(record['id'], []).append(relative)
                 except (ValueError, OSError, UnicodeError) as exc:
                     warnings.append({'source': relative, 'reason': str(exc)})
         for id in sorted(duplicate):
             records.pop(id, None)
-            conflicts.append({'id': id, 'reason': 'duplicate source id; all copies quarantined'})
+            # The report names the copies since the conflict was scoped to its own sources.
+            conflicts.append({'id': id, 'sources': sorted(owners[id]), 'reason': 'duplicate source id; all copies quarantined'})
         return records, warnings, conflicts
 
     def sync(self):
         # Serialize recovery, source scan and projection across local processes.
         with self.store._connect() as db:
             db.execute('BEGIN IMMEDIATE')
-            completed, recovery_conflicts = self._recover(db)
+            completed, recovery_conflicts, recovery_warnings = self._recover(db)
             receipt_warnings, receipt_conflicts = self._scan_receipts(db)
             records, warnings, conflicts = self._scan()
+            warnings.extend(recovery_warnings)
             warnings.extend(receipt_warnings)
             conflicts.extend(recovery_conflicts + receipt_conflicts)
             old_owned = {row[0] for row in db.execute('SELECT id FROM markdown_sources')}
@@ -107,7 +123,7 @@ class LegacySyncEngine(subject.SyncEngine):
                         record['revision'] = max(record['revision'], previous['revision'])
                 payload = _json(record)
                 if row and id not in old_owned and row[0] != payload:
-                    conflicts.append({'id': id, 'reason': 'id already owned by another record'})
+                    conflicts.append({'id': id, 'source': record['source'], 'reason': 'id already owned by another record'})
                     continue
                 if not row or row[0] != payload:
                     event_type = 'update' if row else 'ingest'
@@ -117,7 +133,9 @@ class LegacySyncEngine(subject.SyncEngine):
             conflicts.extend(project_receipts(self, db, warnings))
             # A supersedes value that retires nothing is reported, not a degraded scan: no
             # source was excluded and the hook must not warn on every turn about it.
-            dead_supersedes = resolve_supersedes([json.loads(row[0]) for row in db.execute('SELECT payload FROM records ORDER BY id')])[1]
+            indexed_records = [json.loads(row[0]) for row in db.execute('SELECT payload FROM records ORDER BY id')]
+            dead_supersedes = resolve_supersedes(indexed_records)[1]
+            ignored_metadata = sorted(r['source'] for r in indexed_records if r.get('metadata_ignored') is True)
             if conflicts:
                 # A receipt hidden by a directory mtime that did not move surfaces as a view
                 # conflict; the next sync then rescans receipts/ in full.
@@ -128,6 +146,9 @@ class LegacySyncEngine(subject.SyncEngine):
         if dead_supersedes:
             result['supersedes_issues'] = dead_supersedes[:20]
             result['supersedes_issue_count'] = len(dead_supersedes)
+        if ignored_metadata:
+            result['metadata_ignored'] = ignored_metadata[:20]
+            result['metadata_ignored_count'] = len(ignored_metadata)
         return result
 
 
@@ -209,11 +230,15 @@ class WarmSyncTest(unittest.TestCase):
                 with patch.object(self.engine.store, '_connect', traced):
                     self.engine.sync()
                 sql = [' '.join(s.upper().split()) for s in statements]
-                self.assertFalse(any(s.startswith('SELECT PAYLOAD FROM RECORDS WHERE') for s in sql), sql)
+                self.assertFalse(any(s.startswith('SELECT PAYLOAD FROM RECORDS WHERE ID') for s in sql), sql)
                 self.assertFalse(any(s.startswith('INSERT OR REPLACE INTO MARKDOWN_SOURCES') for s in sql), sql)
-                self.assertEqual(sql.count('SELECT ID, PAYLOAD FROM RECORDS'), 1)
+                # Every payload at most once; while no writer has touched records since the last
+                # sync (records_generation), only the ones this sync reads again.
+                loads = [s for s in sql if s.startswith('SELECT ID, PAYLOAD FROM RECORDS')]
+                self.assertLessEqual(len(loads), 1, sql)
+                self.assertNotIn('SELECT ID, PAYLOAD FROM RECORDS', sql, 'records unchanged: not every payload')
                 self.assertEqual(sql.count('SELECT ID, SOURCE FROM MARKDOWN_SOURCES ORDER BY ID'), 1)
-                self.assertLess(sql.index('BEGIN IMMEDIATE'), sql.index('SELECT ID, PAYLOAD FROM RECORDS'))
+                self.assertTrue(all(sql.index('BEGIN IMMEDIATE') < sql.index(load) for load in loads))
 
     def test_scan_shares_resolution_but_reads_each_source_twice(self):
         for index in range(6):

@@ -43,6 +43,19 @@ def clean_environ(**extra):
     return patch.dict(os.environ, inherited_env(**extra), clear=True)
 
 
+def require_numpy(test):
+    """numpy for a test of the voice helper, which runs in the voice environment (the engine never
+    imports it). Where it is missing the test is skipped, except on CI (GitHub sets CI=true): the
+    workflows install it, and a skip there turned the helper's microphone code green unseen (tests-ci-2)."""
+    try:
+        import numpy
+    except ImportError:
+        if os.environ.get('CI'):
+            test.fail('numpy is missing on CI; the workflow installs it (python -m pip install numpy)')
+        test.skipTest('numpy yok')
+    return numpy
+
+
 def isolated_path(*first):
     """PATH for a cleared test environment: the given folders, then os.defpath. Windows adds
     its own folders because cmd.exe resolves AutoRun commands (doskey) through PATH alone;
