@@ -47,6 +47,8 @@ Beyni Guncelle.cmd
 .omp/hooks/pre/beyin-v3.ts
 # companion-compact süreçler arası kilidi; kalıcıdır ama kullanıcı verisi değildir
 **/.beyin-compact.lock
+# note-edit'in bu makineye ait yazma kilidi ve notların eski hâllerinin yedekleri
+.beyin-note-write/
 # Yerel veritabanından üretilen görünümler: her makine kendisininkini üretir
 daily/v3/
 knowledge/v3/
