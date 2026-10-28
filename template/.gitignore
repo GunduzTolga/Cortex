@@ -13,6 +13,8 @@
 .claude/scripts/.state/*
 !.claude/scripts/.state/.gitkeep
 **/.beyin-compact.lock
+# note-edit: the machine's write lock and backups of notes as they were (beyin_v3_notes.py)
+.beyin-note-write/
 
 # Yakala: raw transcripts/page text and captured files stay local
 📥 000-Inbox/Yakala/.ham/
