@@ -71,7 +71,11 @@ interface ChatState {
   send(text: string): Promise<boolean>;
   cancel(): void;
   answer(permission: string, option: string | null): void;
+  /** A setting chosen: the chat in front's; or, for a new chat, one it is offered before its first message, which begins it (a Hermes session continued). */
   setOption(option: string, value: string): Promise<void>;
+  /** The settings a new chat with the chosen CLI has before its first message (Hermes: its sessions); none for most. */
+  offered: ConfigOption[];
+  loadOffer(): Promise<void>;
   rename(id: string, title: string): Promise<void>;
   remove(id: string): Promise<void>;
 }
@@ -151,6 +155,7 @@ export const useChat = create<ChatState>((set, get) => {
     drafts: load<Record<string, string>>(DRAFTS_KEY, {}),
     error: null,
     side: { open: load<boolean>(SIDE_KEY, false), path: null },
+    offered: [],
 
     showSide(path = null) {
       set({ side: { open: true, path } });
@@ -323,9 +328,33 @@ export const useChat = create<ChatState>((set, get) => {
       });
     },
 
+    async loadOffer() {
+      const { cli } = get();
+      if (!cli) return set({ offered: [] });
+      try {
+        const offered = await window.cortex.chat.offer(cli);
+        // Another tool chosen meanwhile: its own offer is the one that counts.
+        if (get().cli === cli) set({ offered });
+      } catch {
+        set({ offered: [] });
+      }
+    },
+
     async setOption(option, value) {
-      const { active } = get();
-      if (!active) return;
+      const { active, cli, offered } = get();
+      if (!active) {
+        // Chosen in a new chat: anything but what it offers already begins the chat on it.
+        const known = offered.find((one) => one.id === option);
+        if (!cli || !known || known.current === value) return;
+        try {
+          const { id } = await window.cortex.chat.begin(cli, option, value);
+          const opened = await window.cortex.chat.open(id);
+          set((state) => ({ open: { ...state.open, [id]: fromOpened(opened) }, active: id, offered: [], error: null }));
+        } catch (err) {
+          set({ error: messageOf(err) });
+        }
+        return;
+      }
       try {
         const options = await window.cortex.chat.setOption(active, option, value);
         set((state) => ({ open: { ...state.open, [active]: { ...state.open[active], options } } }));

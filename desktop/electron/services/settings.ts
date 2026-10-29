@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
+import { HERMES_PROFILE, hermesAddress } from '../../shared/hermes';
 import type { AppLanguage } from '../../shared/language';
 import { renameRetrying } from './fileWrite';
 
@@ -45,6 +46,10 @@ export interface Settings {
   voiceConsent: boolean;
   /** The person let the microphone listen all the time for the wake phrase, while Cortex runs (services/microphone.ts). */
   wakeConsent: boolean;
+  /** A Hermes Agent's API server on another machine (`https://host:8642`), for the chat; null until given. Its key is in keys.ts. */
+  hermesUrl: string | null;
+  /** The Hermes profile served under `/p/<profile>/` on that address; null for the server's own. */
+  hermesProfile: string | null;
 }
 
 /** The longest name kept: a way of addressing somebody, not a paragraph. */
@@ -57,7 +62,7 @@ export function tidyName(value: unknown): string | null {
   return name || null;
 }
 
-const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false };
+const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null };
 
 let cache: Settings | null = null;
 let keepOff = false;
@@ -78,6 +83,8 @@ function hydrate(raw: Record<string, unknown>): Settings {
     background: raw.background !== false,
     voiceConsent: raw.voiceConsent === true,
     wakeConsent: raw.wakeConsent === true,
+    hermesUrl: typeof raw.hermesUrl === 'string' ? hermesAddress(raw.hermesUrl) : null,
+    hermesProfile: typeof raw.hermesProfile === 'string' && HERMES_PROFILE.test(raw.hermesProfile) ? raw.hermesProfile : null,
   };
 }
 

@@ -4,12 +4,13 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { ChatEvent, ChatOpened, ChatPush, ChatSummary, CliId, CliInfo, ConfigOption } from '../../shared/chat';
 import { acpBackend } from './acpChat';
-import { type Backend, type Card, ChatRefusal, type Turn, failureEvent, scrubberFor } from './chatKit';
+import { type Backend, type Between, type Card, ChatRefusal, type Turn, failureEvent, scrubberFor } from './chatKit';
 import { claudeBackend } from './claudeChat';
 import { codexBackend } from './codexChat';
 import { writeWhole } from './fileWrite';
+import { hermesBackend } from './hermesChat';
 import { localBackend } from './localChat';
-import { LOCAL_IDS, isLocal, launchFor, listClis, protocolOf, refreshPath } from './clis';
+import { LOCAL_IDS, isServer, launchFor, listClis, protocolOf, refreshPath } from './clis';
 import { findLocal } from './localModels';
 import { readSettings } from './settings';
 import { vaultSettled } from './setup';
@@ -65,13 +66,13 @@ interface Live {
   seq: number;
 }
 
-const CLI_IDS: readonly CliId[] = ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'lmstudio', 'ollama', 'test', 'test-claude', 'test-codex'];
+const CLI_IDS: readonly CliId[] = ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'lmstudio', 'ollama', 'hermes', 'test', 'test-claude', 'test-codex'];
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const TITLE_MAX = 60;
 const MESSAGE_MAX = 100_000;
 const EVENTS_KEPT = 2000;
 
-const BACKENDS = { claude: claudeBackend, codex: codexBackend, acp: acpBackend, local: localBackend } as const;
+const BACKENDS = { claude: claudeBackend, codex: codexBackend, acp: acpBackend, local: localBackend, hermes: hermesBackend } as const;
 const backendOf = (cli: CliId): Backend => BACKENDS[protocolOf(cli)];
 
 let push: (message: ChatPush) => void = () => undefined;
@@ -304,7 +305,58 @@ export function listChats(): ChatSummary[] {
 
 export function openChat(id: unknown): ChatOpened {
   const chat = liveOf(id);
+  offerTo(chat);
   return { chat: summaryOf(chat.stored), events: compact(chat.events), running: chat.running, options: chat.options, seq: chat.seq };
+}
+
+/** A chat opened before any turn of it ran since the app started: the settings its engine has without one (Hermes's sessions), pushed once asked. */
+function offerTo(chat: Live): void {
+  const backend = backendOf(chat.stored.cli);
+  if (!backend.offer || chat.running || chat.options.length) return;
+  backend.offer(chat.stored.sessionId).then(
+    (options) => {
+      if (kept(chat) && !chat.running && !chat.options.length && options.length) setState(chat, { options });
+    },
+    () => undefined,
+  );
+}
+
+/** The settings a new chat with that CLI has before its first message (Hermes: its sessions); none for the rest, or where they cannot be asked now. */
+export async function offerChat(cli: unknown): Promise<ConfigOption[]> {
+  if (!CLI_IDS.includes(cli as CliId)) throw new ChatRefusal('Not a CLI the chat knows.');
+  const backend = backendOf(cli as CliId);
+  return backend.offer ? backend.offer(null).catch(() => []) : [];
+}
+
+/**
+ * A new chat begun on a setting chosen before its first message - Hermes: a session begun
+ * elsewhere, continued here, its last messages shown - and named after the choice; its id.
+ */
+export async function beginChat(cli: unknown, option: unknown, value: unknown): Promise<{ id: string }> {
+  const vault = currentVault();
+  if (!CLI_IDS.includes(cli as CliId)) throw new ChatRefusal('Not a CLI the chat knows.');
+  if (typeof option !== 'string' || typeof value !== 'string') throw new ChatRefusal('Not a setting.');
+  const backend = backendOf(cli as CliId);
+  const options = backend.offer ? await backend.offer(null) : [];
+  const choice = options.find((one) => one.id === option)?.choices.find((one) => one.value === value);
+  if (!choice) throw new ChatRefusal('Not a choice this chat offers.');
+  const now = Date.now();
+  const stored: Stored = { id: randomUUID(), title: choice.name.slice(0, TITLE_MAX), cli: cli as CliId, createdAt: now, updatedAt: now, vault, sessionId: null };
+  const chat = fresh(stored, []);
+  chat.options = options;
+  readIndex().chats.push(stored);
+  live.set(stored.id, chat);
+  try {
+    await setChatOption(stored.id, option, value);
+  } catch (err) {
+    // Not begun after all: nothing of it left in the list.
+    live.delete(stored.id);
+    readIndex().chats = readIndex().chats.filter((one) => one.id !== stored.id);
+    saveIndexQuietly();
+    throw err;
+  }
+  push({ chatId: stored.id, summary: summaryOf(stored) });
+  return { id: stored.id };
 }
 
 /** A message to a chat, or to a new chat with that CLI. Answered at once with the chat's id; the answer itself comes as pushes. */
@@ -315,8 +367,8 @@ export function sendChat(id: unknown, cli: unknown, message: unknown): { id: str
   let chat: Live;
   if (id === null) {
     if (!CLI_IDS.includes(cli as CliId)) throw new ChatRefusal('Not a CLI the chat knows.');
-    // A model server is asked when the chat runs; one that is off says so in the chat.
-    if (!isLocal(cli as CliId) && !launchFor(cli as CliId)) throw new ChatRefusal(`${cli} is not installed on this machine.`);
+    // A model server, or Hermes on another machine, is asked when the chat runs; one that is off says so in the chat.
+    if (!isServer(cli as CliId) && !launchFor(cli as CliId)) throw new ChatRefusal(`${cli} is not installed on this machine.`);
     const now = Date.now();
     const stored: Stored = { id: randomUUID(), title: '', cli: cli as CliId, createdAt: now, updatedAt: now, vault, sessionId: null };
     readIndex().chats.push(stored);
@@ -361,7 +413,17 @@ export async function setChatOption(id: unknown, option: unknown, value: unknown
   const known = chat.options.find((one) => one.id === option);
   if (!known || !known.choices.some((choice) => choice.value === value)) throw new ChatRefusal('Not a choice this chat offers.');
   if (chat.running) throw new ChatRefusal('Wait for the answer to end before changing this.');
-  setState(chat, { options: await backendOf(chat.stored.cli).setOption(chat.stored.id, chat.options, option, value) });
+  // A session chosen to continue (Hermes) binds the chat to it, and shows where its conversation left off.
+  const between: Between = {
+    emit: (event) => emit(chat, event),
+    setSession: (sessionId) => {
+      if (!kept(chat)) return;
+      chat.stored.sessionId = sessionId;
+      saveIndexQuietly();
+    },
+  };
+  setState(chat, { options: await backendOf(chat.stored.cli).setOption(chat.stored.id, chat.options, option, value, between) });
+  if (kept(chat)) saveLog(chat);
   const prefs = readIndex().prefs;
   prefs[chat.stored.cli] = { ...(prefs[chat.stored.cli] ?? {}), [option]: value };
   saveIndex();

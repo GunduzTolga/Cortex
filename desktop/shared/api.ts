@@ -1,4 +1,5 @@
 import type { ChatApi, ChatPush } from './chat';
+import type { HermesApi } from './hermes';
 import type { AppLanguage } from './language';
 import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
 import type { OfficeApi } from './office';
@@ -102,6 +103,8 @@ export interface CortexApi {
   office: OfficeApi;
   /** Notes from the phone through the person's own Telegram bot (shared/telegram.ts). */
   telegram: TelegramApi;
+  /** A Hermes Agent on another machine as a chat engine: its address, profile and key (shared/hermes.ts). */
+  hermes: HermesApi;
   on: {
     /** The vault changed on disk, or another vault was chosen: read the index again. */
     notesChanged(handler: () => void): () => void;

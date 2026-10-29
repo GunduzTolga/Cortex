@@ -55,13 +55,29 @@ export interface Turn {
   ask(card: Card): Promise<string | null>;
 }
 
+/**
+ * What a backend may do for its chat between turns, when a setting is chosen: show what the setting
+ * brought (a session continued, its earlier messages) and change the session the chat continues -
+ * null, a new one at the next turn.
+ */
+export interface Between {
+  emit(event: ChatEvent): void;
+  setSession(sessionId: string | null): void;
+}
+
 export interface Backend {
   /** One turn: the message sent, what happens told through the turn; the reason it stopped (`end_turn`, `cancelled`…), or a TurnFailure. */
   run(turn: Turn, message: string): Promise<string>;
   /** Stop the chat's turn: asked of the CLI, and the CLI ended if it does not stop in a few seconds. */
   cancel(chatId: string): void;
   /** A setting chosen: given to the CLI now where it takes it, else at its next session; the chat's settings as they are now. */
-  setOption(chatId: string, options: ConfigOption[], option: string, value: string): Promise<ConfigOption[]>;
+  setOption(chatId: string, options: ConfigOption[], option: string, value: string, chat?: Between): Promise<ConfigOption[]>;
+  /**
+   * The settings a chat has before any turn of it runs - a new chat, or one reopened after a start
+   * of the app - where the engine has any to offer without a turn (Hermes: its sessions, to continue
+   * one); given the session the chat continues, or null.
+   */
+  offer?(sessionId: string | null): Promise<ConfigOption[]>;
   /** The chat forgotten: anything kept running for it ended. */
   forget(chatId: string): void;
   /** Every CLI this backend started, ended. */
