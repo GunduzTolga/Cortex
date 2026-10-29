@@ -97,9 +97,10 @@ macOS ve Linux'ta hafıza motoru terminalden kurulur: [Terminalden kurulum](docs
 ## Nasıl çalışır?
 
 ```mermaid
-flowchart LR
+flowchart TB
   C["Yapay zeka istemcin<br/>Claude Code · Codex · OpenCode · …"]
   subgraph PC["Senin bilgisayarın"]
+    direction TB
     M["Hafıza motoru<br/>beyin.py · yalnız Python standart kütüphanesi"]
     K[("Kasa<br/>düz Markdown notlar")]
     I[("Yerel arama indeksi")]
@@ -110,7 +111,7 @@ flowchart LR
   M <--> K
   M <--> I
   A -- "kurar, günceller" --> M
-  A <--> K
+  A <-- "notlar" --> K
 ```
 
 Cortex iki parçadır:
