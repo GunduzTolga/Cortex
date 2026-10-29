@@ -7,7 +7,7 @@
  * never starts a program: it names a CLI from the list it was given.
  */
 
-export type CliId = 'claude' | 'codex' | 'opencode' | 'gemini' | 'qwen' | 'lmstudio' | 'ollama' | 'test' | 'test-claude' | 'test-codex';
+export type CliId = 'claude' | 'codex' | 'opencode' | 'gemini' | 'qwen' | 'lmstudio' | 'ollama' | 'hermes' | 'test' | 'test-claude' | 'test-codex';
 
 export interface CliInfo {
   id: CliId;
@@ -114,6 +114,10 @@ export interface ChatApi {
   cancel(id: string): Promise<void>;
   answer(id: string, permission: string, option: string | null): Promise<void>;
   setOption(id: string, option: string, value: string): Promise<ConfigOption[]>;
+  /** The settings a new chat with that CLI has before its first message (Hermes: its sessions to continue); none for most. */
+  offer(cli: CliId): Promise<ConfigOption[]>;
+  /** A new chat begun on one of those settings chosen (a Hermes session continued, its last messages shown); its id. */
+  begin(cli: CliId, option: string, value: string): Promise<{ id: string }>;
   rename(id: string, title: string): Promise<ChatSummary>;
   remove(id: string): Promise<void>;
   /** Every AI tool, and whether it is signed in. */

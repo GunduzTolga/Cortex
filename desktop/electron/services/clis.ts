@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { CliId, CliInfo } from '../../shared/chat';
+import { HERMES_NAME, hermesConfigured } from './hermesChat';
 import { keyEnv } from './keys';
 import { LOCAL, type LocalId, lastSeen } from './localModels';
 
@@ -17,6 +18,8 @@ import { LOCAL, type LocalId, lastSeen } from './localModels';
  *
  * The model servers on this machine, LM Studio and Ollama, are talked to
  * directly (localChat.ts): they are offered while they are up with a model.
+ * So is a Hermes Agent on another machine, through its gateway's API server
+ * (hermesChat.ts): offered once its address is given.
  *
  * Nothing is run through a shell. On Windows an npm install puts a `.cmd`
  * shim on the PATH, and Node refuses to start a `.cmd` without one; the shim
@@ -24,7 +27,7 @@ import { LOCAL, type LocalId, lastSeen } from './localModels';
  * and that is started with its arguments as an array.
  */
 
-export type Protocol = 'claude' | 'codex' | 'acp' | 'local';
+export type Protocol = 'claude' | 'codex' | 'acp' | 'local' | 'hermes';
 
 interface Known {
   id: CliId;
@@ -78,10 +81,12 @@ const KNOWN: Known[] = [
 
 export const LOCAL_IDS: readonly LocalId[] = ['lmstudio', 'ollama'];
 export const isLocal = (id: CliId): id is LocalId => (LOCAL_IDS as readonly CliId[]).includes(id);
+/** Talked to over HTTP, not started: a model server on this machine, or Hermes on another. */
+export const isServer = (id: CliId): boolean => isLocal(id) || id === 'hermes';
 
 /** How a CLI talks to the chat. */
 export const protocolOf = (id: CliId): Protocol =>
-  isLocal(id) ? 'local' : id === 'test-claude' ? 'claude' : id === 'test-codex' ? 'codex' : id === 'test' ? 'acp' : (KNOWN.find((one) => one.id === id)?.protocol ?? 'acp');
+  isLocal(id) ? 'local' : id === 'hermes' ? 'hermes' : id === 'test-claude' ? 'claude' : id === 'test-codex' ? 'codex' : id === 'test' ? 'acp' : (KNOWN.find((one) => one.id === id)?.protocol ?? 'acp');
 
 export interface Launch {
   command: string;
@@ -285,6 +290,7 @@ export function listClis(env: NodeJS.ProcessEnv = process.env): CliInfo[] {
     const up = lastSeen(id).models.length > 0;
     out.push({ id, name: LOCAL[id].name, available: up || onPathAny(LOCAL[id].tools, env), local: up ? 'up' : 'off' });
   }
+  if (hermesConfigured()) out.push({ id: 'hermes', name: HERMES_NAME, available: true });
   if (testLaunch('test', env)) out.push({ id: 'test', name: 'Test agent', available: true });
   if (testLaunch('test-claude', env)) out.push({ id: 'test-claude', name: 'Test Claude', available: true });
   if (testLaunch('test-codex', env)) out.push({ id: 'test-codex', name: 'Test Codex', available: true });
@@ -294,8 +300,8 @@ export function listClis(env: NodeJS.ProcessEnv = process.env): CliInfo[] {
 /** How the chat starts a CLI: with the key the person gave Cortex for it, where it takes one from its environment (electron/services/keys.ts). */
 export function launchFor(id: CliId, env: NodeJS.ProcessEnv = process.env): Launch | null {
   if (id === 'test' || id === 'test-claude' || id === 'test-codex') return testLaunch(id, env);
-  // A model server is no program to start: it is talked to over HTTP (localChat.ts).
-  if (isLocal(id)) return null;
+  // A model server, or Hermes, is no program to start: it is talked to over HTTP (localChat.ts, hermesChat.ts).
+  if (isServer(id)) return null;
   const launch = launchOf(id, env);
   if (!launch) return null;
   const keys = keyEnv(id);

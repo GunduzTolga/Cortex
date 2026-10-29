@@ -6,6 +6,7 @@ import { currentListener, expectVoiceTurn, onHelperChange, startWithWindows, tra
 import { setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
+import * as hermes from './services/hermesChat';
 import { captureToInbox } from './services/inbox';
 import * as officeTalk from './services/officeTalk';
 import * as setup from './services/setup';
@@ -173,6 +174,8 @@ export function registerIpc(): void {
   handle('chat:cancel', (id) => chat.cancelChat(id));
   handle('chat:answer', (id, permission, option) => chat.answerChat(id, permission, option));
   handle('chat:setOption', (id, option, value) => chat.setChatOption(id, option, value));
+  handle('chat:offer', (cli) => chat.offerChat(cli));
+  handle('chat:begin', (cli, option, value) => chat.beginChat(cli, option, value));
   handle('chat:rename', (id, title) => chat.renameChat(id, title));
   handle('chat:remove', (id) => chat.removeChat(id));
   // A message kept for later in the vault's inbox (services/inbox.ts): words go in, a card's place comes back.
@@ -253,6 +256,12 @@ export function registerIpc(): void {
     expectVoiceTurn();
     return setup.setVoice(patch);
   });
+
+  // A Hermes Agent on another machine as a chat engine (services/hermesChat.ts): its address set here, its key going in and never sent back.
+  handle('hermes:status', () => hermes.hermesStatus());
+  handle('hermes:save', (setup) => hermes.saveHermes(setup));
+  handle('hermes:forget', () => hermes.forgetHermes());
+  handle('hermes:test', () => hermes.testHermes());
 
   // Notes from the phone through the person's own Telegram bot (services/telegram.ts): a key goes in and is never sent back.
   handle('telegram:status', () => telegram.telegramStatus());

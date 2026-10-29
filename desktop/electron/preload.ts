@@ -67,6 +67,8 @@ const api: CortexApi = {
     cancel: (id) => invoke('chat:cancel', id),
     answer: (id, permission, option) => invoke('chat:answer', id, permission, option),
     setOption: (id, option, value) => invoke('chat:setOption', id, option, value),
+    offer: (cli) => invoke('chat:offer', cli),
+    begin: (cli, option, value) => invoke('chat:begin', cli, option, value),
     rename: (id, title) => invoke('chat:rename', id, title),
     remove: (id) => invoke('chat:remove', id),
     auth: () => invoke('chat:auth'),
@@ -79,6 +81,12 @@ const api: CortexApi = {
   office: {
     models: (tool) => invoke('office:models', tool),
     talk: (request) => invoke('office:talk', request),
+  },
+  hermes: {
+    status: () => invoke('hermes:status'),
+    save: (setup) => invoke('hermes:save', setup),
+    forget: () => invoke('hermes:forget'),
+    test: () => invoke('hermes:test'),
   },
   telegram: {
     status: () => invoke('telegram:status'),

@@ -8,7 +8,8 @@ import { writeWhole } from './fileWrite';
  * The API keys the person gives Cortex for a CLI that takes its key from the
  * environment: Claude Code (ANTHROPIC_API_KEY, instead of its subscription),
  * Gemini CLI (GEMINI_API_KEY) and Qwen Code (OPENAI_API_KEY, with the
- * OpenAI-compatible address it is for). Codex keeps its own key (`codex
+ * OpenAI-compatible address it is for); and the key of a Hermes Agent's API
+ * server, which is sent to that server and to nothing else. Codex keeps its own key (`codex
  * login --with-api-key`, electron/services/auth.ts) and OpenCode its own
  * connections; neither is kept here.
  *
@@ -30,6 +31,8 @@ export const KEY_ENV: Partial<Record<CliId, { variable: string; baseUrl?: string
   claude: { variable: 'ANTHROPIC_API_KEY' },
   gemini: { variable: 'GEMINI_API_KEY' },
   qwen: { variable: 'OPENAI_API_KEY', baseUrl: 'OPENAI_BASE_URL' },
+  // No program started here: Hermes's key goes to its API server as a Bearer token (hermesChat.ts); the name is only how keyEnv hands it over.
+  hermes: { variable: 'HERMES_API_KEY' },
 };
 
 const file = () => path.join(app.getPath('userData'), 'keys.json');

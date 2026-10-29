@@ -7,6 +7,7 @@ import { useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 import { Button, Modal, Spinner, inputClass } from '../ui/ui';
 import { useChat } from './chatStore';
+import { HermesSection } from './HermesSection';
 
 /**
  * Signing in to the AI tools Pyn talks through (electron/services/auth.ts):
@@ -16,7 +17,7 @@ import { useChat } from './chatStore';
  * only whether one is kept.
  */
 
-export const TOOL_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code', lmstudio: 'LM Studio', ollama: 'Ollama' };
+export const TOOL_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code', lmstudio: 'LM Studio', ollama: 'Ollama', hermes: 'Hermes' };
 const NOTES: Record<string, Key> = {
   claude: 'auth.note.claude',
   codex: 'auth.note.codex',
@@ -217,6 +218,7 @@ export function AuthDialog() {
           {auth.map((tool) => (
             <ToolRow key={tool.id} tool={tool} focused={open === tool.id} refused={failed.includes(tool.id)} />
           ))}
+          <HermesSection focused={open === 'hermes'} />
         </ul>
       )}
     </Modal>
