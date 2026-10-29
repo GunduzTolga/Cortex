@@ -183,7 +183,7 @@ test('an address is kept as http(s)://host[:port][/path]; anything else is not o
 test('set up: the address and the profile kept, the key kept encrypted and never told back; Hermes offered in the chat only then', async () => {
   forgetHermes();
   assert.equal(listClis({ PATH: '' }).some((one) => one.id === 'hermes'), false, 'not offered before an address is given');
-  assert.throws(() => saveHermes({ url: 'not an address', key: KEY }), /not the address of a Hermes server/);
+  assert.throws(() => saveHermes({ url: 'not an address', key: KEY }), /not the address of a Pyn server/);
   assert.throws(() => saveHermes({ url: 'https://host:8642' }), /needs its API key/);
   assert.throws(() => saveHermes({ url: 'https://host:8642', key: KEY, profile: 'a/b' }), /not the name of a profile/);
   const status = saveHermes({ url: 'https://host:8642/', profile: '/p/work/', key: KEY });
@@ -485,7 +485,7 @@ test('a server not reached, one with no Hermes behind it, a busy session and a f
   closed.server.close();
   await new Promise((done) => setTimeout(done, 20));
   saveHermes({ url: closed.base, key: KEY });
-  await assert.rejects(hermesBackend.run(fakeTurn().turn, 'merhaba'), (err: Error) => /^Hermes could not be reached \(ECONNREFUSED\)\./.test(err.message) && !err.message.includes('\n'));
+  await assert.rejects(hermesBackend.run(fakeTurn().turn, 'merhaba'), (err: Error) => /^Pyn on the server could not be reached \(ECONNREFUSED\)\./.test(err.message) && !err.message.includes('\n'));
 
   // Something else at the address.
   const other = http.createServer((_request, response) => {
@@ -495,7 +495,7 @@ test('a server not reached, one with no Hermes behind it, a busy session and a f
   await new Promise<void>((done) => other.listen(0, '127.0.0.1', done));
   try {
     saveHermes({ url: `http://127.0.0.1:${(other.address() as AddressInfo).port}`, key: KEY });
-    await assert.rejects(hermesBackend.run(fakeTurn().turn, 'merhaba'), /There is no Hermes API server at this address/);
+    await assert.rejects(hermesBackend.run(fakeTurn().turn, 'merhaba'), /There is no Pyn API server at this address/);
   } finally {
     other.close();
   }
@@ -511,7 +511,7 @@ test('a server not reached, one with no Hermes behind it, a busy session and a f
       send('run.failed', { completed: false, turn_exit_reason: 'iteration budget exhausted' });
       end();
     });
-    await assert.rejects(hermesBackend.run(fakeTurn('api_busy').turn, 'x'), /: Hermes could not finish the answer: iteration budget exhausted$/);
+    await assert.rejects(hermesBackend.run(fakeTurn('api_busy').turn, 'x'), /: Pyn on the server could not finish the answer: iteration budget exhausted$/);
     fake.script(({ send, end }) => {
       send('error', { message: `provider rejected ${KEY}` });
       send('done');
@@ -519,7 +519,7 @@ test('a server not reached, one with no Hermes behind it, a busy session and a f
     });
     await assert.rejects(hermesBackend.run(fakeTurn('api_busy').turn, 'x'), (err: Error) => {
       keyless(err.message);
-      return /^Hermes stopped: provider rejected …$/.test(err.message);
+      return /^Pyn on the server stopped: provider rejected …$/.test(err.message);
     });
   } finally {
     fake.server.close();
@@ -538,7 +538,7 @@ test('a server not reached, one with no Hermes behind it, a busy session and a f
   await new Promise<void>((done) => busy.listen(0, '127.0.0.1', done));
   try {
     saveHermes({ url: `http://127.0.0.1:${(busy.address() as AddressInfo).port}`, key: KEY });
-    await assert.rejects(hermesBackend.run(fakeTurn('api_x').turn, 'x'), /: Hermes is busy with this session: Session is busy with another turn$/);
+    await assert.rejects(hermesBackend.run(fakeTurn('api_x').turn, 'x'), /: Pyn on the server is busy with this session: Session is busy with another turn$/);
   } finally {
     busy.close();
   }

@@ -40,7 +40,7 @@ export function HermesSection({ focused }: { focused: boolean }) {
     setBusy(true);
     try {
       shown(await window.cortex.hermes.save({ url: url.trim(), profile: profile.trim() || null, ...(key.trim() ? { key: key.trim() } : {}) }));
-      toast({ tone: 'success', title: t('auth.key.saved', { name: 'Hermes' }) });
+      toast({ tone: 'success', title: t('auth.key.saved', { name: 'Pyn' }) });
       // Offered in the tool chip from now on.
       void useChat.getState().refreshClis();
     } catch (err) {

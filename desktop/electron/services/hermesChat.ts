@@ -39,7 +39,7 @@ import { readSettings, updateSettings } from './settings';
  * asked of Hermes (`POST /v1/runs/{run}/stop`) and the stream let go.
  */
 
-export const HERMES_NAME = 'Hermes';
+export const HERMES_NAME = 'Pyn';
 /** What a session begun here is marked as made by, in Hermes's own list. */
 const SOURCE = 'cortex-desktop';
 export const SESSION_OPTION = 'session';
@@ -89,13 +89,13 @@ export function hermesStatus(): HermesStatus {
 export function saveHermes(setup: unknown): HermesStatus {
   const asked = setup && typeof setup === 'object' ? (setup as Record<string, unknown>) : {};
   const url = typeof asked.url === 'string' ? hermesAddress(asked.url) : null;
-  if (!url) throw new HermesRefusal('That is not the address of a Hermes server. Give it as https://host:port.');
+  if (!url) throw new HermesRefusal('That is not the address of a Pyn server. Give it as https://host:port.');
   // Written as Hermes's path (`/p/name/`) or as the name alone.
   const profile = typeof asked.profile === 'string' ? asked.profile.trim().replace(/^\/?p\//, '').replace(/\/+$/, '') : '';
   if (profile && !HERMES_PROFILE.test(profile)) throw new HermesRefusal('That is not the name of a profile: letters, digits, - and _ only.');
   // The key first: one refused leaves the address as it was.
   if (typeof asked.key === 'string' && asked.key.trim()) saveKey('hermes', asked.key, undefined);
-  else if (!keptHere('hermes')) throw new HermesRefusal('Hermes needs its API key (API_SERVER_KEY).');
+  else if (!keptHere('hermes')) throw new HermesRefusal('Pyn on the server needs its API key (API_SERVER_KEY).');
   updateSettings((settings) => {
     settings.hermesUrl = url;
     settings.hermesProfile = profile || null;
@@ -120,7 +120,7 @@ export async function testHermes(): Promise<{ sessions: number }> {
 function serverOf(): Server {
   const { hermesUrl, hermesProfile } = readSettings();
   const key = keyEnv('hermes').HERMES_API_KEY;
-  if (!hermesUrl || !key) throw new TurnFailure('Hermes is not set up: give its address and its API key in the AI tools window.', 'auth');
+  if (!hermesUrl || !key) throw new TurnFailure('Pyn on the server is not set up: give its address and its API key in the AI tools window.', 'auth');
   return { base: hermesUrl + (hermesProfile ? `/p/${encodeURIComponent(hermesProfile)}` : ''), key };
 }
 
@@ -143,7 +143,7 @@ function open(server: Server, method: 'GET' | 'POST', route: string, body: unkno
     headers['content-length'] = Buffer.byteLength(payload);
   }
   const request = (url.protocol === 'https:' ? https : http).request(url, { method, headers, signal, timeout, agent: false }, onResponse);
-  // Said by its code alone (unreachable): `Hermes could not be reached (ETIMEDOUT)`.
+  // Said by its code alone (unreachable): `Pyn on the server could not be reached (ETIMEDOUT)`.
   request.on('timeout', () => request.destroy(Object.assign(new Error(), { code: 'ETIMEDOUT' })));
   request.end(payload);
   return request;
@@ -157,7 +157,7 @@ function call(server: Server, method: 'GET' | 'POST', route: string, body?: unkn
       response.setEncoding('utf8');
       response.on('data', (chunk: string) => {
         text += chunk;
-        if (text.length > BODY_MAX) request.destroy(new TurnFailure('Hermes answered with more than Cortex reads.', null));
+        if (text.length > BODY_MAX) request.destroy(new TurnFailure('Pyn on the server answered with more than Cortex reads.', null));
       });
       response.on('end', () => resolve({ status: response.statusCode ?? 0, body: text }));
       response.on('error', (err) => reject(err instanceof TurnFailure ? err : lost()));
@@ -173,10 +173,10 @@ function call(server: Server, method: 'GET' | 'POST', route: string, body?: unkn
 /** The server not reached: its kind of trouble named (`ECONNREFUSED`, a certificate's), never more of the error. */
 function unreachable(err: NodeJS.ErrnoException): TurnFailure {
   const why = typeof err.code === 'string' && /^[A-Z0-9_]{2,60}$/.test(err.code) ? ` (${err.code})` : '';
-  return new TurnFailure(`Hermes could not be reached${why}. Check that its gateway is running and that the address is right.`, null);
+  return new TurnFailure(`Pyn on the server could not be reached${why}. Check that the server is running and that the address is right.`, null);
 }
 
-const lost = () => new TurnFailure('Hermes stopped answering mid-way: the connection was lost.', null);
+const lost = () => new TurnFailure('Pyn on the server stopped answering mid-way: the connection was lost.', null);
 
 /** What Hermes said of a refusal: its OpenAI-style `{"error": {"message"}}`, cut. */
 function saidOf(body: string): string {
@@ -193,10 +193,10 @@ function saidOf(body: string): string {
 function refusal(reply: Reply): TurnFailure {
   const said = saidOf(reply.body);
   const status = reply.status;
-  if (status === 401 || status === 403) return new TurnFailure('Hermes did not take the key. Give its API_SERVER_KEY again in the AI tools window.', 'auth');
-  if (status === 409) return new TurnFailure(said ? `Hermes is busy with this session: ${said}` : 'Hermes is busy with this session. Wait for its turn to end, or choose another session.', null);
-  if (status === 429) return new TurnFailure('Hermes is running as many turns as it takes. Try again in a moment.', null);
-  return new TurnFailure(said ? `Hermes refused (HTTP ${status}): ${said}` : `Hermes refused (HTTP ${status}).`, null);
+  if (status === 401 || status === 403) return new TurnFailure('Pyn on the server did not take the key. Give its API_SERVER_KEY again in the AI tools window.', 'auth');
+  if (status === 409) return new TurnFailure(said ? `Pyn on the server is busy with this session: ${said}` : 'Pyn on the server is busy with this session. Wait for its turn to end, or choose another session.', null);
+  if (status === 429) return new TurnFailure('Pyn on the server is running as many turns as it takes. Try again in a moment.', null);
+  return new TurnFailure(said ? `Pyn on the server refused (HTTP ${status}): ${said}` : `Pyn on the server refused (HTTP ${status}).`, null);
 }
 
 function parsed(reply: Reply): Record<string, unknown> {
@@ -206,7 +206,7 @@ function parsed(reply: Reply): Record<string, unknown> {
   } catch {
     /* said below */
   }
-  throw new TurnFailure('Hermes answered with something Cortex does not read. Is this the address of its API server?', null);
+  throw new TurnFailure('Pyn on the server answered with something Cortex does not read. Is this the address of its API server?', null);
 }
 
 /* ------------------------------------------------------------------ */
@@ -228,7 +228,7 @@ export interface Listed {
  */
 async function listSessions(server: Server, signal: AbortSignal | undefined, strict = false): Promise<Listed[]> {
   const reply = await call(server, 'GET', `/api/sessions?limit=${SESSIONS_LISTED}`, undefined, signal);
-  if (reply.status === 404) throw new TurnFailure('There is no Hermes API server at this address: check the address and the profile.', null);
+  if (reply.status === 404) throw new TurnFailure('There is no Pyn API server at this address: check the address and the profile.', null);
   if (reply.status !== 200) {
     if (strict || reply.status === 401 || reply.status === 403) throw refusal(reply);
     return [];
@@ -260,7 +260,7 @@ async function createSession(server: Server, message: string, signal: AbortSigna
     if (typeof session?.id === 'string' && session.id) return session.id;
     break;
   }
-  throw new TurnFailure('Hermes did not start a session.', null);
+  throw new TurnFailure('Pyn on the server did not start a session.', null);
 }
 
 /** A session's name on the chip: its title (or its first words), and when it was last written to. */
@@ -317,7 +317,7 @@ export function historyEvents(messages: unknown[]): ChatEvent[] {
 
 async function readHistory(server: Server, sessionId: string): Promise<ChatEvent[]> {
   const reply = await call(server, 'GET', `/api/sessions/${encodeURIComponent(sessionId)}/messages?limit=${HISTORY_SHOWN}&order=latest`);
-  if (reply.status === 404) throw new HermesRefusal('That Hermes session is gone.');
+  if (reply.status === 404) throw new HermesRefusal('That session is gone.');
   if (reply.status !== 200) throw refusal(reply);
   const data = parsed(reply).data;
   return historyEvents(Array.isArray(data) ? data : []);
@@ -403,7 +403,7 @@ async function approve(turn: Turn, server: Server, data: Record<string, unknown>
   if (!offered.includes('deny')) offered.push('deny');
   const said = [textOf(data.description, 1000).trim(), textOf(data.command, OUTPUT_MAX * 2).trim()].filter(Boolean).join('\n');
   const chosen = await turn.ask({
-    title: cutSaid(said || (inEnglish ? 'Hermes asks before a step' : 'Hermes bir adımdan önce izin istiyor')),
+    title: cutSaid(said || (inEnglish ? 'Pyn on the server asks before a step' : 'Pyn on the server bir adımdan önce izin istiyor')),
     kind: 'execute',
     paths: [],
     options: offered.map((id) => ({ id, name: inEnglish ? APPROVALS[id].en : APPROVALS[id].tr, kind: APPROVALS[id].kind })),
@@ -522,12 +522,12 @@ function streamTurn(turn: Turn, server: Server, sessionId: string, message: stri
           break;
         case 'run.failed': {
           const why = textOf(data.turn_exit_reason ?? data.error, 300).trim();
-          failure = new TurnFailure(why ? `Hermes could not finish the answer: ${why}` : 'Hermes could not finish the answer.', null);
+          failure = new TurnFailure(why ? `Pyn on the server could not finish the answer: ${why}` : 'Pyn on the server could not finish the answer.', null);
           break;
         }
         case 'error': {
           const said = textOf(data.message, 500).trim();
-          failure = new TurnFailure(said ? `Hermes stopped: ${said}` : 'Hermes stopped.', null);
+          failure = new TurnFailure(said ? `Pyn on the server stopped: ${said}` : 'Pyn on the server stopped.', null);
           break;
         }
         default:
@@ -587,7 +587,7 @@ export const hermesBackend: Backend = {
         turn.setOptions([sessionOptions(sessions, sessionId)]);
         const reason = await streamTurn(turn, server, sessionId, message, live);
         if (reason !== GONE) return reason;
-        if (attempt) throw new TurnFailure('Hermes did not start a session.', null);
+        if (attempt) throw new TurnFailure('Pyn on the server did not start a session.', null);
         // Deleted in Hermes since: the message goes to a new session, and the chat says the earlier one is not remembered.
         turn.emit({ type: 'notice', notice: 'new-session' });
         sessionId = null;
