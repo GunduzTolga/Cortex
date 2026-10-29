@@ -105,3 +105,32 @@ test('every failure the engine names is said in Turkish and in English', () => {
     assert.equal(engineSentence({ type: 'ValueError', code, message: '', hint: null, named: false, given: null }, 'en'), said.en.replace('{file}', ''));
   }
 });
+
+test('Python’s own last words are not the sentence: a module’s exception is named, a script it could not open is said, no path shown', () => {
+  // 29 October: a package that was not a zip showed "zipfile.BadZipFile: File is not a zip file" in the Turkish window,
+  // and a missing installer the whole python.exe and script paths.
+  const zip = 'Traceback (most recent call last):\n  File "x.py", line 3\nzipfile.BadZipFile: File is not a zip file';
+  assert.match(engineFailureText(zip, 'tr') ?? '', /^Cortex’in motoru açıklamadığı bir hatayla durdu \(BadZipFile\)/);
+  assert.match(engineFailureText(zip, 'en') ?? '', /^Cortex’s engine stopped with an error it does not explain \(BadZipFile\)/);
+  const script = "C:\\Python312\\python.exe: can't open file 'C:\\Temp\\cortex-kurulum-1\\scripts\\install_v3.py': [Errno 2] No such file or directory";
+  const said = engineFailureText(script, 'tr') ?? '';
+  assert.match(said, /gereken bir dosya yok/);
+  assert.doesNotMatch(said, /Temp|python\.exe|install_v3/);
+  // A built-in error with what it was refused still says it, and a sentence of the engine's own is left as it is.
+  assert.match(engineFailureText("PermissionError: [WinError 5] Access is denied: 'C:\\x'", 'en') ?? '', /^PermissionError/);
+  assert.equal(engineFailureText('bilinmeyen komut', 'en'), 'bilinmeyen komut');
+});
+
+test('A download that timed out or was cut off is said as the connection, not as an error to install the app again for', () => {
+  // 30 October: pip's "Read timed out." on a slow connection told the person to install the app again.
+  for (const line of [
+    "pip._vendor.urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='files.pythonhosted.org', port=443): Read timed out.",
+    'http.client.RemoteDisconnected: Remote end closed connection without response',
+  ]) {
+    assert.match(engineFailureText(line, 'tr') ?? '', /^İnternete bağlanılamadı/);
+    assert.match(engineFailureText(line, 'en') ?? '', /^The internet could not be reached/);
+  }
+  // Read on the error's own line only: pip's warning that it tries again uses these words, far above another failure.
+  const retried = "WARNING: Retrying (Retry(total=4)) after connection broken by 'ReadTimeoutError(Read timed out.)': /simple/x/\nzipfile.BadZipFile: File is not a zip file";
+  assert.match(engineFailureText(retried, 'en') ?? '', /\(BadZipFile\)/);
+});

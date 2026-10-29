@@ -391,3 +391,52 @@ test("a bin list that will not be read is kept beside and the bin goes on: its e
   assert.ok(fs.readdirSync(path.join(dir, '.trash')).some((name) => /^\.cortex\.broken-\d+\.json$/.test(name)), 'the unread list kept beside');
   assert.deepEqual(await restoreVaultTrash('Liste.md'), { path: 'Liste.md' });
 });
+
+test('a rename onto another file whose name folds alike (İ, I, ı; Unicode’s two spellings) is refused, and both are kept', async () => {
+  // NTFS keeps "ılık" and "Ilık" as two files; told apart by their folded key, the one was put over the other (29 October).
+  const dir = vault();
+  useVault(dir);
+  const write = (name: string, text: string) => fs.writeFileSync(path.join(dir, 'Ev', name), text);
+  write('ılık.md', 'birinci\n');
+  write('Ilık.md', 'IMPORTANT\n');
+  const both = fs.readdirSync(path.join(dir, 'Ev')).filter((one) => one.endsWith('ık.md')).length === 2;
+  await vaultIndex();
+  if (both) {
+    await assert.rejects(renameVaultEntry('Ev/ılık.md', 'Ilık'), /already/);
+    assert.equal(fs.readFileSync(path.join(dir, 'Ev', 'Ilık.md'), 'utf8'), 'IMPORTANT\n');
+    assert.equal(fs.readFileSync(path.join(dir, 'Ev', 'ılık.md'), 'utf8'), 'birinci\n');
+  }
+  const nfd = 'Café.md';
+  const nfc = 'Café.md';
+  write(nfd, 'decomposed\n');
+  write(nfc, 'composed\n');
+  if (fs.readdirSync(path.join(dir, 'Ev')).filter((one) => one.normalize('NFC') === nfc).length === 2) {
+    await vaultIndex();
+    await assert.rejects(renameVaultEntry(`Ev/${nfd}`, 'Café'), /already/);
+    assert.equal(fs.readFileSync(path.join(dir, 'Ev', nfc), 'utf8'), 'composed\n');
+  }
+  // The same file under another case is still a rename of its case.
+  const cased = await renameVaultEntry('Ev/Liste.md', 'LİSTE');
+  assert.equal(cased.path, 'Ev/LİSTE.md');
+  assert.equal(fs.readFileSync(path.join(dir, 'Ev', 'LİSTE.md'), 'utf8'), 'Bu hafta tadilat bitmeli. [plan](../Proje%20plan%C4%B1.md)\n');
+  const upper = await renameVaultEntry('Ev/Tadilat.md', 'TADILAT');
+  assert.equal(upper.path, 'Ev/TADILAT.md');
+});
+
+test('a folder already there is said as a name taken, and a file marked read-only is read as one not to be written', async () => {
+  const dir = vault();
+  useVault(dir);
+  await vaultIndex();
+  // Node's EEXIST with the vault's whole path was the sentence shown (29 October).
+  await assert.rejects(createVaultFolder('', 'Ev'), (err: Error) => /already/.test(err.message) && !err.message.includes(dir));
+  const locked = path.join(dir, 'Ev', 'Tadilat.md');
+  fs.chmodSync(locked, 0o444);
+  try {
+    const read = await readVaultNote('Ev/Tadilat.md');
+    // Root writes whatever the mode says; anyone else, and Windows by the read-only flag, may not.
+    if (process.platform === 'win32' || process.getuid?.() !== 0) assert.equal(read.readOnly, 'locked');
+  } finally {
+    fs.chmodSync(locked, 0o644);
+  }
+  assert.equal((await readVaultNote('Ev/Tadilat.md')).readOnly, null);
+});

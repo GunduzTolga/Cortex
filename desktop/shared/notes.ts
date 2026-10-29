@@ -32,8 +32,11 @@ export interface NoteRead {
   hash: string | null;
   modified: number;
   tooLarge: boolean;
-  /** Shown, not saved: `encoding` for bytes that are not UTF-8; a receipt or a generated page for what Cortex's engine keeps (core/vaultNotes.ts, `keptBy`). */
-  readOnly: 'encoding' | Keeper | null;
+  /**
+   * Shown, not saved: `encoding` for bytes that are not UTF-8; `locked` for a file the system will not let be written
+   * (marked read-only); a receipt or a generated page for what Cortex's engine keeps (core/vaultNotes.ts, `keptBy`).
+   */
+  readOnly: 'encoding' | 'locked' | Keeper | null;
 }
 
 /** Something in the vault's bin (`.trash/`), to be taken back or sent on to the system's bin. */

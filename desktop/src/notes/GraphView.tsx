@@ -6,6 +6,7 @@ import { vaultGraph, type GraphNode, type GraphOptions } from '../../core/vaultN
 import { useT } from '../i18n/useT';
 import type { Key } from '../i18n';
 import { useActiveTab, useNotes } from './notesStore';
+import { useView } from '../store/view';
 
 /**
  * The vault as a graph, as Obsidian draws one: a note a point, a link a line,
@@ -425,8 +426,19 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
         node.fx = null;
         node.fy = null;
         sim.current?.alphaTarget(0);
-        if (!moved && node.kind !== 'tag' && node.kind !== 'missing') useNotes.getState().open(node.id, { newTab: event.ctrlKey || event.metaKey });
-        if (!moved && node.kind === 'tag') useNotes.getState().search(`tag:${node.label}`);
+        // From the vault's graph, the note (or the tag's search) is put in front: opened in the notes view behind it,
+        // nothing was seen to happen but a ring round the node (29 October). The local graph is beside the note already.
+        const front = () => {
+          if (!local) useView.getState().setView('notes');
+        };
+        if (!moved && node.kind !== 'tag' && node.kind !== 'missing') {
+          useNotes.getState().open(node.id, { newTab: event.ctrlKey || event.metaKey });
+          front();
+        }
+        if (!moved && node.kind === 'tag') {
+          useNotes.getState().search(`tag:${node.label}`);
+          front();
+        }
       }
     };
     const wheel = (event: WheelEvent) => {

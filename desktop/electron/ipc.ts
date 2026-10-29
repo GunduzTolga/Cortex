@@ -168,7 +168,30 @@ export function registerIpc(): void {
   // The chat with the person's own AI CLIs (services/chat.ts): the window names a CLI from the list it is given, never a program.
   chat.onChatPush((payload) => broadcast('chat:event', payload));
   handle('chat:clis', () => chat.listChatClis());
-  handle('chat:list', () => chat.listChats());
+  handle('chat:list', () => {
+    const chats = chat.listChats();
+    const broken = chat.takeIndexBroken();
+    if (broken) {
+      const say = (tr: string, en: string) => (readSettings().language === 'en' ? en : tr);
+      notice({
+        tone: 'error',
+        title: say('Sohbet listesi okunamadı', 'The chat list could not be read'),
+        detail:
+          broken === 'copied'
+            ? say('Liste yeniden başladı; eski listenin bir kopyası uygulamanın klasöründe saklandı.', 'The list began again; a copy of the old one was kept in the app’s folder.')
+            : broken === 'damaged'
+              ? say(
+                  'Liste bozuk ve kopyası alınamadı; dosyaya dokunulmadı, uygulamanın klasöründe olduğu gibi duruyor. Bu arada açılan sohbetler listeye yazılmaz.',
+                  'The list is damaged and no copy of it could be made; the file was left as it is in the app’s folder. Chats begun meanwhile are not added to the list.',
+                )
+              : say(
+                'Başka bir program tutuyor olabilir. Eski sohbetler silinmedi, uygulama yeniden açılınca geri gelir; bu arada açılan sohbetler listeye yazılmaz.',
+                'Another program may be holding it. The old chats were not deleted and come back when the app is opened again; chats begun meanwhile are not added to the list.',
+              ),
+      });
+    }
+    return chats;
+  });
   handle('chat:open', (id) => chat.openChat(id));
   handle('chat:send', (id, cli, text) => chat.sendChat(id, cli, text));
   handle('chat:cancel', (id) => chat.cancelChat(id));
@@ -182,10 +205,10 @@ export function registerIpc(): void {
   handle('chat:toInbox', (text) => captureToInbox({ text }, 'pyn'));
 
   // Signing in to those tools (services/auth.ts): a key goes in and is never sent back.
-  auth.onAuthChanged(() => {
+  auth.onAuthChanged((cli) => {
     // A sign-in or an install ended: CLIs started before it start again with it at their next message.
     chat.restartIdleChats();
-    broadcast('chat:authChanged', null);
+    broadcast('chat:authChanged', cli);
   });
   handle('chat:auth', () => auth.authStatuses());
   handle('chat:login', (cli) => auth.startLogin(cli));
@@ -272,7 +295,7 @@ export function registerIpc(): void {
 
 export function stopWatching(): void {
   vaultNotes.stopWatchingVault();
-  // No CLI outlives the app, nor the Telegram listener.
-  chat.shutdownChats();
+  // No CLI outlives the app, nor the Telegram listener. A turn still answering is stopped, not failed.
+  chat.shutdownChats(true);
   void telegram.stopTelegram();
 }

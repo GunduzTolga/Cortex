@@ -6,6 +6,7 @@ import { useT } from '../i18n/useT';
 import type { Key } from '../i18n';
 import { GraphView } from './GraphView';
 import { folderLabel, labelOf, useActiveTab, useNotes } from './notesStore';
+import { useSettled } from './useSettled';
 
 /**
  * Beside the note in front: what links to it and what it links to, its
@@ -100,18 +101,21 @@ function Links() {
     };
   }, [path, revision]);
 
+  const text = useSettled(live?.text ?? '', live?.path ?? null);
+  const livePath = live?.path ?? null;
+  // Read from the settled text, and only when it or the note changes: `live` changes on every key.
   const outgoing = useMemo(() => {
-    if (!live || live.path !== path) return { there: [] as string[], missing: [] as string[] };
+    if (livePath === null || livePath !== path) return { there: [] as string[], missing: [] as string[] };
     const there = new Map<string, string>();
     const missing = new Map<string, string>();
-    for (const link of parseNote(live.text).links) {
+    for (const link of parseNote(text).links) {
       if (!link.target) continue;
-      const to = resolve(link.target, live.path, link.kind);
+      const to = resolve(link.target, livePath, link.kind);
       if (to) there.set(to, to);
       else if (link.kind === 'wiki') missing.set(pathKey(link.target), link.target);
     }
     return { there: [...there.values()], missing: [...missing.values()] };
-  }, [live, path, resolve]);
+  }, [text, livePath, path, resolve]);
 
   if (!path) return <p className="p-4 text-[12px] text-zinc-400">{t('notes.side.none')}</p>;
   const item = (to: string, lines?: Array<{ line: number; text: string }>) => (
@@ -158,7 +162,9 @@ function Outline() {
   const t = useT();
   const path = useActiveTab().path;
   const live = useNotes((state) => state.live);
-  const headings = useMemo(() => (live && live.path === path ? parseNote(live.text).headings : []), [live, path]);
+  const text = useSettled(live?.text ?? '', live?.path ?? null);
+  const livePath = live?.path ?? null;
+  const headings = useMemo(() => (livePath === path ? parseNote(text).headings : []), [livePath, path, text]);
   if (!headings.length) return <p className="p-4 text-[12px] text-zinc-400">{t('notes.side.noOutline')}</p>;
   const top = Math.min(...headings.map((one) => one.level));
   return (

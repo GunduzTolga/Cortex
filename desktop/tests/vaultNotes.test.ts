@@ -11,6 +11,7 @@ import {
   retitle,
   fuzzyMatch,
   makeResolver,
+  missingNoteAt,
   nameProblem,
   parseNote,
   parseQuery,
@@ -159,6 +160,40 @@ test("a Markdown link is read from the linking note's folder first, and never cl
   assert.equal(resolve('Tadilat.md', 'Ev/Notlar/Liste.md', 'markdown'), 'Ev/Tadilat.md', 'by name when not beside it');
   assert.equal(resolve('Liste.md', 'Ev/Notlar/Yeni.md', 'markdown'), 'Ev/Notlar/Liste.md');
   assert.equal(resolve('../../../etc/passwd', 'Ev/Tadilat.md', 'markdown'), null);
+});
+
+test('a missing note is made in the folder its link names, read as the link is read; a picture is not made as a note', () => {
+  // 30 October: `[[ideas/x]]` for the folder `Ideas`, or a folder named from the linking note's own, made the note at the top.
+  const folders = ['Ideas', 'Projects', 'Projects/Sub'];
+  assert.deepEqual(missingNoteAt('Ideas/Yeni Fikir', 'Projects/Hub.md', folders), { folder: 'Ideas', name: 'Yeni Fikir', make: [] });
+  assert.deepEqual(missingNoteAt('ideas/Yeni Fikir', 'Projects/Hub.md', folders), { folder: 'Ideas', name: 'Yeni Fikir', make: [] });
+  assert.deepEqual(missingNoteAt('Sub/Alt Not', 'Projects/Hub.md', folders), { folder: 'Projects/Sub', name: 'Alt Not', make: [] });
+  assert.deepEqual(missingNoteAt('Ideas\\Ters.md', 'Hub.md', folders), { folder: 'Ideas', name: 'Ters', make: [] });
+  assert.deepEqual(missingNoteAt('Plan', 'Projects/Hub.md', folders), { folder: '', name: 'Plan', make: [] });
+  // A folder not there is made from the top, each part in its turn, in the one before it as it is written on disk.
+  assert.deepEqual(missingNoteAt('Yok/Burada', 'Hub.md', folders), { folder: 'Yok', name: 'Burada', make: [{ parent: '', name: 'Yok' }] });
+  assert.deepEqual(missingNoteAt('projects/Yeni/Derin/Not', 'Hub.md', folders), {
+    folder: 'Projects/Yeni/Derin',
+    name: 'Not',
+    make: [
+      { parent: 'Projects', name: 'Yeni' },
+      { parent: 'Projects/Yeni', name: 'Derin' },
+    ],
+  });
+  assert.equal(missingNoteAt('photo.png', 'Hub.md', folders), null);
+  assert.equal(missingNoteAt('Ideas/', 'Hub.md', folders), null);
+});
+
+test('a note kept with Windows line breaks has its headings', () => {
+  // 30 October: every line ended in its carriage return, and no heading was read - no outline, no embed of one.
+  const note = parseNote('# Bir\r\n\r\nmetin\r\n\r\n## İki ##\r\nson\r\n');
+  assert.deepEqual(
+    note.headings.map((one) => [one.level, one.text, one.line]),
+    [
+      [1, 'Bir', 0],
+      [2, 'İki', 4],
+    ],
+  );
 });
 
 test('the shortest link is the name when only one file answers to it', () => {

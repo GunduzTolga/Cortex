@@ -43,6 +43,11 @@ interface Stored extends ChatSummary {
   /** The vault it was held in; a chat is listed and continued only there. */
   vault: string;
   sessionId: string | null;
+  /**
+   * The settings its engine last offered (model, mode, effort), shown again once the app is opened anew: they came
+   * only with a turn, and a chat reopened had its tool's chip alone until the next message (29 October).
+   */
+  options?: ConfigOption[];
 }
 
 interface Index {
@@ -57,6 +62,8 @@ interface Live {
   events: ChatEvent[];
   running: boolean;
   options: ConfigOption[];
+  /** The options are the ones kept from before the app started (Stored.options), not yet offered by the engine now. */
+  stale: boolean;
   /** Answers awaited for steps the program asked leave for, by the card's id. */
   permissions: Map<string, (option: string | null) => void>;
   /** The running turn's Stop (Turn.signal). */
@@ -64,6 +71,8 @@ interface Live {
   turn: number;
   /** Its events counted since the app started (ChatPush.seq). */
   seq: number;
+  /** Its history on disk was not read (held by another program): what is said now is not saved over it (saveLog). */
+  unread: boolean;
 }
 
 const CLI_IDS: readonly CliId[] = ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'lmstudio', 'ollama', 'hermes', 'test', 'test-claude', 'test-codex'];
@@ -94,29 +103,46 @@ let index: Index | null = null;
 
 function readIndex(): Index {
   if (index) return index;
+  let text: string | null = null;
   try {
-    const parsed = JSON.parse(fs.readFileSync(indexFile(), 'utf8')) as Partial<Index>;
+    text = fs.readFileSync(indexFile(), 'utf8');
+    const parsed = JSON.parse(text.replace(/^\uFEFF/, '')) as Partial<Index>;
     const chats = (Array.isArray(parsed.chats) ? parsed.chats : []).filter(
       (one): one is Stored =>
         typeof one === 'object' && one !== null && ID.test(String(one.id)) && CLI_IDS.includes(one.cli) && typeof one.vault === 'string' && typeof one.title === 'string',
     );
     index = { version: 1, chats, prefs: typeof parsed.prefs === 'object' && parsed.prefs !== null ? parsed.prefs : {} };
   } catch (err) {
-    // A list that will not be read is kept beside, as the settings file is, and the chat starts with none.
+    // A list that will not be read is kept beside, as the settings file is, and the chat starts with none. One the disk
+    // would not hand over (another program holding it) is not damaged: nothing is written over it in this run, as the
+    // settings file is not (30 October: a list held at the start was taken as damaged, no copy was made of it, and
+    // the next chat's save left a list of one).
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      try {
-        fs.copyFileSync(indexFile(), path.join(folder(), `index.broken-${Date.now()}.json`));
-      } catch {
-        /* nothing to keep */
+      indexBroken = text === null ? 'left' : 'damaged';
+      if (text !== null) {
+        try {
+          fs.copyFileSync(indexFile(), path.join(folder(), `index.broken-${Date.now()}.json`));
+          indexBroken = 'copied';
+        } catch {
+          /* no copy made: the damaged list is left as it is */
+        }
       }
+      // Said once to the window (ipc.ts, chat:list): every chat went from the list and nothing told why (29 October).
+      indexLeft = indexBroken !== 'copied';
     }
     index = { version: 1, chats: [], prefs: {} };
   }
   return index;
 }
 
+/** The list on disk was not read and is left as it is: nothing is saved over it until the app starts again. */
+let indexLeft = false;
+
 /** Written beside and renamed into place, tried again while Windows holds the file (fileWrite.ts): a list half written is never left. */
-const saveIndex = () => writeWhole(indexFile(), JSON.stringify(readIndex()));
+const saveIndex = () => {
+  const now = readIndex();
+  if (!indexLeft) writeWhole(indexFile(), JSON.stringify(now));
+};
 
 /**
  * The list saved for something a CLI said while it answered - its session, its name for the chat -
@@ -157,9 +183,16 @@ export function compact(events: readonly ChatEvent[]): ChatEvent[] {
   return out.slice(-EVENTS_KEPT);
 }
 
-function readLog(id: string): ChatEvent[] {
+/** The chat's events as kept; null when the disk would not hand them over (another program holding the file). */
+function readLog(id: string): ChatEvent[] | null {
+  let text: string;
   try {
-    const events = JSON.parse(fs.readFileSync(logFile(id), 'utf8')) as unknown;
+    text = fs.readFileSync(logFile(id), 'utf8');
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? [] : null;
+  }
+  try {
+    const events = JSON.parse(text.replace(/^\uFEFF/, '')) as unknown;
     return Array.isArray(events) ? events.filter((one): one is ChatEvent => typeof one === 'object' && one !== null && typeof (one as { type?: unknown }).type === 'string') : [];
   } catch {
     return [];
@@ -187,7 +220,21 @@ function storedOf(id: unknown): Stored {
   return stored;
 }
 
-const fresh = (stored: Stored, events: ChatEvent[]): Live => ({ stored, events, running: false, options: [], permissions: new Map(), stop: null, turn: 0, seq: 0 });
+// The options kept are shown again only for an engine that takes a choice before its session runs; an ACP agent
+// refuses one until it is connected, so its chips would refuse every pick.
+const keptOptions = (stored: Stored): ConfigOption[] | null => (Array.isArray(stored.options) && protocolOf(stored.cli) !== 'acp' ? stored.options : null);
+const fresh = (stored: Stored, events: ChatEvent[] | null): Live => ({
+  stored,
+  events: events ?? [],
+  running: false,
+  options: keptOptions(stored) ?? [],
+  stale: keptOptions(stored) !== null,
+  permissions: new Map(),
+  stop: null,
+  turn: 0,
+  seq: 0,
+  unread: events === null,
+});
 
 function liveOf(id: unknown): Live {
   const stored = storedOf(id);
@@ -207,11 +254,18 @@ function emit(chat: Live, event: ChatEvent): void {
 
 function setState(chat: Live, change: Partial<Pick<Live, 'running' | 'options'>>): void {
   Object.assign(chat, change);
+  if (change.options) chat.stale = false;
+  if (change.options?.length && kept(chat)) {
+    chat.stored.options = change.options;
+    saveIndexQuietly();
+  }
   push({ chatId: chat.stored.id, state: { running: chat.running, options: chat.options } });
 }
 
 function saveLog(chat: Live): void {
   chat.events = compact(chat.events);
+  // A history not read is not written over with what was said since: read as none, the chat's past was lost at its next turn.
+  if (chat.unread) return;
   try {
     writeWhole(logFile(chat.stored.id), JSON.stringify(chat.events));
   } catch {
@@ -242,7 +296,9 @@ function turnOf(chat: Live, signal: AbortSignal): Turn {
     vault: stored.vault,
     sessionId: stored.sessionId,
     number: chat.turn,
-    prefs: readIndex().prefs[stored.cli] ?? {},
+    // A chat reopened after a restart runs as its chips say: its engine had not seen the options kept for it, and
+    // started with the CLI's last choices while the chip showed the chat's own ("Önce sor" shown, edits accepted: 30 October).
+    prefs: { ...(readIndex().prefs[stored.cli] ?? {}), ...(chat.stale ? Object.fromEntries(chat.options.map((one) => [one.id, one.current])) : {}) },
     signal,
     emit: (event) => chat.running && emit(chat, event),
     setOptions: (options) => setState(chat, { options }),
@@ -274,9 +330,12 @@ async function run(chat: Live, message: string): Promise<void> {
     await Promise.race([vaultSettled(), new Promise((done) => stop.signal.addEventListener('abort', done, { once: true }))]);
     // Stopped while it waited: the CLI is not started for a turn already ended.
     const reason = stop.signal.aborted ? 'cancelled' : await backendOf(chat.stored.cli).run(turnOf(chat, stop.signal), message);
-    emit(chat, { type: 'done', reason });
+    // Once Stop was asked for, the turn was stopped, whatever the CLI reports: an agent asked to end while a card
+    // waited said end_turn, and what it wrote after Stop read as a finished answer (29 October).
+    emit(chat, { type: 'done', reason: stop.signal.aborted ? 'cancelled' : reason });
   } catch (err) {
-    emit(chat, failureEvent(err, scrubberFor(chat.stored.vault)));
+    // A program ended under a stopped turn (Stop, or the app closing: shutdownChats) did not fail: it was stopped.
+    emit(chat, stop.signal.aborted ? { type: 'done', reason: 'cancelled' } : failureEvent(err, scrubberFor(chat.stored.vault)));
   } finally {
     if (chat.stop === stop) chat.stop = null;
     for (const answer of chat.permissions.values()) answer(null);
@@ -312,10 +371,11 @@ export function openChat(id: unknown): ChatOpened {
 /** A chat opened before any turn of it ran since the app started: the settings its engine has without one (Hermes's sessions), pushed once asked. */
 function offerTo(chat: Live): void {
   const backend = backendOf(chat.stored.cli);
-  if (!backend.offer || chat.running || chat.options.length) return;
+  // Kept options are asked again: an engine that offers its own (Hermes's sessions) lists them as they are now.
+  if (!backend.offer || chat.running || (chat.options.length && !chat.stale)) return;
   backend.offer(chat.stored.sessionId).then(
     (options) => {
-      if (kept(chat) && !chat.running && !chat.options.length && options.length) setState(chat, { options });
+      if (kept(chat) && !chat.running && (!chat.options.length || chat.stale) && options.length) setState(chat, { options });
     },
     () => undefined,
   );
@@ -451,9 +511,25 @@ export function removeChat(id: unknown): void {
   fs.rmSync(logFile(stored.id), { force: true });
 }
 
+/** Whether the chat list would not be read and was begun again, since this was last asked: said once, then forgotten. */
+let indexBroken: 'copied' | 'left' | 'damaged' | false = false;
+/**
+ * Whether the list began empty because it was not read: damaged and a copy kept beside it, held by another program and
+ * left as it was, or damaged and left as it was (no copy could be made). Said once.
+ */
+export function takeIndexBroken(): 'copied' | 'left' | 'damaged' | false {
+  const was = indexBroken;
+  indexBroken = false;
+  return was;
+}
+
 /** Every program ended: the app is closing, or another vault was chosen. */
-export function shutdownChats(): void {
+export function shutdownChats(closing = false): void {
   restartWanted = false;
+  // A chat answering as Cortex closes is stopped first: ended by its program going, it was kept as the tool having
+  // failed ("Program durdu.") and reopened that way (29 October). Another vault chosen mid-answer is still said as
+  // the tool having stopped: the person did not stop it, the vault under it went.
+  if (closing) for (const chat of live.values()) if (chat.running) chat.stop?.abort();
   for (const backend of Object.values(BACKENDS)) backend.shutdown();
 }
 
@@ -478,4 +554,6 @@ export function forgetChats(): void {
   shutdownChats();
   live.clear();
   index = null;
+  indexLeft = false;
+  indexBroken = false;
 }

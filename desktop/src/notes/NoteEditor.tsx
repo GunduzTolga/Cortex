@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Annotation, Compartment, EditorSelection, EditorState } from '@codemirror/state';
+import { Annotation, Compartment, EditorSelection, EditorState, Transaction } from '@codemirror/state';
 import {
   Decoration,
   EditorView,
@@ -12,7 +12,7 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab, redo } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { autocompletion, completionKeymap, type Completion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
@@ -22,6 +22,9 @@ import type { MarkdownConfig } from '@lezer/markdown';
 import { insertTemplate, splitWikiLink } from '../../core/vaultNotes';
 import { livePreview, type LiveHooks } from './livePreview';
 import { holds, lineBreakOf, textWith } from './lineEndings';
+
+/** Above this many characters a note is edited as plain text (see `huge`), as the reading view shows it as text. */
+const PLAIN_EDIT = 150_000;
 
 /**
  * A note's source, written in place: CodeMirror 6 with Markdown (GitHub's, as
@@ -43,6 +46,8 @@ export interface NoteEditorHandle {
   focus(): void;
   /** A filled template put in at the cursor, its properties at the top when the note has none (`insertTemplate`). */
   insertTemplate(template: string): void;
+  /** The version on disk put in place of what was typed, by the person's own choice: one undo brings the typing back. */
+  takeVersion(text: string): void;
 }
 
 export interface LinkChoice {
@@ -189,6 +194,11 @@ export const NoteEditor = forwardRef<
   const view = useRef<EditorView | null>(null);
   const editable = useRef(new Compartment());
   const preview = useRef(new Compartment());
+  // The undo history, begun again when the note is read again from disk (below).
+  const memory = useRef(new Compartment());
+  // A note this long is edited as plain text: the Markdown grammar reads a paragraph whole on every key, and in a note
+  // that is one paragraph of a megabyte a key took a second (29 October). Decided once, when the note is opened.
+  const huge = useRef(value.length > PLAIN_EDIT);
   // The latest of each callback, read when the editor calls it: the editor is made once.
   const latest = useRef({ onChange, onSave, onOpenLink, choices, hooks });
   latest.current = { onChange, onSave, onOpenLink, choices, hooks };
@@ -215,6 +225,15 @@ export const NoteEditor = forwardRef<
       const { text, cursor } = insertTemplate(doc, editor.state.selection.main.head, template.replace(/\r\n/g, '\n'));
       editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text }, selection: EditorSelection.cursor(cursor), scrollIntoView: true });
       editor.focus();
+    },
+    takeVersion(text) {
+      const editor = view.current;
+      if (!editor || holds(editor.state.doc, text)) return;
+      // One step of the history, as typing is: the history let go of at a reload (the effect on `value`) is for a version
+      // put in unasked, and a version taken on the banner took what was typed away for good (30 October).
+      const lines = text.replace(/\r\n?/g, '\n');
+      const head = Math.min(editor.state.selection.main.head, lines.length);
+      editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: lines }, selection: EditorSelection.cursor(head), annotations: fromDisk.of(true) });
     },
   }));
 
@@ -248,23 +267,23 @@ export const NoteEditor = forwardRef<
     const state = EditorState.create({
       doc: value,
       extensions: [
-        history(),
+        memory.current.of(history()),
         drawSelection(),
         highlightActiveLine(),
         highlightSelectionMatches(),
         EditorView.lineWrapping,
-        markdown({ base: markdownLanguage, extensions: [properties] }),
+        ...(huge.current ? [] : [markdown({ base: markdownLanguage, extensions: [properties] })]),
         look,
-        syntaxHighlighting(style),
-        marks(WIKI, 'cm-wikilink'),
-        marks(TAG, 'cm-tagmark'),
+        ...(huge.current ? [] : [syntaxHighlighting(style), marks(WIKI, 'cm-wikilink'), marks(TAG, 'cm-tagmark')]),
         search({ top: true }),
         autocompletion({ override: [links, hashtags], icons: false, activateOnTyping: true }),
         placeholder(empty),
         editable.current.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
-        preview.current.of(previewOf(live)),
+        preview.current.of(huge.current ? [] : previewOf(live)),
         keymap.of([
           { key: 'Mod-s', preventDefault: true, run: () => (latest.current.onSave(), true) },
+          // Redo as most Windows editors and Obsidian have it, beside Ctrl+Y: it undid once more instead (29 October).
+          { key: 'Mod-Shift-z', preventDefault: true, run: redo },
           ...completionKeymap,
           ...searchKeymap,
           ...historyKeymap,
@@ -318,7 +337,11 @@ export const NoteEditor = forwardRef<
     if (holds(editor.state.doc, value)) return;
     const lines = value.replace(/\r\n?/g, '\n');
     const head = Math.min(editor.state.selection.main.head, lines.length);
-    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: lines }, selection: EditorSelection.cursor(head), annotations: fromDisk.of(true) });
+    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: lines }, selection: EditorSelection.cursor(head), annotations: [fromDisk.of(true), Transaction.addToHistory.of(false)] });
+    // Undo does not reach behind a version read from disk: the whole note replaced was one step of the history, and
+    // Ctrl+Z took the version another program wrote away again and saved the old one over it (29 October).
+    editor.dispatch({ effects: memory.current.reconfigure([]) });
+    editor.dispatch({ effects: memory.current.reconfigure(history()) });
   }, [value]);
 
   useEffect(() => {
@@ -326,7 +349,7 @@ export const NoteEditor = forwardRef<
   }, [readOnly]);
 
   useEffect(() => {
-    view.current?.dispatch({ effects: preview.current.reconfigure(previewOf(live)) });
+    view.current?.dispatch({ effects: preview.current.reconfigure(huge.current ? [] : previewOf(live)) });
     // Reconfigured when the mode is switched, and only then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live]);

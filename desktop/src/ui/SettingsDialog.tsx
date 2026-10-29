@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, FolderOpen, KeyRound, ListChecks } from 'lucide-react';
 import { useChat } from '../chat/chatStore';
 import { useT } from '../i18n/useT';
 import { useApp } from '../store/app';
 import { useSaved } from '../store/saved';
+import { useSetup } from '../store/setup';
 import { LanguageSwitch } from './LanguageSwitch';
 import { OfficeTalkSection } from './OfficeTalkSection';
 import { SetupSections } from './SetupSections';
@@ -80,6 +81,7 @@ export function SettingsDialog() {
               tone="ghost"
               onClick={() => {
                 close();
+                useSetup.setState({ again: true });
                 void set({ onboarded: false });
               }}
               data-settings-onboarding
@@ -127,10 +129,18 @@ function NameField() {
   const saved = useApp((s) => s.settings.userName);
   const [name, setName] = useState(saved ?? '');
   useEffect(() => setName(saved ?? ''), [saved]);
-  const changed = name.trim() !== (saved ?? '');
+  // Compared as the main process keeps a name (settings.ts tidyName: spaces run together): compared trimmed only,
+  // "Deniz  Hanım" stayed "changed" against the kept "Deniz Hanım" and its Save button never went (29 October).
+  // Any white space, as tidyName's \s is: a pasted non-breaking space or a tab kept the button there too (30 October).
+  const tidy = (value: string) => value.replace(/\s+/g, ' ').trim();
+  const changed = tidy(name) !== (saved ?? '');
   const keep = () => {
-    if (changed) void useApp.getState().setSettings({ userName: name.trim() || null });
+    if (changed) void useApp.getState().setSettings({ userName: tidy(name) || null });
   };
+  // The dialog closed with Escape takes the field away without a blur: a name typed and not yet kept is kept then.
+  const latest = useRef(keep);
+  latest.current = keep;
+  useEffect(() => () => latest.current(), []);
   return (
     <>
     {changed ? <SaveButton onSave={keep} data="settings-name-save" /> : null}

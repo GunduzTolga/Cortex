@@ -52,7 +52,8 @@ function readKept(forWriting = false): Partial<Record<CliId, Kept>> {
     throw new KeyRefusal('The kept keys could not be read just now, so nothing was written over them. Try again in a moment.');
   }
   try {
-    const parsed = JSON.parse(text) as unknown;
+    // A BOM in front (Notepad's "UTF-8 with BOM") is not JSON, and every key would have read as none.
+    const parsed = JSON.parse(text.replace(/^\uFEFF/, '')) as unknown;
     return typeof parsed === 'object' && parsed !== null ? (parsed as Partial<Record<CliId, Kept>>) : {};
   } catch {
     return {};
@@ -74,6 +75,16 @@ export function hasKey(id: CliId, env: NodeJS.ProcessEnv = process.env): boolean
 
 /** Whether the key the CLI would use is one kept here (not one of the person's own environment). */
 export const keptHere = (id: CliId): boolean => Boolean(readKept()[id]?.key);
+
+/**
+ * Whether a key kept here can be read back on this computer. One encrypted on another computer or under another
+ * Windows account is kept but unusable: said as kept, the window called it set while every request went out without
+ * it (29 October).
+ */
+export function keptReadable(id: CliId): boolean {
+  const where = KEY_ENV[id];
+  return Boolean(where && keyEnv(id)[where.variable]);
+}
 
 export function saveKey(id: CliId, key: unknown, baseUrl: unknown): void {
   const where = KEY_ENV[id];

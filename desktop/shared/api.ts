@@ -1,4 +1,4 @@
-import type { ChatApi, ChatPush } from './chat';
+import type { ChatApi, ChatPush, CliId } from './chat';
 import type { HermesApi } from './hermes';
 import type { AppLanguage } from './language';
 import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
@@ -110,8 +110,8 @@ export interface CortexApi {
     notesChanged(handler: () => void): () => void;
     /** A chat going on: an event, its state, its list entry. */
     chat(handler: (push: ChatPush) => void): () => void;
-    /** A sign-in window was closed: ask the tools' statuses again. */
-    authChanged(handler: () => void): () => void;
+    /** A sign-in window was closed, or a sign-in done (the tool's), or an install ended (null): ask the tools' statuses again. */
+    authChanged(handler: (cli: CliId | null) => void): () => void;
     /** A setup job going on: a step, or its end. */
     setup(handler: (push: SetupPush) => void): () => void;
     /** The voice status read anew (the notification-area icon switched it): the settings show it as it is. */

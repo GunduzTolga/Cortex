@@ -5,6 +5,7 @@
 // çerçeve her ışık modu için bir kez çizilir, kıvılcımlar NEURON_PATHS boyunca akar, ofisteki olaylar
 // odanın BRAIN.anchors noktasından kıvılcım çıkarır (Claude Design'ın brain-preview.js'i gibi).
 // Müdürün adı kasanın sahibinin adı (nameTheManager); Tolga, Cortex'i yazan yazılımcı, kendi masasında.
+import { enOf } from './ofis-en.js';
 
 // Around the brain, and behind a room's preview: Cortex's paper (src/index.css), as the other screens.
 const PAPER = '#F3EFE4', PAPER_DEEP = '#EAE4D6';
@@ -28,7 +29,8 @@ export function possessive(name, lang = 'tr') {
   const text = String(name || '').trim();
   if (!text) return '';
   if (lang === 'en') return text + (/s$/i.test(text) ? "'" : "'s");
-  const lower = text.toLocaleLowerCase('tr');
+  // Read without an ellipsis a name was cut with: "Ayşe Fatma…" is "Ayşe Fatma…'nın", not "…'ın" (30 October).
+  const lower = text.replace(/…$/, '').toLocaleLowerCase('tr');
   const vowels = lower.match(/[aeıioöuü]/g);
   const last = vowels ? vowels[vowels.length - 1] : 'e';
   const suffix = { a: 'ın', ı: 'ın', e: 'in', i: 'in', o: 'un', u: 'un', ö: 'ün', ü: 'ün' }[last];
@@ -43,13 +45,28 @@ export function possessive(name, lang = 'tr') {
 export function nameTheManager(art, userName, lang = 'tr') {
   const boss = art.CHARACTERS && art.CHARACTERS.mudur;
   const room = art.MAP && art.MAP.rooms.find((one) => one.id === 'mudur');
-  const name = String(userName || '').trim().slice(0, 24);
+  // Cut at a word, with an ellipsis: cut at the 24th letter, a long name ended mid-word ("… Kıl").
+  const name = cutAtWord(String(userName || '').trim(), 24);
   if (boss) boss.name = name || (lang === 'en' ? 'Manager' : 'Müdür');
   if (room) {
-    const short = name.length > 14 ? name.slice(0, 13) + '…' : name;
+    // Cut at a word as the chip is: cut at its 13th letter, the room was "ABDURRAHMAN M…'IN ODASI".
+    const short = cutAtWord(name, 14);
     room.tr = short ? possessive(short, 'tr').toLocaleUpperCase('tr') + ' ODASI' : 'MÜDÜR ODASI';
     room.en = short ? (possessive(short, 'en') + ' office').toUpperCase() : "MANAGER'S OFFICE";
   }
+}
+
+/**
+ * The text in at most `most` letters, cut at a word with an ellipsis; a single word longer than that is cut where it
+ * must be. Counted by letter, not by UTF-16 unit, so an emoji is not cut in two. 30 October: a word that ended where
+ * the cut fell was dropped as if cut ("Ayşe Fatma Kılıçdaroğlu Yılmaz" → "Ayşe Fatma…"), and one long word was "…".
+ */
+export function cutAtWord(text, most) {
+  const letters = [...text];
+  if (letters.length <= most) return text;
+  const head = letters.slice(0, most - 1).join('');
+  const atWord = /\s/.test(letters[most - 1]) ? head : head.replace(/\s+\S*$/, '');
+  return (atWord.trimEnd() || head) + '…';
 }
 
 // The office's events that spark from a room of the brain (the log's icon → the room).
@@ -253,10 +270,12 @@ export class OfficeEngine {
     setTimeout(() => this.log('✅', 'Pyn onayladı: «Toplantı notları»', '#5BD77A'), 1200 / this.speed);
     setTimeout(() => this.log('📰', 'Yayında: «Toplantı notları»', '#5BD77A'), 9000 / this.speed);
   }
-  say(ag, text, dur = 3.2) { this.bubbles = this.bubbles.filter((b) => b.ag !== ag); this.bubbles.push({ ag, text: this.who(text), t: 0, dur }); }
+  // Said in the window's language: the office's own lines are Turkish, and stayed so in English (ofis-en.js, 29 October).
+  said(text) { return this.lang === 'en' ? enOf(text) : text; }
+  say(ag, text, dur = 3.2) { this.bubbles = this.bubbles.filter((b) => b.ag !== ag); this.bubbles.push({ ag, text: this.who(this.said(text)), t: 0, dur }); }
   status(ag, icon, dur = 3) { this.bubbles = this.bubbles.filter((b) => b.ag !== ag || b.text); this.bubbles.push({ ag, icon, t: 0, dur }); }
   log(icon, text, color, who) {
-    this.cb.onLog && this.cb.onLog({ time: clockText(), icon, text: this.who(text), color, who });
+    this.cb.onLog && this.cb.onLog({ time: clockText(), icon, text: this.who(this.said(text)), color, who });
     // The event sparks from its room: by its icon, or from where the one who said it is.
     const speaker = who && this.byId && this.byId[who];
     const room = EVENT_ROOM[icon] || (speaker ? this.art.roomAt(Math.floor(speaker.x / 16), Math.floor(speaker.y / 16)) : null);
@@ -492,7 +511,7 @@ export class OfficeEngine {
       const [hx, hy] = this.toScreen(a.x - cell.footX + an.head[0] + 0.5, a.y - cell.footY + an.head[1]);
       a._head = [hx, hy];
       if (a.id === this.selected) { const k = Math.max(2, Math.round(this.zoom)), s = art.ICONS.select, f = Math.floor(this.t * 3) % 2, bob = Math.round(Math.sin(this.t * 5) * 2); c.drawImage(this.frame('select', f), Math.round(hx - s.w * k / 2), Math.round(hy - s.h * k - 6 + bob), s.w * k, s.h * k); }
-      else if (a.id === this.hover) this.nameTag(c, hx, hy - 6, a.ch.name, a.ch.color);
+      else if (a.id === this.hover) this.nameTag(c, hx, hy - 6, a.id === 'mudur' ? a.ch.name : this.said(a.ch.name), a.ch.color);
     }
     for (const b of this.bubbles) { const h = b.ag._head; if (!h) continue; const lift = b.ag.id === this.selected ? Math.max(2, Math.round(this.zoom)) * 9 + 6 : 4; if (b.text) this.speech(c, h[0], h[1] - lift, b.text, b.t, b.dur); else this.statusBubble(c, h[0], h[1] - lift, b.icon, b.t, b.dur); }
   }
@@ -536,7 +555,7 @@ export class OfficeEngine {
   snapshot() {
     return this.agents.map((a) => {
       const [tx, ty] = this.tileOf(a.x, a.y);
-      return { id: a.id, act: a.act || (a.pose === 'sleep' ? 'uyuyor' : 'etrafa bakıyor'), mood: a.pose === 'sleep' ? '😴' : a.pose === 'yawn' ? '🥱' : a.mood, room: this.art.roomAt(tx, ty) || this.art.roomAt(tx, ty + 1) || this.art.roomAt(tx, ty - 1), needs: { tea: Math.round(a.needs.tea), food: Math.round(a.needs.food), energy: Math.round(a.needs.energy) }, cnt: { ...a.cnt }, walking: !!a.path };
+      return { id: a.id, act: this.said(a.act || (a.pose === 'sleep' ? 'uyuyor' : 'etrafa bakıyor')), mood: a.pose === 'sleep' ? '😴' : a.pose === 'yawn' ? '🥱' : a.mood, room: this.art.roomAt(tx, ty) || this.art.roomAt(tx, ty + 1) || this.art.roomAt(tx, ty - 1), needs: { tea: Math.round(a.needs.tea), food: Math.round(a.needs.food), energy: Math.round(a.needs.energy) }, cnt: { ...a.cnt }, walking: !!a.path };
     });
   }
 }

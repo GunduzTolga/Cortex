@@ -245,7 +245,9 @@ const WIKI = /(!?)\[\[([^[\]\n]+?)\]\]/g;
 const MARKDOWN = /(!?)\[([^\]\n]*)\]\(\s*(<[^>\n]+>|[^)\s]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*\)/g;
 // A tag follows nothing or a space; `#` with a space after it is a heading, and a tag must have something in it that is not a digit (Obsidian's rule).
 const TAG = /(^|[\s,;(])#([\p{L}\p{N}_/-]+)/gu;
-const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/;
+// A line of a note kept with Windows line breaks ends in its `\r`: not let end one, no heading of such a note was
+// read - no outline, no embed of a heading, no link to one (30 October).
+const HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t\r]*$/;
 const BLOCK_ID = /\s\^([A-Za-z0-9-]+)\s*$/;
 
 /** Split `target#subpath|alias`, the pipe written `\|` inside a table as Obsidian allows. */
@@ -468,6 +470,43 @@ export function makeResolver(paths: readonly string[]): Resolve {
     const files = (byName.get(pathKey(wanted)) ?? []).filter((path) => pathKey(baseName(path)) === pathKey(wanted));
     return files.length ? pick(files, from) : null;
   };
+}
+
+/**
+ * Where a wiki link to a note not written yet makes it: in the folder the link names, found as the link is read (from
+ * the vault's top, then from the linking note's folder, whatever the case of its letters). A folder that is not there
+ * is made from the vault's top, as Obsidian makes it: `make` lists the folders to make first, each in its parent.
+ * Null for a link that names no note: a picture or another kind of file is not made as a note. 30 October: a link
+ * whose folder was written in other letters (`[[ideas/x]]` for `Ideas`), named from its own folder or not there yet
+ * made the note at the top, the link stayed missing and a second click was refused as a note already there;
+ * `[[photo.png]]` made `photo.png.md`.
+ */
+export function missingNoteAt(
+  target: string,
+  from: string,
+  folders: readonly string[],
+): { folder: string; name: string; make: Array<{ parent: string; name: string }> } | null {
+  const wanted = target.trim().replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!wanted || MEDIA.test(wanted)) return null;
+  const cut = wanted.lastIndexOf('/');
+  const name = wanted.slice(cut + 1).replace(/\.md$/i, '');
+  if (!name.trim()) return null;
+  if (cut < 0) return { folder: '', name, make: [] };
+  const byKey = new Map(folders.map((one) => [pathKey(one), one]));
+  const named = wanted.slice(0, cut);
+  const there = (path: string | null) => (path === null ? undefined : byKey.get(pathKey(path)));
+  const found = there(normalisePath(named)) ?? there(normalisePath(`${folderOf(from)}/${named}`));
+  if (found) return { folder: found, name, make: [] };
+  // Each part not there yet made in its turn, in the one before it as it is written on disk.
+  const make: Array<{ parent: string; name: string }> = [];
+  let folder = '';
+  for (const part of normalisePath(named)?.split('/') ?? []) {
+    const next = folder ? `${folder}/${part}` : part;
+    const known = there(next);
+    if (!known) make.push({ parent: folder, name: part });
+    folder = known ?? next;
+  }
+  return { folder, name, make };
 }
 
 /**

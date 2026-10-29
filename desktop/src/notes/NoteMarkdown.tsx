@@ -18,7 +18,8 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
-import { baseName, noteTitle, parseNote, pathKey, splitProperties, type NoteProperty } from '../../core/vaultNotes';
+import { baseName, missingNoteAt, nameProblem, noteTitle, parseNote, pathKey, splitProperties, type NoteProperty } from '../../core/vaultNotes';
+import { NAME_PROBLEM } from './NotesNav';
 import { useT } from '../i18n/useT';
 import type { Key } from '../i18n';
 import { useApp } from '../store/app';
@@ -27,6 +28,7 @@ import { labelOf, useNotes } from './notesStore';
 import { remarkObsidian } from './remarkObsidian';
 import { imageOf, noteTextOf } from './vaultCache';
 import { peekLeave, peekSoon } from './peek';
+import { copyText } from '../ui/copyText';
 
 /**
  * A note drawn for reading, as Obsidian draws it (core/vaultNotes.ts reads it
@@ -62,22 +64,40 @@ function useTarget(target: string, kind: 'wiki' | 'markdown' = 'wiki'): string |
 
 const openOptions = (event: { ctrlKey: boolean; metaKey: boolean; button: number }) => ({ newTab: event.ctrlKey || event.metaKey || event.button === 1 });
 
+/** A note a link names made where `missingNoteAt` says, the folders it names that are not there made first. */
+export async function makeMissingNote(at: NonNullable<ReturnType<typeof missingNoteAt>>, t: (key: Key) => string): Promise<{ path: string }> {
+  // Every name read before anything is made: a folder made and the next name then refused left an empty folder
+  // behind (30 October).
+  for (const name of [...at.make.map((one) => one.name), at.name]) {
+    const problem = nameProblem(name);
+    if (problem) throw new Error(`${t(NAME_PROBLEM[problem])} (${name.trim()})`);
+  }
+  for (const one of at.make) await window.cortex.notes.createFolder(one.parent, one.name);
+  return window.cortex.notes.create(at.folder, at.name, { text: '' });
+}
+
 function WikiLink({ target, subpath, alias }: { target: string; subpath: string; alias: string }) {
   const t = useT();
   const toast = useApp((s) => s.toast);
+  const { path: from } = useContext(NoteContext);
   const to = useTarget(target);
   // A link to a receipt reads as its event_id, not as the hash its file is named by.
   const label = useNotes((state) => (to ? state.labels.get(to) : undefined));
   const shown = alias || (label ?? (target ? target.replace(/\.md$/i, '') : '')) + (subpath ? `${target ? ' › ' : ''}${subpath.replace(/^\^/, '')}` : '');
   const open = (event: React.MouseEvent) => {
+    // The left button and the middle one: auxclick is the right button's too, and a right-click followed the link,
+    // or made the note a missing one names (29 October).
+    if (event.type === 'auxclick' && event.button !== 1) return;
     event.preventDefault();
     if (to) {
       useNotes.getState().open(to, { ...openOptions(event), subpath: subpath || null });
       return;
     }
-    // Not written yet: made at the vault's top under the name the link gives it, as Obsidian makes it, and opened to be written.
-    const name = baseName(target).replace(/\.md$/i, '');
-    window.cortex.notes.create('', name, { text: '' }).then(
+    // Not written yet: made where the link names it (missingNoteAt) and opened to be written. Made at the top whatever
+    // the link said, the link stayed missing and a second click was refused as a note already there (29 October).
+    const at = missingNoteAt(target, from, useNotes.getState().index?.folders ?? []);
+    if (!at) return;
+    makeMissingNote(at, t).then(
       async (made) => {
         await useNotes.getState().refresh();
         useNotes.getState().open(made.path, { edit: true });
@@ -184,6 +204,8 @@ function NoteEmbed({ target, subpath }: { target: string; subpath: string }) {
       live = false;
     };
   }, [to, modified, revision]);
+  // A missing picture is said as one: drawn as a link, a click made a note named after the picture (ghost.png.md).
+  if (!to && IMAGE_NAME.test(target)) return <MissingImage name={target} />;
   if (!to) return <WikiLink target={target} subpath={subpath} alias="" />;
   if (!/\.md$/i.test(to)) {
     if (/\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(to)) return <VaultImage path={to} alt={noteTitle(to)} />;
@@ -300,6 +322,7 @@ const components = {
     </MarkdownLink>
   ),
   img: (props: Given) => <MarkdownImage src={text(props, 'src')} alt={text(props, 'alt')} />,
+  pre: (props: Given) => <CodeBlock>{props.children}</CodeBlock>,
   li: (props: Given) => {
     const line = typeof props['data-line'] === 'number' ? (props['data-line'] as number) : null;
     const { children, ...rest } = without(props) as ComponentProps<'li'>;
@@ -312,15 +335,53 @@ const components = {
   input: (props: Given) => <TaskBox {...props} />,
 } as Components;
 
+function MissingImage({ name }: { name: string }) {
+  const t = useT();
+  return (
+    <span className="text-[0.9em] text-zinc-400" data-missing-image>
+      {t('notes.image.none', { name })}
+    </span>
+  );
+}
+
 function EmbeddedImage({ target, alias }: { target: string; alias: string }) {
   const to = useTarget(target);
-  if (!to) return <WikiLink target={target} subpath="" alias="" />;
+  if (!to) return <MissingImage name={target} />;
   return <VaultImage path={to} alt={noteTitle(to)} size={sizeOf(alias)} />;
 }
 
 const external = (href: string) => /^[a-z][a-z0-9+.-]*:/i.test(href);
 
+/** A code block with a button that copies it: selecting a long block by hand was the only way (29 October). */
+function CodeBlock({ children }: { children: ReactNode }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <div className="kg-code group relative">
+      <pre>{children}</pre>
+      <button
+        type="button"
+        onClick={(event) => {
+          const code = (event.currentTarget.previousElementSibling as HTMLElement | null)?.innerText ?? '';
+          copyText(code.replace(/\n$/, ''));
+          setCopied(true);
+        }}
+        className="absolute right-1.5 top-1.5 rounded-md border border-zinc-200 bg-white/90 px-1.5 py-0.5 text-[10.5px] font-semibold text-zinc-500 opacity-0 transition-opacity hover:text-darkDelegation focus:opacity-100 group-hover:opacity-100"
+        data-code-copy={copied ? 'copied' : 'idle'}
+      >
+        {t(copied ? 'notes.code.copied' : 'notes.code.copy')}
+      </button>
+    </div>
+  );
+}
+
 function MarkdownLink({ href, title, children }: { href: string; title: string; children: ReactNode }) {
+  const t = useT();
   let target = href;
   try {
     target = decodeURIComponent(href);
@@ -329,6 +390,9 @@ function MarkdownLink({ href, title, children }: { href: string; title: string; 
   }
   const [file, subpath] = target.split('#');
   const to = useTarget(file, 'markdown');
+  // An address the markdown reader would not let through (javascript:, file:) is emptied: it is said as a link left
+  // shut, not as a note that is missing (29 October).
+  if (!href) return <span title={t('notes.link.refused')}>{children}</span>;
   if (external(href)) {
     // To the system's browser (electron/main.ts sends a new window there), and only for the web.
     return /^https?:/i.test(href) ? (
@@ -396,8 +460,29 @@ export function NoteMarkdown({
   depth?: number;
   onToggleTask?: (line: number) => void;
 }) {
+  const t = useT();
   const context = useMemo(() => ({ path, depth, onToggleTask }), [path, depth, onToggleTask]);
   const plugins = useMemo(() => [remarkGfm, [remarkObsidian, { offset }]] as NonNullable<ComponentProps<typeof ReactMarkdown>['remarkPlugins']>, [offset]);
+  const plain = useMemo(() => (source.length > READ_AS_TEXT ? source.split(/\r?\n/) : null), [source]);
+  // A note this long is shown as its text: the Markdown reader works on the window's one thread, and a note of a
+  // megabyte held the whole app still for half a minute, again at every start with it in front (29 October). The
+  // editor (Ctrl+E) still edits it.
+  // Each line is its own block, numbered as the Markdown reader numbers its blocks: drawn as one, a heading from the
+  // outline, a search hit or a link into the note scrolled nowhere (30 October).
+  if (plain) {
+    return (
+      <div className="kg-note" data-note-plain>
+        <p className="mb-3 rounded-lg bg-paper-2 px-3 py-2 text-[12.5px] text-zinc-500">{t('notes.large.plain')}</p>
+        <div className="whitespace-pre-wrap break-words font-sans text-[14px] leading-relaxed">
+          {plain.map((line, at) => (
+            <div key={at} data-line={offset + at}>
+              {line || ' '}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
   return (
     <NoteContext.Provider value={context}>
       <div className="kg-note">
@@ -408,6 +493,9 @@ export function NoteMarkdown({
     </NoteContext.Provider>
   );
 }
+
+/** How long a note is drawn as Markdown, in characters; a longer one is shown as text. About 0.2 MB took 2 s to draw. */
+const READ_AS_TEXT = 150_000;
 
 const isUrl = (value: string) => /^https?:\/\/\S+$/i.test(value);
 

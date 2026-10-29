@@ -248,10 +248,18 @@ export function programOf(id: CliId, env: NodeJS.ProcessEnv = process.env): Laun
   const known = KNOWN.find((one) => one.id === id);
   if (!known) return null;
   if (WINDOWS) {
-    const exe = onPath([`${known.bin}.exe`], env);
-    if (exe) return { command: exe, args: [] };
-    const shim = onPath([`${known.bin}.cmd`], env);
-    return shim ? readShim(shim, env) : null;
+    // As Windows finds a command: the PATH's folders in their order, a program before a shim within one folder.
+    // Every folder searched for the .exe first, a Claude Code left in ~/.local/bin (added at the PATH's end) won over
+    // the npm one the person's PATH named first, and was the one whose sign-in was read (29 October).
+    const exe = `${known.bin}.exe`;
+    const first = onPath([exe, `${known.bin}.cmd`], env);
+    if (!first) return null;
+    if (path.basename(first).toLowerCase() === exe.toLowerCase()) return { command: first, args: [] };
+    const fromShim = readShim(first, env);
+    if (fromShim) return fromShim;
+    // A shim that names nothing there: a program further on, as before.
+    const later = onPath([exe], env);
+    return later ? { command: later, args: [] } : null;
   }
   const bin = onPath([known.bin], env);
   return bin ? { command: bin, args: [] } : null;

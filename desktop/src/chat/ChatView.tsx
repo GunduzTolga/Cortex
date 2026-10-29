@@ -12,11 +12,13 @@ import { useConfirm, usePrompt } from '../notes/NotesMenus';
 import { useApp } from '../store/app';
 import { useView } from '../store/view';
 import { Button, Spinner } from '../ui/ui';
+import { TOOL_NAMES } from './AuthDialog';
 import { useChat, waitingChats } from './chatStore';
 import { Composer } from './Composer';
 import { SidePane } from './SidePane';
 import { Transcript } from './Transcript';
 import { notesOf, turnsOf, usageOf, waitingOn } from './turns';
+import { escapeLayers } from '../ui/escapeLayers';
 
 /**
  * Pyn: Cortex's first screen, where the person talks to their own AI. The
@@ -55,8 +57,14 @@ function ChatList() {
   const confirm = useConfirm();
   const prompt = usePrompt();
   const groups = useMemo(() => groupsOf(chats), [chats]);
-  const cliName = (id: string) => clis?.find((one) => one.id === id)?.name ?? id;
-  const time = (at: number) => new Date(at).toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' });
+  // A tool no longer offered (a server forgotten) by its own name, never its id ("hermes" was shown; 29 October).
+  const cliName = (id: string) => clis?.find((one) => one.id === id)?.name ?? TOOL_NAMES[id] ?? id;
+  // The hour alone for today's; an older chat says its day too (one 40 days old said only "18:36").
+  const time = (at: number) => {
+    const when = new Date(at);
+    const hour = when.toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' });
+    return when.toDateString() === new Date().toDateString() ? hour : `${when.toLocaleDateString(language, { day: 'numeric', month: 'short' })} ${hour}`;
+  };
 
   const remove = async (chat: ChatSummary) => {
     if (!(await confirm({ title: t('chat.remove.title', { name: chat.title || t('chat.untitled') }), detail: t('chat.remove.detail'), action: t('chat.remove.action') }))) return;
@@ -109,7 +117,8 @@ function ChatList() {
                       {cliName(chat.cli)} · {time(chat.updatedAt)}
                     </span>
                   </button>
-                  <span className="absolute right-1.5 top-1.5 hidden gap-0.5 group-hover:flex">
+                  {/* Shown on hover and on keyboard focus: hover only, Tab never reached rename and delete. */}
+                  <span className="absolute right-1.5 top-1.5 hidden gap-0.5 group-focus-within:flex group-hover:flex">
                     <button type="button" onClick={() => void rename(chat)} title={t('chat.rename')} aria-label={t('chat.rename')} className="rounded p-1 text-zinc-400 hover:bg-zinc-200 hover:text-darkDelegation">
                       <PencilLine size={12} />
                     </button>
@@ -219,6 +228,8 @@ export function ChatView({ visible }: { visible: boolean }) {
   useEffect(() => {
     if (!visible) return;
     const key = (event: KeyboardEvent) => {
+      // Not behind a dialog: with the AI tools window open, the chat behind it was swapped for a new one (29 October).
+      if (escapeLayers.modal()) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         void useChat.getState().select(null);
@@ -240,6 +251,7 @@ export function ChatView({ visible }: { visible: boolean }) {
     <Composer
       big={big}
       focusKey={`${draftKey}:${visible}`}
+      chatKey={draftKey}
       draft={drafts[draftKey] ?? ''}
       onDraft={(text) => state.setDraft(draftKey, text)}
       onSend={(text) => state.send(text)}
@@ -280,7 +292,12 @@ export function ChatView({ visible }: { visible: boolean }) {
               </button>
             ) : null}
             {/* Keyed by its chat: another chat opens at its last message and follows its answer, not at the scroll of the one before. */}
-            <Transcript key={active} turns={turns} running={chat.running} onSignIn={() => summary && state.openAuth(summary.cli)} />
+            <Transcript key={active} turns={turns} running={chat.running} onSignIn={() => summary && state.openAuth(summary.cli)} onRetry={(text) => {
+                void state.send(text, true);
+                // The button is gone once the message is sent again: the cursor back in the field, as after Send.
+                document.querySelector<HTMLTextAreaElement>('[data-chat-input]')?.focus();
+              }}
+            />
             {composer(false)}
           </>
         ) : (
@@ -302,7 +319,11 @@ export function ChatView({ visible }: { visible: boolean }) {
                       <button
                         key={one}
                         type="button"
-                        onClick={() => state.setDraft('new', t(one))}
+                        onClick={() => {
+                          state.setDraft('new', t(one));
+                          // The field takes the cursor, so Enter sends what was put in it (it stayed on the chip and filled it again).
+                          document.querySelector<HTMLTextAreaElement>('[data-chat-input]')?.focus();
+                        }}
                         className="rounded-full border border-zinc-200 px-3 py-1 text-[12px] text-zinc-500 transition-colors hover:border-zinc-400 hover:text-darkDelegation"
                         data-chat-suggestion
                       >

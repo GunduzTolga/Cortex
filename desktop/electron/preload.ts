@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { CortexApi } from '../shared/api';
+import type { CliId } from '../shared/chat';
 import { plainIpcMessage, rejectionText } from '../shared/ipcError';
 
 /**
@@ -23,6 +24,18 @@ const subscribe = (channel: string, handler: () => void): (() => void) => {
   ipcRenderer.on(channel, listener);
   return () => ipcRenderer.removeListener(channel, listener);
 };
+
+/*
+  The notification-area icon's "Ayarlar", asked as the page finishes loading (a reload, the window made again, a start
+  hidden at sign-in): main sends it then, before the app has begun to listen, and it was dropped (30 October). Kept
+  until something listens, and handed to it then.
+*/
+let settingsAsked = false;
+const settingsHeard = new Set<() => void>();
+ipcRenderer.on('app:openSettings', () => {
+  if (!settingsHeard.size) settingsAsked = true;
+  for (const handler of settingsHeard) handler();
+});
 
 /** A channel that carries data: the payload is handed on, the event that brought it is not. */
 const listen = <T>(channel: string, handler: (payload: T) => void): (() => void) => {
@@ -108,12 +121,19 @@ const api: CortexApi = {
   on: {
     notesChanged: (handler) => subscribe('notes:changed', handler),
     chat: (handler) => listen('chat:event', handler),
-    authChanged: (handler) => subscribe('chat:authChanged', handler),
+    authChanged: (handler) => listen<CliId | null>('chat:authChanged', (cli) => handler(typeof cli === 'string' ? cli : null)),
     setup: (handler) => listen('setup:event', handler),
     voiceStatus: (handler) => listen('setup:voice', handler),
     voiceHelper: (handler) => listen('setup:helper', handler),
     notice: (handler) => listen('app:notice', handler),
-    openSettings: (handler) => subscribe('app:openSettings', handler),
+    openSettings: (handler) => {
+      settingsHeard.add(handler);
+      if (settingsAsked) {
+        settingsAsked = false;
+        handler();
+      }
+      return () => void settingsHeard.delete(handler);
+    },
     askWake: (handler) => subscribe('app:askWake', handler),
     flush: (handler) => {
       // Answered whatever the save came to: the window waits for the answer, not for the save to succeed.

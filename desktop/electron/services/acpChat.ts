@@ -3,7 +3,7 @@ import type { CliId, ConfigOption, PermissionKind, ToolStatus } from '../../shar
 import { AcpConnection, AcpError } from './acp';
 import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
 import { launchFor } from './clis';
-import { keptHere } from './keys';
+import { keptReadable } from './keys';
 import { readSettings } from './settings';
 
 /**
@@ -115,7 +115,7 @@ function connectionFor(cli: CliId, vault: string): Promise<Conn> {
       conn.canResume = Boolean(answer?.agentCapabilities?.sessionCapabilities?.resume);
       // A key kept by Cortex is in the program's environment; it is told to use it, by the way in it names for a key (14 October).
       const method = KEY_METHODS[cli];
-      if (method && keptHere(cli) && answer?.authMethods?.some((one) => one.id === method)) await conn.acp.request('authenticate', { methodId: method });
+      if (method && keptReadable(cli) && answer?.authMethods?.some((one) => one.id === method)) await conn.acp.request('authenticate', { methodId: method });
     });
   // A start that failed is not kept: the next message starts the program again, rather than meet the same failure until the app is closed.
   conn.ready.catch(() => {

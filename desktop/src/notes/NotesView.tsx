@@ -14,6 +14,7 @@ import { NotePeek } from './peek';
 import { imageOf } from './vaultCache';
 import { folderLabel, labelOf, nameLabel, useActiveTab, useNotes } from './notesStore';
 import { TextFile } from './TextFile';
+import { escapeLayers } from '../ui/escapeLayers';
 import './notes.css';
 
 /**
@@ -63,6 +64,11 @@ export function NotesView({ visible, onGraph }: { visible: boolean; onGraph: () 
   const tab = useActiveTab();
   const [fold, setFold] = useFold();
   const [switching, setSwitching] = useState(false);
+  // A finder left open behind another view (a notice's "Go" taking the window to a chat) held the whole window shut:
+  // a dialog no one could see, every click on the chat refused until Escape (30 October).
+  useEffect(() => {
+    if (!visible) setSwitching(false);
+  }, [visible]);
   const makers = useMakers();
   // A note open when another vault is chosen is read again, from that one: a path is the same in both, the note is not.
   const vaultSeq = useApp((state) => state.vaultSeq);
@@ -75,6 +81,9 @@ export function NotesView({ visible, onGraph }: { visible: boolean; onGraph: () 
   useEffect(() => {
     if (!visible) return;
     const keys = (event: KeyboardEvent) => {
+      // Not behind a dialog, a menu or the switcher: with the settings open, Ctrl+N wrote a note into the vault and
+      // Ctrl+O opened the switcher over them (29 October).
+      if (escapeLayers.modal()) return;
       const mod = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
       if (mod && !event.shiftKey && !event.altKey && key === 'e') {

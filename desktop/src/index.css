@@ -24,6 +24,13 @@ body,
   user-select: text;
 }
 
+/* The window is the app's: each view scrolls its own panes. Let scroll, the page grew past a view taller than the
+   window and the header scrolled away with it (29 October). */
+html,
+body {
+  overflow: hidden;
+}
+
 body {
   background: var(--color-white);
   color: var(--color-ink);

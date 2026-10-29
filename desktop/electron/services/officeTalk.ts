@@ -226,7 +226,10 @@ function askLocal(tool: 'lmstudio' | 'ollama', model: string, system: string, us
       reject(
         (err as NodeJS.ErrnoException).code === 'ECONNREFUSED'
           ? new Error(say('Sunucu kapalı: uygulamasını açıp bir model yükle.', 'The server is not running: open its app and load a model.'))
-          : err,
+          : // Closed while it answered (the app quit): Node's own "socket hang up" was the sentence (29 October).
+            (err as NodeJS.ErrnoException).code === 'ECONNRESET' || /socket hang up/i.test(String((err as Error).message))
+            ? new Error(say('Sunucu cevabın ortasında kapandı. Uygulamasının açık olduğuna bak ve yeniden dene.', 'The server closed while it answered. Check that its app is open and try again.'))
+            : err,
       ),
     );
     request.end(body);
@@ -288,7 +291,9 @@ export async function officeTalk(request: unknown): Promise<TalkLine[]> {
       const tool = asked.tool as 'lmstudio' | 'ollama';
       const { models, loaded } = await talkModels(tool);
       const model = typeof asked.model === 'string' && models.includes(asked.model) ? asked.model : (loaded[0] ?? models[0]);
-      if (!model) throw new Error(say('Sunucuda model yok: uygulamasında bir model indir ya da yükle.', 'The server has no model: download or load one in its app.'));
+      // No model listed is a server not running as often as one with none: said as both, where "no model" alone sent the
+      // person looking for a model on a server that was closed (29 October).
+      if (!model) throw new Error(say('Sunucu kapalı ya da yüklü bir modeli yok: uygulamasını açıp bir model yükle.', 'The server is not running, or has no model: open its app and load a model.'));
       let said = await askLocal(tool, model, system, user, false);
       // It thought all the same (a server that ignores "no thinking"): once more, with room to think and answer.
       if (!said.content.trim() && said.thought) said = await askLocal(tool, model, system, user, true);

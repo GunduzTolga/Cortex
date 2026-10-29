@@ -3,13 +3,13 @@ import { ArrowLeft, ArrowRight, BookOpen, Code2, ExternalLink, FolderOpen, Layou
 import type { NoteRead } from '@shared/notes';
 import { messageOf } from '@shared/ipcError';
 import { appLanguage } from '@shared/language';
-import { conflictName, fillTemplate, folderOf, insertTemplate, nameProblem, noteTitle, parseNote, pathKey, shortestLink } from '../../core/vaultNotes';
+import { conflictName, fillTemplate, folderOf, insertTemplate, missingNoteAt, nameProblem, noteTitle, parseNote, pathKey, shortestLink } from '../../core/vaultNotes';
 import { TemplatePicker, templateText } from './templates';
 import { translate, type Key } from '../i18n';
 import { useT } from '../i18n/useT';
 import { refusal, useApp } from '../store/app';
 import { Spinner } from '../ui/ui';
-import { NoteDocument } from './NoteMarkdown';
+import { NoteDocument, makeMissingNote } from './NoteMarkdown';
 import { NoteEditor, type LinkChoice, type NoteEditorHandle } from './NoteEditor';
 import type { LiveHooks } from './livePreview';
 import { imageOf } from './vaultCache';
@@ -20,6 +20,9 @@ import { Menu } from './NotesMenus';
 import { useTrash } from './bin';
 import { NAME_PROBLEM } from './NotesNav';
 import { holdOpenNote } from './openNotes';
+import { copyText } from '../ui/copyText';
+import { useSettled } from './useSettled';
+import { useView } from '../store/view';
 
 /**
  * One note, read or written. It is read from the vault when it is opened and
@@ -39,17 +42,6 @@ type Saving = 'saved' | 'unsaved' | 'saving' | 'failed';
 /** A sentence in the window's language, for what is said after the pane that asked is gone. */
 const say = (key: Key, values?: Record<string, string | number>) => translate(appLanguage(useApp.getState().settings.language), key, values);
 
-/** Text put on the clipboard from a press: the page's clipboard API is one of the permissions the window is refused (electron/main.ts). */
-function copyText(text: string): void {
-  const field = document.createElement('textarea');
-  field.value = text;
-  field.style.position = 'fixed';
-  field.style.opacity = '0';
-  document.body.appendChild(field);
-  field.select();
-  document.execCommand('copy');
-  field.remove();
-}
 
 /**
  * Text that could not be saved over its note - the note changed on disk
@@ -62,24 +54,110 @@ function copyText(text: string): void {
  */
 async function keepAside(path: string, text: string, why: string, here = true): Promise<void> {
   const toast = useApp.getState().toast;
+  const made = here ? await placeAside(path, text) : null;
+  if (made) {
+    toast({
+      tone: 'info',
+      sticky: true,
+      title: say('notes.aside.kept'),
+      detail: `${say('notes.aside.where', { name: nameLabel(noteTitle(made)) })}\n${why}`,
+      action: { label: say('notes.aside.open'), run: () => useNotes.getState().open(made) },
+    });
+    return;
+  }
+  // Nowhere to write it now (the vault's folder gone: a drive pulled, a sync moving it): kept in the window's own
+  // store too, and written beside the note once the vault is back (retryKeptAside). Kept only in the toast, it was
+  // lost when the toast was closed (29 October). Not for another vault's note (`here` false): that one is not ours to write.
+  // Said as kept when it is: "saved nowhere" was said of a text that was then written beside its note (30 October).
+  const kept = here && stashAside(path, text);
+  toast({
+    tone: 'error',
+    sticky: true,
+    title: say(kept ? 'notes.aside.later' : 'notes.aside.none', { name: nameLabel(noteTitle(path)) }),
+    detail: why,
+    action: { label: say('notes.aside.copy'), run: () => copyText(text) },
+  });
+}
+
+/** The text written as a note of its own beside the note, else at the vault's top: its path, or null where neither took it. */
+async function placeAside(path: string, text: string): Promise<string | null> {
   const name = conflictName(noteTitle(path), say('notes.aside.word'), new Date());
-  for (const folder of here ? new Set([folderOf(path), '']) : []) {
+  for (const folder of new Set([folderOf(path), ''])) {
     try {
       const made = await window.cortex.notes.create(folder, name, { text, unique: true });
       void useNotes.getState().refresh();
-      toast({
-        tone: 'info',
-        sticky: true,
-        title: say('notes.aside.kept'),
-        detail: `${say('notes.aside.where', { name: nameLabel(noteTitle(made.path)) })}\n${why}`,
-        action: { label: say('notes.aside.open'), run: () => useNotes.getState().open(made.path) },
-      });
-      return;
+      return made.path;
     } catch {
       /* Not there: the next place. */
     }
   }
-  toast({ tone: 'error', sticky: true, title: say('notes.aside.none', { name: nameLabel(noteTitle(path)) }), detail: why, action: { label: say('notes.aside.copy'), run: () => copyText(text) } });
+  return null;
+}
+
+const ASIDE_STORE = 'cortex.notes.unsaved';
+interface Stashed {
+  vault: string;
+  path: string;
+  text: string;
+}
+function stashed(): Stashed[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(ASIDE_STORE) ?? '[]') as unknown;
+    return Array.isArray(value) ? (value as Stashed[]).filter((one) => typeof one?.path === 'string' && typeof one?.text === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+/** Whether the text was kept in the window's store. */
+function stashAside(path: string, text: string): boolean {
+  const vault = useApp.getState().vault.vault?.name;
+  if (!vault) return false;
+  try {
+    localStorage.setItem(ASIDE_STORE, JSON.stringify([...stashed(), { vault, path, text }]));
+    return true;
+  } catch {
+    /* No store: the toast's copy button is the way left. */
+    return false;
+  }
+}
+
+let retrying: Promise<void> | null = null;
+/**
+ * Text kept in the window's store while the vault was gone, written beside its note now that the vault is open again.
+ * One at a time: the window's focus twice in a moment read the same text twice and wrote it twice (30 October).
+ */
+export function retryKeptAside(): Promise<void> {
+  if (!retrying) retrying = writeKeptAside().finally(() => (retrying = null));
+  return retrying;
+}
+
+async function writeKeptAside(): Promise<void> {
+  const vault = useApp.getState().vault;
+  if (!vault.vault || vault.missing) return;
+  const all = stashed();
+  if (!all.length) return;
+  const written: Stashed[] = [];
+  for (const one of all) {
+    if (one.vault !== vault.vault.name) continue;
+    const made = await placeAside(one.path, one.text);
+    if (!made) continue;
+    written.push(one);
+    useApp.getState().toast({
+      tone: 'info',
+      sticky: true,
+      title: say('notes.aside.kept'),
+      detail: say('notes.aside.where', { name: nameLabel(noteTitle(made)) }),
+      action: { label: say('notes.aside.open'), run: () => useNotes.getState().open(made) },
+    });
+  }
+  // Read again: a text kept while these were written (stashAside) stays with the ones not written now.
+  const left = stashed().filter((one) => !written.some((done) => done.vault === one.vault && done.path === one.path && done.text === one.text));
+  try {
+    if (left.length) localStorage.setItem(ASIDE_STORE, JSON.stringify(left));
+    else localStorage.removeItem(ASIDE_STORE);
+  } catch {
+    /* kept as it was */
+  }
 }
 
 /** `- [ ]` and `- [x]` on one line of a note, the other way round. */
@@ -87,7 +165,8 @@ export function toggleTask(text: string, line: number): string | null {
   const lines = text.split('\n');
   const now = lines[line];
   if (now === undefined) return null;
-  const match = /^(\s*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\])/.exec(now);
+  // A task in a quote or a callout (`> - [ ]`, any depth) ticks as one outside: its box was drawn and did nothing (29 October).
+  const match = /^(\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+\[)([ xX])(\])/.exec(now);
   if (!match) return null;
   lines[line] = `${match[1]}${match[2] === ' ' ? 'x' : ' '}${match[3]}${now.slice(match[0].length)}`;
   return lines.join('\n');
@@ -174,6 +253,16 @@ export function NotePane({ path }: { path: string }) {
       else setFailed(refusal(messageOf(err)));
     }
   }, [path, toast]);
+
+  // A file marked read-only is read again when the window comes back: its mark taken away outside changes no time on
+  // disk, and the note stayed shut until it was opened again (29 October).
+  const locked = doc?.readOnly === 'locked';
+  useEffect(() => {
+    if (!locked) return;
+    const back = () => void load();
+    window.addEventListener('focus', back);
+    return () => window.removeEventListener('focus', back);
+  }, [locked, load]);
 
   // One pane per note (the screen keys it by the path), so a save that outlives it is still of this note.
   useEffect(() => {
@@ -394,8 +483,22 @@ export function NotePane({ path }: { path: string }) {
   const choices = useCallback(() => linkChoices(), []);
   const openLink = useCallback((link: { target: string; subpath: string | null; kind: 'wiki' | 'markdown' }, newTab: boolean) => {
     const to = link.target ? useNotes.getState().resolve(link.target, path, link.kind) : path;
-    if (to) useNotes.getState().open(to, { newTab, subpath: link.subpath });
-  }, [path]);
+    if (to) {
+      useNotes.getState().open(to, { newTab, subpath: link.subpath });
+      return;
+    }
+    // A wiki link to a note not yet written is made and opened, as the reading view makes it (in the link's folder
+    // where that is there): clicked in the editor, nothing happened (29 October). A picture or a web address is not.
+    const at = link.kind === 'wiki' && link.target ? missingNoteAt(link.target, path, useNotes.getState().index?.folders ?? []) : null;
+    if (!at) return;
+    makeMissingNote(at, t).then(
+      async (made) => {
+        await useNotes.getState().refresh();
+        useNotes.getState().open(made.path, { edit: true, newTab });
+      },
+      (err) => toast({ tone: 'error', title: t('notes.create.failed'), detail: messageOf(err) }),
+    );
+  }, [path, toast, t]);
 
   // What the live preview asks of the vault: where a link of this note goes, an image, and opening one.
   const liveHooks = useMemo<LiveHooks>(
@@ -415,6 +518,11 @@ export function NotePane({ path }: { path: string }) {
 
   // A template from the vault's templates folder, into this note: at the cursor while writing, at the end while reading.
   const [picking, setPicking] = useState(false);
+  // Closed when the notes go from the front, as the finder is (NotesView): open unseen, it held the window shut.
+  const inFront = useView((state) => state.view === 'notes');
+  useEffect(() => {
+    if (!inFront) setPicking(false);
+  }, [inFront]);
   const putTemplate = async (from: string) => {
     setPicking(false);
     const raw = await templateText(from);
@@ -446,14 +554,16 @@ export function NotePane({ path }: { path: string }) {
   };
 
   // Counted from the text a moment behind the keys: a long note is parsed whole for it.
-  const settled = useDeferredValue(text);
+  const settled = useSettled(useDeferredValue(text));
   const words = useMemo(() => (doc ? parseNote(settled).words : 0), [doc, settled]);
   const backlinks = useNotes((state) => state.index?.notes.filter((note) => note.path !== path && note.links.includes(path)).length ?? 0);
   const folder = folderOf(path);
   const reason =
     doc?.readOnly === 'encoding'
       ? t('notes.readOnly.encoding')
-      : doc?.readOnly === 'receipt'
+      : doc?.readOnly === 'locked'
+        ? t('notes.readOnly.locked')
+        : doc?.readOnly === 'receipt'
         ? t('notes.readOnly.receipt')
         : doc?.readOnly === 'generated'
           ? t('notes.readOnly.generated')
@@ -519,6 +629,7 @@ export function NotePane({ path }: { path: string }) {
             className="font-bold underline"
             data-note-take-disk
             onClick={() => {
+              editor.current?.takeVersion(conflict.text);
               current.current.text = conflict.text;
               setText(conflict.text);
               setDoc((was) => (was ? { ...was, text: conflict.text, hash: conflict.hash, modified: conflict.modified } : was));

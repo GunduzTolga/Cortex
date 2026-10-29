@@ -4,7 +4,7 @@ import type { CliAuth, CliId } from '../../shared/chat';
 import { childEnv } from './acp';
 import { LOCAL_IDS, onPathAny, powerShellExe, programOf, refreshPath } from './clis';
 import { LOCAL, type LocalId, findLocal, localModel, shortContext } from './localModels';
-import { KEY_ENV, KeyRefusal, forgetKey, hasKey, keptHere, saveKey } from './keys';
+import { KEY_ENV, KeyRefusal, forgetKey, hasKey, keptHere, keptReadable, saveKey } from './keys';
 import { readSettings } from './settings';
 
 /**
@@ -62,10 +62,11 @@ const INSTALLERS: Partial<Record<CliId, { run: string; puts: string }>> = {
   claude: { run: 'irm https://claude.ai/install.ps1 | iex', puts: "(Join-Path $env:USERPROFILE '.local\\bin\\claude.exe')" },
 };
 
-let changed: () => void = () => undefined;
+/** Told with the tool whose sign-in ended or was done; null for an install ended. */
+let changed: (cli: CliId | null) => void = () => undefined;
 
 /** Where the window hears that a sign-in window was closed: its statuses are asked again. */
-export function onAuthChanged(listener: () => void): void {
+export function onAuthChanged(listener: (cli: CliId | null) => void): void {
   changed = listener;
 }
 
@@ -126,17 +127,22 @@ async function statusOf(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
     key: installed ? tool.key : null,
     baseUrl: Boolean(KEY_ENV[tool.id]?.baseUrl),
     hasKey: hasKey(tool.id),
+    kept: keptHere(tool.id),
   };
   if (!installed) return base;
+  // A key kept here that this computer cannot read back (kept on another one, or under another Windows account) is not
+  // one the tool starts with: said as set, the window called the tool signed in and it went without it (30 October).
+  const variable = KEY_ENV[tool.id]?.variable;
+  const keyUsable = keptReadable(tool.id) || Boolean(variable && process.env[variable]);
   // A key kept here is what the chat starts the tool with: said first.
-  if (tool.key === 'cortex' && keptHere(tool.id)) return { ...base, signedIn: true, detail: 'API key' };
+  if (tool.key === 'cortex' && keptHere(tool.id) && keptReadable(tool.id)) return { ...base, signedIn: true, detail: 'API key' };
   if (tool.id === 'claude') return { ...base, ...claudeStatus((await ask('claude', ['auth', 'status', '--json'])) ?? '') };
   if (tool.id === 'codex') return { ...base, ...codexStatus((await ask('codex', ['login', 'status'])) ?? '') };
   if (tool.id === 'opencode') {
     const { signedIn, detail } = opencodeStatus((await ask('opencode', ['auth', 'list'])) ?? '');
     return { ...base, signedIn, detail };
   }
-  return { ...base, signedIn: base.hasKey, detail: base.hasKey ? 'API key' : null };
+  return { ...base, signedIn: keyUsable, detail: keyUsable ? 'API key' : null };
 }
 
 /** A model server on this machine: up with its models, or installed and off, or not here; nothing to sign in to. */
@@ -154,6 +160,7 @@ async function localStatus(id: LocalId): Promise<CliAuth> {
     key: null,
     baseUrl: false,
     hasKey: false,
+    kept: false,
     local: { models: found.models.length, loaded: found.loaded, shortContext: model && found.loaded.includes(model) ? shortContext(found, model) : null },
   };
 }
@@ -185,11 +192,11 @@ export function startLogin(id: unknown): void {
   let open = true;
   child.on('error', () => {
     open = false;
-    changed();
+    changed(tool.id);
   });
   child.on('exit', () => {
     open = false;
-    changed();
+    changed(tool.id);
   });
   child.unref();
   void watchLogin(tool, () => open);
@@ -207,7 +214,7 @@ async function watchLogin(tool: (typeof TOOLS)[number], open: () => boolean): Pr
     await new Promise((resolve) => setTimeout(resolve, LOGIN_POLL));
     if (!open()) return;
     if ((await statusOf(tool)).signedIn === true) {
-      changed();
+      changed(tool.id);
       return;
     }
   }
@@ -252,7 +259,7 @@ export function installTool(id: unknown): void {
 
 async function afterInstall(tool: (typeof TOOLS)[number]): Promise<void> {
   await refreshPath(true);
-  changed();
+  changed(null);
   if (!programOf(tool.id) || !tool.login) return;
   if ((await statusOf(tool)).signedIn === true) return;
   try {

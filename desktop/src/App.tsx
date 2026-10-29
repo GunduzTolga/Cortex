@@ -22,8 +22,10 @@ import { useView, type View } from './store/view';
 import { LanguageSwitch } from './ui/LanguageSwitch';
 import { SettingsDialog } from './ui/SettingsDialog';
 import { MicConsent } from './ui/MicConsent';
+import { escapeLayers } from './ui/escapeLayers';
 import { Toasts } from './ui/Toasts';
 import { Button, Spinner } from './ui/ui';
+import { retryKeptAside } from './notes/NotePane';
 
 /**
  * The window: the first-run screen until it has been gone through once
@@ -45,9 +47,33 @@ export function App() {
   useEffect(() => {
     void useApp.getState().boot();
   }, []);
+  // Text typed while the vault's folder was gone, written beside its note once the vault is back (src/notes/NotePane.tsx).
+  useEffect(() => {
+    if (vault.vault && !vault.missing) void retryKeptAside();
+  }, [vault]);
 
   // The notification-area icon's "Ayarlar": the window comes back on its settings.
-  useEffect(() => window.cortex.on.openSettings(() => useApp.getState().openSettings(true)), []);
+  // Only where the settings are: asked on the welcome screen or the first-run screen, the request was kept and the
+  // settings opened by themselves once a vault was chosen; asked over a question (the microphone's), they opened
+  // under it (29 October). 30 October: the screen of a vault gone missing has its settings, and they open there; asked
+  // while the page still loads (a reload, the window made again, a start hidden at sign-in), it is asked again once
+  // the page knows its vault, where before it was dropped.
+  useEffect(() => {
+    const open = () => {
+      const { vault: kept, settings, ready } = useApp.getState();
+      if (!ready) {
+        const stop = useApp.subscribe((state) => {
+          if (!state.ready) return;
+          stop();
+          open();
+        });
+        return;
+      }
+      if (!kept.vault || !settings.onboarded || escapeLayers.modal()) return;
+      useApp.getState().openSettings(true);
+    };
+    return window.cortex.on.openSettings(open);
+  }, []);
   // Its "listen all the time", not allowed yet: asked here, where it is explained (src/ui/MicConsent.tsx).
   useEffect(() => window.cortex.on.askWake(() => void useSetup.getState().voice({ wake: true })), []);
   // The window going for good: the note open saves what it holds first, or keeps it aside (src/notes/openNotes.ts).
@@ -202,6 +228,9 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
     const key = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key === ',') {
         event.preventDefault();
+        // Not over another dialog or question: over the microphone's, the settings opened beneath it and a click on
+        // its "Allow" went through to a settings switch behind (29 October).
+        if (escapeLayers.modal()) return;
         useApp.getState().openSettings(true);
       }
     };

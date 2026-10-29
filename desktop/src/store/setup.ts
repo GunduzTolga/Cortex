@@ -21,6 +21,8 @@ interface SetupState {
   listener: ListenerSeen;
   /** The listener being started again, or moved to another key: once at a time. */
   listenerBusy: boolean;
+  /** The first-run screen opened again from Settings: it begins at its start, not where a first run was left. */
+  again: boolean;
   refresh(): Promise<void>;
   run(job: SetupJob): Promise<void>;
   voice(patch: VoicePatch): Promise<void>;
@@ -85,6 +87,7 @@ export const useSetup = create<SetupState>((set, get) => {
     error: null,
     listener: NO_LISTENER,
     listenerBusy: false,
+    again: false,
 
     async refresh() {
       listen();

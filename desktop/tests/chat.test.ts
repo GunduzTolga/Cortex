@@ -103,6 +103,26 @@ test('a CLI is found without a shell: an npm shim read for the program or the sc
   assert.equal(listClis({ PATH: bin }).some((one) => one.id === 'test'), false, 'the test agent only when named');
 });
 
+test('a CLI is found as Windows finds a command: the PATH in its order, a program before a shim within one folder', { skip: process.platform !== 'win32' }, () => {
+  // npm's shim named first on the PATH, an old program left in a folder at its end (~/.local/bin, refreshPath):
+  // every folder was searched for the program first, so the old one was used and its sign-in read (29 October).
+  const npm = temp('clis-npm-');
+  const late = temp('clis-late-');
+  fs.mkdirSync(path.join(npm, 'node_modules', 'x', 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(npm, 'node_modules', 'x', 'bin', 'opencode.exe'), '');
+  fs.writeFileSync(path.join(npm, 'opencode.cmd'), '@ECHO off\r\n"%dp0%\\node_modules\\x\\bin\\opencode.exe"   %*\r\n');
+  fs.writeFileSync(path.join(late, 'opencode.exe'), '');
+  const PATH = `${npm};${late}`;
+  assert.equal(launchOf('opencode', { PATH })?.command, path.join(npm, 'node_modules', 'x', 'bin', 'opencode.exe'), 'the shim named first wins');
+  assert.equal(launchOf('opencode', { PATH: `${late};${npm}` })?.command, path.join(late, 'opencode.exe'), 'and the program, where it comes first');
+  // In one folder, the program before the shim; a shim that names nothing there leaves the program further on.
+  fs.writeFileSync(path.join(npm, 'opencode.exe'), '');
+  assert.equal(launchOf('opencode', { PATH })?.command, path.join(npm, 'opencode.exe'));
+  const broken = temp('clis-broken-');
+  fs.writeFileSync(path.join(broken, 'opencode.cmd'), 'echo nothing here');
+  assert.equal(launchOf('opencode', { PATH: `${broken};${late}` })?.command, path.join(late, 'opencode.exe'));
+});
+
 test('what a CLI says is made safe to show: the vault taken off every path, home said as ~, a path outside cut to its name', () => {
   const vault = process.platform === 'win32' ? 'C:\\Users\\kisi\\Documents\\Pyn' : '/home/kisi/Pyn';
   const home = process.platform === 'win32' ? 'C:\\Users\\kisi' : '/home/kisi';
