@@ -134,6 +134,78 @@ const lmStudio = http.createServer((request, response) => {
 });
 await new Promise((done) => lmStudio.listen(0, '127.0.0.1', done));
 const lmStudioBase = `http://127.0.0.1:${lmStudio.address().port}`;
+
+/*
+  A stand-in for Pyn on a server, a Hermes Agent's API server (electron/services/hermesChat.ts,
+  tests/hermesChat.test.ts for the whole of it): under the profile `pyn`, a session begun on a
+  phone, a new one begun from here, a turn streamed, a command it asks leave for.
+*/
+const HERMES_KEY = 'e2e-hermes-key-0123456789abcdef';
+const hermesSeen = [];
+const hermesSessions = [{ id: 'phone_1', title: 'Telefondan', source: 'telegram', started_at: 1_761_700_000, last_active: 1_761_710_000, preview: 'yarın ne var' }];
+const hermesMessages = new Map([
+  [
+    'phone_1',
+    [
+      { role: 'user', content: 'yarın ne var', timestamp: 1_761_700_000 },
+      { role: 'assistant', content: 'Yarın 10:00 diş hekimi.', timestamp: 1_761_700_005 },
+    ],
+  ],
+]);
+let hermesApproval = null;
+const hermes = http.createServer((request, response) => {
+  let raw = '';
+  request.on('data', (chunk) => (raw += chunk));
+  request.on('end', () => {
+    const json = (status, value) => {
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(value));
+    };
+    const url = new URL(request.url ?? '/', 'http://x');
+    const profiled = url.pathname.match(/^\/p\/([^/]+)(\/.*)$/);
+    const route = profiled ? profiled[2] : url.pathname;
+    const body = raw ? JSON.parse(raw) : null;
+    hermesSeen.push({ method: request.method, route, profile: profiled?.[1] ?? null, auth: request.headers.authorization, body });
+    if (request.headers.authorization !== `Bearer ${HERMES_KEY}`) return json(401, { error: { message: 'Invalid API key' } });
+    if (request.method === 'GET' && route === '/api/sessions') return json(200, { object: 'list', data: hermesSessions });
+    if (request.method === 'POST' && route === '/api/sessions') {
+      const session = { id: `api_${hermesSessions.length}`, title: body?.title ?? null, source: body?.source, started_at: Date.now() / 1000, last_active: Date.now() / 1000, preview: null };
+      hermesSessions.unshift(session);
+      hermesMessages.set(session.id, []);
+      return json(201, { session });
+    }
+    const messagesOf = route.match(/^\/api\/sessions\/([^/]+)\/messages$/);
+    if (request.method === 'GET' && messagesOf) return json(200, { object: 'list', data: hermesMessages.get(decodeURIComponent(messagesOf[1])) ?? [] });
+    const streamOf = route.match(/^\/api\/sessions\/([^/]+)\/chat\/stream$/);
+    if (request.method === 'POST' && streamOf) {
+      const id = decodeURIComponent(streamOf[1]);
+      if (!hermesMessages.has(id)) return json(404, { error: { message: 'Session not found' } });
+      const send = (name, data = {}) => response.write(`event: ${name}\ndata: ${JSON.stringify({ session_id: id, run_id: 'run_e2e', ...data })}\n\n`);
+      const finish = (text) => {
+        send('assistant.delta', { delta: text });
+        send('run.completed', {});
+        response.end();
+      };
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      if (body?.input === 'izin iste') {
+        send('approval.request', { request_id: 'req_1', description: 'Bir komut çalıştırmak istiyor', command: 'ls -la', choices: ['once', 'session', 'deny'] });
+        hermesApproval = (choice) => finish(`izin: ${choice}`);
+        return;
+      }
+      send('assistant.delta', { delta: 'Masaüstünden ' });
+      return finish('merhaba.');
+    }
+    if (request.method === 'POST' && route === '/v1/runs/run_e2e/approval') {
+      json(200, { resolved: 1 });
+      hermesApproval?.(body?.choice);
+      hermesApproval = null;
+      return;
+    }
+    json(404, { error: { message: 'Not found' } });
+  });
+});
+await new Promise((done) => hermes.listen(0, '127.0.0.1', done));
+const hermesBase = `http://127.0.0.1:${hermes.address().port}`;
 const hiddenBefore = fs.readFileSync(vaultNote('.hidden/Secret.md'), 'utf8');
 const obsidianBefore = fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'utf8');
 
@@ -276,7 +348,7 @@ const windowAlone = await page.evaluate(async () => {
   });
   return { node: typeof require + typeof process, bridge: Object.keys(window.cortex).sort(), fetched, image, opened: window.open('https://example.com/') === null };
 });
-check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,notes,office,on,settings,setup,telegram,vault');
+check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,hermes,notes,office,on,settings,setup,telegram,vault');
 check('it reaches nothing on the network: no request, no image', windowAlone.fetched === 'blocked' && windowAlone.image === 'blocked');
 check('and opens no window of its own', windowAlone.opened && app.windows().length === 1);
 
@@ -894,8 +966,11 @@ check('Pyn opens on a new chat: the greeting and the field', await shownSoon(pag
 await page.locator('[data-chat-chip="cli"]').click();
 await page.locator('[data-chat-chip-footer]').click();
 check(
-  'the tools’ sign-ins open from the tool chip, every tool listed, the model servers with them',
-  (await shownSoon(page.locator('[data-auth-list]'), 30_000)) && (await page.locator('[data-auth-tool]').count()) === 7 && (await page.locator('[data-auth-tool="lmstudio"]').count()) === 1,
+  'the tools’ sign-ins open from the tool chip, every tool listed, the model servers and Pyn on a server with them',
+  (await shownSoon(page.locator('[data-auth-list]'), 30_000)) &&
+    (await page.locator('[data-auth-tool]').count()) === 8 &&
+    (await page.locator('[data-auth-tool="lmstudio"]').count()) === 1 &&
+    (await page.locator('[data-auth-tool="hermes"]').count()) === 1,
 );
 await shoot('15-auth.png');
 await page.keyboard.press('Escape');
@@ -1071,6 +1146,81 @@ check(
 await page.locator('[data-toast="error"]', { hasText: 'Could not add it to the inbox' }).locator('button').last().click();
 await page.locator('[data-chat-input]').fill('');
 await shoot('13b-lmstudio.png');
+
+/*
+  Pyn on a server (electron/services/hermesChat.ts, src/chat/HermesSection.tsx): set up in the
+  sign-ins - its address, its profile, its key, never shown again - then offered in the tool chip
+  as Pyn. A session begun on a phone is continued from its last messages; a new chat begins one
+  with its first message; a command it asks leave for is the same card. To the person it is Pyn:
+  the name of the agent behind it is nowhere on screen.
+*/
+console.log('\nPyn on a server');
+await page.locator('[data-app-view="pyn"]').click();
+await page.locator('[data-chat-new]').click();
+await page.locator('[data-chat-chip="cli"]').click();
+check('it is not offered in the tool chip before its address is given', (await page.locator('[data-chat-choice="hermes"]').count()) === 0);
+await page.locator('[data-chat-chip-footer]').click();
+const hermesCard = page.locator('[data-auth-tool="hermes"]');
+await hermesCard.waitFor();
+// Written as the server's page or Hermes's own path would have it: the closing `/` and `/p/…/` are taken off.
+await hermesCard.locator('[data-hermes-url]').fill(`${hermesBase}/`);
+await hermesCard.locator('[data-hermes-profile]').fill('/p/pyn/');
+await hermesCard.locator('[data-hermes-key]').fill(HERMES_KEY);
+await hermesCard.locator('[data-hermes-save]').click();
+check(
+  'its address, profile and key are saved; the key is not shown again, nor kept as written',
+  (await shownSoon(hermesCard.locator('[data-hermes-test]'))) &&
+    (await hermesCard.locator('[data-hermes-key]').inputValue()) === '' &&
+    (await hermesCard.locator('[data-hermes-url]').inputValue()) === hermesBase &&
+    (await hermesCard.locator('[data-hermes-profile]').inputValue()) === 'pyn' &&
+    !(await page.evaluate(() => document.body.innerHTML)).includes(HERMES_KEY) &&
+    !fs.readFileSync(path.join(userData, 'keys.json'), 'utf8').includes(HERMES_KEY),
+);
+await hermesCard.locator('[data-hermes-test]').click();
+check('the connection is tried as a chat asks it: the sessions it lists are counted', await shownSoon(page.locator('[data-toast="success"]', { hasText: 'Pyn answered: 1 recent sessions' })));
+await shoot('15b-pyn-server-setup.png');
+await page.keyboard.press('Escape');
+await page.locator('[data-auth-list]').waitFor({ state: 'detached' });
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-choice="hermes"]').click();
+check(
+  'then it is offered as Pyn, its sessions on a chip before the first message',
+  (await shownSoon(page.locator('[data-chat-chip="session"]'))) && (await page.locator('[data-chat-chip="cli"]').textContent())?.trim() === 'Pyn',
+);
+await page.locator('[data-chat-chip="session"]').click();
+check('the session begun on the phone is listed by its title', await shownSoon(page.locator('[data-chat-choice="phone_1"]', { hasText: 'Telefondan' })));
+await page.locator('[data-chat-choice="phone_1"]').click();
+check(
+  'chosen, it is shown from its last messages, the person’s and Pyn’s',
+  (await shownSoon(page.locator('[data-chat-text]', { hasText: 'Yarın 10:00 diş hekimi.' }))) && (await page.locator('[data-chat-user]', { hasText: 'yarın ne var' }).count()) === 1,
+);
+await page.locator('[data-chat-input]').fill('masaüstünden devam');
+await page.keyboard.press('Enter');
+check(
+  'and the next message goes on in it, under the profile, with the key; the answer streamed in',
+  (await shownSoon(page.locator('[data-chat-text]', { hasText: 'Masaüstünden merhaba.' }))) &&
+    hermesSeen.some((one) => one.method === 'POST' && one.route === '/api/sessions/phone_1/chat/stream' && one.profile === 'pyn' && one.auth === `Bearer ${HERMES_KEY}` && one.body?.input === 'masaüstünden devam') &&
+    !hermesSeen.some((one) => one.method === 'POST' && one.route === '/api/sessions'),
+);
+await shoot('13c-pyn-server.png');
+await page.locator('[data-chat-send]').waitFor();
+await page.locator('[data-chat-new]').click();
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-choice="hermes"]').click();
+await page.locator('[data-chat-input]').fill('izin iste');
+await page.keyboard.press('Enter');
+check(
+  'a new chat begins a session of its own with its first message, marked as begun here',
+  await soon(() => hermesSeen.some((one) => one.method === 'POST' && one.route === '/api/sessions' && one.body?.source === 'cortex-desktop')),
+);
+check(
+  'a command it asks leave for is the same card, with the choices it offers',
+  (await shownSoon(page.locator('[data-chat-permission]'))) && (await page.locator('[data-chat-answer-option]').count()) === 3,
+);
+await page.locator('[data-chat-answer-option="allow_once"]').click();
+check('and the answer reaches it', await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: once' })));
+check('the name of the agent behind it is nowhere on screen', !(await page.evaluate(() => document.body.innerText)).includes('Hermes'));
+await page.locator('[data-chat-send]').waitFor();
 await page.locator('[data-app-view="graph"]').click();
 await page.waitForTimeout(1_500);
 const graphSize = await page.locator('[data-notes-graph="vault"]').evaluate((element) => ({ nodes: Number(element.dataset.graphNodes), edges: Number(element.dataset.graphEdges) }));
