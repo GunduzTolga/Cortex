@@ -108,7 +108,7 @@ const AnswerText = memo(function AnswerText({ text }: { text: string }) {
   return <NoteMarkdown path="" source={text} offset={0} />;
 });
 
-function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?: () => void }) {
+function Answer({ turn, live, onSignIn, onRetry }: { turn: Turn; live: boolean; onSignIn?: () => void; onRetry?: () => void }) {
   const t = useT();
   const language = useLanguage();
   const working = live && !turn.end;
@@ -129,7 +129,7 @@ function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?
           </Fold>
         ) : null}
         {turn.steps.length || answered.length ? (
-          <Fold data="activity" icon={<ListChecks size={12} />} label={t('chat.activity', { count: turn.steps.length })} busy={working && turn.steps.some((one) => one.status === 'pending' || one.status === 'in_progress')}>
+          <Fold data="activity" icon={<ListChecks size={12} />} label={t('chat.activity', { count: turn.steps.length + answered.length })} busy={working && turn.steps.some((one) => one.status === 'pending' || one.status === 'in_progress')}>
             <ul className="divide-y divide-zinc-50">
               {turn.steps.map((step) => (
                 <StepRow key={step.id} step={step} />
@@ -175,7 +175,18 @@ function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?
                 {t('chat.signIn')}
               </button>
             ) : null}
+            {/* The message again, without typing it again: the field is emptied once a message is taken (29 October). */}
+            {onRetry ? (
+              <button type="button" onClick={onRetry} className="ml-1.5 mt-2 rounded-lg border border-darkDelegation/25 px-2.5 py-1 text-[11.5px] font-semibold text-darkDelegation hover:border-darkDelegation" data-chat-retry>
+                {t('chat.retry')}
+              </button>
+            ) : null}
           </div>
+        ) : turn.end?.kind === 'done' && turn.end.reason === 'end_turn' && !turn.text.trim() && !turn.steps.length && !turn.asked.length ? (
+          // Only Pyn's face was shown for a model that answered nothing, or only thought (29 October).
+          <p className="mt-1 text-[11.5px] text-zinc-400" data-chat-no-answer>
+            {t('chat.end.empty')}
+          </p>
         ) : turn.end?.kind === 'done' && turn.end.reason !== 'end_turn' ? (
           <p className="mt-1 text-[11.5px] text-zinc-400" data-chat-stopped={turn.end.reason}>
             {t(turn.end.reason === 'cancelled' ? 'chat.stopped' : turn.end.reason === 'max_tokens' ? 'chat.end.length' : turn.end.reason === 'refusal' ? 'chat.end.refusal' : 'chat.end.other', { reason: turn.end.reason })}
@@ -186,7 +197,7 @@ function Answer({ turn, live, onSignIn }: { turn: Turn; live: boolean; onSignIn?
   );
 }
 
-export function Transcript({ turns, running, onSignIn }: { turns: Turn[]; running: boolean; onSignIn?: () => void }) {
+export function Transcript({ turns, running, onSignIn, onRetry }: { turns: Turn[]; running: boolean; onSignIn?: () => void; onRetry?: (text: string) => void }) {
   const box = useRef<HTMLDivElement>(null);
   // Following the answer while the person is at the foot of the chat; left where they are when they scrolled up.
   const atFoot = useRef(true);
@@ -214,7 +225,12 @@ export function Transcript({ turns, running, onSignIn }: { turns: Turn[]; runnin
                 {turn.user.text}
               </div>
             ) : null}
-            <Answer turn={turn} live={running && at === turns.length - 1} onSignIn={onSignIn} />
+            <Answer
+              turn={turn}
+              live={running && at === turns.length - 1}
+              onSignIn={onSignIn}
+              onRetry={onRetry && !running && at === turns.length - 1 && turn.end?.kind === 'error' && turn.user ? () => onRetry(turn.user?.text ?? '') : undefined}
+            />
           </div>
         ))}
       </div>

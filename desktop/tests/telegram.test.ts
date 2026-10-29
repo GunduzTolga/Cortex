@@ -144,6 +144,16 @@ async function stopsBeating(vault: string, ms = 10_000): Promise<void> {
   }
 }
 
+/** The stand-in listener's pid, or 0 while there is none. Its file is opened before it is written: read in between, it was empty, 0 was taken for the pid and `nabiz-0` looked for (29 October). */
+function listenerPid(vault: string): number {
+  try {
+    const pid = Number(fs.readFileSync(path.join(vault, 'dinle.pid'), 'utf8').trim());
+    return Number.isInteger(pid) && pid > 0 ? pid : 0;
+  } catch {
+    return 0;
+  }
+}
+
 async function until(check: () => boolean, ms = 10_000): Promise<void> {
   const end = Date.now() + ms;
   while (!check()) {
@@ -234,8 +244,8 @@ test('the key is checked by the engine, kept encrypted, and the listener runs wi
   assert.ok(!kept.includes(KEY), 'never kept as it was given');
   assert.ok(!fs.readdirSync(vault).some((name) => fs.readFileSync(path.join(vault, name), 'utf8').includes(KEY)), 'nothing in the vault holds the key');
 
-  await until(() => fs.existsSync(path.join(vault, 'dinle.pid')));
-  const pid = Number(fs.readFileSync(path.join(vault, 'dinle.pid'), 'utf8'));
+  await until(() => listenerPid(vault) > 0);
+  const pid = listenerPid(vault);
   assert.ok(alive(pid));
   assert.ok(asked(vault).includes('telegram dinle +anahtar'), 'the listener is given the key as its environment');
   const paired = await telegramStatus();
@@ -246,7 +256,7 @@ test('the key is checked by the engine, kept encrypted, and the listener runs wi
   assert.ok(asked(vault).includes('telegram kur --yeniden-esle +anahtar'));
   // The listener was stopped before the new link was written, and started again after it (pyn-telegram-jev-2): left
   // running, it wrote the old pairing back over the new one within its round.
-  await until(() => fs.existsSync(path.join(vault, 'dinle.pid')) && Number(fs.readFileSync(path.join(vault, 'dinle.pid'), 'utf8')) !== pid);
+  await until(() => listenerPid(vault) > 0 && listenerPid(vault) !== pid);
   const lastBeat = Number(fs.readFileSync(path.join(vault, `nabiz-${pid}`), 'utf8'));
   const written = Number(fs.readFileSync(path.join(vault, 'kur.zaman'), 'utf8'));
   assert.ok(lastBeat < written, 'no listener ran while the pairing was written');

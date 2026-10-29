@@ -7,6 +7,7 @@ import '@fontsource/vt323/400.css';
 import './office.css';
 import * as art from './office-art.js';
 import type { ToolId } from './office-art.js';
+import { BIO_EN, enOf } from './ofis-en.js';
 import { OfficeEngine, clockText, lightForHour, nameTheManager, possessive, type AgentSnapshot, type Led, type LogEntry } from './ofis-engine.js';
 import { useChat } from '../chat/chatStore';
 import { TALK_EVERY, TALK_TOOL_NAME, useTalk, useTalkModels, useTalkTools, type TalkToolState } from './talkPrefs';
@@ -112,6 +113,8 @@ function Icon({ name, title }: { name: string; title: string }) {
 export function OfficeView({ visible }: { visible: boolean }) {
   const t = useT();
   const language = useLanguage();
+  // The office's own words (names, bios) in the window's language (ofis-en.js).
+  const said = (text: string) => (language === 'en' ? enOf(text) : text);
   const mapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
@@ -132,7 +135,9 @@ export function OfficeView({ visible }: { visible: boolean }) {
   const [tip, setTip] = useState<string | null>(null);
   const [newPill, setNewPill] = useState(false);
   const [now, setNow] = useState(() => new Date());
-  const [lastTalk, setLastTalk] = useState<string | null>(null);
+  // The last exchange as what it was, not as a sentence: kept as one, it said "just now" hours later and stayed in the
+  // language it was written in (29 October).
+  const [lastTalk, setLastTalk] = useState<{ kind: 'writing' } | { kind: 'done'; tool: string; at: number } | { kind: 'failed'; reason: string } | null>(null);
 
   const auth = useChat((state) => state.auth);
   const index = useNotes((state) => state.index);
@@ -198,7 +203,19 @@ export function OfficeView({ visible }: { visible: boolean }) {
     };
   }, []);
 
-  // Escape closes what is open over the map - the settings, a card, a room - one layer at a time with any dialog above.
+  // Escape closes what is open over the map - the settings, a card, a room - one layer at a time with any dialog above,
+  // and last the full screen (it had no layer, so Escape left the office full screen; 29 October).
+  // Entered after a card or the settings were opened, the full screen's layer is on top; it closes what is open over
+  // the map first all the same, and leaves the full screen last (Escape left it with the card still open).
+  useEscapeLayer(visible && full, () => {
+    if (settingsOpen) setSettingsOpen(false);
+    else if (selected || room) {
+      engineRef.current?.select(null);
+      if (engineRef.current) engineRef.current.room = null;
+      setSelected(null);
+      setRoom(null);
+    } else setFull(false);
+  });
   useEscapeLayer(visible && settingsOpen, () => setSettingsOpen(false));
   useEscapeLayer(visible && Boolean(selected || room), () => {
     engineRef.current?.select(null);
@@ -206,6 +223,12 @@ export function OfficeView({ visible }: { visible: boolean }) {
     setSelected(null);
     setRoom(null);
   });
+
+  // Which tools can write the office's talk, asked when the office is put in front: only the chat asked it, and an
+  // app opened on this view said LM Studio was not running until the chat had been opened once (29 October).
+  useEffect(() => {
+    if (visible) void useChat.getState().refreshClis();
+  }, [visible]);
 
   // The server room's lights: each tool's own sign-in, asked once if not yet.
   useEffect(() => {
@@ -227,7 +250,8 @@ export function OfficeView({ visible }: { visible: boolean }) {
   useEffect(() => engineRef.current?.setUserName(userName), [userName]);
 
   // The light by the hour, or day all day; the face the canvas writes in.
-  const night = prefs.followClock && (now.getHours() >= 20 || now.getHours() < 8);
+  // Night as the map draws it (lightForHour): counted from 20 to 08, the HUD said night shift over a morning map.
+  const night = prefs.followClock && lightForHour(now.getHours()) === 'gece';
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -288,6 +312,8 @@ export function OfficeView({ visible }: { visible: boolean }) {
   }, [index, now]);
 
   const roomStatus = (id: string, people: number): string => {
+    // A big vault takes a while to read: until it is, its rooms say so, not "0 notes" (29 October).
+    if (index === null && ['harita', 'arsiv', 'pyn', 'mudur'].includes(id)) return t('office.room.counting');
     const ok = Object.values(leds).filter((one) => one === 'ok').length;
     const wait = Object.values(leds).filter((one) => one === 'wait').length;
     switch (id) {
@@ -342,23 +368,31 @@ export function OfficeView({ visible }: { visible: boolean }) {
     const tool: TalkTool | null = talk.tool;
     if (!tool || !toolReady || writing) return;
     setWriting(true);
-    setLastTalk(t('office.settings.writing'));
+    setLastTalk({ kind: 'writing' });
     // Not the cat, and not the manager: that is the person, who speaks for themselves.
     const cast = Object.entries(art.CHARACTERS)
       .filter(([, one]) => one.kind !== 'cat' && one.kind !== 'mudur')
       .map(([id, one]) => {
         const person = one as { name: string; role: string; roleEn: string; bio?: string };
-        return { id, name: person.name, role: language === 'en' ? person.roleEn : person.role, bio: person.bio ?? '' };
+        return { id, name: said(person.name), role: language === 'en' ? person.roleEn : person.role, bio: language === 'en' ? (BIO_EN[id] ?? person.bio ?? '') : (person.bio ?? '') };
       });
     try {
       const lines = await window.cortex.office.talk({ tool, model: talk.model, cast, language: language === 'en' ? 'en' : 'tr' });
       engineRef.current?.speak(lines);
-      setLastTalk(t('office.settings.lastNow', { tool: TALK_TOOL_NAME[tool] + (talk.model ? ` · ${talk.model}` : '') }));
+      setLastTalk({ kind: 'done', tool: TALK_TOOL_NAME[tool] + (talk.model ? ` · ${talk.model}` : ''), at: Date.now() });
     } catch (err) {
-      setLastTalk(t('office.settings.failed', { reason: refusal(err instanceof Error ? err.message : String(err)) }));
+      setLastTalk({ kind: 'failed', reason: err instanceof Error ? err.message : String(err) });
+      // What failed may be the server gone: its state asked again, so the tool is not still shown as ready.
+      void useChat.getState().refreshClis();
     } finally {
       setWriting(false);
     }
+  };
+  const lastTalkText = (last: NonNullable<typeof lastTalk>): string => {
+    if (last.kind === 'writing') return t('office.settings.writing');
+    if (last.kind === 'failed') return t('office.settings.failed', { reason: refusal(last.reason) });
+    const minutes = Math.floor((now.getTime() - last.at) / 60_000);
+    return minutes < 1 ? t('office.settings.lastNow', { tool: last.tool }) : t('office.settings.lastAgo', { tool: last.tool, minutes });
   };
   const writeRef = useRef(writeTalk);
   writeRef.current = writeTalk;
@@ -390,7 +424,13 @@ export function OfficeView({ visible }: { visible: boolean }) {
   };
 
   const log = (
-    <div className={`ofis-log${full ? ' is-floating' : ''}`} style={full ? undefined : { height: prefs.logHeight }} data-ofis-log>
+    <div
+      className={`ofis-log${full ? ' is-floating' : ''}`}
+      // Never taller than the window leaves room for under the map: dragged to its most in the least window, the page
+      // itself grew and the header scrolled away (29 October).
+      style={full ? undefined : { height: prefs.logHeight }}
+      data-ofis-log
+    >
       <div className="ofis-log-title ofis-label">{t('office.log')}</div>
       <div
         ref={logRef}
@@ -407,7 +447,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
             <span>{line.time}</span>
             <span>{line.icon}</span>
             <span>
-              <span style={{ fontWeight: 700, color: line.nameColor }}>{line.name}</span>
+              <span style={{ fontWeight: 700, color: line.nameColor }}>{said(line.name)}</span>
               <span style={{ color: line.textColor }}>{line.text}</span>
             </span>
           </div>
@@ -526,7 +566,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
                 <button type="button" className="ofis-cta" disabled={writing || !toolReady} onClick={() => void writeTalk()} data-ofis-talk>
                   {t(writing ? 'office.settings.writing' : 'office.settings.now')}
                 </button>
-                {lastTalk ? <div className="ofis-hint-text">{lastTalk}</div> : null}
+                {lastTalk ? <div className="ofis-hint-text">{lastTalkText(lastTalk)}</div> : null}
               </div>
             ) : null}
             <div className="ofis-row ofis-sep">
@@ -560,7 +600,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
                 <div className="ofis-name" style={{ color: onPaper(card.color) }}>
-                  {card.name}
+                  {said(card.name)}
                 </div>
                 <div className="ofis-dim" style={{ fontSize: 13 }}>
                   {language === 'en' ? card.roleEn : card.role}
@@ -576,7 +616,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
                 <span>{t('office.card.tool', { tool: TOOL_NAME[card.tool], status: t(ledWord[leds[card.tool]]) })}</span>
               </div>
             ) : null}
-            <div className="ofis-bio">{card.bio}</div>
+            <div className="ofis-bio">{language === 'en' ? (BIO_EN[selected ?? ''] ?? said(card.bio ?? '')) : card.bio}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {bars.map(([label, value, color]) => (
                 <div key={label} className="ofis-bar">
@@ -648,7 +688,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
                 <div key={one.id} className="ofis-person">
                   <i style={{ background: art.CHARACTERS[one.id].color }} />
                   <span style={{ minWidth: 0 }}>
-                    <span style={{ fontWeight: 700 }}>{art.CHARACTERS[one.id].name}</span> <span className="ofis-dim">{one.act}</span>
+                    <span style={{ fontWeight: 700 }}>{said(art.CHARACTERS[one.id].name)}</span> <span className="ofis-dim">{one.act}</span>
                   </span>
                 </div>
               ))}
@@ -701,7 +741,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
               return (
                 <button key={id} type="button" className="ofis-chip" aria-pressed={selected === id} onClick={() => pickCharacter(id)} data-ofis-chip={id}>
                   <i style={{ background: character.color }} />
-                  <span style={{ fontWeight: 700 }}>{character.name}</span>
+                  <span style={{ fontWeight: 700 }}>{said(character.name)}</span>
                   <span className="ofis-chip-mood">{byId[id]?.mood ?? '🙂'}</span>
                   <span className="ofis-dim" title={act}>{act.length > 12 ? `${act.slice(0, 11)}…` : act}</span>
                 </button>

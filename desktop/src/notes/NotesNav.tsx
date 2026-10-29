@@ -339,7 +339,14 @@ function FileTree() {
     }
   };
   const trashEntry = useTrash();
-  const trash = (node: TreeNode) => trashEntry(node.path, node.kind === 'folder' ? { count: node.children.length } : undefined);
+  // A folder's count is of everything at its top, not of what the tree shows: with "all files" off it left out the
+  // files it hides, and the question said 3 where the bin then held 5 (29 October).
+  const topOf = (folder: string) => {
+    const index = useNotes.getState().index;
+    const inside = (one: string) => one.startsWith(`${folder}/`) && !one.slice(folder.length + 1).includes('/');
+    return index ? index.notes.filter((one) => inside(one.path)).length + index.files.filter((one) => inside(one.path)).length + index.folders.filter(inside).length : null;
+  };
+  const trash = (node: TreeNode) => trashEntry(node.path, node.kind === 'folder' ? { count: topOf(node.path) ?? node.children.length } : undefined);
 
   const menuFor = (node: TreeNode): MenuItem[] => {
     const items: MenuItem[] = [];

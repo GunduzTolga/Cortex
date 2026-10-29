@@ -254,7 +254,7 @@ export function isPredecessor(version: string, appVersion: string = app.getVersi
  */
 export function pinnedState(vault: string): string | null {
   try {
-    const pin = JSON.parse(fs.readFileSync(path.join(vault, '.beyin-runtime.json'), 'utf8')) as { state?: unknown };
+    const pin = JSON.parse(fs.readFileSync(path.join(vault, '.beyin-runtime.json'), 'utf8').replace(/^\uFEFF/, '')) as { state?: unknown };
     const state = typeof pin.state === 'string' && path.isAbsolute(pin.state) ? pin.state : null;
     return state && fs.existsSync(state) ? state : null;
   } catch {

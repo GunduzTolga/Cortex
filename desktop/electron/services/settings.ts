@@ -93,7 +93,9 @@ export function readSettings(): Settings {
   let text: string | null = null;
   try {
     text = fs.readFileSync(settingsPath(), 'utf8');
-    const raw: unknown = JSON.parse(text);
+    // A BOM in front (Notepad's "UTF-8 with BOM", PowerShell 5.1's Set-Content) is not JSON: read as damaged, the
+    // settings were set aside and the app started as on a first run (29 October).
+    const raw: unknown = JSON.parse(text.replace(/^\uFEFF/, ''));
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('the settings file holds no object');
     cache = hydrate(raw as Record<string, unknown>);
   } catch (err) {

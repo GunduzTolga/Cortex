@@ -168,7 +168,18 @@ export function registerIpc(): void {
   // The chat with the person's own AI CLIs (services/chat.ts): the window names a CLI from the list it is given, never a program.
   chat.onChatPush((payload) => broadcast('chat:event', payload));
   handle('chat:clis', () => chat.listChatClis());
-  handle('chat:list', () => chat.listChats());
+  handle('chat:list', () => {
+    const chats = chat.listChats();
+    if (chat.takeIndexBroken()) {
+      const say = (tr: string, en: string) => (readSettings().language === 'en' ? en : tr);
+      notice({
+        tone: 'error',
+        title: say('Sohbet listesi okunamadı', 'The chat list could not be read'),
+        detail: say('Liste yeniden başladı; eski listenin bir kopyası uygulamanın klasöründe saklandı.', 'The list began again; a copy of the old one was kept in the app’s folder.'),
+      });
+    }
+    return chats;
+  });
   handle('chat:open', (id) => chat.openChat(id));
   handle('chat:send', (id, cli, text) => chat.sendChat(id, cli, text));
   handle('chat:cancel', (id) => chat.cancelChat(id));
@@ -272,7 +283,7 @@ export function registerIpc(): void {
 
 export function stopWatching(): void {
   vaultNotes.stopWatchingVault();
-  // No CLI outlives the app, nor the Telegram listener.
-  chat.shutdownChats();
+  // No CLI outlives the app, nor the Telegram listener. A turn still answering is stopped, not failed.
+  chat.shutdownChats(true);
   void telegram.stopTelegram();
 }

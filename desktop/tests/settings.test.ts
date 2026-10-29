@@ -75,3 +75,13 @@ test('a name is kept tidied and cut to a way of addressing somebody; an empty on
   assert.equal(tidyName('   '), null);
   assert.equal(tidyName('x'.repeat(100))?.length, 40);
 });
+
+test('a file saved with a BOM in front (Notepad, PowerShell 5.1) is read as it is, not taken for a damaged one', () => {
+  // Read as damaged, it was set aside and the app opened on a first run: vault, name and language gone (29 October).
+  fresh();
+  fs.writeFileSync(settingsPath(), '\uFEFF' + JSON.stringify({ vault: null, language: 'en', userName: 'Deniz', onboarded: true }));
+  const read = readSettings();
+  assert.deepEqual([read.language, read.userName, read.onboarded], ['en', 'Deniz', true]);
+  assert.equal(settingsUnreadable(), null);
+  assert.deepEqual(fs.readdirSync(dir()).filter((name) => name.includes('corrupt')), []);
+});

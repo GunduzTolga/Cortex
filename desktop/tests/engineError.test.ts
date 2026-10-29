@@ -105,3 +105,18 @@ test('every failure the engine names is said in Turkish and in English', () => {
     assert.equal(engineSentence({ type: 'ValueError', code, message: '', hint: null, named: false, given: null }, 'en'), said.en.replace('{file}', ''));
   }
 });
+
+test('Python’s own last words are not the sentence: a module’s exception is named, a script it could not open is said, no path shown', () => {
+  // 29 October: a package that was not a zip showed "zipfile.BadZipFile: File is not a zip file" in the Turkish window,
+  // and a missing installer the whole python.exe and script paths.
+  const zip = 'Traceback (most recent call last):\n  File "x.py", line 3\nzipfile.BadZipFile: File is not a zip file';
+  assert.match(engineFailureText(zip, 'tr') ?? '', /^Cortex’in motoru açıklamadığı bir hatayla durdu \(BadZipFile\)/);
+  assert.match(engineFailureText(zip, 'en') ?? '', /^Cortex’s engine stopped with an error it does not explain \(BadZipFile\)/);
+  const script = "C:\\Python312\\python.exe: can't open file 'C:\\Temp\\cortex-kurulum-1\\scripts\\install_v3.py': [Errno 2] No such file or directory";
+  const said = engineFailureText(script, 'tr') ?? '';
+  assert.match(said, /gereken bir dosya yok/);
+  assert.doesNotMatch(said, /Temp|python\.exe|install_v3/);
+  // A built-in error with what it was refused still says it, and a sentence of the engine's own is left as it is.
+  assert.match(engineFailureText("PermissionError: [WinError 5] Access is denied: 'C:\\x'", 'en') ?? '', /^PermissionError/);
+  assert.equal(engineFailureText('bilinmeyen komut', 'en'), 'bilinmeyen komut');
+});

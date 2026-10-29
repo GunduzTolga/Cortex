@@ -107,6 +107,19 @@ function windowIcon(): string | undefined {
 }
 
 /**
+ * An address for the system's browser, at most one every 300 ms: a page made to open them in a loop (a note's script
+ * would be one, were scripts let run) put five tabs up at once (29 October). At one a second, a person's second link
+ * clicked quickly was lost; a person does not click two links within 300 ms.
+ */
+let lastOpened = 0;
+function openOutside(url: string): void {
+  const now = Date.now();
+  if (now - lastOpened < 300) return;
+  lastOpened = now;
+  void shell.openExternal(url);
+}
+
+/**
  * What any page of this app is held to, whatever made it: no new window, no
  * navigation away, no webview. A link in a note with `target=_blank` is the
  * person's click on an address they wrote, and goes to the system's browser,
@@ -114,14 +127,14 @@ function windowIcon(): string | undefined {
  */
 function holdContents(contents: Electron.WebContents): void {
   contents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    if (/^https?:\/\//i.test(url)) openOutside(url);
     return { action: 'deny' };
   });
   contents.on('will-navigate', (event, url) => {
     // Compared as origins, not as text: `startsWith` let `http://localhost:5274.evil.example` through in Krewgent's first version.
     if (isOwnPage(url)) return;
     event.preventDefault();
-    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    if (/^https?:\/\//i.test(url)) openOutside(url);
   });
   contents.on('will-attach-webview', (event) => event.preventDefault());
 }

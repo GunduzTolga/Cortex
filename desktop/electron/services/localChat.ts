@@ -107,7 +107,7 @@ const sessionFile = (id: string) => path.join(sessionDir(), `${id}.json`);
 function loadSession(id: string): Session | null {
   if (!SESSION_ID.test(id)) return null;
   try {
-    const raw = JSON.parse(fs.readFileSync(sessionFile(id), 'utf8')) as Partial<Session>;
+    const raw = JSON.parse(fs.readFileSync(sessionFile(id), 'utf8').replace(/^\uFEFF/, '')) as Partial<Session>;
     const messages = Array.isArray(raw.messages)
       ? raw.messages.filter((one): one is Message => typeof one === 'object' && one !== null && ['system', 'user', 'assistant'].includes(one.role) && typeof one.content === 'string')
       : [];
@@ -293,7 +293,7 @@ export function hookContext(vault: string, event: 'SessionStart' | 'UserPromptSu
   const hook = path.join(vault, '.claude', 'scripts', 'beyin_v3_hook.py');
   let state: string | null = null;
   try {
-    const runtime = JSON.parse(fs.readFileSync(path.join(vault, '.beyin-runtime.json'), 'utf8')) as { state?: unknown };
+    const runtime = JSON.parse(fs.readFileSync(path.join(vault, '.beyin-runtime.json'), 'utf8').replace(/^\uFEFF/, '')) as { state?: unknown };
     state = typeof runtime.state === 'string' && path.isAbsolute(runtime.state) ? runtime.state : null;
   } catch {
     state = null;
@@ -523,8 +523,12 @@ function complete(
           resolve({ text, used, calls: signal.aborted ? [] : made.filter((call) => call.function.name) });
         };
         response.on('end', finish);
-        // Stopped mid-answer: what came so far is the answer.
-        response.on('error', (err) => (signal.aborted ? finish() : reject(err)));
+        // Stopped mid-answer: what came so far is the answer. Cut off by the server (it quit, or the connection was
+        // lost), the turn says so; Node's own "aborted" was all it said (29 October).
+        response.on('error', () => (signal.aborted ? finish() : reject(new TurnFailure(`${LOCAL[id].name} stopped answering mid-way: the connection was lost.`, null))));
+        response.on('aborted', () => {
+          if (!signal.aborted) reject(new TurnFailure(`${LOCAL[id].name} stopped answering mid-way: the connection was lost.`, null));
+        });
         response.on('close', () => signal.aborted && finish());
       },
     );
@@ -599,7 +603,9 @@ async function answer(turn: Turn, message: string, session: Session, found: Loca
       }
     }
     if (answer) session.messages.push({ role: 'assistant', content: answer });
-    else if (signal.aborted) takeBack();
+    // No answer, stopped or empty: the question is taken back, so the next message (a retry among them) is not sent
+    // joined to it (29 October: "boş cevap ver" went along with the next one).
+    else takeBack();
     const size = found.contexts[model];
     if (used !== null && size) turn.emit({ type: 'usage', used, size, cost: null, currency: null });
     return signal.aborted ? 'cancelled' : 'end_turn';

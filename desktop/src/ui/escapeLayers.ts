@@ -112,6 +112,11 @@ export function createLayerStack(target: KeyTarget) {
     leave,
     top: (): Layer | undefined => layers[layers.length - 1],
     size: () => layers.length,
+    /**
+     * Whether a dialog is up (a layer with a modal root): what the app's own shortcuts wait behind. A menu or the
+     * office's settings panel is a layer and not a dialog; the settings open over those.
+     */
+    modal: () => layers.some((layer) => Boolean(layer.modalRoot)),
     /** Called after every change to the stack. Returns how to stop. */
     watch(watcher: () => void): () => void {
       watchers.add(watcher);

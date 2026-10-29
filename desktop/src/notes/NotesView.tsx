@@ -14,6 +14,7 @@ import { NotePeek } from './peek';
 import { imageOf } from './vaultCache';
 import { folderLabel, labelOf, nameLabel, useActiveTab, useNotes } from './notesStore';
 import { TextFile } from './TextFile';
+import { escapeLayers } from '../ui/escapeLayers';
 import './notes.css';
 
 /**
@@ -75,6 +76,9 @@ export function NotesView({ visible, onGraph }: { visible: boolean; onGraph: () 
   useEffect(() => {
     if (!visible) return;
     const keys = (event: KeyboardEvent) => {
+      // Not behind a dialog, a menu or the switcher: with the settings open, Ctrl+N wrote a note into the vault and
+      // Ctrl+O opened the switcher over them (29 October).
+      if (escapeLayers.modal()) return;
       const mod = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
       if (mod && !event.shiftKey && !event.altKey && key === 'e') {

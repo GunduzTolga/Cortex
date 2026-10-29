@@ -43,6 +43,11 @@ interface Stored extends ChatSummary {
   /** The vault it was held in; a chat is listed and continued only there. */
   vault: string;
   sessionId: string | null;
+  /**
+   * The settings its engine last offered (model, mode, effort), shown again once the app is opened anew: they came
+   * only with a turn, and a chat reopened had its tool's chip alone until the next message (29 October).
+   */
+  options?: ConfigOption[];
 }
 
 interface Index {
@@ -57,6 +62,8 @@ interface Live {
   events: ChatEvent[];
   running: boolean;
   options: ConfigOption[];
+  /** The options are the ones kept from before the app started (Stored.options), not yet offered by the engine now. */
+  stale: boolean;
   /** Answers awaited for steps the program asked leave for, by the card's id. */
   permissions: Map<string, (option: string | null) => void>;
   /** The running turn's Stop (Turn.signal). */
@@ -95,7 +102,7 @@ let index: Index | null = null;
 function readIndex(): Index {
   if (index) return index;
   try {
-    const parsed = JSON.parse(fs.readFileSync(indexFile(), 'utf8')) as Partial<Index>;
+    const parsed = JSON.parse(fs.readFileSync(indexFile(), 'utf8').replace(/^\uFEFF/, '')) as Partial<Index>;
     const chats = (Array.isArray(parsed.chats) ? parsed.chats : []).filter(
       (one): one is Stored =>
         typeof one === 'object' && one !== null && ID.test(String(one.id)) && CLI_IDS.includes(one.cli) && typeof one.vault === 'string' && typeof one.title === 'string',
@@ -109,6 +116,8 @@ function readIndex(): Index {
       } catch {
         /* nothing to keep */
       }
+      // Said once to the window (ipc.ts, chat:list): every chat went from the list and nothing told why (29 October).
+      indexBroken = true;
     }
     index = { version: 1, chats: [], prefs: {} };
   }
@@ -159,7 +168,7 @@ export function compact(events: readonly ChatEvent[]): ChatEvent[] {
 
 function readLog(id: string): ChatEvent[] {
   try {
-    const events = JSON.parse(fs.readFileSync(logFile(id), 'utf8')) as unknown;
+    const events = JSON.parse(fs.readFileSync(logFile(id), 'utf8').replace(/^\uFEFF/, '')) as unknown;
     return Array.isArray(events) ? events.filter((one): one is ChatEvent => typeof one === 'object' && one !== null && typeof (one as { type?: unknown }).type === 'string') : [];
   } catch {
     return [];
@@ -187,7 +196,10 @@ function storedOf(id: unknown): Stored {
   return stored;
 }
 
-const fresh = (stored: Stored, events: ChatEvent[]): Live => ({ stored, events, running: false, options: [], permissions: new Map(), stop: null, turn: 0, seq: 0 });
+// The options kept are shown again only for an engine that takes a choice before its session runs; an ACP agent
+// refuses one until it is connected, so its chips would refuse every pick.
+const keptOptions = (stored: Stored): ConfigOption[] | null => (Array.isArray(stored.options) && protocolOf(stored.cli) !== 'acp' ? stored.options : null);
+const fresh = (stored: Stored, events: ChatEvent[]): Live => ({ stored, events, running: false, options: keptOptions(stored) ?? [], stale: keptOptions(stored) !== null, permissions: new Map(), stop: null, turn: 0, seq: 0 });
 
 function liveOf(id: unknown): Live {
   const stored = storedOf(id);
@@ -207,6 +219,11 @@ function emit(chat: Live, event: ChatEvent): void {
 
 function setState(chat: Live, change: Partial<Pick<Live, 'running' | 'options'>>): void {
   Object.assign(chat, change);
+  if (change.options) chat.stale = false;
+  if (change.options?.length && kept(chat)) {
+    chat.stored.options = change.options;
+    saveIndexQuietly();
+  }
   push({ chatId: chat.stored.id, state: { running: chat.running, options: chat.options } });
 }
 
@@ -274,9 +291,12 @@ async function run(chat: Live, message: string): Promise<void> {
     await Promise.race([vaultSettled(), new Promise((done) => stop.signal.addEventListener('abort', done, { once: true }))]);
     // Stopped while it waited: the CLI is not started for a turn already ended.
     const reason = stop.signal.aborted ? 'cancelled' : await backendOf(chat.stored.cli).run(turnOf(chat, stop.signal), message);
-    emit(chat, { type: 'done', reason });
+    // Once Stop was asked for, the turn was stopped, whatever the CLI reports: an agent asked to end while a card
+    // waited said end_turn, and what it wrote after Stop read as a finished answer (29 October).
+    emit(chat, { type: 'done', reason: stop.signal.aborted ? 'cancelled' : reason });
   } catch (err) {
-    emit(chat, failureEvent(err, scrubberFor(chat.stored.vault)));
+    // A program ended under a stopped turn (Stop, or the app closing: shutdownChats) did not fail: it was stopped.
+    emit(chat, stop.signal.aborted ? { type: 'done', reason: 'cancelled' } : failureEvent(err, scrubberFor(chat.stored.vault)));
   } finally {
     if (chat.stop === stop) chat.stop = null;
     for (const answer of chat.permissions.values()) answer(null);
@@ -312,10 +332,11 @@ export function openChat(id: unknown): ChatOpened {
 /** A chat opened before any turn of it ran since the app started: the settings its engine has without one (Hermes's sessions), pushed once asked. */
 function offerTo(chat: Live): void {
   const backend = backendOf(chat.stored.cli);
-  if (!backend.offer || chat.running || chat.options.length) return;
+  // Kept options are asked again: an engine that offers its own (Hermes's sessions) lists them as they are now.
+  if (!backend.offer || chat.running || (chat.options.length && !chat.stale)) return;
   backend.offer(chat.stored.sessionId).then(
     (options) => {
-      if (kept(chat) && !chat.running && !chat.options.length && options.length) setState(chat, { options });
+      if (kept(chat) && !chat.running && (!chat.options.length || chat.stale) && options.length) setState(chat, { options });
     },
     () => undefined,
   );
@@ -451,9 +472,21 @@ export function removeChat(id: unknown): void {
   fs.rmSync(logFile(stored.id), { force: true });
 }
 
+/** Whether the chat list would not be read and was begun again, since this was last asked: said once, then forgotten. */
+let indexBroken = false;
+export function takeIndexBroken(): boolean {
+  const was = indexBroken;
+  indexBroken = false;
+  return was;
+}
+
 /** Every program ended: the app is closing, or another vault was chosen. */
-export function shutdownChats(): void {
+export function shutdownChats(closing = false): void {
   restartWanted = false;
+  // A chat answering as Cortex closes is stopped first: ended by its program going, it was kept as the tool having
+  // failed ("Program durdu.") and reopened that way (29 October). Another vault chosen mid-answer is still said as
+  // the tool having stopped: the person did not stop it, the vault under it went.
+  if (closing) for (const chat of live.values()) if (chat.running) chat.stop?.abort();
   for (const backend of Object.values(BACKENDS)) backend.shutdown();
 }
 

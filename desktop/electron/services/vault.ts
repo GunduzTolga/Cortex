@@ -88,12 +88,32 @@ export async function setVault(dir: string): Promise<VaultStatus> {
   if (ownDataTouchedBy(resolved)) throw refusedAsData();
   if (!(await isFolder(resolved))) throw new Error(`Not a folder: ${path.basename(resolved) || resolved}`);
   if (await throughLink(resolved)) throw new Error(`${path.basename(resolved)} leads elsewhere through a link. Choose the folder itself.`);
-  const real = await fs.realpath(resolved);
+  const name = path.basename(resolved) || resolved;
+  // A folder the person may not open: Node's own EPERM, with the whole path, was the sentence shown (29 October).
+  const real = await fs.realpath(resolved).catch(() => {
+    throw new Error(`${name} cannot be opened: Cortex cannot reach it. Choose another folder.`);
+  });
   if (ownDataTouchedBy(real)) throw refusedAsData();
+  await writable(real, name);
   updateSettings((settings) => {
     settings.vault = real;
   });
   return vaultStatus();
+}
+
+/**
+ * Whether Cortex may write in the folder, tried by writing a small file and taking it away: Windows says a folder
+ * may be written to (`fs.access`) from its read-only flag alone, not from who is let in. A folder only to be read
+ * was taken as the vault, and the first note written failed with a bare EPERM (29 October).
+ */
+async function writable(folder: string, name: string): Promise<void> {
+  const probe = path.join(folder, `.cortex-yazma-denemesi-${process.pid}-${Date.now()}`);
+  try {
+    await fs.writeFile(probe, '', { flag: 'wx' });
+  } catch {
+    throw new Error(`Cortex cannot write in ${name}: your notes are kept there. Choose a folder you can write in.`);
+  }
+  await fs.rm(probe, { force: true }).catch(() => undefined);
 }
 
 /** The vault by its folder's name, and whether it is still there; never its path. */

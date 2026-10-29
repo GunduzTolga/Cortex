@@ -68,7 +68,7 @@ function say(tr: string, en: string): string {
 
 function keptKey(): string | null {
   try {
-    const kept = JSON.parse(fs.readFileSync(file(), 'utf8')) as { key?: unknown };
+    const kept = JSON.parse(fs.readFileSync(file(), 'utf8').replace(/^\uFEFF/, '')) as { key?: unknown };
     if (typeof kept.key !== 'string' || !kept.key) return null;
     return safeStorage.decryptString(Buffer.from(kept.key, 'base64'));
   } catch {

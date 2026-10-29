@@ -44,12 +44,15 @@ const OPTIONAL = new Set<StepId>(['name', 'python', 'engine', 'tools', 'voice'])
  * A model server with a model loaded is ready: it was just asked. A sign-in the tool keeps is
  * not proof - it may have run out - so a tool counts only once it is signed in to here.
  */
-const serving = (tool: CliAuth) => Boolean(tool.local && tool.signedIn && tool.local.loaded.length);
+const serving = (tool: CliAuth) => Boolean(tool.local && tool.signedIn && tool.local.loaded.length && !tool.local.shortContext);
 
 export function Onboarding() {
   const t = useT();
   const settings = useApp((s) => s.settings);
-  const vault = useApp((s) => s.vault.vault);
+  const kept = useApp((s) => s.vault);
+  // A vault whose folder was moved or removed is not chosen: counted as one, Next and Finish led to the
+  // "not where it was" screen (29 October).
+  const vault = kept.missing ? null : kept.vault;
   const status = useSetup((s) => s.status);
   const steps = useSetup((s) => s.steps);
   const error = useSetup((s) => s.error);
@@ -63,6 +66,11 @@ export function Onboarding() {
   const trying = useRef<Set<CliId>>(new Set());
   // A sign-in opened from its button and not yet ended: said on its row, as its console may open behind the window.
   const [signingIn, setSigningIn] = useState<Set<CliId>>(new Set());
+  // A sign-in from its button that ended without one (its console closed, or it stopped at once): said on its row,
+  // where before nothing changed and nothing told why (29 October).
+  const [unfinished, setUnfinished] = useState<Set<CliId>>(new Set());
+  const signingRef = useRef(signingIn);
+  signingRef.current = signingIn;
   // Claude Code being installed from here, or its installer ended without it.
   const [installing, setInstalling] = useState<'running' | 'failed' | null>(null);
   const installRef = useRef(installing);
@@ -83,7 +91,15 @@ export function Onboarding() {
         });
     // Told by the main process: a sign-in done (its console may still be open), or its console closed.
     // Either way the sign-in is over on its row; a sign-in closed without one shows the tool signed out again.
-    const stop = window.cortex.on.authChanged(() => void reread().then(() => setSigningIn(new Set())));
+    const stop = window.cortex.on.authChanged(
+      () =>
+        void reread().then((signed) => {
+          const now = useChat.getState().auth ?? [];
+          const ended = [...signingRef.current].filter((id) => !signed.includes(id) && now.find((tool) => tool.id === id)?.signedIn !== true);
+          if (ended.length) setUnfinished((before) => new Set([...before, ...ended]));
+          setSigningIn(new Set());
+        }),
+    );
     // Back from a terminal or the browser, where a tool or Python was installed or signed in to: asked again,
     // and a sign-in that ended there counted as done here.
     const back = () => {
@@ -100,10 +116,12 @@ export function Onboarding() {
   }, []);
   const login = (id: CliId) => {
     trying.current.add(id);
+    setUnfinished((before) => new Set([...before].filter((one) => one !== id)));
     setSigningIn((before) => new Set(before).add(id));
     void window.cortex.chat.login(id).catch(() => {
       trying.current.delete(id);
       setSigningIn((before) => new Set([...before].filter((one) => one !== id)));
+      setUnfinished((before) => new Set(before).add(id));
     });
   };
   const install = (id: CliId) => {
@@ -142,6 +160,19 @@ export function Onboarding() {
     voice: Boolean(status?.voice?.installed),
     done: false,
   };
+
+  // Opened again after a first run was left half way (a name or a vault kept): it goes on at the first step not done,
+  // where before it began again at the name (29 October). Placed once, before anything is chosen here.
+  const placed = useRef(false);
+  useEffect(() => {
+    if (placed.current || !status) return;
+    placed.current = true;
+    if (!settings.userName && !vault) return;
+    const first = order.find((step) => step !== 'done' && !done[step]) ?? 'done';
+    setAt((now) => (now === 'name' ? first : now));
+    // Only once, when the setup's status is first known.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
   const index = Math.max(0, order.indexOf(at));
   const go = (step: StepId) => setAt(step);
@@ -187,13 +218,16 @@ export function Onboarding() {
           })}
         </ol>
       </nav>
-      <main className="flex min-w-0 flex-1 items-center justify-center overflow-y-auto px-10 py-10">
-        <div className="w-full max-w-xl">
-          {at === 'name' ? <NameStep onNext={next} /> : null}
-          {at === 'vault' ? <VaultStep name={vault?.name ?? null} /> : null}
+      {/* Centred by the child's margin, not by the scroller: centred by the scroller, a step taller than the window
+          lost its top, which no scrolling reached (zoomed, or the least window; 29 October). The top padding keeps the
+          language switch off the step. */}
+      <main className="flex min-w-0 flex-1 overflow-y-auto px-10 pb-10 pt-16">
+        <div className="m-auto w-full max-w-xl">
+          {at === 'name' ? <NameStep onNext={next} onSkip={skip} /> : null}
+          {at === 'vault' ? <VaultStep name={vault?.name ?? null} missing={kept.missing ? (kept.vault?.name ?? null) : null} /> : null}
           {at === 'python' ? <PythonStep status={status} /> : null}
           {at === 'engine' ? <EngineStep status={status} /> : null}
-          {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} signingIn={signingIn} installing={installing} onLogin={login} onInstall={install} /> : null}
+          {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} signingIn={signingIn} unfinished={unfinished} installing={installing} onLogin={login} onInstall={install} /> : null}
           {at === 'voice' ? <VoiceStep status={status} /> : null}
           {at === 'done' ? <DoneStep order={order} done={done} skipped={skipped} canFinish={Boolean(vault)} /> : null}
 
@@ -249,15 +283,34 @@ function Done({ children }: { children: React.ReactNode }) {
   );
 }
 
-function NameStep({ onNext }: { onNext: () => void }) {
+function NameStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
   const t = useT();
   const saved = useApp((s) => s.settings.userName);
   const [name, setName] = useState(saved ?? '');
   const word = name.trim();
+  // Left by the step list with a name typed and not yet saved: kept, as Next would have (it was dropped; 29 October).
+  const decided = useRef(false);
+  const typed = useRef(word);
+  typed.current = word;
+  useEffect(
+    () => () => {
+      if (!decided.current && typed.current && typed.current !== useApp.getState().settings.userName) void useApp.getState().setSettings({ userName: typed.current });
+    },
+    [],
+  );
   const save = async (value: string | null) => {
+    decided.current = true;
     await useApp.getState().setSettings({ userName: value });
     onNext();
   };
+  const skipName = async () => {
+    decided.current = true;
+    await useApp.getState().setSettings({ userName: null });
+    onSkip();
+  };
+  // Bey / Hanım offered only where the whole fits the 40 letters a name is kept to: past it, the kept name was cut
+  // mid-word ("… Ha").
+  const chips = word && !/\s/.test(word) ? [`${word} Bey`, `${word} Hanım`].filter((one) => one.length <= 40) : [];
   return (
     <div>
       <img src={sitting} alt="" className="mb-4 h-28 w-28" data-onboarding-pyn="sitting" />
@@ -284,9 +337,9 @@ function NameStep({ onNext }: { onNext: () => void }) {
           onChange={(event) => setName(event.target.value)}
           data-onboarding-name
         />
-        {word && !/\s/.test(word) ? (
+        {chips.length ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {[`${word} Bey`, `${word} Hanım`].map((one) => (
+            {chips.map((one) => (
               <button
                 key={one}
                 type="button"
@@ -302,7 +355,7 @@ function NameStep({ onNext }: { onNext: () => void }) {
         <p className="mt-3 text-[12px] leading-relaxed text-zinc-500">{t('onboarding.name.hint')}</p>
         <div className="mt-8 flex items-center gap-2">
           <span className="flex-1" />
-          <Button tone="quiet" onClick={() => void save(null)} data-onboarding-skip>
+          <Button tone="quiet" onClick={() => void skipName()} data-onboarding-skip>
             {t('onboarding.skip')}
           </Button>
           <Button tone="primary" type="submit" disabled={!word} data-onboarding-next>
@@ -315,7 +368,7 @@ function NameStep({ onNext }: { onNext: () => void }) {
   );
 }
 
-function VaultStep({ name }: { name: string | null }) {
+function VaultStep({ name, missing }: { name: string | null; missing: string | null }) {
   const t = useT();
   const who = useApp((s) => s.settings.userName);
   const choose = () => void useApp.getState().chooseVault(t('app.vault.failed'));
@@ -325,6 +378,11 @@ function VaultStep({ name }: { name: string | null }) {
         <p>{t('onboarding.vault.body')}</p>
         <p className="text-[12.5px] text-zinc-500">{t('onboarding.vault.required')}</p>
       </Heading>
+      {missing ? (
+        <p className="mt-5 rounded-lg bg-red-50 px-3 py-2 text-[12.5px] text-red-700" data-onboarding-vault-missing>
+          {t('app.vault.missing', { name: missing })}
+        </p>
+      ) : null}
       {name ? (
         <>
           <Done>{t('onboarding.vault.chosen', { name })}</Done>
@@ -409,6 +467,7 @@ function ToolsStep({
   auth,
   fresh,
   signingIn,
+  unfinished,
   installing,
   onLogin,
   onInstall,
@@ -416,6 +475,7 @@ function ToolsStep({
   auth: CliAuth[] | null;
   fresh: Set<CliId>;
   signingIn: Set<CliId>;
+  unfinished: Set<CliId>;
   installing: 'running' | 'failed' | null;
   onLogin: (id: CliId) => void;
   onInstall: (id: CliId) => void;
@@ -428,12 +488,19 @@ function ToolsStep({
   const offerInstall = Boolean(claude && !claude.installed && claude.canInstall);
   const state = (tool: CliAuth): [Key, string] =>
     tool.local
-      ? serving(tool)
-        ? ['onboarding.tools.serving', 'bg-good/15 text-good']
-        : ['onboarding.tools.noModel', 'bg-zinc-100 text-zinc-500']
+      ? // A server that is not running is off, as the AI tools window says; "no model" is one running with none loaded.
+        !tool.signedIn
+        ? ['auth.status.off', 'bg-bad/10 text-bad']
+        : tool.local.shortContext
+          ? ['onboarding.tools.short', 'bg-gold/25 text-darkDelegation']
+          : serving(tool)
+            ? ['onboarding.tools.serving', 'bg-good/15 text-good']
+            : ['onboarding.tools.noModel', 'bg-zinc-100 text-zinc-500']
       : fresh.has(tool.id)
         ? ['onboarding.tools.fresh', 'bg-good/15 text-good']
-        : refused.includes(tool.id)
+        : unfinished.has(tool.id)
+          ? ['onboarding.tools.unfinished', 'bg-bad/10 text-bad']
+          : refused.includes(tool.id)
           ? ['auth.status.refused', 'bg-bad/10 text-bad']
           : tool.signedIn === true
             ? ['onboarding.tools.kept', 'bg-gold/25 text-darkDelegation']
@@ -465,10 +532,16 @@ function ToolsStep({
           const [words, colours] = state(tool);
           const going = signingIn.has(tool.id) && !fresh.has(tool.id);
           return (
-            <li key={tool.id} className="flex items-center gap-3 px-3 py-2.5" data-onboarding-tool={tool.id}>
-              <span className="min-w-0 flex-1 text-[13px] font-semibold text-darkDelegation">
+            <li key={tool.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5" data-onboarding-tool={tool.id}>
+              {/* Wrapped, not run under the badge beside it, where the window is narrow or zoomed (29 October). */}
+              <span className="min-w-[7rem] flex-1 break-words text-[13px] font-semibold text-darkDelegation">
                 {TOOL_NAMES[tool.id] ?? tool.id}
                 {going ? <span className="mt-0.5 block text-[11.5px] font-normal text-zinc-500">{t('onboarding.tools.signingIn.note')}</span> : null}
+                {tool.local?.shortContext && tool.signedIn ? (
+                  <span className="mt-0.5 block text-[11.5px] font-normal text-zinc-500" data-onboarding-tool-short>
+                    {t('auth.local.short', { tokens: tool.local.shortContext })}
+                  </span>
+                ) : null}
               </span>
               {going ? (
                 <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-gold/25 px-2 py-0.5 text-[10.5px] font-semibold text-darkDelegation" data-onboarding-tool-signing-in>

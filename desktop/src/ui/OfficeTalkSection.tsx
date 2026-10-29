@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import type { TalkTool } from '@shared/office';
+import { useChat } from '../chat/chatStore';
 import type { Key } from '../i18n';
 import { useT } from '../i18n/useT';
 import { TALK_EVERY, TALK_TOOL_NAME, useTalk, useTalkModels, useTalkTools, type TalkToolState } from '../office/talkPrefs';
@@ -25,6 +27,11 @@ function Note({ children, data }: { children: React.ReactNode; data?: string }) 
 export function OfficeTalkSection() {
   const t = useT();
   const talk = useTalk();
+  // The tools' state asked when the section is opened: before the chat had been opened once, a running LM Studio was
+  // said not to be (29 October).
+  useEffect(() => {
+    void useChat.getState().refreshClis();
+  }, []);
   const tools = useTalkTools();
   const ready = tools.some((one) => one.id === talk.tool && one.state === 'ready');
   const models = useTalkModels(talk.live ? talk.tool : null, ready);

@@ -68,7 +68,8 @@ interface ChatState {
   select(id: string | null): Promise<void>;
   setCli(cli: CliId): void;
   setDraft(key: string, text: string): void;
-  send(text: string): Promise<boolean>;
+  /** `again`: a failed message sent once more, which leaves what is being typed in the field as it is. */
+  send(text: string, again?: boolean): Promise<boolean>;
   cancel(): void;
   answer(permission: string, option: string | null): void;
   /** A setting chosen: the chat in front's; or, for a new chat, one it is offered before its first message, which begins it (a Hermes session continued). */
@@ -290,7 +291,7 @@ export const useChat = create<ChatState>((set, get) => {
       keep(DRAFTS_KEY, drafts);
     },
 
-    async send(text) {
+    async send(text, again = false) {
       const { active, cli, open } = get();
       const chatCli = active ? get().chats.find((one) => one.id === active)?.cli : cli;
       if (!chatCli || !text.trim()) return false;
@@ -301,7 +302,8 @@ export const useChat = create<ChatState>((set, get) => {
           const opened = await window.cortex.chat.open(id);
           set((state) => ({ open: { ...state.open, [id]: fromOpened(opened) } }));
         }
-        get().setDraft(active ?? 'new', '');
+        // A retry is not what was typed: the field keeps what is being written now (it was emptied; 29 October).
+        if (!again) get().setDraft(active ?? 'new', '');
         set({ active: id, error: null });
         return true;
       } catch (err) {
@@ -382,6 +384,7 @@ export const useChat = create<ChatState>((set, get) => {
     async remove(id) {
       try {
         await window.cortex.chat.remove(id);
+        const wasInFront = get().active === id;
         set((state) => {
           const open = { ...state.open };
           delete open[id];
@@ -390,6 +393,10 @@ export const useChat = create<ChatState>((set, get) => {
           return { chats, open, active: state.active === id ? null : state.active };
         });
         get().setDraft(id, '');
+        // As the comment above says: it was always a new chat (29 October). Only for the chat in front: another one
+        // deleted from a new chat leaves the new chat where it is.
+        const next = get().chats[0];
+        if (wasInFront && next) void get().select(next.id);
       } catch (err) {
         set({ error: messageOf(err) });
       }
