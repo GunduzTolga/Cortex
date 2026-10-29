@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { engineAction } from '@shared/setup';
 import { BookOpen, Building2, FolderOpen, MessageCircle, Network, Settings } from 'lucide-react';
 import logo from '../../tema/ananas/marka/pyn-logo-512.png';
+import smallLogo from '../../tema/ananas/marka/pyn-logo-96.png';
 import type { Key } from './i18n';
 import { useT } from './i18n/useT';
 import { AuthDialog } from './chat/AuthDialog';
@@ -218,7 +219,7 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-white" data-vault-screen>
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-zinc-100 px-3" role="group" aria-label={t('app.view')}>
-        <img src={logo} alt="" className="mr-2 h-6 w-6" />
+        <img src={smallLogo} alt="" className="mr-2 h-6 w-6" />
         {views.map(([one, icon, words]) => (
           <button
             key={one}

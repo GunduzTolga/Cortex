@@ -167,6 +167,8 @@ export const en = {
   'onboarding.tools.noModel': 'No model loaded',
   'onboarding.tools.signIn': 'Sign in',
   'onboarding.tools.again': 'Sign in again',
+  'onboarding.tools.signingIn': 'Signing in',
+  'onboarding.tools.signingIn.note': 'Finish signing in in the window or browser that opened; it shows here when done.',
   'onboarding.tools.keys': 'API keys and more…',
   'onboarding.voice.title': 'Voice typing',
   'onboarding.voice.later': 'Skip it now if you like: Settings → Voice typing sets it up with one button. You can go on to the next steps while it installs.',

@@ -56,11 +56,27 @@ fs.writeFileSync(
     "if (what === 'auth' && how === 'status') console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', email: 'e2e@example.com' }));\n" +
     "else process.exit(1);\n",
 );
+/*
+  Codex signed out, its sign-in as a browser's goes: done a moment after it is opened, while its
+  console stays open a while longer. The first-run screen said nothing until the console was
+  closed or the app opened again (29 October); the sign-in is asked after while it is open.
+*/
+const codexSignedIn = path.join(toolBin, 'codex-signed-in');
+fs.writeFileSync(
+  path.join(toolBin, 'codex-standin.mjs'),
+  "import fs from 'node:fs';\n" +
+    `const flag = ${JSON.stringify(codexSignedIn)};\n` +
+    "const [what, how] = process.argv.slice(2);\n" +
+    "if (what === 'login' && how === 'status') console.log(fs.existsSync(flag) ? 'Logged in using ChatGPT' : 'Not logged in');\n" +
+    "else if (what === 'login') { setTimeout(() => fs.writeFileSync(flag, ''), 1500); setTimeout(() => process.exit(0), 25000); }\n" +
+    "else process.exit(1);\n",
+);
 // Windows spells it Path: one key, so the child gets one PATH.
 const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
 if (process.platform === 'win32') {
   // As npm writes a script's shim: the app reads the script it names and runs it with node.
   fs.writeFileSync(path.join(toolBin, 'claude.cmd'), '@ECHO off\r\nnode "%dp0%\\claude-status.mjs" %*\r\n');
+  fs.writeFileSync(path.join(toolBin, 'codex.cmd'), '@ECHO off\r\nnode "%dp0%\\codex-standin.mjs" %*\r\n');
 } else {
   fs.writeFileSync(path.join(toolBin, 'claude'), `#!/bin/sh\nexec "${process.execPath}" "${path.join(toolBin, 'claude-status.mjs')}" "$@"\n`, { mode: 0o755 });
 }
@@ -405,6 +421,17 @@ check('then the AI tools', await shownSoon(page.locator('[data-onboarding-step="
     );
     console.log(`       kept ${kept}, sign-in offered as expected ${again}, serving ${serving}; rows: ${rows.join(' | ') || 'none'}`);
   }
+}
+if (process.platform === 'win32') {
+  // Signed in from here while the window stays in front: no focus comes back to it, the console stays open.
+  const codexRow = page.locator('[data-onboarding-tool="codex"]');
+  const out = await shownSoon(codexRow.locator('[data-onboarding-tool-state="auth.status.out"]'));
+  await codexRow.locator('[data-onboarding-tool-login="codex"]').click();
+  const saysSigningIn = await shownSoon(codexRow.locator('[data-onboarding-tool-signing-in]'), 3_000);
+  check(
+    'a sign-in opened from the first run is said to be going on, and its end is shown without the console closed or the window left',
+    out && saysSigningIn && (await shownSoon(codexRow.locator('[data-onboarding-tool-state="onboarding.tools.fresh"]'), 15_000)),
+  );
 }
 await shoot('01c2-onboarding-tools.png');
 await onward();

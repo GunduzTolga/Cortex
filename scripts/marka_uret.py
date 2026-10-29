@@ -6,7 +6,7 @@ Pillow ve numpy ister; yalnız tasarım değiştiğinde elle çalıştırılır,
 `kaynak/` altındaki dört çizimin zeminini kaldırır (kenarlarda zemin rengi ayıklanır, kağıt
 zemindeki benekler atılır) ve şunları yazar:
 
-- pyn-logo-512.png              : logo, tek başına (uygulamanın köşesi, karşılama)
+- pyn-logo-{512,96}.png         : logo, tek başına (karşılama; köşe ve sohbetteki Pyn)
 - pyn-muhur-{28,42,56,200}.png  : logo krem dairede, ince mürekkep halkayla: uygulamanın mührü
                                   (bildirim alanı, terminaldeki Pyn sekmesi, kurulum başlığı)
 - pyn.ico                       : aynı mühür, Windows uygulama ve kısayol ikonu (16-256 px)
@@ -159,7 +159,7 @@ ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 256)
 def logo():
     """Pyn's marks from the drawings in `kaynak/`:
 
-    - pyn-logo.webp: the logo, alone (pyn-logo-512.png: the app's corner and welcome) and on its
+    - pyn-logo.webp: the logo, alone (pyn-logo-{512,96}.png: the welcome, the corner, the chat) and on its
       round mark (pyn-muhur-{28,42,56,200}.png, pyn.ico, pyn-muhur.six: the app's and its
       shortcuts' icon, the notification area, the terminal's tab and welcome)
     - pyn-yakala.webp: Pyn taking a note, the phone's Not al button; Not al's title here too
@@ -168,7 +168,9 @@ def logo():
     - pyn-ananas.webp: Pyn as a pineapple, small (pyn-ananas-512.png: the first run's last step)"""
     OUT.mkdir(parents=True, exist_ok=True)
     alone = cutout(SOURCES / 'pyn-logo.webp')
-    alone.resize((512, 512), Image.LANCZOS).save(OUT / 'pyn-logo-512.png', optimize=True)
+    # 512 for the welcome; 96 for what is drawn at 24-36 px (the corner, the chat's face), which a browser shrinking 512 blurs.
+    for size in (512, 96):
+        alone.resize((size, size), Image.LANCZOS).save(OUT / f'pyn-logo-{size}.png', optimize=True)
     mark = badge(alone)
     for size in (28, 42, 56, 200):
         mark.resize((size, size), Image.LANCZOS).save(OUT / f'pyn-muhur-{size}.png', optimize=True)
