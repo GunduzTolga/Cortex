@@ -108,6 +108,7 @@ const ENGINE_STEPS: Array<[RegExp, string]> = [
   [/^Ekran kartı bu bilgisayarda işlemciden yavaş kaldı \((\d+),(\d+) sn\); işlemciye geçiliyor\.$/, 'On this computer the graphics card was slower than the processor ($1.$2 s); going on with the processor.'],
   [/^İşlemcinin modeli hazırlanamadı; ekran kartı kalıyor\.$/, 'The processor’s model could not be had; the graphics card stays.'],
   [/^whisper\.cpp modeli indiriliyor \(yaklaşık 1,6 GB\)…$/, 'Downloading the whisper.cpp model (about 1.6 GB)…'],
+  [/^whisper\.cpp modeli indiriliyor \(yaklaşık 870 MB\)…$/, 'Downloading the whisper.cpp model (about 870 MB)…'],
   [/^Sanal ortam kuruluyor…$/, 'Setting up its own environment…'],
   [/^Paketler yükleniyor \(ilk kurulumda birkaç dakika sürer\): (.+)$/, 'Installing packages (a few minutes the first time): $1'],
   [/^Uyandırma modeli indiriliyor \(yaklaşık 40 MB\)…$/, 'Downloading the wake-word model (about 40 MB)…'],
@@ -359,6 +360,7 @@ export function voiceOf(result: Record<string, unknown>): VoiceStatus | null {
     // An engine from before Telegram does not say: taken as able, so nothing is offered that it cannot use.
     readsFiles: result.dosya_okur !== false,
     cpuModel: CPU_MODELS.includes(result.islemci_modeli as CpuModel) ? (result.islemci_modeli as CpuModel) : null,
+    earlierModel: result.eski_model === true,
   };
 }
 

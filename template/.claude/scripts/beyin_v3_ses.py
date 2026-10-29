@@ -62,13 +62,18 @@ PACKAGES = FASTER_PACKAGES + BASE_PACKAGES  # the processor's set
 VULKAN_DIR = 'whisper-vulkan'
 SERVER_EXE = 'whisper-server.exe'
 GGML_DIR = 'ggml'
-# whisper.cpp's own model file for the Vulkan engine, pinned by its digest.
+# whisper.cpp's own model file for the Vulkan engine, pinned by its digest: large-v3-turbo kept in
+# 8 bits (q8_0), about half the full one's 1.6 GB and writing practically as well; the full one
+# was all read onto the card before the voice could start, and it started late (30 October).
 GGML_MODEL = {
-    'ad': 'ggml-large-v3-turbo.bin',
-    'url': 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin',
-    'sha256': '1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69',
-    'boyut': 1624555275,
+    'ad': 'ggml-large-v3-turbo-q8_0.bin',
+    'url': 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin',
+    'sha256': '317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1',
+    'boyut': 874188075,
 }
+# The model files earlier versions fetched: written with until the pinned one is in place (`kur`
+# fetches it), then removed by that `kur`, so 1.6 GB is not left behind.
+GGML_EARLIER = ('ggml-large-v3-turbo.bin',)
 # whisper.cpp built for Vulkan by .github/workflows/whisper-vulkan.yml, a pre-release of its own
 # (published 2026-10-15), never replaced once published: another build gets a tag of its own and is
 # taken up by changing the url and sha256 here. A build already in the voice folder is used as it is.
@@ -828,6 +833,30 @@ def ggml_model(state):
     return ses_dir(state) / GGML_DIR / GGML_MODEL['ad']
 
 
+def ggml_whole(state):
+    """Whether the pinned model file is there, all of it."""
+    model = ggml_model(state)
+    return model.is_file() and model.stat().st_size == GGML_MODEL['boyut']
+
+
+def ggml_in_place(state):
+    """The model file whisper.cpp writes with: the pinned one when it is whole, else one an earlier
+    version fetched, still on disk - an engine updated before `kur` ran again keeps writing on the
+    card, not on the processor - else the pinned one's path, which the server says it cannot open."""
+    if ggml_whole(state):
+        return ggml_model(state)
+    for name in GGML_EARLIER:
+        earlier = ses_dir(state) / GGML_DIR / name
+        if earlier.is_file():
+            return earlier
+    return ggml_model(state)
+
+
+def ggml_earlier(state):
+    """An earlier version's model file is what the card writes with: `kur` fetches the pinned one."""
+    return ggml_in_place(state).name in GGML_EARLIER
+
+
 def packages_for(engine):
     if engine == 'vulkan':
         return list(FASTER_PACKAGES) + list(BASE_PACKAGES) + list(DECODE_PACKAGES)
@@ -990,9 +1019,14 @@ def _vulkan_ready(state, say, download_checked):
         if not exe.is_file():
             return False
     model = ggml_model(state)
-    if not (model.is_file() and model.stat().st_size == GGML_MODEL['boyut']):
-        say('whisper.cpp modeli indiriliyor (yaklaşık 1,6 GB)…')
+    if not ggml_whole(state):
+        say('whisper.cpp modeli indiriliyor (yaklaşık 870 MB)…')
         download_checked(GGML_MODEL['url'], model, GGML_MODEL['sha256'], say)
+    # An earlier version's file goes only now, with the pinned one checked in its place: a fetch that
+    # failed left the voice writing with it. One the running server still holds stays to the next `kur`.
+    for name in GGML_EARLIER:
+        with contextlib.suppress(OSError):
+            (model.parent / name).unlink()
     return True
 
 
@@ -1305,7 +1339,9 @@ def status(state):
             'motor': engine, 'klasor': str(ses_dir(state)),
             'islemci_modeli': config.get('cpu_model') or DEFAULTS['cpu_model'],
             'komutlar': config['komutlar'], 'adla_kaydet': list(config.get('adla_kaydet') or []),
-            'dosya_okur': installed(state) and reads_files(state)}
+            'dosya_okur': installed(state) and reads_files(state),
+            # The card writes with an earlier version's larger model file: `kur` again fetches the lighter one.
+            'eski_model': engine == 'vulkan' and installed(state) and ggml_earlier(state)}
 
 
 def uninstall(state):
@@ -2018,8 +2054,9 @@ def load_model(state, config, report=None):
     """(model, what it is), on the engine `ses kur` set up; a failed card says why on stderr (isci.log)."""
     engine = ses.engine_in_use(state, config)
     if engine == 'vulkan':
-        exe, model, log = ses.server_exe(state), ses.ggml_model(state), ses.ses_dir(state) / 'whisper-server.log'
-        name = ses.GGML_MODEL['ad'][len('ggml-'):-len('.bin')]
+        exe, model, log = ses.server_exe(state), ses.ggml_in_place(state), ses.ses_dir(state) / 'whisper-server.log'
+        # Named by the file it writes with: an earlier version's, until `kur` fetches the pinned one.
+        name = model.name[len('ggml-'):-len('.bin')]
         try:
             return Server(exe, model, config, log), name + ' (ekran kartı, Vulkan)'
         except Exception as exc:

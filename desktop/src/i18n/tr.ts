@@ -213,6 +213,8 @@ export const tr: Record<keyof typeof en, string> = {
   'setup.voice.intro': 'Yakala\'ya (Ctrl+Alt+C) yazmak yerine konuş; "Pyn, not al" demek de pencereyi açabilir. Ses bilgisayardan çıkmaz. Kurulum yaklaşık 2 GB indirir ve ekran kartın varsa onu kullanır.',
   'setup.voice.install': 'Sesle yazmayı kur',
   'setup.voice.update': 'Sesle yazmayı güncelle',
+  'setup.voice.lighter': 'Daha hafif ses modelini al',
+  'setup.voice.lighter.hint': 'Ekran kartında yazan modelin yarı boyutlu sürümü var (yaklaşık 870 MB): yazışı neredeyse aynı, ses daha çabuk açılır. Alınca eski 1,6 GB\'lık dosya silinir; o zamana kadar ses eskisiyle çalışır.',
   'setup.voice.update.hint': 'Telegram botuna gönderilen sesli notları yazıya çevirmek için sesle yazmanın kendi ortamına bir paket daha gerekiyor: güncellemek onu ekler, modeller yerinde kalır.',
   'telegram.title': 'Telegram',
   'telegram.intro': 'Telefondan Cortex\'e not gönder: kendi Telegram botuna gönderdiğin yazı, bağlantı, fotoğraf, dosya ya da sesli not gelen kutusuna (📥 000-Inbox/Yakala) düşer. Bilgisayar kapalıyken gönderdiklerin açılınca gelir.',

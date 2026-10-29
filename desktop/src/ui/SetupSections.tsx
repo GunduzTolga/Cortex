@@ -397,16 +397,27 @@ function VoiceSection({ status }: { status: SetupStatus }) {
           ) : null}
           {voice.commands ? <VoiceCommandsBlock commands={voice.commands} busy={busy} /> : null}
           {voice.readsFiles === false ? <Note data="update">{t('setup.voice.update.hint')}</Note> : null}
+          {voice.readsFiles !== false && voice.earlierModel ? <Note data="lighter">{t('setup.voice.lighter.hint')}</Note> : null}
         </>
       ) : (
         <Note data="not-installed">{t('setup.voice.intro')}</Note>
       )}
       {voice?.installed && voice.readsFiles !== false && helperFailing ? <Note data="repair">{t('setup.voice.repair.hint')}</Note> : null}
-      {status.engine.installed && status.python && (status.job === 'voice' || (voice && (!voice.installed || voice.readsFiles === false || helperFailing))) ? (
+      {status.engine.installed && status.python && (status.job === 'voice' || (voice && (!voice.installed || voice.readsFiles === false || helperFailing || voice.earlierModel))) ? (
         <div className="mt-2 px-3">
           <Button tone="ghost" disabled={busy} onClick={() => void run('voice')} data-setup-voice>
             <Mic size={13} />
-            {t(!voice?.installed ? 'setup.voice.install' : voice.readsFiles === false ? 'setup.voice.update' : 'setup.voice.repair')}
+            {t(
+              !voice?.installed
+                ? 'setup.voice.install'
+                : voice.readsFiles === false
+                  ? 'setup.voice.update'
+                  : helperFailing
+                    ? 'setup.voice.repair'
+                    : voice.earlierModel
+                      ? 'setup.voice.lighter'
+                      : 'setup.voice.repair',
+            )}
           </Button>
         </div>
       ) : null}

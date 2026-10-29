@@ -219,6 +219,8 @@ export const en = {
   'setup.voice.intro': 'Talk into yakala (Ctrl+Alt+C) instead of typing; saying "Pyn, not al" can open it too. Speech never leaves this computer. Setting up downloads about 2 GB and uses your graphics card if you have one.',
   'setup.voice.install': 'Set up voice typing',
   'setup.voice.update': 'Update voice typing',
+  'setup.voice.lighter': 'Get the lighter voice model',
+  'setup.voice.lighter.hint': 'The model that writes on the graphics card has a version half the size (about 870 MB): it writes almost the same, and the voice starts sooner. Getting it removes the earlier 1.6 GB file; until then the voice works with that one.',
   'setup.voice.update.hint': 'Voice notes sent to the Telegram bot need one more package in voice typing\'s own environment: updating adds it, the models stay.',
   'telegram.title': 'Telegram',
   'telegram.intro': 'Send notes to Cortex from your phone: a text, a link, a photo, a file or a voice note sent to your own Telegram bot lands in the inbox (📥 000-Inbox/Yakala). What you send while the computer is off comes in when it is on again.',

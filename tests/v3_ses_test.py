@@ -615,6 +615,54 @@ class SetupTest(unittest.TestCase):
         self.assertIn('vosk>=0.3.45', pip)
         self.assertEqual(ses.engine_in_use(self.state), 'vulkan')
 
+    def test_an_install_with_the_earlier_full_model_fetches_the_lighter_one_then_removes_the_earlier(self):
+        # 30 October: the full large-v3-turbo (1.6 GB) gave way to its q8_0, about half of it, as it was
+        # all read onto the card before the voice could start. Set up before, an install keeps writing
+        # with the earlier file until `kur` has the pinned one in its place.
+        exe = ses.server_exe(self.state)
+        exe.parent.mkdir(parents=True)
+        exe.write_bytes(b'MZ')
+        earlier = ses.ses_dir(self.state) / ses.GGML_DIR / ses.GGML_EARLIER[0]
+        earlier.parent.mkdir(parents=True)
+        earlier.write_bytes(b'eski')
+        self.assertEqual(ses.ggml_in_place(self.state), earlier, 'written with until the lighter one is in place')
+        fetched = []
+        _result, _pip, said = self.vulkan_install(fetched)
+        self.assertEqual(fetched, [(ses.GGML_MODEL['url'], ses.GGML_MODEL['sha256'])])
+        self.assertTrue(any('870 MB' in line for line in said), said)
+        self.assertFalse(earlier.exists(), 'the earlier 1.6 GB file is removed once the lighter one is in')
+        self.assertEqual(ses.ggml_in_place(self.state), ses.ggml_model(self.state))
+
+    def test_a_failed_fetch_of_the_lighter_model_leaves_the_earlier_one_writing(self):
+        exe = ses.server_exe(self.state)
+        exe.parent.mkdir(parents=True)
+        exe.write_bytes(b'MZ')
+        earlier = ses.ses_dir(self.state) / ses.GGML_DIR / ses.GGML_EARLIER[0]
+        earlier.parent.mkdir(parents=True)
+        earlier.write_bytes(b'eski')
+
+        def failing(url, target, sha256, say=print):
+            raise OSError('bağlantı koptu')
+
+        with self.assertRaises(OSError):
+            ses._vulkan_ready(self.state, lambda _line: None, failing)
+        self.assertTrue(earlier.is_file(), 'kept: the voice still writes with it')
+        self.assertEqual(ses.ggml_in_place(self.state), earlier)
+
+    def test_the_status_says_when_the_card_writes_with_the_earlier_larger_model(self):
+        ses.save_config(self.state, dict(ses.load_config(self.state), motor='vulkan'))
+        python = ses.venv_python(self.state)
+        python.parent.mkdir(parents=True, exist_ok=True)
+        python.write_text('')
+        (ses.ses_dir(self.state) / ses.MARKER).write_text(json.dumps({'schema': 1, 'motor': 'vulkan'}), encoding='utf-8')
+        folder = ses.ses_dir(self.state) / ses.GGML_DIR
+        folder.mkdir(parents=True)
+        (folder / ses.GGML_EARLIER[0]).write_bytes(b'eski')
+        self.assertTrue(ses.status(self.state)['eski_model'], 'the settings offer the lighter one')
+        with mock.patch.dict(ses.GGML_MODEL, boyut=4):
+            ses.ggml_model(self.state).write_bytes(b'yeni')
+            self.assertFalse(ses.status(self.state)['eski_model'], 'the pinned one whole: written with, nothing to fetch')
+
     def test_whisper_cpp_comes_from_its_pre_release_and_without_one_the_processor_writes(self):
         fetched = []
         with mock.patch.dict(ses.VULKAN_BUILD, sha256=None):
@@ -1768,7 +1816,7 @@ class VulkanServerTest(unittest.TestCase):
         stand_in = self.stand_in('kart-yok')
         self.helper.ses = types.SimpleNamespace(
             engine_in_use=lambda _state, _config: 'vulkan', server_exe=lambda _state: stand_in,
-            ggml_model=lambda _state: self.folder / 'ggml-large-v3-turbo.bin', ses_dir=lambda _state: self.folder,
+            ggml_in_place=lambda _state: self.folder / 'ggml-large-v3-turbo.bin', ses_dir=lambda _state: self.folder,
             GGML_MODEL=ses.GGML_MODEL)
         errors = io.StringIO()
         with redirect_stderr(errors):
@@ -1787,7 +1835,7 @@ class VulkanServerTest(unittest.TestCase):
         stand_in = self.stand_in('kart-yok')
         self.helper.ses = types.SimpleNamespace(
             engine_in_use=lambda _state, _config: 'vulkan', server_exe=lambda _state: stand_in,
-            ggml_model=lambda _state: self.folder / 'ggml-large-v3-turbo.bin', ses_dir=lambda _state: self.folder,
+            ggml_in_place=lambda _state: self.folder / 'ggml-large-v3-turbo.bin', ses_dir=lambda _state: self.folder,
             GGML_MODEL=ses.GGML_MODEL, CPU_MODELS=ses.CPU_MODELS)
         opened = []
         self.helper._open = lambda name, device, compute, report=None: opened.append((name, device, compute)) or 'yazi'
