@@ -40,7 +40,7 @@ hedef: 2026-10-24
 ---
 # Lansman planı
 
-Cortex 1.0.25'in herkese açık duyurusu. Hedef: yöneticilerin indirip on dakikada kurabilmesi.
+Cortex'in herkese açık duyurusu. Hedef: yöneticilerin indirip on dakikada kurabilmesi.
 
 ## Bu hafta
 
@@ -192,7 +192,7 @@ if args[:2] == ['yakala', 'durum']:
     print(json.dumps({'status': 'tamam', 'kurulu': True}))
 elif args[:1] == ['ses']:
     print(json.dumps({'kurulu': True, 'acik': True, 'uyandirma': True, 'otomatik_dinle': True, 'motor': 'vulkan',
-                      'model': 'large-v3-turbo (ekran kartı, Vulkan)', 'komutlar': commands, 'adla_kaydet': ['gönder', 'tamam'],
+                      'model': 'large-v3-turbo-q8_0 (ekran kartı, Vulkan)', 'komutlar': commands, 'adla_kaydet': ['gönder', 'tamam'],
                       'uyandirma_sozu': 'ikisi'}, ensure_ascii=False))
 else:
     sys.exit(2)
@@ -213,8 +213,11 @@ const app = await electron.launch({
 });
 const page = await app.firstWindow();
 await page.waitForLoadState('domcontentloaded');
-// A late morning on a weekday: Beyin's light and clock follow the hour, and a night shift is dark.
-await page.clock.setFixedTime(new Date('2026-10-16T11:20:00'));
+// A late morning, today: Beyin's light and clock follow the hour, and a night shift is dark. Today, as the chat's
+// time is the main process's own: on another day, the list named the date and the hour of the night it was taken.
+const morning = new Date();
+morning.setHours(11, 20, 0, 0);
+await page.clock.setFixedTime(morning);
 // No browser is opened from a run.
 await app.evaluate(({ shell }) => {
   shell.openExternal = async () => {};
@@ -308,6 +311,14 @@ try {
     await page.keyboard.press('Control+,');
     const phrase = page.locator('[data-setup-voice-phrase="ikisi"]');
     await wait(phrase, 20_000);
+    // Always-listen shown on, as it is set: allowed as a person would allow it, where the app asks.
+    const always = page.locator('[data-setup-voice-wake]');
+    if ((await always.getAttribute('aria-checked')) !== 'true') {
+      await always.click();
+      const yes = page.locator('[data-consent-yes]');
+      if (await yes.waitFor({ timeout: 5_000 }).then(() => true, () => false)) await yes.click();
+      await page.waitForTimeout(800);
+    }
     await phrase.scrollIntoViewIfNeeded();
     await page.waitForTimeout(500);
     await shoot('ayarlar-ses.png');
