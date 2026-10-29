@@ -29,7 +29,8 @@ export function possessive(name, lang = 'tr') {
   const text = String(name || '').trim();
   if (!text) return '';
   if (lang === 'en') return text + (/s$/i.test(text) ? "'" : "'s");
-  const lower = text.toLocaleLowerCase('tr');
+  // Read without an ellipsis a name was cut with: "Ayşe Fatma…" is "Ayşe Fatma…'nın", not "…'ın" (30 October).
+  const lower = text.replace(/…$/, '').toLocaleLowerCase('tr');
   const vowels = lower.match(/[aeıioöuü]/g);
   const last = vowels ? vowels[vowels.length - 1] : 'e';
   const suffix = { a: 'ın', ı: 'ın', e: 'in', i: 'in', o: 'un', u: 'un', ö: 'ün', ü: 'ün' }[last];
@@ -45,15 +46,27 @@ export function nameTheManager(art, userName, lang = 'tr') {
   const boss = art.CHARACTERS && art.CHARACTERS.mudur;
   const room = art.MAP && art.MAP.rooms.find((one) => one.id === 'mudur');
   // Cut at a word, with an ellipsis: cut at the 24th letter, a long name ended mid-word ("… Kıl").
-  const whole = String(userName || '').trim();
-  const name = whole.length > 24 ? whole.slice(0, 23).replace(/\s+\S*$/, '') + '…' : whole;
+  const name = cutAtWord(String(userName || '').trim(), 24);
   if (boss) boss.name = name || (lang === 'en' ? 'Manager' : 'Müdür');
   if (room) {
     // Cut at a word as the chip is: cut at its 13th letter, the room was "ABDURRAHMAN M…'IN ODASI".
-    const short = name.length > 14 ? (name.slice(0, 13).replace(/\s+\S*$/, '') || name.slice(0, 13)) + '…' : name;
+    const short = cutAtWord(name, 14);
     room.tr = short ? possessive(short, 'tr').toLocaleUpperCase('tr') + ' ODASI' : 'MÜDÜR ODASI';
     room.en = short ? (possessive(short, 'en') + ' office').toUpperCase() : "MANAGER'S OFFICE";
   }
+}
+
+/**
+ * The text in at most `most` letters, cut at a word with an ellipsis; a single word longer than that is cut where it
+ * must be. Counted by letter, not by UTF-16 unit, so an emoji is not cut in two. 30 October: a word that ended where
+ * the cut fell was dropped as if cut ("Ayşe Fatma Kılıçdaroğlu Yılmaz" → "Ayşe Fatma…"), and one long word was "…".
+ */
+export function cutAtWord(text, most) {
+  const letters = [...text];
+  if (letters.length <= most) return text;
+  const head = letters.slice(0, most - 1).join('');
+  const atWord = /\s/.test(letters[most - 1]) ? head : head.replace(/\s+\S*$/, '');
+  return (atWord.trimEnd() || head) + '…';
 }
 
 // The office's events that spark from a room of the brain (the log's icon → the room).
@@ -498,7 +511,7 @@ export class OfficeEngine {
       const [hx, hy] = this.toScreen(a.x - cell.footX + an.head[0] + 0.5, a.y - cell.footY + an.head[1]);
       a._head = [hx, hy];
       if (a.id === this.selected) { const k = Math.max(2, Math.round(this.zoom)), s = art.ICONS.select, f = Math.floor(this.t * 3) % 2, bob = Math.round(Math.sin(this.t * 5) * 2); c.drawImage(this.frame('select', f), Math.round(hx - s.w * k / 2), Math.round(hy - s.h * k - 6 + bob), s.w * k, s.h * k); }
-      else if (a.id === this.hover) this.nameTag(c, hx, hy - 6, this.said(a.ch.name), a.ch.color);
+      else if (a.id === this.hover) this.nameTag(c, hx, hy - 6, a.id === 'mudur' ? a.ch.name : this.said(a.ch.name), a.ch.color);
     }
     for (const b of this.bubbles) { const h = b.ag._head; if (!h) continue; const lift = b.ag.id === this.selected ? Math.max(2, Math.round(this.zoom)) * 9 + 6 : 4; if (b.text) this.speech(c, h[0], h[1] - lift, b.text, b.t, b.dur); else this.statusBubble(c, h[0], h[1] - lift, b.icon, b.t, b.dur); }
   }

@@ -143,7 +143,8 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
               {t('auth.key')}
             </Button>
           ) : null}
-          {tool.key === 'cortex' && tool.hasKey && tool.detail === 'API key' ? (
+          {/* One kept here, readable or not (kept on another computer, it is not signed in with): forgotten here (30 October). */}
+          {tool.key === 'cortex' && tool.kept ? (
             <Button tone="danger" onClick={() => void forget()} data-auth-forget>
               <Trash2 size={13} />
               {t('auth.key.forget')}

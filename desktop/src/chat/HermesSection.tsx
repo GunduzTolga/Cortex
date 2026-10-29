@@ -114,7 +114,11 @@ export function HermesSection({ focused }: { focused: boolean }) {
             autoComplete="off"
             spellCheck={false}
             value={key}
-            onChange={(event) => setKey(event.target.value)}
+            onChange={(event) => {
+              setKey(event.target.value);
+              // A key typed is a change too: tried before it was saved, the test sent the kept key and failed (30 October).
+              setDirty(true);
+            }}
             placeholder={t(status.key ? 'hermes.key.kept' : 'hermes.key.placeholder')}
             aria-label={t('auth.key')}
             className={inputClass}

@@ -57,6 +57,8 @@ interface Line {
   time: string;
   icon: string;
   name: string;
+  /** The character who said it, if one did. */
+  who: string | null;
   nameColor: string;
   text: string;
   textColor: string;
@@ -88,6 +90,7 @@ function lineOf(entry: LogEntry): Line {
     time: entry.time,
     icon: entry.icon ?? '',
     name: who ? who.name : '',
+    who: who ? (entry.who ?? null) : null,
     nameColor: who ? onPaper(who.color) : 'var(--ofis-yazi)',
     text: who ? `: ${entry.text}` : entry.text,
     textColor: who ? 'var(--ofis-yazi)' : entry.color ? onPaper(entry.color) : 'var(--ofis-yazi-ikincil)',
@@ -115,6 +118,9 @@ export function OfficeView({ visible }: { visible: boolean }) {
   const language = useLanguage();
   // The office's own words (names, bios) in the window's language (ofis-en.js).
   const said = (text: string) => (language === 'en' ? enOf(text) : text);
+  // A character's name in it, but the manager's: that is the person's own name, and "Patron" was shown as "Boss"
+  // (30 October).
+  const nameOf = (id: string | null | undefined, name: string) => (id === 'mudur' ? name : said(name));
   const mapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
@@ -374,7 +380,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
       .filter(([, one]) => one.kind !== 'cat' && one.kind !== 'mudur')
       .map(([id, one]) => {
         const person = one as { name: string; role: string; roleEn: string; bio?: string };
-        return { id, name: said(person.name), role: language === 'en' ? person.roleEn : person.role, bio: language === 'en' ? (BIO_EN[id] ?? person.bio ?? '') : (person.bio ?? '') };
+        return { id, name: nameOf(id, person.name), role: language === 'en' ? person.roleEn : person.role, bio: language === 'en' ? (BIO_EN[id] ?? person.bio ?? '') : (person.bio ?? '') };
       });
     try {
       const lines = await window.cortex.office.talk({ tool, model: talk.model, cast, language: language === 'en' ? 'en' : 'tr' });
@@ -413,7 +419,10 @@ export function OfficeView({ visible }: { visible: boolean }) {
   const startResize = (event: React.MouseEvent) => {
     event.preventDefault();
     const from = event.clientY;
-    const height = prefs.logHeight;
+    // From the height it is drawn at: shrunk to a short window, a drag from the height kept moved nothing for its
+    // first hundred pixels (30 October).
+    const drawn = (event.currentTarget as HTMLElement).parentElement?.querySelector('.ofis-log')?.getBoundingClientRect().height;
+    const height = drawn ? Math.round(drawn) : prefs.logHeight;
     const move = (moved: MouseEvent) => change({ logHeight: Math.max(90, Math.min(420, height - (moved.clientY - from))) });
     const up = () => {
       window.removeEventListener('mousemove', move);
@@ -447,7 +456,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
             <span>{line.time}</span>
             <span>{line.icon}</span>
             <span>
-              <span style={{ fontWeight: 700, color: line.nameColor }}>{said(line.name)}</span>
+              <span style={{ fontWeight: 700, color: line.nameColor }}>{nameOf(line.who, line.name)}</span>
               <span style={{ color: line.textColor }}>{line.text}</span>
             </span>
           </div>
@@ -600,7 +609,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
                 <div className="ofis-name" style={{ color: onPaper(card.color) }}>
-                  {said(card.name)}
+                  {nameOf(selected, card.name)}
                 </div>
                 <div className="ofis-dim" style={{ fontSize: 13 }}>
                   {language === 'en' ? card.roleEn : card.role}
@@ -688,7 +697,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
                 <div key={one.id} className="ofis-person">
                   <i style={{ background: art.CHARACTERS[one.id].color }} />
                   <span style={{ minWidth: 0 }}>
-                    <span style={{ fontWeight: 700 }}>{said(art.CHARACTERS[one.id].name)}</span> <span className="ofis-dim">{one.act}</span>
+                    <span style={{ fontWeight: 700 }}>{nameOf(one.id, art.CHARACTERS[one.id].name)}</span> <span className="ofis-dim">{one.act}</span>
                   </span>
                 </div>
               ))}
@@ -741,7 +750,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
               return (
                 <button key={id} type="button" className="ofis-chip" aria-pressed={selected === id} onClick={() => pickCharacter(id)} data-ofis-chip={id}>
                   <i style={{ background: character.color }} />
-                  <span style={{ fontWeight: 700 }}>{said(character.name)}</span>
+                  <span style={{ fontWeight: 700 }}>{nameOf(id, character.name)}</span>
                   <span className="ofis-chip-mood">{byId[id]?.mood ?? '🙂'}</span>
                   <span className="ofis-dim" title={act}>{act.length > 12 ? `${act.slice(0, 11)}…` : act}</span>
                 </button>

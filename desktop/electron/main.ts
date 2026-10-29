@@ -107,15 +107,17 @@ function windowIcon(): string | undefined {
 }
 
 /**
- * An address for the system's browser, at most one every 300 ms: a page made to open them in a loop (a note's script
- * would be one, were scripts let run) put five tabs up at once (29 October). At one a second, a person's second link
- * clicked quickly was lost; a person does not click two links within 300 ms.
+ * An address for the system's browser, at most one every 300 ms and five in ten seconds: a page made to open them in a
+ * loop (a note's script would be one, were scripts let run) put five tabs up at once (29 October), and one a little
+ * slower than the gap went on opening a tab every third of a second (30 October). At one a second, a person's second
+ * link clicked quickly was lost; a person does not click two links within 300 ms, nor six within ten seconds.
  */
-let lastOpened = 0;
+const opened: number[] = [];
 function openOutside(url: string): void {
   const now = Date.now();
-  if (now - lastOpened < 300) return;
-  lastOpened = now;
+  while (opened.length && now - opened[0] > 10_000) opened.shift();
+  if (opened.length >= 5 || (opened.length && now - opened[opened.length - 1] < 300)) return;
+  opened.push(now);
   void shell.openExternal(url);
 }
 

@@ -91,13 +91,16 @@ export function Onboarding() {
         });
     // Told by the main process: a sign-in done (its console may still be open), or its console closed.
     // Either way the sign-in is over on its row; a sign-in closed without one shows the tool signed out again.
+    // Only the tool told of is over: with two sign-ins open, the one whose console was still open was said unfinished
+    // when the other's closed (30 October).
     const stop = window.cortex.on.authChanged(
-      () =>
+      (cli) =>
         void reread().then((signed) => {
           const now = useChat.getState().auth ?? [];
-          const ended = [...signingRef.current].filter((id) => !signed.includes(id) && now.find((tool) => tool.id === id)?.signedIn !== true);
-          if (ended.length) setUnfinished((before) => new Set([...before, ...ended]));
-          setSigningIn(new Set());
+          if (cli && signingRef.current.has(cli) && !signed.includes(cli) && now.find((tool) => tool.id === cli)?.signedIn !== true) {
+            setUnfinished((before) => new Set(before).add(cli));
+          }
+          setSigningIn((before) => new Set([...before].filter((id) => id !== cli && !signed.includes(id))));
         }),
     );
     // Back from a terminal or the browser, where a tool or Python was installed or signed in to: asked again,
@@ -162,14 +165,19 @@ export function Onboarding() {
   };
 
   // Opened again after a first run was left half way (a name or a vault kept): it goes on at the first step not done,
-  // where before it began again at the name (29 October). Placed once, before anything is chosen here.
+  // where before it began again at the name (29 October). Placed once, before anything is chosen here. 30 October:
+  // a name skipped is a step gone past once the vault is chosen, not one left undone; nothing moves under a person
+  // who has begun typing or clicking; and the screen opened again from Settings begins at its start.
   const placed = useRef(false);
+  const touched = useRef(false);
   useEffect(() => {
     if (placed.current || !status) return;
     placed.current = true;
-    if (!settings.userName && !vault) return;
-    const first = order.find((step) => step !== 'done' && !done[step]) ?? 'done';
-    setAt((now) => (now === 'name' ? first : now));
+    const again = useSetup.getState().again;
+    useSetup.setState({ again: false });
+    if (again || (!settings.userName && !vault)) return;
+    const first = order.find((step) => step !== 'done' && !(step === 'name' && vault) && !done[step]) ?? 'done';
+    setAt((now) => (now === 'name' && !touched.current ? first : now));
     // Only once, when the setup's status is first known.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
@@ -185,7 +193,13 @@ export function Onboarding() {
   const busy = status?.job ?? null;
 
   return (
-    <div className="relative flex h-full bg-[#f3efe4]" data-onboarding data-onboarding-step={at}>
+    <div
+      className="relative flex h-full bg-[#f3efe4]"
+      data-onboarding
+      data-onboarding-step={at}
+      onPointerDownCapture={() => (touched.current = true)}
+      onKeyDownCapture={() => (touched.current = true)}
+    >
       <div className="absolute right-4 top-3">
         <LanguageSwitch />
       </div>

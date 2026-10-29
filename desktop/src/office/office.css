@@ -77,6 +77,13 @@
   border: 2px solid var(--ofis-cizgi);
   overflow: hidden;
 }
+/* A short window (the smallest one zoomed in): the map gives up some of its height, so the log's newest line stays
+   on screen. Kept at 260px, the log's foot went below the window's edge and nothing scrolled to it (30 October). */
+@media (max-height: 520px) {
+  .ofis-map {
+    min-height: 160px;
+  }
+}
 .ofis-map canvas.ofis-world {
   position: absolute;
   inset: 0;

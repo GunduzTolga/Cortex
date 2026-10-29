@@ -46,6 +46,8 @@ export interface NoteEditorHandle {
   focus(): void;
   /** A filled template put in at the cursor, its properties at the top when the note has none (`insertTemplate`). */
   insertTemplate(template: string): void;
+  /** The version on disk put in place of what was typed, by the person's own choice: one undo brings the typing back. */
+  takeVersion(text: string): void;
 }
 
 export interface LinkChoice {
@@ -223,6 +225,15 @@ export const NoteEditor = forwardRef<
       const { text, cursor } = insertTemplate(doc, editor.state.selection.main.head, template.replace(/\r\n/g, '\n'));
       editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: text }, selection: EditorSelection.cursor(cursor), scrollIntoView: true });
       editor.focus();
+    },
+    takeVersion(text) {
+      const editor = view.current;
+      if (!editor || holds(editor.state.doc, text)) return;
+      // One step of the history, as typing is: the history let go of at a reload (the effect on `value`) is for a version
+      // put in unasked, and a version taken on the banner took what was typed away for good (30 October).
+      const lines = text.replace(/\r\n?/g, '\n');
+      const head = Math.min(editor.state.selection.main.head, lines.length);
+      editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: lines }, selection: EditorSelection.cursor(head), annotations: fromDisk.of(true) });
     },
   }));
 

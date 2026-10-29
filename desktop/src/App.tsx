@@ -55,16 +55,25 @@ export function App() {
   // The notification-area icon's "Ayarlar": the window comes back on its settings.
   // Only where the settings are: asked on the welcome screen or the first-run screen, the request was kept and the
   // settings opened by themselves once a vault was chosen; asked over a question (the microphone's), they opened
-  // under it (29 October).
-  useEffect(
-    () =>
-      window.cortex.on.openSettings(() => {
-        const { vault: kept, settings } = useApp.getState();
-        if (!kept.vault || kept.missing || !settings.onboarded || escapeLayers.modal()) return;
-        useApp.getState().openSettings(true);
-      }),
-    [],
-  );
+  // under it (29 October). 30 October: the screen of a vault gone missing has its settings, and they open there; asked
+  // while the page still loads (a reload, the window made again, a start hidden at sign-in), it is asked again once
+  // the page knows its vault, where before it was dropped.
+  useEffect(() => {
+    const open = () => {
+      const { vault: kept, settings, ready } = useApp.getState();
+      if (!ready) {
+        const stop = useApp.subscribe((state) => {
+          if (!state.ready) return;
+          stop();
+          open();
+        });
+        return;
+      }
+      if (!kept.vault || !settings.onboarded || escapeLayers.modal()) return;
+      useApp.getState().openSettings(true);
+    };
+    return window.cortex.on.openSettings(open);
+  }, []);
   // Its "listen all the time", not allowed yet: asked here, where it is explained (src/ui/MicConsent.tsx).
   useEffect(() => window.cortex.on.askWake(() => void useSetup.getState().voice({ wake: true })), []);
   // The window going for good: the note open saves what it holds first, or keeps it aside (src/notes/openNotes.ts).

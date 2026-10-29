@@ -251,6 +251,7 @@ export function ChatView({ visible }: { visible: boolean }) {
     <Composer
       big={big}
       focusKey={`${draftKey}:${visible}`}
+      chatKey={draftKey}
       draft={drafts[draftKey] ?? ''}
       onDraft={(text) => state.setDraft(draftKey, text)}
       onSend={(text) => state.send(text)}
@@ -291,7 +292,12 @@ export function ChatView({ visible }: { visible: boolean }) {
               </button>
             ) : null}
             {/* Keyed by its chat: another chat opens at its last message and follows its answer, not at the scroll of the one before. */}
-            <Transcript key={active} turns={turns} running={chat.running} onSignIn={() => summary && state.openAuth(summary.cli)} onRetry={(text) => void state.send(text, true)} />
+            <Transcript key={active} turns={turns} running={chat.running} onSignIn={() => summary && state.openAuth(summary.cli)} onRetry={(text) => {
+                void state.send(text, true);
+                // The button is gone once the message is sent again: the cursor back in the field, as after Send.
+                document.querySelector<HTMLTextAreaElement>('[data-chat-input]')?.focus();
+              }}
+            />
             {composer(false)}
           </>
         ) : (

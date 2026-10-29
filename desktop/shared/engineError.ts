@@ -132,6 +132,9 @@ const KNOWN: Array<[RegExp, EngineCode]> = [
   ],
 ];
 
+/** An exception's own line that says a connection timed out or was cut (`engineSentence`). */
+const CUT_OFF = /read timed out|readtimeout|connecttimeout|remotedisconnected|remote end closed connection|incompleteread|connection broken|http error 5\d\d/i;
+
 const isCode = (value: unknown): value is EngineCode => typeof value === 'string' && (ENGINE_CODES as readonly string[]).includes(value);
 
 /** The engine's JSON error among the last lines written, read whole; null when none of them is one. */
@@ -252,6 +255,10 @@ export function engineSentence(error: EngineError, language: 'tr' | 'en'): strin
     // (PermissionError: … Access is denied: 'C:\…') says what to look at, and is left as it came.
     const raised = error.message.match(/^(?:[a-z_]\w*\.)+([A-Z]\w*)\b:/);
     const missing = /can't open file[\s\S]*\[Errno 2\]/.test(error.message);
+    // A connection that timed out or was cut is said as one, read on the error's own line only: pip's warning that it
+    // tries again after one uses these words too, far above a failure of another kind (30 October: "Read timed out."
+    // told the person to install the app again).
+    if (raised && CUT_OFF.test(error.message.split('\n')[0])) return cut(SAID.network[language]);
     if (raised || missing) {
       const kind = raised ? raised[1] : language === 'en' ? 'a file it needs is missing' : 'gereken bir dosya yok';
       return cut(

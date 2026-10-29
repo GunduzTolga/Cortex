@@ -225,6 +225,9 @@ function PermissionCard({ asked, onAnswer, visible }: { asked: Asked; onAnswer: 
 
 const OPTION_ORDER = ['model', 'mode', 'thought_level'];
 
+/** The chats whose Stop was pressed and that have not ended yet (Composer). */
+const stoppingChats = new Set<string>();
+
 export function Composer({
   draft,
   onDraft,
@@ -243,6 +246,7 @@ export function Composer({
   visible,
   big = false,
   focusKey,
+  chatKey,
   auth,
   onAuth,
 }: {
@@ -267,6 +271,8 @@ export function Composer({
   big?: boolean;
   /** Changed, the field takes the cursor: another chat put in front. */
   focusKey: string;
+  /** The chat in front (its id, or the new one's), whose Stop the button shows. */
+  chatKey: string;
   /** Whether each tool is signed in, for the dots on the tool chip. */
   auth: CliAuth[] | null;
   onAuth: () => void;
@@ -276,10 +282,21 @@ export function Composer({
   const [sending, setSending] = useState(false);
   // Stop pressed and the turn not ended yet: a CLI may take a few seconds to stop, and the button looked the same
   // throughout, so it read as not having been pressed (29 October).
-  const [stopping, setStopping] = useState(false);
+  // Kept by chat, and outside the field (stoppingChats): the field is one for every chat, and another chat brought to
+  // the front was shown as stopping, its Stop doing nothing; reset when the view changed, or drawn again by the new
+  // chat's screen, a chat still stopping was shown as not (30 October).
+  const [, redraw] = useState(0);
+  const stopping = running && stoppingChats.has(chatKey);
+  const setStopping = (now: boolean) => {
+    if (stoppingChats.has(chatKey) === now) return;
+    if (now) stoppingChats.add(chatKey);
+    else stoppingChats.delete(chatKey);
+    redraw((times) => times + 1);
+  };
   useEffect(() => {
     if (!running) setStopping(false);
-  }, [running]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, chatKey]);
 
   useEffect(() => {
     field.current?.focus();

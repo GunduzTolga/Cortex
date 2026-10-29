@@ -18,7 +18,7 @@ let pushTo: (push: ChatPush) => void = () => undefined;
 let authChanged: () => void = () => undefined;
 const opened: Record<string, ChatOpened> = {};
 
-const claudeAuth = (): CliAuth => ({ id: 'claude', installed, signedIn: installed ? false : null, detail: null, canLogin: installed, canInstall: !installed, key: null, baseUrl: false, hasKey: false });
+const claudeAuth = (): CliAuth => ({ id: 'claude', installed, signedIn: installed ? false : null, detail: null, canLogin: installed, canInstall: !installed, key: null, baseUrl: false, hasKey: false, kept: false });
 
 Object.assign(globalThis, {
   requestAnimationFrame: (draw: () => void) => {

@@ -18,7 +18,8 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
-import { baseName, noteTitle, parseNote, pathKey, splitProperties, type NoteProperty } from '../../core/vaultNotes';
+import { baseName, missingNoteAt, nameProblem, noteTitle, parseNote, pathKey, splitProperties, type NoteProperty } from '../../core/vaultNotes';
+import { NAME_PROBLEM } from './NotesNav';
 import { useT } from '../i18n/useT';
 import type { Key } from '../i18n';
 import { useApp } from '../store/app';
@@ -63,9 +64,22 @@ function useTarget(target: string, kind: 'wiki' | 'markdown' = 'wiki'): string |
 
 const openOptions = (event: { ctrlKey: boolean; metaKey: boolean; button: number }) => ({ newTab: event.ctrlKey || event.metaKey || event.button === 1 });
 
+/** A note a link names made where `missingNoteAt` says, the folders it names that are not there made first. */
+export async function makeMissingNote(at: NonNullable<ReturnType<typeof missingNoteAt>>, t: (key: Key) => string): Promise<{ path: string }> {
+  // Every name read before anything is made: a folder made and the next name then refused left an empty folder
+  // behind (30 October).
+  for (const name of [...at.make.map((one) => one.name), at.name]) {
+    const problem = nameProblem(name);
+    if (problem) throw new Error(`${t(NAME_PROBLEM[problem])} (${name.trim()})`);
+  }
+  for (const one of at.make) await window.cortex.notes.createFolder(one.parent, one.name);
+  return window.cortex.notes.create(at.folder, at.name, { text: '' });
+}
+
 function WikiLink({ target, subpath, alias }: { target: string; subpath: string; alias: string }) {
   const t = useT();
   const toast = useApp((s) => s.toast);
+  const { path: from } = useContext(NoteContext);
   const to = useTarget(target);
   // A link to a receipt reads as its event_id, not as the hash its file is named by.
   const label = useNotes((state) => (to ? state.labels.get(to) : undefined));
@@ -79,14 +93,11 @@ function WikiLink({ target, subpath, alias }: { target: string; subpath: string;
       useNotes.getState().open(to, { ...openOptions(event), subpath: subpath || null });
       return;
     }
-    // Not written yet: made where the link names it - its folder, where it gives one and that folder is there, else the
-    // vault's top - and opened to be written. Made at the top whatever the link said, the link stayed missing and a
-    // second click was refused as a note already there (29 October).
-    const name = baseName(target).replace(/\.md$/i, '');
-    const folder = target.includes('/') ? target.slice(0, target.lastIndexOf('/')) : '';
-    const index = useNotes.getState().index;
-    const into = folder && index?.folders?.some((one) => one === folder) ? folder : '';
-    window.cortex.notes.create(into, name, { text: '' }).then(
+    // Not written yet: made where the link names it (missingNoteAt) and opened to be written. Made at the top whatever
+    // the link said, the link stayed missing and a second click was refused as a note already there (29 October).
+    const at = missingNoteAt(target, from, useNotes.getState().index?.folders ?? []);
+    if (!at) return;
+    makeMissingNote(at, t).then(
       async (made) => {
         await useNotes.getState().refresh();
         useNotes.getState().open(made.path, { edit: true });
@@ -452,14 +463,23 @@ export function NoteMarkdown({
   const t = useT();
   const context = useMemo(() => ({ path, depth, onToggleTask }), [path, depth, onToggleTask]);
   const plugins = useMemo(() => [remarkGfm, [remarkObsidian, { offset }]] as NonNullable<ComponentProps<typeof ReactMarkdown>['remarkPlugins']>, [offset]);
+  const plain = useMemo(() => (source.length > READ_AS_TEXT ? source.split(/\r?\n/) : null), [source]);
   // A note this long is shown as its text: the Markdown reader works on the window's one thread, and a note of a
   // megabyte held the whole app still for half a minute, again at every start with it in front (29 October). The
   // editor (Ctrl+E) still edits it.
-  if (source.length > READ_AS_TEXT) {
+  // Each line is its own block, numbered as the Markdown reader numbers its blocks: drawn as one, a heading from the
+  // outline, a search hit or a link into the note scrolled nowhere (30 October).
+  if (plain) {
     return (
       <div className="kg-note" data-note-plain>
         <p className="mb-3 rounded-lg bg-paper-2 px-3 py-2 text-[12.5px] text-zinc-500">{t('notes.large.plain')}</p>
-        <pre className="whitespace-pre-wrap break-words font-sans text-[14px] leading-relaxed">{source}</pre>
+        <div className="whitespace-pre-wrap break-words font-sans text-[14px] leading-relaxed">
+          {plain.map((line, at) => (
+            <div key={at} data-line={offset + at}>
+              {line || ' '}
+            </div>
+          ))}
+        </div>
       </div>
     );
   }

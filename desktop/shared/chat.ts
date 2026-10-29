@@ -35,6 +35,8 @@ export interface CliAuth {
   /** Whether a key needs the OpenAI-compatible address it is for. */
   baseUrl: boolean;
   hasKey: boolean;
+  /** A key Cortex keeps for it, not one of the person's own environment: the one that can be forgotten here. */
+  kept: boolean;
   /** For a model server on this machine (LM Studio, Ollama), which needs no sign-in: what it has. */
   local?: { models: number; loaded: string[]; shortContext: number | null };
 }

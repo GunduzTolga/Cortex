@@ -64,6 +64,11 @@ export function NotesView({ visible, onGraph }: { visible: boolean; onGraph: () 
   const tab = useActiveTab();
   const [fold, setFold] = useFold();
   const [switching, setSwitching] = useState(false);
+  // A finder left open behind another view (a notice's "Go" taking the window to a chat) held the whole window shut:
+  // a dialog no one could see, every click on the chat refused until Escape (30 October).
+  useEffect(() => {
+    if (!visible) setSwitching(false);
+  }, [visible]);
   const makers = useMakers();
   // A note open when another vault is chosen is read again, from that one: a path is the same in both, the note is not.
   const vaultSeq = useApp((state) => state.vaultSeq);

@@ -77,6 +77,12 @@ test('a step is shown by its tool and what it works on; settings become flags, t
   assert.ok(!options.find((one) => one.id === 'mode')?.choices.some((one) => one.value === 'bypassPermissions'), 'skipping every permission is never offered');
   assert.deepEqual(claudeArgs(['-p'], options, 'ses-1'), ['-p', '--model', 'opus', '--permission-mode', 'acceptEdits', '--resume', 'ses-1']);
   assert.deepEqual(claudeArgs(['-p'], claudeOptions({}), null), ['-p']);
+  // 30 October: a model from Claude Code's own list, kept with the chat, ran as the default after a restart.
+  const kept = claudeOptions({ model: 'sonnet[1m]' });
+  assert.equal(kept.find((one) => one.id === 'model')?.current, 'sonnet[1m]');
+  assert.deepEqual(claudeArgs(['-p'], kept, null), ['-p', '--model', 'sonnet[1m]']);
+  assert.equal(claudeOptions({ model: 'not a model' }).find((one) => one.id === 'model')?.current, 'default');
+  assert.equal(claudeOptions({ model: 'sonnet[1m]' }, [{ value: 'opus', name: 'Opus' }]).find((one) => one.id === 'model')?.current, 'default', 'Claude Code’s own list decides');
 });
 
 test('a message to Claude Code gets its answer streamed in pieces, its steps with paths made safe, its plan, its context; a sub-agent’s words stay its own', async () => {

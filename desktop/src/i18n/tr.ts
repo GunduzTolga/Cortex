@@ -515,6 +515,7 @@ export const tr: Record<keyof typeof en, string> = {
   'notes.aside.otherVault': 'Kaydedilmeden önce başka bir kasa açıldı; onun yerine o kasaya bir şey yazılmadı.',
   'notes.aside.open': 'Aç',
   'notes.aside.none': '{name} notuna yazdıkların hiçbir yere kaydedilemedi',
+  'notes.aside.later': '{name} notuna yazdıkların şimdilik saklandı; kasa geri gelince notun yanına yazılacak',
   'notes.aside.copy': 'Metni kopyala',
   'notes.task.done': 'Yapıldı',
   'notes.task.todo': 'Yapılacak',

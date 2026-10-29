@@ -82,6 +82,12 @@ export function claudeOptions(prefs: Readonly<Record<string, string>>, models: A
     ? { default: 'Varsayılan efor', low: 'Düşük efor', medium: 'Orta efor', high: 'Yüksek efor', xhigh: 'Çok yüksek efor', max: 'En yüksek efor' }
     : { default: 'Default effort', low: 'Low effort', medium: 'Medium effort', high: 'High effort', xhigh: 'Extra-high effort', max: 'Max effort' };
   const pick = (value: string | undefined, allowed: readonly string[], fallback: string) => (value && allowed.includes(value) ? value : fallback);
+  // A model Claude Code itself offered (its own list, kept with the chat or as the last choice) is kept before Claude
+  // Code is asked again: the list it starts with does not name it, and the chip said it while the chat ran on the
+  // default (30 October). Claude Code's own list, once it names it, decides.
+  if (models === FALLBACK_MODELS && prefs.model && !models.some((one) => one.value === prefs.model) && /^[\w.:@/\[\]-]{1,80}$/.test(prefs.model)) {
+    models = [...models, { value: prefs.model, name: prefs.model }];
+  }
   return [
     { id: 'model', name: 'Model', category: 'model', current: pick(prefs.model, models.map((one) => one.value), 'default'), choices: models },
     { id: 'mode', name: tr ? 'İzin modu' : 'Permission mode', category: 'mode', current: pick(prefs.mode, PERMISSION_MODES, 'default'), choices: PERMISSION_MODES.map((value) => ({ value, name: modeNames[value] })) },

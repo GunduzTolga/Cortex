@@ -521,6 +521,7 @@ export const en = {
   'notes.aside.otherVault': 'Another vault was opened before it was saved, and nothing is written into that one in its place.',
   'notes.aside.open': 'Open',
   'notes.aside.none': 'What you wrote in {name} could not be saved anywhere',
+  'notes.aside.later': 'What you wrote in {name} is kept for now, and is written beside the note when the vault is back',
   'notes.aside.copy': 'Copy the text',
   'notes.task.done': 'Done',
   'notes.task.todo': 'To do',

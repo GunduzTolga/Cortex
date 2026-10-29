@@ -71,6 +71,8 @@ interface Live {
   turn: number;
   /** Its events counted since the app started (ChatPush.seq). */
   seq: number;
+  /** Its history on disk was not read (held by another program): what is said now is not saved over it (saveLog). */
+  unread: boolean;
 }
 
 const CLI_IDS: readonly CliId[] = ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'lmstudio', 'ollama', 'hermes', 'test', 'test-claude', 'test-codex'];
@@ -101,31 +103,46 @@ let index: Index | null = null;
 
 function readIndex(): Index {
   if (index) return index;
+  let text: string | null = null;
   try {
-    const parsed = JSON.parse(fs.readFileSync(indexFile(), 'utf8').replace(/^\uFEFF/, '')) as Partial<Index>;
+    text = fs.readFileSync(indexFile(), 'utf8');
+    const parsed = JSON.parse(text.replace(/^\uFEFF/, '')) as Partial<Index>;
     const chats = (Array.isArray(parsed.chats) ? parsed.chats : []).filter(
       (one): one is Stored =>
         typeof one === 'object' && one !== null && ID.test(String(one.id)) && CLI_IDS.includes(one.cli) && typeof one.vault === 'string' && typeof one.title === 'string',
     );
     index = { version: 1, chats, prefs: typeof parsed.prefs === 'object' && parsed.prefs !== null ? parsed.prefs : {} };
   } catch (err) {
-    // A list that will not be read is kept beside, as the settings file is, and the chat starts with none.
+    // A list that will not be read is kept beside, as the settings file is, and the chat starts with none. One the disk
+    // would not hand over (another program holding it) is not damaged: nothing is written over it in this run, as the
+    // settings file is not (30 October: a list held at the start was taken as damaged, no copy was made of it, and
+    // the next chat's save left a list of one).
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-      try {
-        fs.copyFileSync(indexFile(), path.join(folder(), `index.broken-${Date.now()}.json`));
-      } catch {
-        /* nothing to keep */
+      indexBroken = text === null ? 'left' : 'damaged';
+      if (text !== null) {
+        try {
+          fs.copyFileSync(indexFile(), path.join(folder(), `index.broken-${Date.now()}.json`));
+          indexBroken = 'copied';
+        } catch {
+          /* no copy made: the damaged list is left as it is */
+        }
       }
       // Said once to the window (ipc.ts, chat:list): every chat went from the list and nothing told why (29 October).
-      indexBroken = true;
+      indexLeft = indexBroken !== 'copied';
     }
     index = { version: 1, chats: [], prefs: {} };
   }
   return index;
 }
 
+/** The list on disk was not read and is left as it is: nothing is saved over it until the app starts again. */
+let indexLeft = false;
+
 /** Written beside and renamed into place, tried again while Windows holds the file (fileWrite.ts): a list half written is never left. */
-const saveIndex = () => writeWhole(indexFile(), JSON.stringify(readIndex()));
+const saveIndex = () => {
+  const now = readIndex();
+  if (!indexLeft) writeWhole(indexFile(), JSON.stringify(now));
+};
 
 /**
  * The list saved for something a CLI said while it answered - its session, its name for the chat -
@@ -166,9 +183,16 @@ export function compact(events: readonly ChatEvent[]): ChatEvent[] {
   return out.slice(-EVENTS_KEPT);
 }
 
-function readLog(id: string): ChatEvent[] {
+/** The chat's events as kept; null when the disk would not hand them over (another program holding the file). */
+function readLog(id: string): ChatEvent[] | null {
+  let text: string;
   try {
-    const events = JSON.parse(fs.readFileSync(logFile(id), 'utf8').replace(/^\uFEFF/, '')) as unknown;
+    text = fs.readFileSync(logFile(id), 'utf8');
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? [] : null;
+  }
+  try {
+    const events = JSON.parse(text.replace(/^\uFEFF/, '')) as unknown;
     return Array.isArray(events) ? events.filter((one): one is ChatEvent => typeof one === 'object' && one !== null && typeof (one as { type?: unknown }).type === 'string') : [];
   } catch {
     return [];
@@ -199,7 +223,18 @@ function storedOf(id: unknown): Stored {
 // The options kept are shown again only for an engine that takes a choice before its session runs; an ACP agent
 // refuses one until it is connected, so its chips would refuse every pick.
 const keptOptions = (stored: Stored): ConfigOption[] | null => (Array.isArray(stored.options) && protocolOf(stored.cli) !== 'acp' ? stored.options : null);
-const fresh = (stored: Stored, events: ChatEvent[]): Live => ({ stored, events, running: false, options: keptOptions(stored) ?? [], stale: keptOptions(stored) !== null, permissions: new Map(), stop: null, turn: 0, seq: 0 });
+const fresh = (stored: Stored, events: ChatEvent[] | null): Live => ({
+  stored,
+  events: events ?? [],
+  running: false,
+  options: keptOptions(stored) ?? [],
+  stale: keptOptions(stored) !== null,
+  permissions: new Map(),
+  stop: null,
+  turn: 0,
+  seq: 0,
+  unread: events === null,
+});
 
 function liveOf(id: unknown): Live {
   const stored = storedOf(id);
@@ -229,6 +264,8 @@ function setState(chat: Live, change: Partial<Pick<Live, 'running' | 'options'>>
 
 function saveLog(chat: Live): void {
   chat.events = compact(chat.events);
+  // A history not read is not written over with what was said since: read as none, the chat's past was lost at its next turn.
+  if (chat.unread) return;
   try {
     writeWhole(logFile(chat.stored.id), JSON.stringify(chat.events));
   } catch {
@@ -259,7 +296,9 @@ function turnOf(chat: Live, signal: AbortSignal): Turn {
     vault: stored.vault,
     sessionId: stored.sessionId,
     number: chat.turn,
-    prefs: readIndex().prefs[stored.cli] ?? {},
+    // A chat reopened after a restart runs as its chips say: its engine had not seen the options kept for it, and
+    // started with the CLI's last choices while the chip showed the chat's own ("Önce sor" shown, edits accepted: 30 October).
+    prefs: { ...(readIndex().prefs[stored.cli] ?? {}), ...(chat.stale ? Object.fromEntries(chat.options.map((one) => [one.id, one.current])) : {}) },
     signal,
     emit: (event) => chat.running && emit(chat, event),
     setOptions: (options) => setState(chat, { options }),
@@ -473,8 +512,12 @@ export function removeChat(id: unknown): void {
 }
 
 /** Whether the chat list would not be read and was begun again, since this was last asked: said once, then forgotten. */
-let indexBroken = false;
-export function takeIndexBroken(): boolean {
+let indexBroken: 'copied' | 'left' | 'damaged' | false = false;
+/**
+ * Whether the list began empty because it was not read: damaged and a copy kept beside it, held by another program and
+ * left as it was, or damaged and left as it was (no copy could be made). Said once.
+ */
+export function takeIndexBroken(): 'copied' | 'left' | 'damaged' | false {
   const was = indexBroken;
   indexBroken = false;
   return was;
@@ -511,4 +554,6 @@ export function forgetChats(): void {
   shutdownChats();
   live.clear();
   index = null;
+  indexLeft = false;
+  indexBroken = false;
 }

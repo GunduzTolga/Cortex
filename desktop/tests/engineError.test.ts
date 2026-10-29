@@ -120,3 +120,17 @@ test('Python’s own last words are not the sentence: a module’s exception is 
   assert.match(engineFailureText("PermissionError: [WinError 5] Access is denied: 'C:\\x'", 'en') ?? '', /^PermissionError/);
   assert.equal(engineFailureText('bilinmeyen komut', 'en'), 'bilinmeyen komut');
 });
+
+test('A download that timed out or was cut off is said as the connection, not as an error to install the app again for', () => {
+  // 30 October: pip's "Read timed out." on a slow connection told the person to install the app again.
+  for (const line of [
+    "pip._vendor.urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='files.pythonhosted.org', port=443): Read timed out.",
+    'http.client.RemoteDisconnected: Remote end closed connection without response',
+  ]) {
+    assert.match(engineFailureText(line, 'tr') ?? '', /^İnternete bağlanılamadı/);
+    assert.match(engineFailureText(line, 'en') ?? '', /^The internet could not be reached/);
+  }
+  // Read on the error's own line only: pip's warning that it tries again uses these words, far above another failure.
+  const retried = "WARNING: Retrying (Retry(total=4)) after connection broken by 'ReadTimeoutError(Read timed out.)': /simple/x/\nzipfile.BadZipFile: File is not a zip file";
+  assert.match(engineFailureText(retried, 'en') ?? '', /\(BadZipFile\)/);
+});
