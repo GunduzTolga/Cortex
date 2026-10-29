@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Download, FolderOpen, KeyRound, LogIn, Mic, RefreshCw, SkipForward } from 'lucide-react';
-import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz.svg';
+import pineapple from '../../../tema/ananas/marka/pyn-ananas-512.png';
+import logo from '../../../tema/ananas/marka/pyn-logo-512.png';
+import sitting from '../../../tema/ananas/marka/pyn-oturan-512.png';
 import type { CliAuth, CliId } from '@shared/chat';
 import { engineAction, type SetupStatus, wakePhraseLabel } from '@shared/setup';
 import { AuthDialog, TOOL_NAMES } from '../chat/AuthDialog';
@@ -146,7 +148,7 @@ export function Onboarding() {
       </div>
       <nav className="flex w-60 shrink-0 flex-col border-r border-darkDelegation/10 px-4 py-8" aria-label={t('onboarding.title')}>
         <div className="mb-6 flex items-center gap-2 px-2">
-          <img src={face} alt="" className="h-9 w-9" />
+          <img src={logo} alt="" className="h-9 w-9" />
           <span className="font-display text-xl text-darkDelegation">Cortex</span>
         </div>
         <ol className="space-y-1">
@@ -246,7 +248,7 @@ function NameStep({ onNext }: { onNext: () => void }) {
   };
   return (
     <div>
-      <img src={face} alt="" className="mb-5 h-24 w-24" />
+      <img src={sitting} alt="" className="mb-4 h-28 w-28" data-onboarding-pyn="sitting" />
       <Heading title={t('onboarding.name.title')}>
         <p>{t('onboarding.name.body')}</p>
       </Heading>
@@ -522,7 +524,7 @@ function DoneStep({ order, done, skipped, canFinish }: { order: StepId[]; done: 
   const job = useSetup((s) => s.status?.job ?? null);
   return (
     <div>
-      <img src={face} alt="" className="mb-5 h-20 w-20" />
+      <img src={pineapple} alt="" className="mb-4 h-24 w-24" data-onboarding-pyn="pineapple" />
       <Heading title={who ? t('onboarding.done.titleNamed', { name: who }) : t('onboarding.done.title')}>
         <p>{t('onboarding.done.body')}</p>
       </Heading>

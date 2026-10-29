@@ -57,10 +57,11 @@ class TemaDataTest(unittest.TestCase):
     def test_brand_marks_are_real_images(self):
         import base64
         import beyin_v3_marka as marka
-        for size in (28, 42, 56):
-            png = base64.b64decode(''.join(getattr(marka, 'MUHUR_%d' % size)))
-            self.assertEqual(png[:8], b'\x89PNG\r\n\x1a\n')
-            self.assertEqual(int.from_bytes(png[16:20], 'big'), size)  # IHDR width
+        for name in ('MUHUR', 'YAKALA'):
+            for size in (28, 42, 56):
+                png = base64.b64decode(''.join(getattr(marka, '%s_%d' % (name, size))))
+                self.assertEqual(png[:8], b'\x89PNG\r\n\x1a\n')
+                self.assertEqual(int.from_bytes(png[16:20], 'big'), size)  # IHDR width
         ico = base64.b64decode(''.join(marka.ICO))
         self.assertEqual(ico[:4], b'\x00\x00\x01\x00')
         self.assertGreaterEqual(int.from_bytes(ico[4:6], 'little'), 4)  # several sizes for every DPI

@@ -322,8 +322,15 @@ else:
     sys.exit(2)
 `;
 
+/** Whether a picture of the brand's (tema/ananas/marka, scripts/marka_uret.py) is drawn: loaded, not a broken image's empty box. */
+const drawn = (selector) =>
+  page
+    .waitForFunction((one) => [...document.querySelectorAll(one)].some((img) => img.complete && img.naturalWidth > 0), selector, { timeout: 10_000 })
+    .then(() => true, () => false);
+
 console.log('\nFirst opening');
 check('a first run opens on the first-run screen, Pyn asking how to address the person', await shownSoon(page.locator('[data-onboarding-step="name"]'), 30_000));
+const seenSitting = await drawn('[data-onboarding-pyn="sitting"]');
 check(
   'in Turkish, unless chosen otherwise, cased as Turkish',
   (await page.locator('[data-onboarding-next]').textContent())?.trim() === 'Devam' && (await page.evaluate(() => document.documentElement.lang)) === 'tr',
@@ -409,6 +416,8 @@ check(
   'the last step lists what was left, to be set up later from the settings',
   (await shownSoon(page.locator('[data-onboarding-step="done"]'))) && (await page.locator('[data-onboarding-summary="engine"]').textContent())?.includes('skipped'),
 );
+// The picture waits for them.
+check('Pyn sits on the first step, the pineapple Pyn on the last, the logo beside the steps', (await drawn('[data-onboarding-pyn="pineapple"]')) && (await drawn('[data-onboarding] nav img')) && seenSitting);
 await shoot('01d-onboarding-done.png');
 await page.locator('[data-onboarding-finish]').click();
 check('then Pyn opens, where the person talks to their AI', await shownSoon(page.locator('[data-chat-view]'), 15_000));

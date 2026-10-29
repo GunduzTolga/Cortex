@@ -66,7 +66,7 @@ def asset_vars():
     lines = ['body {']
     for icon in sorted((TEMA / 'ikonlar').glob('*.svg')):
         lines.append(f'  --ananas-ikon-{icon.stem}: ' + _data_uri(icon, 'image/svg+xml') + ';')
-    lines.append('  --ananas-logo: ' + _data_uri(MARKA / 'pyn-muhur.svg', 'image/svg+xml') + ';')
+    lines.append('  --ananas-logo: ' + _data_uri(MARKA / 'pyn-muhur-200.png', 'image/png') + ';')
     lines.append('  --ananas-pyn-yuz: ' + _data_uri(MARKA / 'pyn-yuz' / 'pyn-yuz.svg', 'image/svg+xml') + ';')
     lines.append('  --ananas-pyn-yuz-koyu: ' + _data_uri(MARKA / 'pyn-yuz' / 'pyn-yuz-koyu.svg', 'image/svg+xml') + ';')
     lines.append('}')
@@ -120,8 +120,9 @@ def module_text():
 
 
 def brand_text():
-    """Pyn's marks for the runtime: the yakala header, the Windows shortcut icon and the seal
-    `pyn` draws in its welcome box (Sixel)."""
+    """Pyn's marks for the runtime: the seal (the terminal's Pyn tab), Pyn taking a note (the
+    yakala header, as the phone's Not al button), the Windows shortcut icon and the seal `pyn`
+    draws in its welcome box (Sixel)."""
     lines = ['"""Pyn marka görselleri. ÜRETİLMİŞ DOSYA, elle düzenleme.',
              '',
              'Kaynak: tema/ananas/marka/. Yeniden üretmek için:',
@@ -129,6 +130,8 @@ def brand_text():
              '"""']
     for size in (28, 42, 56, 200):
         lines += [f'MUHUR_{size} = (', *_chunked((MARKA / f'pyn-muhur-{size}.png').read_bytes()), ')']
+    for size in (28, 42, 56):
+        lines += [f'YAKALA_{size} = (', *_chunked((MARKA / f'pyn-yakala-{size}.png').read_bytes()), ')']
     # Not al's microphone button (scripts/marka_uret.py yakala): drawn smooth, as Tk cannot.
     for path in sorted((MARKA / 'yakala').glob('mikrofon-*.png')):
         name = path.stem.replace('-', '_').upper()

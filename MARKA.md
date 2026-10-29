@@ -5,8 +5,8 @@ Cortex'in kodu [MIT lisansıyla](LICENSE) açıktır: kullanabilir, değiştireb
 ## Marka unsurları
 
 - **"Cortex"** adı (bu yazılım için) ve **"Pyn"** adı
-- Pyn'in **mührü** (altın zemin üzerinde ananas) ve **yüzü**
-- `tema/ananas/marka/` altındaki logo, ikon ve mühür dosyaları ile aynı görsellerin `template/.claude/scripts/beyin_v3_marka.py` içindeki gömülü kopyaları
+- Pyn'in **logosu** (açılan başından ananas çıkan Pyn), **mührü** (aynı logo krem dairede), **çizimleri** (not alan, oturan ve ananas Pyn) ve **yüzü**
+- `tema/ananas/marka/` altındaki kaynak çizimler (`kaynak/`), logo, ikon ve mühür dosyaları ile aynı görsellerin `template/.claude/scripts/beyin_v3_marka.py` içindeki gömülü kopyaları
 
 ## Serbest olanlar
 
