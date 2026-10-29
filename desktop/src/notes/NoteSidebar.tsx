@@ -101,7 +101,7 @@ function Links() {
     };
   }, [path, revision]);
 
-  const text = useSettled(live?.text ?? '');
+  const text = useSettled(live?.text ?? '', live?.path ?? null);
   const livePath = live?.path ?? null;
   // Read from the settled text, and only when it or the note changes: `live` changes on every key.
   const outgoing = useMemo(() => {
@@ -162,7 +162,7 @@ function Outline() {
   const t = useT();
   const path = useActiveTab().path;
   const live = useNotes((state) => state.live);
-  const text = useSettled(live?.text ?? '');
+  const text = useSettled(live?.text ?? '', live?.path ?? null);
   const livePath = live?.path ?? null;
   const headings = useMemo(() => (livePath === path ? parseNote(text).headings : []), [livePath, path, text]);
   if (!headings.length) return <p className="p-4 text-[12px] text-zinc-400">{t('notes.side.noOutline')}</p>;
