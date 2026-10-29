@@ -1,5 +1,6 @@
 import { strict as assert } from 'node:assert';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
@@ -67,8 +68,17 @@ test('a keys file Windows says is busy is not written over: a new key never take
 });
 
 test('with no tool installed, each is said to be missing and nothing is offered; a sign-in or a key for one is refused', async () => {
-  const before = process.env.PATH;
+  const kept = { PATH: process.env.PATH, USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME, SystemRoot: process.env.SystemRoot };
   process.env.PATH = '';
+  /*
+    On Windows the PATH is read again from the machine's and the person's (clis.ts refreshPath), with
+    Claude Code's installer's folder beside it: a machine with the tools installed saw them all here
+    (29 October, the owner's PC). Its PowerShell not found and a home with nothing in it, nothing is added.
+  */
+  const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-auth-home-'));
+  process.env.USERPROFILE = emptyHome;
+  process.env.HOME = emptyHome;
+  process.env.SystemRoot = emptyHome;
   // The model servers asked where nothing answers.
   process.env.CORTEX_TEST_LMSTUDIO = 'http://127.0.0.1:9';
   process.env.CORTEX_TEST_OLLAMA = 'http://127.0.0.1:9';
@@ -88,7 +98,11 @@ test('with no tool installed, each is said to be missing and nothing is offered;
     assert.throws(() => startLogin('nope'), /Not a tool/);
     await assert.rejects(setToolKey('codex', 'sk-test', undefined), /not installed/);
   } finally {
-    process.env.PATH = before;
+    for (const [name, value] of Object.entries(kept)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    fs.rmSync(emptyHome, { recursive: true, force: true });
     delete process.env.CORTEX_TEST_LMSTUDIO;
     delete process.env.CORTEX_TEST_OLLAMA;
   }

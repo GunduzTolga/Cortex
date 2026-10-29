@@ -349,7 +349,14 @@ export const useChat = create<ChatState>((set, get) => {
         try {
           const { id } = await window.cortex.chat.begin(cli, option, value);
           const opened = await window.cortex.chat.open(id);
-          set((state) => ({ open: { ...state.open, [id]: fromOpened(opened) }, active: id, offered: [], error: null }));
+          // Listed at once: a message sent reads the chat's tool from the list, and the pushed summary waits for the next frame (an Enter there was lost, 29 October).
+          set((state) => ({
+            open: { ...state.open, [id]: fromOpened(opened) },
+            chats: [opened.chat, ...state.chats.filter((one) => one.id !== id)].sort(byTime),
+            active: id,
+            offered: [],
+            error: null,
+          }));
         } catch (err) {
           set({ error: messageOf(err) });
         }
