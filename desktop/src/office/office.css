@@ -93,20 +93,20 @@
 }
 .ofis-hud {
   position: absolute;
-  left: 10px;
-  top: 10px;
+  left: 8px;
+  top: 8px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 10px 5px 9px;
-  font-size: 13px;
-  letter-spacing: 0.08em;
+  gap: 5px;
+  padding: 2px 7px 2px 6px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
   pointer-events: none;
   white-space: nowrap;
 }
 .ofis-hud-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   background: var(--ofis-yesil);
   display: block;
   animation: ofis-pulse 1.8s steps(6, end) infinite;

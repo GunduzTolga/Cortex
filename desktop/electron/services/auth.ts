@@ -51,6 +51,8 @@ const TOOLS: Array<{ id: CliId; login: string[] | null; key: CliAuth['key'] }> =
 ];
 
 const STATUS_TIMEOUT = 20_000;
+/** The e2e run (CORTEX_HIDDEN=1, electron/main.ts) signs in to stand-ins: their console is not put in front of the person at the machine. */
+const SHOW_CONSOLE = process.env.CORTEX_HIDDEN !== '1';
 /** While a sign-in window is open: asked this often whether it is done, for at most this long. */
 const LOGIN_POLL = 4_000;
 const LOGIN_WATCH = 10 * 60_000;
@@ -179,7 +181,7 @@ export function startLogin(id: unknown): void {
   const program = programOf(tool.id);
   if (!tool.login || !program) throw new KeyRefusal('This tool is not signed in to from here.');
   if (process.platform !== 'win32') throw new KeyRefusal('Signing in from Cortex opens a console window, which only Windows does here.');
-  const child = spawn(program.command, [...program.args, ...tool.login], { cwd: os.homedir(), env: childEnv(program.env), detached: true, stdio: 'ignore', windowsHide: false, shell: false });
+  const child = spawn(program.command, [...program.args, ...tool.login], { cwd: os.homedir(), env: childEnv(program.env), detached: true, stdio: 'ignore', windowsHide: !SHOW_CONSOLE, shell: false });
   let open = true;
   child.on('error', () => {
     open = false;
@@ -236,7 +238,7 @@ export function installTool(id: unknown): void {
   if (process.platform !== 'win32') throw new KeyRefusal('Installing from Cortex opens a console window, which only Windows does here.');
   if (programOf(tool.id)) throw new KeyRefusal('This tool is installed already.');
   const script = installScript(tool.id, readSettings().language !== 'en');
-  const child = spawn(powerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { cwd: os.homedir(), env: childEnv(), detached: true, stdio: 'ignore', windowsHide: false, shell: false });
+  const child = spawn(powerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { cwd: os.homedir(), env: childEnv(), detached: true, stdio: 'ignore', windowsHide: !SHOW_CONSOLE, shell: false });
   let ended = false;
   const after = () => {
     if (ended) return;

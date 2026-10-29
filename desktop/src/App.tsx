@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { engineAction } from '@shared/setup';
 import { BookOpen, Building2, FolderOpen, MessageCircle, Network, Settings } from 'lucide-react';
-import seal from '../../tema/ananas/marka/pyn-muhur.svg';
+import logo from '../../tema/ananas/marka/pyn-logo-512.png';
+import smallLogo from '../../tema/ananas/marka/pyn-logo-96.png';
 import type { Key } from './i18n';
 import { useT } from './i18n/useT';
 import { AuthDialog } from './chat/AuthDialog';
@@ -96,7 +97,7 @@ function Welcome() {
         <LanguageSwitch />
       </div>
       <div className="flex max-w-xl items-center gap-8">
-        <img src={seal} alt="" className="h-32 w-32 shrink-0" />
+        <img src={logo} alt="" className="h-32 w-32 shrink-0" data-welcome-logo />
         <div>
           <h1 className="font-display text-4xl text-darkDelegation">Cortex</h1>
           <p className="mt-2 text-[15px] text-zinc-700">{t('welcome.tagline')}</p>
@@ -218,7 +219,7 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-white" data-vault-screen>
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-zinc-100 px-3" role="group" aria-label={t('app.view')}>
-        <img src={seal} alt="" className="mr-2 h-6 w-6" />
+        <img src={smallLogo} alt="" className="mr-2 h-6 w-6" />
         {views.map(([one, icon, words]) => (
           <button
             key={one}

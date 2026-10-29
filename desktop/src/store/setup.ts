@@ -57,6 +57,11 @@ export const useSetup = create<SetupState>((set, get) => {
         set({ steps: { job: push.job, lines: lines.slice(-6) } });
         return;
       }
+      // A job ended: what is set up now read again, whoever started it. Only the window that started it was told
+      // before, by its own call; a window loaded again meanwhile, or one where the job was not started, kept saying
+      // it was going on (29 October).
+      if (get().steps?.job === push.job) set({ steps: null });
+      void get().refresh();
       if (push.ok && push.warning) {
         // Set up, but not as wished (voice typing's listener did not start): said, with what mends it, until closed.
         useApp.getState().toast({

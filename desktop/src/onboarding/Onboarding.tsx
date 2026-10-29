@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Download, FolderOpen, KeyRound, LogIn, Mic, RefreshCw, SkipForward } from 'lucide-react';
-import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz.svg';
+import pineapple from '../../../tema/ananas/marka/pyn-ananas-512.png';
+import logo from '../../../tema/ananas/marka/pyn-logo-96.png';
+import sitting from '../../../tema/ananas/marka/pyn-oturan-512.png';
 import type { CliAuth, CliId } from '@shared/chat';
 import { engineAction, type SetupStatus, wakePhraseLabel } from '@shared/setup';
 import { AuthDialog, TOOL_NAMES } from '../chat/AuthDialog';
@@ -11,7 +13,7 @@ import { useApp } from '../store/app';
 import { useSetup } from '../store/setup';
 import { LanguageSwitch } from '../ui/LanguageSwitch';
 import { HotkeyBusy, Progress, VoiceHelperBar, engineButtonText, pythonWantingText } from '../ui/SetupSections';
-import { Button, Switch, inputClass } from '../ui/ui';
+import { Button, Spinner, Switch, inputClass } from '../ui/ui';
 
 /**
  * The first thing the app shows, until it has been gone through once: Pyn
@@ -59,6 +61,8 @@ export function Onboarding() {
   // The tools signed in to from here: a sign-in opened for them, from its button or after its install, that ended signed in.
   const [fresh, setFresh] = useState<Set<CliId>>(new Set());
   const trying = useRef<Set<CliId>>(new Set());
+  // A sign-in opened from its button and not yet ended: said on its row, as its console may open behind the window.
+  const [signingIn, setSigningIn] = useState<Set<CliId>>(new Set());
   // Claude Code being installed from here, or its installer ended without it.
   const [installing, setInstalling] = useState<'running' | 'failed' | null>(null);
   const installRef = useRef(installing);
@@ -75,11 +79,17 @@ export function Onboarding() {
           for (const id of signed) trying.current.delete(id);
           if (signed.length) setFresh((before) => new Set([...before, ...signed]));
           if (installRef.current === 'running') setInstalling(now.find((tool) => tool.id === 'claude')?.installed ? null : 'failed');
+          return signed;
         });
-    const stop = window.cortex.on.authChanged(() => void reread());
-    // Back from a terminal or the browser, where a tool or Python was installed or signed in to: asked again.
+    // Told by the main process: a sign-in done (its console may still be open), or its console closed.
+    // Either way the sign-in is over on its row; a sign-in closed without one shows the tool signed out again.
+    const stop = window.cortex.on.authChanged(() => void reread().then(() => setSigningIn(new Set())));
+    // Back from a terminal or the browser, where a tool or Python was installed or signed in to: asked again,
+    // and a sign-in that ended there counted as done here.
     const back = () => {
-      void useChat.getState().loadAuth();
+      void reread().then((signed) => {
+        if (signed.length) setSigningIn((before) => new Set([...before].filter((id) => !signed.includes(id))));
+      });
       void useSetup.getState().refresh();
     };
     window.addEventListener('focus', back);
@@ -90,7 +100,11 @@ export function Onboarding() {
   }, []);
   const login = (id: CliId) => {
     trying.current.add(id);
-    void window.cortex.chat.login(id).catch(() => trying.current.delete(id));
+    setSigningIn((before) => new Set(before).add(id));
+    void window.cortex.chat.login(id).catch(() => {
+      trying.current.delete(id);
+      setSigningIn((before) => new Set([...before].filter((one) => one !== id)));
+    });
   };
   const install = (id: CliId) => {
     trying.current.add(id);
@@ -146,7 +160,7 @@ export function Onboarding() {
       </div>
       <nav className="flex w-60 shrink-0 flex-col border-r border-darkDelegation/10 px-4 py-8" aria-label={t('onboarding.title')}>
         <div className="mb-6 flex items-center gap-2 px-2">
-          <img src={face} alt="" className="h-9 w-9" />
+          <img src={logo} alt="" className="h-9 w-9" />
           <span className="font-display text-xl text-darkDelegation">Cortex</span>
         </div>
         <ol className="space-y-1">
@@ -179,7 +193,7 @@ export function Onboarding() {
           {at === 'vault' ? <VaultStep name={vault?.name ?? null} /> : null}
           {at === 'python' ? <PythonStep status={status} /> : null}
           {at === 'engine' ? <EngineStep status={status} /> : null}
-          {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} installing={installing} onLogin={login} onInstall={install} /> : null}
+          {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} signingIn={signingIn} installing={installing} onLogin={login} onInstall={install} /> : null}
           {at === 'voice' ? <VoiceStep status={status} /> : null}
           {at === 'done' ? <DoneStep order={order} done={done} skipped={skipped} canFinish={Boolean(vault)} /> : null}
 
@@ -246,7 +260,7 @@ function NameStep({ onNext }: { onNext: () => void }) {
   };
   return (
     <div>
-      <img src={face} alt="" className="mb-5 h-24 w-24" />
+      <img src={sitting} alt="" className="mb-4 h-28 w-28" data-onboarding-pyn="sitting" />
       <Heading title={t('onboarding.name.title')}>
         <p>{t('onboarding.name.body')}</p>
       </Heading>
@@ -394,12 +408,14 @@ function EngineStep({ status }: { status: SetupStatus | null }) {
 function ToolsStep({
   auth,
   fresh,
+  signingIn,
   installing,
   onLogin,
   onInstall,
 }: {
   auth: CliAuth[] | null;
   fresh: Set<CliId>;
+  signingIn: Set<CliId>;
   installing: 'running' | 'failed' | null;
   onLogin: (id: CliId) => void;
   onInstall: (id: CliId) => void;
@@ -447,13 +463,24 @@ function ToolsStep({
       <ul className={`mt-5 divide-y divide-zinc-100 rounded-xl border border-darkDelegation/15 bg-white${tools.length ? '' : ' hidden'}`} data-onboarding-tool-list>
         {tools.map((tool) => {
           const [words, colours] = state(tool);
+          const going = signingIn.has(tool.id) && !fresh.has(tool.id);
           return (
             <li key={tool.id} className="flex items-center gap-3 px-3 py-2.5" data-onboarding-tool={tool.id}>
-              <span className="min-w-0 flex-1 text-[13px] font-semibold text-darkDelegation">{TOOL_NAMES[tool.id] ?? tool.id}</span>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${colours}`} data-onboarding-tool-state={words}>
-                {t(words)}
+              <span className="min-w-0 flex-1 text-[13px] font-semibold text-darkDelegation">
+                {TOOL_NAMES[tool.id] ?? tool.id}
+                {going ? <span className="mt-0.5 block text-[11.5px] font-normal text-zinc-500">{t('onboarding.tools.signingIn.note')}</span> : null}
               </span>
-              {tool.canLogin && !fresh.has(tool.id) ? (
+              {going ? (
+                <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-gold/25 px-2 py-0.5 text-[10.5px] font-semibold text-darkDelegation" data-onboarding-tool-signing-in>
+                  <Spinner size={10} />
+                  {t('onboarding.tools.signingIn')}
+                </span>
+              ) : (
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${colours}`} data-onboarding-tool-state={words}>
+                  {t(words)}
+                </span>
+              )}
+              {tool.canLogin && !fresh.has(tool.id) && !going ? (
                 <Button tone={tool.signedIn === true ? 'ghost' : 'primary'} className="h-8 shrink-0" onClick={() => onLogin(tool.id)} data-onboarding-tool-login={tool.id}>
                   <LogIn size={12} />
                   {t(tool.signedIn === true ? 'onboarding.tools.again' : 'onboarding.tools.signIn')}
@@ -522,7 +549,7 @@ function DoneStep({ order, done, skipped, canFinish }: { order: StepId[]; done: 
   const job = useSetup((s) => s.status?.job ?? null);
   return (
     <div>
-      <img src={face} alt="" className="mb-5 h-20 w-20" />
+      <img src={pineapple} alt="" className="mb-4 h-24 w-24" data-onboarding-pyn="pineapple" />
       <Heading title={who ? t('onboarding.done.titleNamed', { name: who }) : t('onboarding.done.title')}>
         <p>{t('onboarding.done.body')}</p>
       </Heading>

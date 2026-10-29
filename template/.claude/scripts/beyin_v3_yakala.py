@@ -1645,13 +1645,13 @@ def _font(size, weight='normal', role='body'):
 
 
 def _logo(root):
-    """Pyn's seal for the popup header at the size nearest the screen scale, or None."""
+    """Pyn taking a note (the phone's Not al button) for the popup header at the size nearest the screen scale, or None."""
     try:
         import tkinter as tk
         import beyin_v3_marka as marka
         scale = root.winfo_fpixels('1i') / 96
         size = 56 if scale >= 1.75 else 42 if scale >= 1.25 else 28
-        return tk.PhotoImage(master=root, data=''.join(getattr(marka, 'MUHUR_%d' % size)))
+        return tk.PhotoImage(master=root, data=''.join(getattr(marka, 'YAKALA_%d' % size)))
     except Exception:
         return None  # a missing or unreadable mark costs the logo, never the capture
 

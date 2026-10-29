@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { BookOpen, Download, PencilLine, Plus, ShieldQuestion, Trash2 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
-// Pyn's own face in the chat, where Pyn is the one talking; the seal stays the app's mark.
-import face from '../../../tema/ananas/marka/pyn-yuz/pyn-yuz.svg';
+// Pyn greeting in a new chat: the logo itself; the seal (it, on its paper disc) stays the app's icon.
+import face from '../../../tema/ananas/marka/pyn-logo-512.png';
 import type { ChatSummary } from '@shared/chat';
 import { messageOf } from '@shared/ipcError';
 import type { Key } from '../i18n';

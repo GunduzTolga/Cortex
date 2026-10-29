@@ -8,6 +8,7 @@ import { settleVault, setupBusy, whenSetupIdle } from './services/setup';
 import { startTelegram } from './services/telegram';
 import { startMicrophoneWord, stopMicrophoneWord } from './services/microphone';
 import { keepStartWithWindows, listeningNow, startTray, trayNotice } from './services/tray';
+import { WINDOW_MIN, keepWindowState, readWindowState } from './services/windowState';
 
 const DEV_SERVER = process.env.VITE_DEV_SERVER_URL;
 const isDev = Boolean(DEV_SERVER);
@@ -204,13 +205,27 @@ async function pageGone(contents: Electron.WebContents, details: Electron.Render
   }
 }
 
+/** Maximized as it is first shown, where it was left so (maximizing shows it too). */
+let maximizeOnShow = false;
+function reveal(win: BrowserWindow): void {
+  if (maximizeOnShow) {
+    maximizeOnShow = false;
+    win.maximize();
+  }
+  win.show();
+}
+
 function createWindow(showNow = true): void {
   flushed = 'no';
+  // Where it was left; filling the screen at the first opening (services/windowState.ts). The e2e run's hidden window keeps the default.
+  const kept = HIDDEN ? { bounds: null, maximized: false } : readWindowState();
+  maximizeOnShow = kept.maximized;
   window = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1040,
-    minHeight: 680,
+    width: kept.bounds?.width ?? 1440,
+    height: kept.bounds?.height ?? 900,
+    ...(kept.bounds ? { x: kept.bounds.x, y: kept.bounds.y } : {}),
+    minWidth: WINDOW_MIN.width,
+    minHeight: WINDOW_MIN.height,
     backgroundColor: PAPER,
     title: 'Cortex',
     icon: windowIcon(),
@@ -230,11 +245,12 @@ function createWindow(showNow = true): void {
     },
   });
   if (HIDDEN) window.webContents.setFrameRate(30);
+  else keepWindowState(window);
   const contents = window.webContents;
   contents.on('render-process-gone', (_event, details) => void pageGone(contents, details));
 
   window.once('ready-to-show', () => {
-    if (!HIDDEN && showNow) window?.show();
+    if (!HIDDEN && showNow && window) reveal(window);
   });
 
   // Windows shutting down or signing out: the window closes for good, nothing holds the session up.
@@ -361,7 +377,7 @@ function showWindow(): void {
     return;
   }
   if (window.isMinimized()) window.restore();
-  window.show();
+  reveal(window);
   window.focus();
 }
 

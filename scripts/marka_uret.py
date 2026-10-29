@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-"""Pyn marka görsellerinin küçük boyutlarını kaynak çizimlerden üretir (geliştirici aracı).
+"""Pyn marka görsellerini kaynak çizimlerden üretir (geliştirici aracı).
 
-Pillow ister; yalnız tasarım değiştiğinde elle çalıştırılır, testler ve CI çalıştırmaz.
-Çıktılar `tema/ananas/marka/` altına yazılır ve depoya girer:
+Pillow ve numpy ister; yalnız tasarım değiştiğinde elle çalıştırılır, testler ve CI çalıştırmaz.
+Çıktılar `tema/ananas/marka/` altına yazılır ve depoya girer. Varsayılan adım (`logo`)
+`kaynak/` altındaki dört çizimin zeminini kaldırır (kenarlarda zemin rengi ayıklanır, kağıt
+zemindeki benekler atılır) ve şunları yazar:
 
-- pyn-muhur-{28,42,56}.png : yakala penceresinin başlığı (ekran ölçeğine göre seçilir)
-- pyn.ico                  : Windows kısayol ikonu (16-256 px)
+- pyn-logo-{512,96}.png         : logo, tek başına (karşılama; köşe ve sohbetteki Pyn)
+- pyn-muhur-{28,42,56,200}.png  : logo krem dairede, ince mürekkep halkayla: uygulamanın mührü
+                                  (bildirim alanı, terminaldeki Pyn sekmesi, kurulum başlığı)
+- pyn.ico                       : aynı mühür, Windows uygulama ve kısayol ikonu (16-256 px)
+- pyn-yakala-{28,42,56}.png     : not alan Pyn, telefondaki Not al düğmesi: yakala penceresinin
+                                  başlığı (ekran ölçeğine göre seçilir)
+- pyn-oturan-512.png            : oturan Pyn (ilk açılış ekranı, kurulum sihirbazı)
+- pyn-ananas-512.png            : ananas Pyn (ilk açılışın son adımı)
 - pyn-yuz/*.svg            : Pyn'in yüzü, vektör (sohbet, Obsidian'da boş sekme); `yuz` adımı
 - pyn-yuz-256.png          : aynı yüzün PNG'si, SVG okumayan yerler için; `yuz` adımı
 
@@ -15,15 +23,17 @@ yuvarlak, sert gölgeli, kenarları yumuşatılmış; boşta, dinlerken, yazarke
 
 `kurulum` adımı masaüstü uygulamasının Windows kurulum sihirbazının görsellerini yazar
 (`desktop/build/`, electron-builder'ın kaynak klasörü): kenar görseli (164x314) ve üst başlık
-(150x57), Pyn'in yüzü ve mühürüyle, Ananas renklerinde.
+(150x57), oturan Pyn ve mühürle, Ananas renklerinde. `tepsi` adımı bildirim alanının ikonlarını
+mühürden çizer; ikisi de `logo` adımından sonra çalıştırılır.
 - pyn-muhur.six            : `pyn` karşılama kutusundaki mühür (Sixel, terminalde gerçek resim)
 - pyn-muhur-200.png        : Windows Terminal Pyn profilinin köşe filigranı
 
 Ardından: py -3 scripts/ananas_tema.py uret
 
-    py -3 scripts/marka_uret.py "C:\\...\\Pyn Tasarım\\docs\\design\\logo"
-    py -3 scripts/marka_uret.py yuz "C:\\...\\Pyn'in Yüz Tasarımı\\pyn-yuz"
+    py -3 scripts/marka_uret.py
     py -3 scripts/marka_uret.py kurulum
+    py -3 scripts/marka_uret.py tepsi
+    py -3 scripts/marka_uret.py yuz "C:\\...\\Pyn'in Yüz Tasarımı\\pyn-yuz"
     py -3 scripts/marka_uret.py yakala
 
 `yuz`, Claude Design'ın teslim ettiği SVG'leri (docs/marka/pyn-yuz-brifi.md) alır; PNG'yi
@@ -71,19 +81,108 @@ def sixel(image, size=SIXEL_SIZE, colors=32):
     return ''.join(out) + '\x1b\\'
 
 
-def main(source):
-    source = Path(source)
-    seal = Image.open(source / 'logo-muhur-1024.png').convert('RGBA')
+SOURCES = OUT / 'kaynak'
+SENTINEL = (255, 0, 255)
+
+
+def _box_sum(mask, k):
+    """How many of `mask` are in the k x k square around each pixel (k odd)."""
+    import numpy as np
+    r = k // 2
+    s = np.pad(mask.astype(np.int32), ((r + 1, r), (r + 1, r))).cumsum(0).cumsum(1)
+    return s[k:, k:] - s[:-k, k:] - s[k:, :-k] + s[:-k, :-k]
+
+
+def cutout(path, despeckle=False):
+    """A drawing on a plain or paper ground, the ground taken off: a square RGBA with a margin.
+
+    The ground is what is near the border's colour and joined to the border, so the white of a face
+    inside its outline stays. The ground's edge is softened by how far each pixel is from the
+    ground's colour, and that colour is taken out of it: no light fringe on a dark taskbar. On a
+    paper ground the paper's specks go: a dot with few others near it is the paper's, a halftone's
+    dots stand together."""
+    import numpy as np
+    from PIL import ImageDraw
+    rgb = Image.open(path).convert('RGB')
+    w, h = rgb.size
+    filled = rgb.copy()
+    border = [(x, y) for x in range(0, w, 8) for y in (0, h - 1)] + [(x, y) for y in range(0, h, 8) for x in (0, w - 1)]
+    for seed in border:
+        if filled.getpixel(seed) != SENTINEL:
+            ImageDraw.floodfill(filled, seed, SENTINEL, thresh=40)
+    marked = np.asarray(filled)
+    ground = (marked[..., 0] == 255) & (marked[..., 1] == 0) & (marked[..., 2] == 255)
+    px = np.asarray(rgb).astype(np.float32)
+    paper = np.median(px[ground], axis=0)
+    alpha = np.where(ground, 0.0, 1.0)
+    if despeckle:
+        solid = alpha > 0
+        alpha[solid & (_box_sum(solid, 31) < 40)] = 0
+        ground = alpha == 0
+    # The drawing's pixels beside the ground are partly ground: as opaque as they are far from it.
+    edge = (alpha > 0) & (_box_sum(ground, 5) > 0)
+    far = np.abs(px - paper).max(axis=2)
+    alpha[edge] = np.clip(far[edge] / 90.0, 0, 1)
+    # Paper's faint blotches left beside the ground, all but clear: gone, or they stretch the crop to the corners.
+    alpha[alpha < 0.15] = 0
+    if despeckle:
+        solid = alpha > 0
+        alpha[solid & (_box_sum(solid, 31) < 40)] = 0
+    a = np.maximum(alpha, 1e-3)[..., None]
+    colour = np.clip((px - paper * (1 - a)) / a, 0, 255)
+    drawn = Image.fromarray(np.dstack([colour, alpha[..., None] * 255]).round().astype(np.uint8), 'RGBA')
+    drawn = drawn.crop(drawn.getchannel('A').getbbox())
+    side = round(max(drawn.size) * 1.08)
+    square = Image.new('RGBA', (side, side), (0, 0, 0, 0))
+    square.alpha_composite(drawn, ((side - drawn.width) // 2, (side - drawn.height) // 2))
+    return square
+
+
+def badge(logo, size=1024):
+    """The round mark: the logo on paper in an ink ring. Black on a dark taskbar is lost; on its
+    paper it reads in both. Drawn four times larger, brought down: a smooth ring."""
+    from PIL import ImageDraw
+    n = size * 4
+    big = Image.new('RGBA', (n, n), (0, 0, 0, 0))
+    d = ImageDraw.Draw(big)
+    ring = n // 40
+    d.ellipse((0, 0, n - 1, n - 1), fill=INK)
+    d.ellipse((ring, ring, n - 1 - ring, n - 1 - ring), fill=PAPER)
+    inner = logo.resize((round(n * 0.8), round(n * 0.8)), Image.LANCZOS)
+    big.alpha_composite(inner, ((n - inner.width) // 2, (n - inner.height) // 2 + n // 60))
+    return big.resize((size, size), Image.LANCZOS)
+
+
+ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 256)
+
+
+def logo():
+    """Pyn's marks from the drawings in `kaynak/`:
+
+    - pyn-logo.webp: the logo, alone (pyn-logo-{512,96}.png: the welcome, the corner, the chat) and on its
+      round mark (pyn-muhur-{28,42,56,200}.png, pyn.ico, pyn-muhur.six: the app's and its
+      shortcuts' icon, the notification area, the terminal's tab and welcome)
+    - pyn-yakala.webp: Pyn taking a note, the phone's Not al button; Not al's title here too
+      (pyn-yakala-{28,42,56}.png)
+    - pyn-oturan.webp: Pyn sitting, whole (pyn-oturan-512.png: the first-run screen, the installer)
+    - pyn-ananas.webp: Pyn as a pineapple, small (pyn-ananas-512.png: the first run's last step)"""
     OUT.mkdir(parents=True, exist_ok=True)
+    alone = cutout(SOURCES / 'pyn-logo.webp')
+    # 512 for the welcome; 96 for what is drawn at 24-36 px (the corner, the chat's face), which a browser shrinking 512 blurs.
+    for size in (512, 96):
+        alone.resize((size, size), Image.LANCZOS).save(OUT / f'pyn-logo-{size}.png', optimize=True)
+    mark = badge(alone)
+    for size in (28, 42, 56, 200):
+        mark.resize((size, size), Image.LANCZOS).save(OUT / f'pyn-muhur-{size}.png', optimize=True)
+    frames = [mark.resize((s, s), Image.LANCZOS) for s in ICO_SIZES]
+    frames[-1].save(OUT / 'pyn.ico', sizes=[(s, s) for s in ICO_SIZES], append_images=frames[:-1])
+    (OUT / 'pyn-muhur.six').write_text(sixel(mark), encoding='ascii', newline='')
+    note = cutout(SOURCES / 'pyn-yakala.webp')
     for size in (28, 42, 56):
-        seal.resize((size, size), Image.LANCZOS).save(OUT / f'pyn-muhur-{size}.png', optimize=True)
-    seal.save(OUT / 'pyn.ico', sizes=[(s, s) for s in (16, 20, 24, 32, 40, 48, 64, 256)])
-    (OUT / 'pyn-muhur.six').write_text(sixel(seal), encoding='ascii', newline='')
-    seal.resize((200, 200), Image.LANCZOS).save(OUT / 'pyn-muhur-200.png', optimize=True)
-    # The vector seal without its C2PA metadata block: that is provenance, not drawing.
-    svg = without_provenance((source / 'logo-muhur.svg').read_text(encoding='utf-8'))
-    (OUT / 'pyn-muhur.svg').write_text(svg.replace(' width="400" height="400"', ''), encoding='utf-8', newline='\n')
-    for path in sorted(OUT.iterdir()):
+        note.resize((size, size), Image.LANCZOS).save(OUT / f'pyn-yakala-{size}.png', optimize=True)
+    cutout(SOURCES / 'pyn-oturan.webp', despeckle=True).resize((512, 512), Image.LANCZOS).save(OUT / 'pyn-oturan-512.png', optimize=True)
+    cutout(SOURCES / 'pyn-ananas.webp', despeckle=True).resize((512, 512), Image.LANCZOS).save(OUT / 'pyn-ananas-512.png', optimize=True)
+    for path in sorted(OUT.glob('pyn-*')):
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
 
 
@@ -135,11 +234,11 @@ def installer_images():
     def font(name, size):
         return ImageFont.truetype(str(FONTS / name), size * k)
 
-    # Sidebar, 164x314: Pyn's face, the name, what it is; a gold band at the foot; an ink edge.
+    # Sidebar, 164x314: Pyn sitting, the name, what it is; a gold band at the foot; an ink edge.
     w, h = 164 * k, 314 * k
     side = Image.new('RGB', (w, h), PAPER)
-    face = Image.open(OUT / 'pyn-yuz-256.png').convert('RGBA').resize((116 * k, 116 * k), Image.LANCZOS)
-    side.paste(face, ((w - face.width) // 2, 52 * k), face)
+    pyn = Image.open(OUT / 'pyn-oturan-512.png').convert('RGBA').resize((132 * k, 132 * k), Image.LANCZOS)
+    side.paste(pyn, ((w - pyn.width) // 2, 44 * k), pyn)
     d = ImageDraw.Draw(side)
     d.text((w // 2, 198 * k), 'Cortex', fill=INK, font=font('Fraunces-Bold.ttf', 27), anchor='mm')
     for i, line in enumerate(('Notların ve yapay zeka', 'araçların için ortak hafıza')):
@@ -284,4 +383,4 @@ if __name__ == '__main__':
     elif sys.argv[1:2] == ['yuz']:
         face(sys.argv[2] if len(sys.argv) > 2 else '.')
     else:
-        main(sys.argv[1] if len(sys.argv) > 1 else '.')
+        logo()

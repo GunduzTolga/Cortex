@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="tema/ananas/marka/pyn-muhur-200.png" width="132" alt="Pyn'in mührü: altın zemin üzerinde ananas">
+  <img src="tema/ananas/marka/pyn-muhur-200.png" width="132" alt="Pyn'in mührü: açılan başından ananas çıkan Pyn, krem dairede">
 </p>
 
 <h1 align="center">Cortex</h1>
@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.34" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.34-E8B23A">
+  <img alt="Sürüm 1.0.36" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.36-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
@@ -370,6 +370,8 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.36](docs/v3/releases/1.0.36.md) | Sohbette de yeni Pyn; uygulama ekranı doldurarak açılır, sonra bırakıldığı gibi; Beyin'in durum kutusu küçüldü. İlk kurulumda giriş yaparken "Giriş sürüyor" görünür, giriş konsolu açık kalsa da bitince "Giriş yapıldı" olur; kurulumun sonu her pencerede görünür. |
+| [1.0.35](docs/v3/releases/1.0.35.md) | Pyn'in yeni logosu: uygulama simgesi, bildirim alanı, kurulum sihirbazı, ilk açılış ve Not al penceresi yeni çizimlerle; simge krem dairede, koyu görev çubuğunda da okunuyor. Masaüstü sohbeti başka bir bilgisayarda çalışan Pyn'le konuşuyor: telefonda başlamış bir konuşma masaüstünden sürdürülür. |
 | [1.0.34](docs/v3/releases/1.0.34.md) | Aynı bilgisayarda kasaya yazan ajanlar birbirinin yazdığını ezmiyor: `note-read` / `note-edit` notu yalnız okunduğu hâlde duruyorsa değiştirir, o arada değişmişse reddeder; eski hâl yedeklenir, BOM ve satır sonları korunur. Öncülün 3.12 hash kontrollü not düzenlemesi. |
 | [1.0.33](docs/v3/releases/1.0.33.md) | Baştan sona incelemenin düzeltmeleri: not yazarken harfler silinmiyor, çakışmada yazılan kaybolmuyor; Enter Pyn'in izin kartını habersiz onaylamıyor, Codex'te Reddet izin vermiyor, Pyn kasada yalnız Markdown notlarına sormadan yazar. Türkçe kullanıcı adlarında ses kuruluyor, eski kurulumlar da işlemcide hızlı modele geçiyor, ses kullanıcı başına tek klasörde. Yakala tek hatada ölmüyor, panodan eski metni ve parolaları almıyor, kasa değişince yeni kasaya geçiyor. Kopya bir not hafızayı kapatmıyor, "ne kadar / ne zaman" soruları notu buluyor, büyük kasalar hızlı. Python sürümü sınanıyor, taşınan kasa yerine bağlanıyor, hatalar tek cümle. Telegram'da kaçan mesajlar kaybolmuyor, kasa değişince bağlantı kopmuyor. |
 | [1.0.32](docs/v3/releases/1.0.32.md) | Ekran kartı olmayan bilgisayarlarda (Intel laptop) "Hey Pyn" yarım dakika geç açılıyordu: işlemcide hızlı model ve ayrı bir uyandırma doğrulayıcısı; ses hazırlanırken ve hazır olunca bildirim; yüklenemeyen ses kendiliğinden yeniden denenir. Kasa, anahtar, giriş, motor güncellemesi, Python ve Telegram değişiklikleri uygulamayı yeniden açmadan geçerli. Mikrofon izin ister: sesle yazma kurulmadan ve **Sürekli dinle** açılmadan önce sorulur; sürekli dinleme yalnız Cortex çalışırken olur, Çık'a basınca mikrofon kapanır. Pyn sohbetinde Claude Code kasadaki notlara (Core.md dahil) sormadan yazar; başka adımlar izin kartıyla sorulur. İlk kurulumda Claude Code yoksa uygulamadan kurulup giriş yapılır; sonradan kurulan araç ya da yapılan giriş, uygulamayı yeniden açmadan görünür. |

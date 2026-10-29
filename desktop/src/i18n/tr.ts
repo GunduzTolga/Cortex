@@ -161,6 +161,8 @@ export const tr: Record<keyof typeof en, string> = {
   'onboarding.tools.noModel': 'Yüklü model yok',
   'onboarding.tools.signIn': 'Giriş yap',
   'onboarding.tools.again': 'Yeniden giriş yap',
+  'onboarding.tools.signingIn': 'Giriş sürüyor',
+  'onboarding.tools.signingIn.note': 'Açılan pencerede ya da tarayıcıda girişi tamamla; bitince burada görünür.',
   'onboarding.tools.keys': 'API anahtarları ve diğerleri…',
   'onboarding.voice.title': 'Sesle yazma',
   'onboarding.voice.later': 'İstersen şimdi atla; Ayarlar → Sesle yazma\'dan tek tuşla kurulur. Kurulum sürerken diğer adımlara geçebilirsin.',
