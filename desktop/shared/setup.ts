@@ -32,6 +32,8 @@ export interface VoiceStatus {
   readsFiles?: boolean;
   /** On the processor, which model writes (`ses ayar --islemci-modeli`); null from an engine that cannot choose. */
   cpuModel?: CpuModel | null;
+  /** The card writes with an earlier version's larger model file (the full large-v3-turbo): setting voice typing up again fetches the lighter one. */
+  earlierModel?: boolean;
 }
 
 /** The wake phrases there are: Pyn's name first, or last, or either of the two ('ikisi'). */

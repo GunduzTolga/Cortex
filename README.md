@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.38" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.38-E8B23A">
+  <img alt="Sürüm 1.0.39" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.39-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Lisans MIT" src="https://img.shields.io/badge/lisans-MIT-1B1712">
@@ -370,6 +370,7 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.39](docs/v3/releases/1.0.39.md) | Ses ekran kartında (AMD / Intel) yarı boyutlu modelle yazıyor: whisper.cpp'nin large-v3-turbo modeli 1,6 GB yerine 8 bitlik sürümüyle (yaklaşık 870 MB), yazışı neredeyse aynı, ses daha çabuk açılıyor. Önceden kurulmuş ses, Ayarlar'daki "Daha hafif ses modelini al" ile geçiyor; eski dosya silinir. |
 | [1.0.38](docs/v3/releases/1.0.38.md) | 1.0.37'nin düzeltmeleri yeniden denendi; bulunanlar düzeltildi: yeniden açılan sohbet ekranda gösterdiği izin moduyla çalışıyor; kilitli sohbet listesi silinmiyor; "Diskteki sürümü al" geri alınabiliyor; Windows satır sonlu notlarda başlıklar okunuyor; eksik notlar doğru klasörde oluşuyor; en yeni bildirim hep görünüyor. |
 | [1.0.37](docs/v3/releases/1.0.37.md) | Uygulama baştan sona bir kullanıcı gibi denendi, 70'ten fazla sorun düzeltildi: benzer adlı nota yeniden adlandırma ve diskten okunan notta geri alma artık not kaybettirmiyor; sunucu anahtarı yalnız verildiği sunucuya gidiyor; uzun notlar donmuyor; sohbette Yeniden dene, Kopyala ve doğru durdurma; ofis İngilizcede de İngilizce. |
 | [1.0.36](docs/v3/releases/1.0.36.md) | Sohbette de yeni Pyn; uygulama ekranı doldurarak açılır, sonra bırakıldığı gibi; Beyin'in durum kutusu küçüldü. İlk kurulumda giriş yaparken "Giriş sürüyor" görünür, giriş konsolu açık kalsa da bitince "Giriş yapıldı" olur; kurulumun sonu her pencerede görünür. |

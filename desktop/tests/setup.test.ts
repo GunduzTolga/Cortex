@@ -87,8 +87,11 @@ test('the voice status is the engine’s, the model by its name only', () => {
     wakePhrase: 'pyn not al',
     readsFiles: true,
     cpuModel: null,
+    earlierModel: false,
   });
   assert.equal(voiceOf({ kurulu: true, dosya_okur: false })?.readsFiles, false, 'a whisper.cpp setup that cannot open a voice note yet');
+  // 30 October: the card's model became one half the size; a setup made before writes with the earlier one until set up again.
+  assert.equal(voiceOf({ kurulu: true, motor: 'vulkan', eski_model: true })?.earlierModel, true);
   // On the processor, the model it writes with is a choice: quick, or accurate and slow there.
   assert.equal(voiceOf({ kurulu: true, motor: 'islemci', islemci_modeli: 'small' })?.cpuModel, 'small');
   assert.equal(voiceOf({ kurulu: true, motor: 'islemci', islemci_modeli: 'large-v3-turbo' })?.cpuModel, 'large-v3-turbo');
