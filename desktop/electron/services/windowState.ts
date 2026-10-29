@@ -48,7 +48,7 @@ const workAreas = (): Rectangle[] => screen.getAllDisplays().map((display) => di
 
 export function readWindowState(): WindowState {
   try {
-    return windowStateOf(JSON.parse(fs.readFileSync(file(), 'utf8')), workAreas());
+    return windowStateOf(JSON.parse(fs.readFileSync(file(), 'utf8').replace(/^\uFEFF/, '')), workAreas());
   } catch {
     return FIRST;
   }

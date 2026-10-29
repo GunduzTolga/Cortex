@@ -80,7 +80,9 @@ export function codexOptions(models: Model[], prefs: Readonly<Record<string, str
   const model = models.find((one) => one.id === prefs.model) ?? models.find((one) => one.isDefault) ?? models[0];
   const modeNames: Record<Mode, string> = tr ? { ask: 'Önce sor', readonly: 'Salt okunur', auto: 'Kasada sormadan çalış' } : { ask: 'Ask first', readonly: 'Read only', auto: 'Work in the vault without asking' };
   const efforts = ['default', ...(model?.efforts ?? [])];
-  const effortName = (value: string) => (value === 'default' ? (tr ? 'Varsayılan efor' : 'Default effort') : tr ? `Efor: ${value}` : `Effort: ${value}`);
+  // Codex names its efforts in English (low, medium, high…): said in Turkish as Claude's are (29 October).
+  const EFFORT_TR: Record<string, string> = { minimal: 'en az', low: 'düşük', medium: 'orta', high: 'yüksek', xhigh: 'çok yüksek' };
+  const effortName = (value: string) => (value === 'default' ? (tr ? 'Varsayılan efor' : 'Default effort') : tr ? `Efor: ${EFFORT_TR[value] ?? value}` : `Effort: ${value}`);
   const options: ConfigOption[] = [];
   if (model) options.push({ id: 'model', name: 'Model', category: 'model', current: model.id, choices: models.map((one) => ({ value: one.id, name: one.name })) });
   options.push({ id: 'mode', name: tr ? 'İzin modu' : 'Permission mode', category: 'mode', current: MODES.includes(prefs.mode as Mode) ? prefs.mode : 'ask', choices: MODES.map((value) => ({ value, name: modeNames[value] })) });

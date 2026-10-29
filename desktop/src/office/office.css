@@ -175,6 +175,9 @@
   right: 10px;
   top: 46px;
   z-index: 5;
+  /* Scrolls in a short window: its last controls were under the map's edge and could not be reached (29 October). */
+  max-height: calc(100% - 56px);
+  overflow-y: auto;
   gap: 12px;
   font-size: 13px;
 }
@@ -513,7 +516,10 @@
 }
 .ofis-log {
   position: relative;
-  flex: none;
+  /* Shrinks to the room the map leaves it (the map keeps its 260px): kept at its own height, its foot - the newest
+     line - went under the window's edge in a short or zoomed window (29 October). */
+  flex: 0 1 auto;
+  min-height: 90px;
   background: var(--ofis-zemin);
   border: 2px solid var(--ofis-cizgi);
   display: flex;

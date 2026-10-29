@@ -8,7 +8,7 @@ import { useApp } from '../store/app';
 import { Spinner } from '../ui/ui';
 import { escapeLayers } from '../ui/escapeLayers';
 import { useEscapeLayer } from '../ui/useEscapeLayer';
-import { authDot } from './AuthDialog';
+import { TOOL_NAMES, authDot } from './AuthDialog';
 import { enterAnswers } from './permissionKey';
 import type { Asked } from './turns';
 
@@ -80,7 +80,7 @@ function ChipSelect({
         data-chat-chip={data}
         className="flex max-w-[14rem] items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-darkDelegation disabled:pointer-events-none disabled:opacity-60"
       >
-        <span className="truncate">{current?.name ?? value}</span>
+        <span className="truncate">{current?.name ?? TOOL_NAMES[value] ?? value}</span>
         {disabled ? null : <ChevronDown size={11} className="shrink-0" />}
       </button>
       {open ? (
@@ -199,7 +199,11 @@ function PermissionCard({ asked, onAnswer, visible }: { asked: Asked; onAnswer: 
           <button
             key={option.id}
             type="button"
-            onClick={() => onAnswer(option.id)}
+            onClick={() => {
+              onAnswer(option.id);
+              // The cursor back in the field: the button it was on goes with the card, and what was typed next went nowhere.
+              document.querySelector<HTMLTextAreaElement>('[data-chat-input]')?.focus();
+            }}
             data-chat-answer-option={option.kind}
             className={`rounded-lg px-2.5 py-1 text-[11.5px] font-semibold transition-colors ${
               option.kind === 'allow_once'
@@ -209,7 +213,9 @@ function PermissionCard({ asked, onAnswer, visible }: { asked: Asked; onAnswer: 
                   : 'border border-darkDelegation/25 text-zinc-600 hover:border-darkDelegation hover:text-darkDelegation'
             }`}
           >
-            {t(ANSWERS[option.kind])}
+            {/* A leave for this chat only (Codex's thread, a server session) is said as one: called "always", it read as
+                more than was given (29 October). */}
+            {t(option.kind === 'allow_always' && option.id === 'session' ? 'chat.permission.thisChat' : ANSWERS[option.kind])}
           </button>
         ))}
       </div>
@@ -268,6 +274,12 @@ export function Composer({
   const t = useT();
   const field = useRef<HTMLTextAreaElement>(null);
   const [sending, setSending] = useState(false);
+  // Stop pressed and the turn not ended yet: a CLI may take a few seconds to stop, and the button looked the same
+  // throughout, so it read as not having been pressed (29 October).
+  const [stopping, setStopping] = useState(false);
+  useEffect(() => {
+    if (!running) setStopping(false);
+  }, [running]);
 
   useEffect(() => {
     field.current?.focus();
@@ -280,11 +292,16 @@ export function Composer({
     element.style.height = `${Math.min(element.scrollHeight, window.innerHeight / 3)}px`;
   }, [draft]);
 
+  // The cursor goes back to the field after a click on Send, Stop or a card's answer: the button it was on is taken
+  // away or disabled, focus fell to the page and what was typed next went nowhere (29 October).
+  const refocus = () => field.current?.focus();
   const send = async () => {
     if (!draft.trim() || running || sending || !cli) return;
     setSending(true);
+    refocus();
     await onSend(draft);
     setSending(false);
+    refocus();
   };
 
   // Kept for later, not sent: the model is not asked, so nothing answers it. The draft goes once it is kept.
@@ -360,8 +377,19 @@ export function Composer({
               {keeping ? <Spinner size={13} /> : <Inbox size={14} />}
             </button>
             {running ? (
-              <button type="button" onClick={onStop} title={t('chat.stop')} aria-label={t('chat.stop')} className="flex h-8 w-8 items-center justify-center rounded-full bg-darkDelegation text-white hover:bg-zinc-700" data-chat-stop>
-                <Square size={11} fill="currentColor" />
+              <button
+                type="button"
+                onClick={() => {
+                  if (!stopping) onStop();
+                  setStopping(true);
+                  refocus();
+                }}
+                title={t(stopping ? 'chat.stopping' : 'chat.stop')}
+                aria-label={t(stopping ? 'chat.stopping' : 'chat.stop')}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-darkDelegation text-white hover:bg-zinc-700"
+                data-chat-stop={stopping ? 'stopping' : 'idle'}
+              >
+                {stopping ? <Spinner size={12} /> : <Square size={11} fill="currentColor" />}
               </button>
             ) : (
               <button

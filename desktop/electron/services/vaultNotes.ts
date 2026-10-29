@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { watch, type FSWatcher } from 'node:fs';
+import { constants as fsConstants, watch, type FSWatcher } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { app, shell } from 'electron';
@@ -206,6 +206,9 @@ function textOf(bytes: Buffer): string | null {
   return Buffer.byteLength(text, 'utf8') === bytes.length && Buffer.from(text, 'utf8').equals(bytes) ? text : null;
 }
 
+/** How many notes are read from disk at once while the vault is indexed. */
+const READERS = 16;
+
 async function build(): Promise<VaultIndex> {
   const vault = readSettings().vault;
   forget(vault);
@@ -217,6 +220,7 @@ async function build(): Promise<VaultIndex> {
   }
   const listed = await walk(vault);
   const seen = new Set<string>();
+  const toRead: typeof listed.files = [];
   for (const file of listed.files) {
     if (!isNotePath(file.path)) continue;
     seen.add(file.path);
@@ -227,16 +231,26 @@ async function build(): Promise<VaultIndex> {
       cache.set(file.path, { modified: file.modified, size: file.size, facts: null, text: null });
       continue;
     }
-    try {
-      const bytes = await fs.readFile(path.join(vault, ...file.path.split('/')));
-      const text = textOf(bytes) ?? bytes.toString('utf8');
-      const keep = cachedText + text.length <= TEXT_CACHE_MAX;
-      if (keep) cachedText += text.length;
-      cache.set(file.path, { modified: file.modified, size: file.size, facts: parseNote(text), text: keep ? text : null });
-    } catch {
-      cache.delete(file.path);
-    }
+    toRead.push(file);
   }
+  // Read a few at a time: read one after another, each waited on the disk (and on an antivirus looking at it), and a
+  // vault of 2 000 notes kept the notes' spinner up for ten seconds at every start (29 October).
+  let next = 0;
+  const reader = async () => {
+    while (next < toRead.length) {
+      const file = toRead[next++];
+      try {
+        const bytes = await fs.readFile(path.join(vault, ...file.path.split('/')));
+        const text = textOf(bytes) ?? bytes.toString('utf8');
+        const keep = cachedText + text.length <= TEXT_CACHE_MAX;
+        if (keep) cachedText += text.length;
+        cache.set(file.path, { modified: file.modified, size: file.size, facts: parseNote(text), text: keep ? text : null });
+      } catch {
+        cache.delete(file.path);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(READERS, toRead.length) }, reader));
   for (const [key, value] of cache) {
     if (seen.has(key)) continue;
     if (value.text) cachedText -= value.text.length;
@@ -322,7 +336,13 @@ export async function readVaultNote(relative: unknown): Promise<NoteRead> {
   if (stat.size > NOTE_READ_MAX) return { path: inside, text: null, hash: null, modified: stat.mtimeMs, tooLarge: true, readOnly: null };
   const bytes = await fs.readFile(file);
   const text = textOf(bytes);
-  const readOnly = text === null ? 'encoding' : keeperOf(inside, text);
+  // A file marked read-only is said so before anything is typed: it took the typing, and every save failed with the
+  // system's own EPERM and the whole path (29 October). Windows answers this from the file's read-only flag.
+  const locked = await fs.access(file, fsConstants.W_OK).then(
+    () => false,
+    () => true,
+  );
+  const readOnly = text === null ? 'encoding' : (keeperOf(inside, text) ?? (locked ? 'locked' : null));
   return { path: inside, text: text ?? bytes.toString('utf8'), hash: hashOf(bytes), modified: stat.mtimeMs, tooLarge: false, readOnly };
 }
 
@@ -346,13 +366,19 @@ export async function readVaultText(relative: unknown): Promise<TextRead> {
 /** A file written beside where it goes and renamed into place, so a note is never left half written. */
 async function writeInPlace(file: string, text: string): Promise<void> {
   const temp = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID()}.tmp`);
-  await fs.writeFile(temp, text, { flag: 'wx' });
   try {
+    await fs.writeFile(temp, text, { flag: 'wx' });
     await renameBusy(temp, file);
   } catch (err) {
     await fs.rm(temp, { force: true });
-    throw err;
+    throw notLetIn(err, path.basename(file));
   }
+}
+
+/** The system refusing a write, said without its path (Node's EPERM names the whole of it, the temporary file too). */
+function notLetIn(err: unknown, name: string): unknown {
+  const code = (err as NodeJS.ErrnoException)?.code;
+  return code === 'EPERM' || code === 'EACCES' ? new VaultRefusal(`${name} could not be written: the system did not let Cortex write it.`) : err;
 }
 
 /** A rename tried again for a moment while Windows says the file is busy (an antivirus or the indexer holds a file just written), without blocking the main process. */
@@ -428,8 +454,12 @@ export async function createVaultFolder(parent: unknown, name: unknown): Promise
   const problem = nameProblem(name);
   if (problem) throw new VaultRefusal(`Not a name a folder can have (${problem}): ${name}`);
   const { file: dir, relative } = await onDisk(parent ?? '');
-  // Not recursive: one folder, made where the person is.
-  await fs.mkdir(path.join(dir, name.trim()));
+  // Not recursive: one folder, made where the person is. One already there is said as a name taken, not as Node's
+  // EEXIST with the vault's whole path (29 October).
+  await fs.mkdir(path.join(dir, name.trim())).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'EEXIST') throw new VaultRefusal(`Something named ${name.trim()} is already in ${relative || 'the vault'}.`);
+    throw notLetIn(err, name.trim());
+  });
   return { path: relative ? `${relative}/${name.trim()}` : name.trim() };
 }
 
@@ -464,15 +494,21 @@ async function moveEntry(fromRelative: unknown, toRelative: string): Promise<Mov
   if (to === from) return { path: from, updated: [], skipped: [] };
   const folder = (await fs.lstat(file)).isDirectory();
   if (folder && (to.startsWith(`${from}/`) || pathKey(to).startsWith(`${pathKey(from)}/`))) throw new VaultRefusal(`A folder cannot go inside itself: ${from}`);
-  // The same thing under another case is a rename of its case, not a clash.
-  if (pathKey(to) !== pathKey(from)) {
-    try {
-      await fs.lstat(target);
-      throw new VaultRefusal(`Something named ${baseName(to)} is already in ${folderOf(to) || 'the vault'}.`);
-    } catch (err) {
-      if (err instanceof VaultRefusal) throw err;
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    }
+  /*
+    Only the same file under another case is a rename of its case; any other file there is a clash, whatever its name
+    folds to. Told apart by the names' key (pathKey folds İ, I and ı to i and Unicode's two spellings to one), a rename
+    of "ılık" to "Ilık" - two files to Windows - put the one over the other and lost its text (29 October). The disk
+    says whether it is the same file: its id, or, where a filesystem has none, the name it really has.
+  */
+  try {
+    const there = await fs.lstat(target, { bigint: true });
+    const self = await fs.lstat(file, { bigint: true });
+    const sameId = there.ino !== 0n && there.ino === self.ino && there.dev === self.dev;
+    const same = sameId || (await fs.realpath(target)) === (await fs.realpath(file));
+    if (!same) throw new VaultRefusal(`Something named ${baseName(to)} is already in ${folderOf(to) || 'the vault'}.`);
+  } catch (err) {
+    if (err instanceof VaultRefusal) throw err;
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
   await vaultIndex();
   const before = last;

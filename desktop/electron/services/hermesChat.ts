@@ -4,7 +4,7 @@ import https from 'node:https';
 import type { ChatEvent, ConfigOption, PermissionKind } from '../../shared/chat';
 import { HERMES_PROFILE, type HermesStatus, hermesAddress } from '../../shared/hermes';
 import { type Backend, OUTPUT_MAX, STOP_GRACE, Stopped, type Turn, TurnFailure, cutSaid, scrubberFor, textOf, unlessStopped } from './chatKit';
-import { forgetKey, keptHere, keyEnv, saveKey } from './keys';
+import { forgetKey, keptHere, keptReadable, keyEnv, saveKey } from './keys';
 import { readSettings, updateSettings } from './settings';
 
 /**
@@ -82,7 +82,17 @@ export const hermesConfigured = (): boolean => Boolean(readSettings().hermesUrl)
 
 export function hermesStatus(): HermesStatus {
   const { hermesUrl, hermesProfile } = readSettings();
-  return { url: hermesUrl, profile: hermesProfile, key: keptHere('hermes') };
+  return { url: hermesUrl, profile: hermesProfile, key: keptReadable('hermes') };
+}
+
+/** The origin an address is sent to (scheme, host, port), or null for one that is not an address. */
+function originOf(address: string | null): string | null {
+  if (!address) return null;
+  try {
+    return new URL(address).origin;
+  } catch {
+    return null;
+  }
 }
 
 /** The address, the profile and, where one is given, a new key, as the window sets them. */
@@ -95,7 +105,10 @@ export function saveHermes(setup: unknown): HermesStatus {
   if (profile && !HERMES_PROFILE.test(profile)) throw new HermesRefusal('That is not the name of a profile: letters, digits, - and _ only.');
   // The key first: one refused leaves the address as it was.
   if (typeof asked.key === 'string' && asked.key.trim()) saveKey('hermes', asked.key, undefined);
-  else if (!keptHere('hermes')) throw new HermesRefusal('Pyn on the server needs its API key (API_SERVER_KEY).');
+  else if (!keptReadable('hermes')) throw new HermesRefusal('Pyn on the server needs its API key (API_SERVER_KEY).');
+  // A key kept goes only to the server it was given for: another host or port is asked for it again. Kept, the next
+  // request sent it to whatever address the window had saved (29 October).
+  else if (originOf(readSettings().hermesUrl) !== originOf(url)) throw new HermesRefusal('A new address needs its key again: a kept key is sent only to the server it was given for.');
   updateSettings((settings) => {
     settings.hermesUrl = url;
     settings.hermesProfile = profile || null;
@@ -120,6 +133,8 @@ export async function testHermes(): Promise<{ sessions: number }> {
 function serverOf(): Server {
   const { hermesUrl, hermesProfile } = readSettings();
   const key = keyEnv('hermes').HERMES_API_KEY;
+  // An address with a key kept that this computer cannot read back (kept on another, or under another account).
+  if (hermesUrl && !key && keptHere('hermes')) throw new TurnFailure('The key kept for Pyn on the server cannot be read on this computer. Give its API key again in the AI tools window.', 'auth');
   if (!hermesUrl || !key) throw new TurnFailure('Pyn on the server is not set up: give its address and its API key in the AI tools window.', 'auth');
   return { base: hermesUrl + (hermesProfile ? `/p/${encodeURIComponent(hermesProfile)}` : ''), key };
 }

@@ -1213,7 +1213,7 @@ check(
     !fs.readFileSync(path.join(userData, 'keys.json'), 'utf8').includes(HERMES_KEY),
 );
 await hermesCard.locator('[data-hermes-test]').click();
-check('the connection is tried as a chat asks it: the sessions it lists are counted', await shownSoon(page.locator('[data-toast="success"]', { hasText: 'Pyn answered: 1 recent sessions' })));
+check('the connection is tried as a chat asks it: the sessions it lists are counted', await shownSoon(page.locator('[data-toast="success"]', { hasText: 'Pyn answered. Recent sessions: 1' })));
 await shoot('15b-pyn-server-setup.png');
 await page.keyboard.press('Escape');
 await page.locator('[data-auth-list]').waitFor({ state: 'detached' });

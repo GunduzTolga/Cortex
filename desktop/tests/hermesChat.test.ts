@@ -193,9 +193,15 @@ test('set up: the address and the profile kept, the key kept encrypted and never
   // Written encrypted, never as it was given.
   assert.ok(!fs.readFileSync(path.join(app.getPath('userData'), 'keys.json'), 'utf8').includes(KEY));
   assert.ok(!fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf8').includes(KEY));
-  // The key left out: the one kept stays.
-  assert.equal(saveHermes({ url: 'https://other:8642', profile: '' }).key, true);
+  // The key left out on the same server (another profile, a path): the one kept stays.
+  assert.equal(saveHermes({ url: 'https://host:8642/', profile: '' }).key, true);
   assert.ok(listClis({ PATH: '' }).some((one) => one.id === 'hermes' && one.available));
+  // Another host or port is asked for the key again: a kept key goes only to the server it was given for. Kept, it
+  // was sent to whatever address was saved next (29 October).
+  assert.throws(() => saveHermes({ url: 'https://other:8642', profile: '' }), /needs its key again/);
+  assert.throws(() => saveHermes({ url: 'https://host:9999' }), /needs its key again/);
+  assert.equal(hermesStatus().url, 'https://host:8642', 'the address refused leaves the one saved');
+  assert.equal(saveHermes({ url: 'https://other:8642', key: KEY }).url, 'https://other:8642', 'given with its key, it is taken');
   assert.deepEqual(forgetHermes(), { url: null, profile: null, key: false });
 });
 
