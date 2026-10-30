@@ -8,6 +8,7 @@ import { useSetup } from '../store/setup';
 import { LanguageSwitch } from './LanguageSwitch';
 import { OfficeTalkSection } from './OfficeTalkSection';
 import { SetupSections } from './SetupSections';
+import { ServerSection } from './ServerSection';
 import { TelegramSection } from './TelegramSection';
 import { Row, SaveButton, Section } from './settingsParts';
 import { Button, Modal, Switch, inputClass } from './ui';
@@ -74,6 +75,7 @@ export function SettingsDialog() {
         </Section>
         <OfficeTalkSection />
         <SetupSections open={open} />
+        <ServerSection open={open} onClose={close} />
         <TelegramSection open={open} />
         <Section title={t('settings.onboarding')} data="onboarding">
           <div className="px-3">
