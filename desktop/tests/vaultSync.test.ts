@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { SECRET_ALLOWED, remoteLabel, secretIn, secretsAdded } from '../shared/vaultSync';
 import { updateSettings } from '../electron/services/settings';
-import { setVaultSync, syncVaultNow, vaultSyncStatus } from '../electron/services/vaultSync';
+import { gitProgram, setVaultSync, syncVaultNow, vaultSyncStatus } from '../electron/services/vaultSync';
 
 /**
  * The vault kept in step with its git remote (electron/services/vaultSync.ts), against real repositories: a bare
@@ -136,4 +136,22 @@ test('a secret in a new line stops the sync before anything is committed or sent
   assert.match(git(a, 'status', '--porcelain', '-uall'), /^\?\? /m, 'the file stays, uncommitted');
   git(b, 'pull', '-q');
   assert.equal(fs.existsSync(path.join(b, 'Sır.md')), false, 'nothing was sent');
+});
+
+test('git is never run from inside the vault, even with the vault on the PATH', { skip: !hasGit }, () => {
+  // 30 October (security review): run by its bare name with the vault as its folder, Windows looks there first.
+  const vault = temp('cortex-sync-planted-');
+  const planted = path.join(vault, process.platform === 'win32' ? 'git.exe' : 'git');
+  fs.writeFileSync(planted, '');
+  const key = Object.keys(process.env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH';
+  const before = process.env[key];
+  process.env[key] = `${vault}${path.delimiter}${before ?? ''}`;
+  try {
+    const found = gitProgram(vault);
+    assert.ok(found, 'the real git is still found');
+    assert.notEqual(path.resolve(found), path.resolve(planted));
+    assert.ok(!path.resolve(found).startsWith(path.resolve(vault)));
+  } finally {
+    process.env[key] = before;
+  }
 });

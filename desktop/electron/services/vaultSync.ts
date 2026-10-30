@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { type SyncState, type SyncStatus, remoteLabel, secretsAdded } from '../../shared/vaultSync';
+import { onPathFile } from './clis';
 import { readSettings, updateSettings } from './settings';
 
 /**
@@ -31,14 +32,40 @@ interface GitResult {
 }
 type Git = (args: string[], cwd: string, timeout?: number) => Promise<GitResult>;
 
+/**
+ * Git's own program, found on the PATH alone and never inside the folder it works on: run by its bare name with the
+ * vault as its folder, Windows looks in that folder first, and a git.exe there (one a remote brought) would have run.
+ */
+export function gitProgram(folder: string): string | null {
+  const inside = (file: string) => {
+    const relative = path.relative(path.resolve(folder), file);
+    return !relative.startsWith('..') && !path.isAbsolute(relative);
+  };
+  return onPathFile([process.platform === 'win32' ? 'git.exe' : 'git'], process.env, (file) => path.isAbsolute(file) && !inside(file));
+}
+
 const realGit: Git = (args, cwd, timeout = GIT_TIMEOUT_MS) =>
   new Promise((done) => {
+    const program = gitProgram(cwd);
+    if (!program) return done({ code: 127, out: '', err: 'git not found' });
     execFile(
-      'git',
-      // Paths as they are written (the vault's emoji and Turkish folders), not quoted in octal escapes.
-      ['-c', 'core.quotepath=false', ...args],
-      {
+      program,
+      [
+        // The vault named, not made the working folder (see gitProgram).
+        '-C',
         cwd,
+        // Paths as they are written (the vault's emoji and Turkish folders), not quoted in octal escapes.
+        '-c',
+        'core.quotepath=false',
+        // Nothing of the repository's own runs in a sync: no hooks, no file-system monitor program.
+        '-c',
+        `core.hooksPath=${os.devNull}`,
+        '-c',
+        'core.fsmonitor=false',
+        ...args,
+      ],
+      {
+        cwd: os.homedir(),
         timeout,
         windowsHide: true,
         maxBuffer: 32 * 1024 * 1024,
@@ -150,7 +177,7 @@ async function syncOnce(vault: string): Promise<void> {
   }
   const staged = await run(['diff', '--cached', '--quiet']);
   if (staged.code === 1) {
-    step = await run(['commit', '-q', '-m', `senkron: ${os.hostname()} ${stamp(new Date())}`]);
+    step = await run(['commit', '-q', '--no-verify', '-m', `senkron: ${os.hostname()} ${stamp(new Date())}`]);
     if (step.code) return say('error', [lastLine(step.err || step.out)]);
   }
   step = await run(['pull', '-q', '--rebase']);
