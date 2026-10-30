@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.40" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.40-E8B23A">
+  <img alt="Sürüm 1.0.41" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.41-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -66,7 +66,7 @@ Cortex'le birlikte bir düşünme ortağı gelir: ananas **Pyn**. Seni tanır, f
     <td width="50%"><img src="docs/gorseller/beyin.png" alt="Beyin: bir beynin içine çizilmiş piksel sanatı ofis; ekip son notlar hakkında konuşuyor"><br><sub><b>Beyin:</b> Pyn'in ekibi beynin içindeki ofiste çalışır; son notların hakkında konuşabilirler.</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/gorseller/grafik.png" alt="Grafik: lansman notları ve aralarındaki bağlantılar"><br><sub><b>Grafik:</b> notların ve aralarındaki bağlantılar.</sub></td>
+    <td width="50%"><img src="docs/gorseller/grafik.png" alt="Grafik: lansman notları ve aralarındaki bağlantılar"><br><sub><b>Grafik:</b> notların ve aralarındaki bağlantılar; yanındaki rehber bağlantı bekleyen ve yazılmayı bekleyen notları gösterir.</sub></td>
     <td width="50%"><img src="docs/gorseller/ayarlar-ses.png" alt="Ayarlar, Sesle yazma: sürekli dinleme açık, uyandırma sözü İkisi de, sesli komutlar"><br><sub><b>Sesle yazma:</b> "Pyn, not al" ya da "Hey Pyn"; sesli komutların sözleri Ayarlar'dan değişir.</sub></td>
   </tr>
 </table>
@@ -186,6 +186,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.41](docs/v3/releases/1.0.41.md) | Grafiğin yanında bir rehber var: sayılar, klasör renkleri, bağlantı bekleyen ve yazılmayı bekleyen notlar, en çok bağlananlar. Sesin ekran kartı derlemesi kurulum dosyasıyla geliyor; "Mikrofondan ses gelmiyor" kısa bir duraksamada çıkmıyor; sunucudaki asistan araç listesinde "Sunucudaki Pyn". |
 | [1.0.40](docs/v3/releases/1.0.40.md) | Kasa bağlı olduğu git deposuyla eşitlenebiliyor: bir bilgisayarda yazılan not sunucuya ve öbür cihazlara gidiyor; Ayarlar › Sunucu'da tek anahtar, sır taraması ve çakışmada üstüne yazmama. |
 | [1.0.39](docs/v3/releases/1.0.39.md) | AMD / Intel ekran kartında ses yarı boyutlu modelle (yaklaşık 870 MB) yazıyor; daha çabuk hazır oluyor. |
 | [1.0.38](docs/v3/releases/1.0.38.md) | 1.0.37'nin düzeltmeleri yeniden denendi: yeniden açılan sohbet gösterdiği izin moduyla çalışıyor, kilitli sohbet listesi silinmiyor, Windows satır sonlu notlarda başlıklar okunuyor. |

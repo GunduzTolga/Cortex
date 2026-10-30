@@ -17,7 +17,9 @@ import { HermesSection } from './HermesSection';
  * only whether one is kept.
  */
 
-export const TOOL_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code', lmstudio: 'LM Studio', ollama: 'Ollama', hermes: 'Pyn' };
+export const TOOL_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code', lmstudio: 'LM Studio', ollama: 'Ollama' };
+/** A tool by its own name; the server's Pyn by its name in the language shown (electron/services/hermesChat.ts, hermesName). */
+export const toolName = (id: string, t: ReturnType<typeof useT>): string | undefined => (id === 'hermes' ? t('auth.tool.hermes') : TOOL_NAMES[id]);
 const NOTES: Record<string, Key> = {
   claude: 'auth.note.claude',
   codex: 'auth.note.codex',
@@ -49,6 +51,7 @@ function Status({ tool, refused }: { tool: CliAuth; refused: boolean }) {
 
 function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; refused: boolean }) {
   const t = useT();
+  const name = toolName(tool.id, t) ?? tool.id;
   const toast = useApp((s) => s.toast);
   const [keying, setKeying] = useState(false);
   const [key, setKey] = useState('');
@@ -60,10 +63,13 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
   const failed = (err: unknown) => toast({ tone: 'error', title: t('auth.failed'), detail: messageOf(err) });
 
   // The sign-in's window closed, or the tool says it is signed in: "finish signing in" is no longer what goes on.
+  // Only its own: another tool's sign-in ending left this one's still going on (as on the first-run screen, 30 October).
   useEffect(() => {
     if (!signingIn) return;
-    return window.cortex.on.authChanged(() => setSigningIn(false));
-  }, [signingIn]);
+    return window.cortex.on.authChanged((cli) => {
+      if (cli === tool.id) setSigningIn(false);
+    });
+  }, [signingIn, tool.id]);
   useEffect(() => {
     if (tool.signedIn) setSigningIn(false);
   }, [tool.signedIn]);
@@ -92,7 +98,7 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
       setKey('');
       setBaseUrl('');
       setKeying(false);
-      toast({ tone: 'success', title: t('auth.key.saved', { name: TOOL_NAMES[tool.id] }) });
+      toast({ tone: 'success', title: t('auth.key.saved', { name }) });
     } catch (err) {
       failed(err);
     }
@@ -109,7 +115,7 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
   return (
     <li className={`rounded-xl border px-4 py-3 ${focused ? 'border-darkDelegation/40 bg-paper-2' : 'border-zinc-100'}`} data-auth-tool={tool.id}>
       <div className="flex items-center gap-2">
-        <p className="flex-1 text-[13.5px] font-semibold text-darkDelegation">{TOOL_NAMES[tool.id]}</p>
+        <p className="flex-1 text-[13.5px] font-semibold text-darkDelegation">{name}</p>
         <Status tool={tool} refused={refused} />
       </div>
       {tool.detail ? <p className="mt-0.5 truncate text-[11.5px] text-zinc-500" data-auth-detail>{tool.detail}</p> : null}

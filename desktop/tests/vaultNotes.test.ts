@@ -10,6 +10,7 @@ import {
   keptBy,
   retitle,
   fuzzyMatch,
+  graphInsights,
   makeResolver,
   missingNoteAt,
   nameProblem,
@@ -324,6 +325,38 @@ test('the graph is drawn from the links that are there, with orphans, missing no
   assert.deepEqual(local.nodes.map((one) => one.id).sort(), ['B.md', 'C.md']);
   const deeper = vaultGraph(INDEX, [], { around: 'C.md', depth: 2, orphans: false, missing: false, tags: false, files: false });
   assert.deepEqual(deeper.nodes.map((one) => one.id).sort(), ['A.md', 'B.md', 'C.md']);
+});
+
+test('beside the graph: what is there, what waits to be linked or written, and where the links meet', () => {
+  const notes: IndexedNote[] = [
+    ...INDEX,
+    { path: 'Fikirler/E.md', modified: 5, size: 1, aliases: [], tags: [], links: [], unresolved: ['yazılacak', 'resim.png', 'Başka', '300-Projects/'] },
+    { path: 'daily/v3/2026-10-12.md', modified: 9, size: 1, aliases: [], tags: [], links: [], unresolved: [], keeper: 'generated' },
+    { path: 'Büyük.md', modified: 9, size: 1, aliases: [], tags: [], links: [], unresolved: [], tooLarge: true },
+  ];
+  const seen = graphInsights(notes, { receipts: false });
+  assert.equal(seen.notes, 7);
+  assert.equal(seen.links, 2, 'A-B and B-C; a picture is no link between notes');
+  assert.deepEqual(seen.unlinked, ['Fikirler/E.md', 'D.md'], "the newest first; the engine's page and a note too large to read are not listed");
+  assert.deepEqual(
+    seen.missing,
+    [
+      { name: 'Yazılacak', from: ['A.md', 'Fikirler/E.md'] },
+      { name: 'Başka', from: ['Fikirler/E.md'] },
+    ],
+    'one name however it is written, the most linked to first; a picture or a folder is not a note to write',
+  );
+  assert.deepEqual(seen.hubs, [
+    { path: 'B.md', links: 2 },
+    { path: 'A.md', links: 1 },
+    { path: 'C.md', links: 1 },
+  ]);
+  assert.deepEqual(seen.folders, [
+    { folder: '', notes: 5 },
+    { folder: 'Fikirler', notes: 1 },
+    { folder: 'daily', notes: 1 },
+  ]);
+  assert.deepEqual(graphInsights(notes, { hubs: 1 }).hubs, [{ path: 'B.md', links: 2 }]);
 });
 
 test("what Cortex's engine keeps is known by where it is and what it says: a receipt by its event_id, a generated page by its flag; receipts leave the graph when asked", () => {

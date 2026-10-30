@@ -101,6 +101,7 @@ const ENGINE_STEPS: Array<[RegExp, string]> = [
   [/^Motor: işlemci$/, 'Engine: the processor'],
   [/^Vulkan derlemesi bu sürümde henüz yayımlanmadı\.$/, 'The Vulkan build is not published for this version yet.'],
   [/^whisper\.cpp \(Vulkan\) indiriliyor…$/, 'Downloading whisper.cpp (Vulkan)…'],
+  [/^whisper\.cpp \(Vulkan\) uygulamayla gelen paketten kuruluyor…$/, 'Setting up whisper.cpp (Vulkan) from the package the app brings…'],
   [/^whisper\.cpp \(Vulkan\) indirilemedi: (.+)$/, 'whisper.cpp (Vulkan) could not be downloaded: $1'],
   [/^İşlemciye geçiliyor\.$/, 'Going on with the processor.'],
   // A card that would not start, or was slower than the processor's quick model: the processor writes (voice-2).
@@ -172,6 +173,18 @@ function packageDirs(): string[] {
 }
 
 /** The Python installer that came with the app, beside it or where the desktop build puts it while developing. */
+/**
+ * whisper.cpp built for Vulkan, as the installer carries it (scripts/vulkan-paket.mjs, package.json extraResources):
+ * given to `ses kur`, which checks its digest and takes it instead of downloading it. The release it is published in
+ * answered 404 once the repository went private, and a first install on an AMD card went to the processor (30 October).
+ */
+function vulkanPackage(): string | null {
+  const dirs = [path.join(process.resourcesPath ?? '', 'whisper-vulkan'), path.join(app.getAppPath(), 'vulkan-paket')];
+  for (const dir of dirs) if (fs.existsSync(path.join(dir, VULKAN_ZIP))) return path.join(dir, VULKAN_ZIP);
+  return null;
+}
+const VULKAN_ZIP = 'whisper-vulkan-win-x64.zip';
+
 function pythonInstaller(): string | null {
   const dirs = [path.join(process.resourcesPath ?? '', 'python'), path.join(app.getAppPath(), 'python-paket')];
   if (process.env.CORTEX_PYTHON_INSTALLERS) dirs.unshift(process.env.CORTEX_PYTHON_INSTALLERS);
@@ -846,7 +859,13 @@ export function installVoice(): Promise<SetupStatus> {
         step(say('Yakala kuruluyor (Ctrl+Alt+C)…', 'Setting up yakala (Ctrl+Alt+C)…'));
         await runPython([beyin, 'yakala', 'kur'], { cwd: vault, timeout: STATUS_TIMEOUT * 5 });
       }
-      const result = await runPython([beyin, 'ses', 'kur'], { cwd: vault, timeout: JOB_TIMEOUT, onStep: (line) => step(engineStep(line)) });
+      const carried = vulkanPackage();
+      const result = await runPython([beyin, 'ses', 'kur'], {
+        cwd: vault,
+        timeout: JOB_TIMEOUT,
+        onStep: (line) => step(engineStep(line)),
+        env: carried ? { BEYIN_VULKAN_PAKET: carried } : undefined,
+      });
       if (result.dinleyici !== false) return undefined;
       const warning = say(
         'Sesle yazma kuruldu, ama arka plandaki dinleyici başlamadı: kısayol, uyandırma sözü ve sesle yazma şimdilik çalışmıyor. Ayarlar → Sesle yazma\'dan dinleyiciyi yeniden başlat.',

@@ -99,6 +99,15 @@ jobs:
       - name: Python
         run: npm run python-paket
 
+      # whisper.cpp built for Vulkan, the voice on an AMD or Intel card, as the
+      # engine pins it (scripts/vulkan-paket.mjs). Its release answers a plain
+      # download with 404 while the repository is private: fetched with this
+      # run's token.
+      - name: Vulkan ses derlemesi
+        run: npm run vulkan-paket
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       # Signed when a code-signing certificate is kept in the repository's secrets
       # (desktop/README.md, "İmza"): WIN_CSC_LINK, the .pfx as base64, and its
       # password. Without them the installer is built unsigned, as before.

@@ -15,9 +15,17 @@ const path = require('node:path');
  *   with its list of digests beside it (scripts/cortex-paket.mjs);
  * - `python-paket/`: python.org's installer pinned in python.json, by its SHA-256
  *   (scripts/python-paket.mjs);
+ * - `vulkan-paket/`: whisper.cpp built for Vulkan, the voice on an AMD or Intel
+ *   card, as the engine pins it (VULKAN_BUILD, scripts/vulkan-paket.mjs): its
+ *   release answers a plain download with 404 while the repository is private,
+ *   and without it a first install went to the processor (30 October);
  * - the app's own version is the engine's (VERSION): the app tells an engine's
  *   age by it.
  */
+/** The Vulkan build the engine pins: its address and its SHA-256, as scripts/vulkan-paket.mjs reads them. */
+const VULKAN_PIN = /VULKAN_BUILD = \{[\s\S]*?'url': '([^']+)'[\s\S]*?'sha256': '([0-9a-f]{64})'/;
+const digest = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+
 function problems(desktop) {
   const found = [];
   const version = fs.readFileSync(path.join(desktop, '..', 'VERSION'), 'utf8').trim();
@@ -37,8 +45,17 @@ function problems(desktop) {
   const python = path.join(desktop, 'python-paket', `${pin.file}.paket`);
   if (!fs.existsSync(python)) {
     found.push(`python-paket/${pin.file}.paket yok; önce: npm run python-paket`);
-  } else if (createHash('sha256').update(fs.readFileSync(python)).digest('hex') !== pin.sha256) {
+  } else if (digest(python) !== pin.sha256) {
     found.push(`python-paket/${pin.file}.paket python.json'daki SHA-256 ile tutmuyor; yeniden: npm run python-paket`);
+  }
+
+  const voice = path.join(desktop, '..', 'template', '.claude', 'scripts', 'beyin_v3_ses.py');
+  const vulkan = fs.existsSync(voice) ? fs.readFileSync(voice, 'utf8').match(VULKAN_PIN) : null;
+  if (vulkan) {
+    const name = vulkan[1].split('/').pop();
+    const build = path.join(desktop, 'vulkan-paket', name);
+    if (!fs.existsSync(build)) found.push(`vulkan-paket/${name} yok; önce: npm run vulkan-paket`);
+    else if (digest(build) !== vulkan[2]) found.push(`vulkan-paket/${name} motorun SHA-256'sıyla tutmuyor; yeniden: npm run vulkan-paket`);
   }
   return found;
 }

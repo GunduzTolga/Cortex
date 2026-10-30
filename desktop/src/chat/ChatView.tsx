@@ -12,7 +12,7 @@ import { useConfirm, usePrompt } from '../notes/NotesMenus';
 import { useApp } from '../store/app';
 import { useView } from '../store/view';
 import { Button, Spinner } from '../ui/ui';
-import { TOOL_NAMES } from './AuthDialog';
+import { toolName } from './AuthDialog';
 import { useChat, waitingChats } from './chatStore';
 import { Composer } from './Composer';
 import { SidePane } from './SidePane';
@@ -58,7 +58,7 @@ function ChatList() {
   const prompt = usePrompt();
   const groups = useMemo(() => groupsOf(chats), [chats]);
   // A tool no longer offered (a server forgotten) by its own name, never its id ("hermes" was shown; 29 October).
-  const cliName = (id: string) => clis?.find((one) => one.id === id)?.name ?? TOOL_NAMES[id] ?? id;
+  const cliName = (id: string) => clis?.find((one) => one.id === id)?.name ?? toolName(id, t) ?? id;
   // The hour alone for today's; an older chat says its day too (one 40 days old said only "18:36").
   const time = (at: number) => {
     const when = new Date(at);

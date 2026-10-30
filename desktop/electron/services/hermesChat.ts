@@ -39,7 +39,11 @@ import { readSettings, updateSettings } from './settings';
  * asked of Hermes (`POST /v1/runs/{run}/stop`) and the stream let go.
  */
 
-export const HERMES_NAME = 'Pyn';
+/**
+ * Its name in the tool list: Pyn, said to be the one on the server. "Pyn" alone sat among Claude Code and Codex
+ * and read as nothing in particular (30 October).
+ */
+export const hermesName = (): string => (english() ? 'Pyn on the server' : 'Sunucudaki Pyn');
 /** What a session begun here is marked as made by, in Hermes's own list. */
 const SOURCE = 'cortex-desktop';
 export const SESSION_OPTION = 'session';

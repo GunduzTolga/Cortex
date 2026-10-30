@@ -8,7 +8,7 @@ import { useApp } from '../store/app';
 import { Spinner } from '../ui/ui';
 import { escapeLayers } from '../ui/escapeLayers';
 import { useEscapeLayer } from '../ui/useEscapeLayer';
-import { TOOL_NAMES, authDot } from './AuthDialog';
+import { authDot, toolName } from './AuthDialog';
 import { enterAnswers } from './permissionKey';
 import type { Asked } from './turns';
 
@@ -80,7 +80,7 @@ function ChipSelect({
         data-chat-chip={data}
         className="flex max-w-[14rem] items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-darkDelegation disabled:pointer-events-none disabled:opacity-60"
       >
-        <span className="truncate">{current?.name ?? TOOL_NAMES[value] ?? value}</span>
+        <span className="truncate">{current?.name ?? toolName(value, t) ?? value}</span>
         {disabled ? null : <ChevronDown size={11} className="shrink-0" />}
       </button>
       {open ? (

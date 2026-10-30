@@ -43,6 +43,11 @@ Her adım ne yaptığını söyler; isteğe bağlı adımlar **Atla** ile geçil
   - Sohbetin okuduğu, değiştirdiği ya da andığı notlar yan panelde açılır.
 - **Notlar:** Obsidian'a gerek kalmadan okuma ve yazma: wiki bağlantıları, canlı önizleme, geri bağlantılar, etiketler, üstüne gelince önizleme, arama (`tag:` ve `path:` ile), hızlı geçiş (`Ctrl+K`), şablonlar ve geri alınabilir çöp kutusu. Makbuzlar ve motorun ürettiği sayfalar salt okunurdur.
 - **Grafik:** notların ve aralarındaki bağlantılar; bir notun çevresini gösteren yerel grafik, makbuzları göster/gizle.
+  - Yanındaki **rehber** haritanın ne gösterdiğini anlatır ve sayıları verir: not, bağlantı, bağlantısız, yazılmamış.
+  - Bir klasörün rengine tıklayınca yalnız o klasörün notları öne çıkar.
+  - **Bağlantı bekleyenler** hiçbir notla bağı olmayan notlardır. **Pyn'e bağlat**, sohbetin yazma kutusuna onları bağlaması için bir istek yazar; isteği okuyup sen gönderirsin.
+  - **Yazılmayı bekleyenler** notlarda adı geçen ama henüz yazılmamış notlardır; tıklayınca not oluşur. Haritada yazılmamış bir noktaya tıklamak da aynısını yapar.
+  - **En çok bağlananlar** kasanın ana konularıdır.
 - **Beyin:** bir beynin içine çizilmiş, yaşayan bir piksel sanatı ofis; kıvrımlarında kıvılcımlar akar.
   - Patron Pyn, ilk açılışta yazdığın adı taşıyan müdür, Cortex'i yazan geliştirici Tolga, 12 kişilik ekip ve kedi Tekir dokuz odada çalışır; karakterlere ve odalara tıklanır.
   - Sunucu odasının ışıkları araçlarının gerçek giriş durumunu, odalar kasanın sayılarını gösterir; ofisin ışığı günün saatine uyar.
@@ -241,7 +246,7 @@ Terminalden güncelleme yalnız resmi kararlı sürüm paketinden yapılır. Pak
 | "Hey Pyn" pencereyi geç açıyor ya da yazı geç geliyor | Bilgisayarda NVIDIA, AMD ya da Intel Arc kartı yoksa ses işlemcide yazıya çevrilir. Ayarlar → Sesle yazma → **Yazı modeli**: **Hızlı** seçili olsun (1.0.32'den beri varsayılan). Açılıştan hemen sonra model yükleniyor olabilir: sağ alttaki simge "Ses hazırlanıyor…" diyorsa "Pyn hazır" bildirimini bekle. Süreler `%LOCALAPPDATA%\beyin-v3\ses\isci.log` dosyasında. |
 | AMD / Intel ekran kartında ses geç hazır oluyor | Ayarlar → Sesle yazma'da **Daha hafif ses modelini al** görünüyorsa bas: model 1,6 GB yerine yaklaşık 870 MB olur ve ekran kartına daha çabuk yüklenir. |
 | "Hey Pyn" pencereyi açmıyor | Cortex çalışıyor mu? **Sürekli dinle** yalnız Cortex açıkken (sağ altta simgesi varken) dinler. Ayarlar → Sesle yazma: **Sürekli dinle** açık mı, izin verildi mi? Uyandırma sözü "Hey Pyn" ya da "İkisi de" mi (varsayılan "Pyn, not al")? Sağ alttaki simgenin menüsü mikrofonun dinleyip dinlemediğini ve hangi sözü beklediğini söyler; dinleyemiyorsa nedenini de (yalnız sessizlik geliyorsa Windows Ayarlar → Gizlilik ve güvenlik → Mikrofon → masaüstü uygulamalarının erişimi açık olmalı). Ne duyduğunu görmek için: `py -3 beyin.py ses dene --uyandirma`. |
-| Not al'da "Mikrofondan ses gelmiyor" | Mikrofon kapalı ya da sessizde olabilir, ya da Windows başka bir mikrofonu dinliyor: Windows ses ayarlarından doğru mikrofonu varsayılan yap. |
+| Not al'da "Mikrofondan ses gelmiyor" | Dinlemeye başladıktan sonra sekiz saniye boyunca mikrofondan hiç ses gelmemiş demektir; konuşma gelince uyarı kendiliğinden kalkar. Kalkmıyorsa: kulaklığın mikrofonu kapalı olabilir (sessiz düğmesi ya da kalkık mikrofon kolu); Windows başka bir mikrofonu dinliyor olabilir (uyarının yanındaki ad dinlenen mikrofondur; Windows ses ayarlarından doğru mikrofonu varsayılan yap); ya da masaüstü uygulamalarının mikrofona erişimi kapalı olabilir (Windows Ayarlar → Gizlilik ve güvenlik → Mikrofon). |
 | Asistan notları hatırlamıyor | İstemcide hook güvenini onayladığını kontrol et, sonra asistana "beyin-doktor ile kontrol et" de ya da `beyin.py doctor` çalıştır. |
 | Bir not bağlama hiç girmiyor | Notta `visibility: private` var mı, klasörünün adında "Özel", "Şifreler" gibi bir sözcük geçiyor mu? `beyin.py doctor` indeks dışı tutulanları gösterir. |
 | Oturum `Memory hygiene:` uyarısıyla açılıyor | `beyin.py companion-compact` eski kayıtları silmeden arşive taşır. |

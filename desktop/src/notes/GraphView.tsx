@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type Simulation, type SimulationLinkDatum, type SimulationNodeDatum } from 'd3-force';
-import { Maximize2, Minus, Plus } from 'lucide-react';
+import { Maximize2, Minus, PanelRightOpen, Plus } from 'lucide-react';
 import { foldForMatch, withoutIcon } from '../../core/titles';
-import { vaultGraph, type GraphNode, type GraphOptions } from '../../core/vaultNotes';
+import { folderOf, graphInsights, pathKey, vaultGraph, type GraphNode, type GraphOptions } from '../../core/vaultNotes';
 import { useT } from '../i18n/useT';
 import type { Key } from '../i18n';
-import { useActiveTab, useNotes } from './notesStore';
+import { folderLabel, useActiveTab, useNotes } from './notesStore';
 import { useView } from '../store/view';
+import { GraphGuide, openFromGraph, writeMissing } from './GraphGuide';
 
 /**
  * The vault as a graph, as Obsidian draws one: a note a point, a link a line,
@@ -18,7 +19,8 @@ import { useView } from '../store/view';
  *
  * Points take a colour from their top folder, so a vault's parts read as
  * regions; a name linked to and not yet written is hollow, a tag a small green
- * point, as the person chooses to show them.
+ * point, as the person chooses to show them. The vault's graph has its guide
+ * beside it (GraphGuide): what it is, what it shows, and what to do from it.
  */
 
 interface Point extends SimulationNodeDatum, GraphNode {
@@ -83,6 +85,16 @@ interface View {
 }
 
 const clampZoom = (k: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, k));
+const topOf = (path: string) => (path.includes('/') ? path.slice(0, path.indexOf('/')) : '');
+
+const GUIDE_KEY = 'cortex.notes.graph.guide';
+function guideOpen(): boolean {
+  try {
+    return localStorage.getItem(GUIDE_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
 
 /** A line's colour part of the way from the resting grey to the hovered violet. */
 function lineColour(lit: number, alpha: number): string {
@@ -97,6 +109,11 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
   const front = useActiveTab().path;
   const [settings, setSettings] = useSettings(local);
   const [filter, setFilter] = useState('');
+  // A top folder chosen in the guide: its notes stand out, as a name typed in the filter does.
+  const [folder, setFolder] = useState<string | null>(null);
+  const [guide, setGuide] = useState(guideOpen);
+  // The point under the pointer, or under a name in the guide, said in words in a corner.
+  const [hovered, setHovered] = useState<GraphNode | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const box = useRef<HTMLDivElement>(null);
   // Where the view is drawn, and where it is headed: a zoom or a fit moves the goal, and each frame takes the view part of the way.
@@ -162,8 +179,15 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
     map made from it each time made the simulation again, behind whichever view
     was in front, at every note Pyn wrote and every return to the window.
   */
-  const tops = useMemo(() => JSON.stringify([...new Set((index?.notes ?? []).map((note) => (note.path.includes('/') ? note.path.slice(0, note.path.indexOf('/')) : '')))].sort()), [index]);
+  const tops = useMemo(() => JSON.stringify([...new Set((index?.notes ?? []).map((note) => topOf(note.path)))].sort()), [index]);
   const folders = useMemo(() => new Map((JSON.parse(tops) as string[]).map((top, at) => [top, COLOURS[at % COLOURS.length]])), [tops]);
+
+  const insights = useMemo(() => (local || !index ? null : graphInsights(index.notes, { receipts: settings.receipts })), [index, local, settings.receipts]);
+  // Read by the pointer's handlers, made once: a point not yet written is made where the first note naming it says.
+  const missingNames = useRef(new Map<string, { name: string; from: string[] }>());
+  missingNames.current = new Map((insights?.missing ?? []).map((one) => [`missing:${pathKey(one.name)}`, one]));
+  const translate = useRef(t);
+  translate.current = t;
 
   /** The view that shows every point, with a margin around them. */
   const fitted = (): View | null => {
@@ -286,7 +310,7 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
       }
       // Matched once a drawing, not once a point and a line.
       const matches = query ? new Set(nodes.filter((node) => foldForMatch(node.label).includes(query)).map((node) => node.id)) : null;
-      const filtered = (id: string) => matches !== null && !matches.has(id);
+      const filtered = (node: Point) => (matches !== null && !matches.has(node.id)) || (folder !== null && (node.kind !== 'note' || topOf(node.id) !== folder));
       const towards = (from: number, to: number) => from + (to - from) * amount;
       context.lineWidth = 1 / k;
       for (const line of lines) {
@@ -301,7 +325,7 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
       }
       for (const node of nodes) {
         const isFront = node.id === around || node.id === front;
-        context.globalAlpha = filtered(node.id) ? 0.18 : focus && !near.has(node.id) ? towards(1, 0.18) : 1;
+        context.globalAlpha = filtered(node) ? 0.18 : focus && !near.has(node.id) ? towards(1, 0.18) : 1;
         context.beginPath();
         context.arc(node.x ?? 0, node.y ?? 0, node.r, 0, Math.PI * 2);
         if (node.kind === 'missing') {
@@ -330,7 +354,7 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
         for (const node of nodes) {
           const touching = focus !== null && near.has(node.id);
           const show = k > 1.1 || touching || node.id === around || (k > 0.7 && node.degree > 3) || nodes.length < 40;
-          if (!show || filtered(node.id)) continue;
+          if (!show || filtered(node)) continue;
           context.globalAlpha = focus && !touching ? towards(0.9, 0.2) : 0.9;
           context.fillText(node.label.length > 40 ? `${node.label.slice(0, 38)}…` : node.label, node.x ?? 0, (node.y ?? 0) + node.r + 3);
         }
@@ -341,7 +365,7 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
     redraw();
     // `redraw` reads refs only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, settings.labels, around, front]);
+  }, [filter, folder, settings.labels, around, front]);
 
   // Its box resized - a side panel folded, the window resized - it is measured again and drawn.
   useEffect(() => {
@@ -400,6 +424,7 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
         const node = pick(event);
         if (node !== hover.current) {
           hover.current = node;
+          setHovered(node);
           element.style.cursor = node ? 'pointer' : 'grab';
           redraw();
         }
@@ -428,17 +453,17 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
         sim.current?.alphaTarget(0);
         // From the vault's graph, the note (or the tag's search) is put in front: opened in the notes view behind it,
         // nothing was seen to happen but a ring round the node (29 October). The local graph is beside the note already.
-        const front = () => {
-          if (!local) useView.getState().setView('notes');
-        };
-        if (!moved && node.kind !== 'tag' && node.kind !== 'missing') {
-          useNotes.getState().open(node.id, { newTab: event.ctrlKey || event.metaKey });
-          front();
+        if (!moved && (node.kind === 'note' || node.kind === 'file')) {
+          if (local) useNotes.getState().open(node.id, { newTab: event.ctrlKey || event.metaKey });
+          else openFromGraph(node.id, event.ctrlKey || event.metaKey);
         }
         if (!moved && node.kind === 'tag') {
           useNotes.getState().search(`tag:${node.label}`);
-          front();
+          if (!local) useView.getState().setView('notes');
         }
+        // A name not written yet is written from here, as from a link to it (30 October: a click did nothing).
+        const named = missingNames.current.get(node.id);
+        if (!moved && node.kind === 'missing' && named) writeMissing(named, translate.current);
       }
     };
     const wheel = (event: WheelEvent) => {
@@ -457,6 +482,7 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
     };
     const leave = () => {
       hover.current = null;
+      setHovered(null);
       redraw();
     };
     element.addEventListener('pointerdown', down);
@@ -487,6 +513,21 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
     goal.current = to;
     redraw();
   };
+  /** A point lit from the guide, as if the pointer were on it. */
+  const point = (id: string | null) => {
+    const node = id ? (sim.current?.nodes() ?? []).find((one) => one.id === id) ?? null : null;
+    hover.current = node;
+    setHovered(node);
+    redraw();
+  };
+  const fold = (open: boolean) => {
+    setGuide(open);
+    try {
+      localStorage.setItem(GUIDE_KEY, open ? '1' : '0');
+    } catch {
+      /* for this run */
+    }
+  };
 
   const toggles: Array<[keyof GraphSettings, Key]> = local
     ? [
@@ -505,55 +546,88 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
       ];
 
   return (
-    <div ref={box} className="relative h-full min-h-0 overflow-hidden bg-[radial-gradient(circle_at_center,_var(--color-white),_var(--color-zinc-50))]" data-notes-graph={local ? 'local' : 'vault'} data-graph-nodes={graph.nodes.length} data-graph-edges={graph.edges.length}>
-      <canvas ref={canvas} className="absolute inset-0 h-full w-full cursor-grab touch-none" aria-label={t(local ? 'notes.graph.local' : 'notes.graph.title')} role="img" />
-      <div className={`absolute ${local ? 'left-2 top-2' : 'left-4 top-4'} flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-1.5`}>
-        {!local ? (
-          <input
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-            placeholder={t('notes.graph.filter')}
-            className="h-7 w-44 rounded-md border border-zinc-200 bg-white/90 px-2 text-[12px] outline-none placeholder:text-zinc-400 focus:border-zinc-400"
-          />
-        ) : (
-          <label className="flex items-center gap-1 rounded-md bg-white/90 px-1.5 py-0.5 text-[11px] text-zinc-500">
-            {t('notes.graph.depth')}
-            <select value={settings.depth} onChange={(event) => setSettings({ ...settings, depth: Number(event.target.value) })} className="bg-transparent text-[11px] outline-none">
-              {[1, 2, 3].map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {toggles.map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            aria-pressed={Boolean(settings[key])}
-            data-graph-toggle={key}
-            onClick={() => setSettings({ ...settings, [key]: !settings[key] })}
-            className={`rounded-md px-2 py-0.5 text-[11px] transition-colors ${settings[key] ? 'bg-darkDelegation text-white' : 'bg-white/90 text-zinc-500 hover:text-darkDelegation'}`}
-          >
-            {t(label)}
+    <div className="flex h-full min-h-0" data-notes-graph={local ? 'local' : 'vault'} data-graph-nodes={graph.nodes.length} data-graph-edges={graph.edges.length}>
+      <div ref={box} className="relative h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-[radial-gradient(circle_at_center,_var(--color-white),_var(--color-zinc-50))]">
+        <canvas ref={canvas} className="absolute inset-0 h-full w-full cursor-grab touch-none" aria-label={t(local ? 'notes.graph.local' : 'notes.graph.title')} role="img" />
+        <div className={`absolute ${local ? 'left-2 top-2 max-w-[calc(100%-1rem)]' : 'left-4 top-4 max-w-[calc(100%-8rem)]'} flex flex-wrap items-center gap-1.5`}>
+          {!local ? (
+            <input
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder={t('notes.graph.filter')}
+              className="h-7 w-44 rounded-md border border-zinc-200 bg-white/90 px-2 text-[12px] outline-none placeholder:text-zinc-400 focus:border-zinc-400"
+            />
+          ) : (
+            <label className="flex items-center gap-1 rounded-md bg-white/90 px-1.5 py-0.5 text-[11px] text-zinc-500">
+              {t('notes.graph.depth')}
+              <select value={settings.depth} onChange={(event) => setSettings({ ...settings, depth: Number(event.target.value) })} className="bg-transparent text-[11px] outline-none">
+                {[1, 2, 3].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {toggles.map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={Boolean(settings[key])}
+              data-graph-toggle={key}
+              onClick={() => setSettings({ ...settings, [key]: !settings[key] })}
+              className={`rounded-md px-2 py-0.5 text-[11px] transition-colors ${settings[key] ? 'bg-darkDelegation text-white' : 'bg-white/90 text-zinc-500 hover:text-darkDelegation'}`}
+            >
+              {t(label)}
+            </button>
+          ))}
+        </div>
+        <div className={`absolute ${local ? 'bottom-2 right-2' : 'bottom-4 right-4'} flex flex-col gap-1`}>
+          {[
+            { icon: <Plus size={14} />, run: () => zoom(1.25), label: 'notes.graph.zoomIn' as Key },
+            { icon: <Minus size={14} />, run: () => zoom(0.8), label: 'notes.graph.zoomOut' as Key },
+            { icon: <Maximize2 size={13} />, run: fit, label: 'notes.graph.fit' as Key },
+          ].map((one) => (
+            <button key={one.label} type="button" onClick={one.run} title={t(one.label)} className="rounded-md border border-zinc-200 bg-white/90 p-1.5 text-zinc-500 hover:text-darkDelegation">
+              {one.icon}
+            </button>
+          ))}
+        </div>
+        {!graph.nodes.length ? (
+          <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-[12px] text-zinc-400">{t(local ? 'notes.graph.localEmpty' : 'notes.graph.empty')}</p>
+        ) : null}
+        {!local && hovered ? <Hovered node={hovered} writable={missingNames.current.has(hovered.id)} /> : null}
+        {insights && !guide ? (
+          <button type="button" onClick={() => fold(true)} className="absolute right-4 top-4 flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white/90 px-2 py-1 text-[11.5px] text-zinc-500 hover:text-darkDelegation" data-graph-guide-open>
+            <PanelRightOpen size={13} />
+            {t('notes.graph.guide.open')}
           </button>
-        ))}
+        ) : null}
       </div>
-      <div className={`absolute ${local ? 'bottom-2 right-2' : 'bottom-4 right-4'} flex flex-col gap-1`}>
-        {[
-          { icon: <Plus size={14} />, run: () => zoom(1.25), label: 'notes.graph.zoomIn' as Key },
-          { icon: <Minus size={14} />, run: () => zoom(0.8), label: 'notes.graph.zoomOut' as Key },
-          { icon: <Maximize2 size={13} />, run: fit, label: 'notes.graph.fit' as Key },
-        ].map((one) => (
-          <button key={one.label} type="button" onClick={one.run} title={t(one.label)} className="rounded-md border border-zinc-200 bg-white/90 p-1.5 text-zinc-500 hover:text-darkDelegation">
-            {one.icon}
-          </button>
-        ))}
-      </div>
-      {!graph.nodes.length ? (
-        <p className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-[12px] text-zinc-400">{t(local ? 'notes.graph.localEmpty' : 'notes.graph.empty')}</p>
-      ) : null}
+      {insights && guide ? <GraphGuide insights={insights} colours={folders} folder={folder} onFolder={setFolder} onPoint={point} onFold={() => fold(false)} /> : null}
+    </div>
+  );
+}
+
+/** The point under the pointer in words: what it is, where, how linked, and what a click does. */
+function Hovered({ node, writable }: { node: GraphNode; writable: boolean }) {
+  const t = useT();
+  const where = node.kind === 'note' ? (folderOf(node.id) ? folderLabel(folderOf(node.id)) : t('notes.graph.guide.top')) : null;
+  const what =
+    node.kind === 'missing'
+      ? t('notes.graph.hover.notWritten')
+      : node.kind === 'tag'
+        ? t('notes.graph.hover.tagNotes', { count: node.degree })
+        : node.kind === 'file'
+          ? t('notes.graph.hover.file')
+          : t('notes.graph.links', { count: node.degree });
+  // A folder linked to (`[[300-Projects/]]`) is drawn as a name not written, and no note can be made for it.
+  const action: Key | null = node.kind === 'missing' ? (writable ? 'notes.graph.hover.write' : null) : node.kind === 'tag' ? 'notes.graph.hover.search' : 'notes.graph.hover.open';
+  return (
+    <div className="pointer-events-none absolute bottom-4 left-4 max-w-[min(22rem,calc(100%-5rem))] rounded-lg border border-zinc-200 bg-white/95 px-3 py-2 shadow-sm" data-graph-hovered={node.id}>
+      <p className="truncate text-[13px] font-semibold text-darkDelegation">{node.label}</p>
+      <p className="mt-0.5 truncate text-[11px] text-zinc-500">{[where, what].filter(Boolean).join(' · ')}</p>
+      {action ? <p className="mt-0.5 text-[10.5px] text-zinc-400">{t(action)}</p> : null}
     </div>
   );
 }

@@ -4,6 +4,7 @@ Her sürümün notu, yanındaki dosyada. En yenisi en üstte. Güncelleme için 
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.41](1.0.41.md) | Grafiğin yanında bir rehber var: sayılar, klasör renkleri, bağlantı bekleyen ve yazılmayı bekleyen notlar, en çok bağlananlar. Sesin ekran kartı derlemesi kurulum dosyasıyla geliyor; "Mikrofondan ses gelmiyor" kısa bir duraksamada çıkmıyor; sunucudaki asistan araç listesinde "Sunucudaki Pyn". |
 | [1.0.40](1.0.40.md) | Kasa bağlı olduğu git deposuyla (örneğin GitHub'daki özel bir depo) eşitlenebiliyor: bir bilgisayarda yazılan not sunucuya ve öbür cihazlara gidiyor, oradakiler buraya geliyor. Ayarlar › Sunucu'da tek anahtar; sır taraması, çakışmada geri çekilme, internet yokken bekleme. |
 | [1.0.39](1.0.39.md) | Ses ekran kartında (AMD / Intel) yarı boyutlu modelle yazıyor: whisper.cpp'nin large-v3-turbo modeli 1,6 GB yerine 8 bitlik sürümüyle (yaklaşık 870 MB), yazışı neredeyse aynı, ses daha çabuk açılıyor. Önceden kurulmuş ses, Ayarlar'daki "Daha hafif ses modelini al" ile geçiyor; eski dosya silinir. |
 | [1.0.38](1.0.38.md) | 1.0.37'nin düzeltmeleri yeniden denendi; bulunanlar düzeltildi: yeniden açılan sohbet ekranda gösterdiği izin moduyla çalışıyor; kilitli sohbet listesi silinmiyor; "Diskteki sürümü al" geri alınabiliyor; Windows satır sonlu notlarda başlıklar okunuyor; eksik notlar doğru klasörde oluşuyor; en yeni bildirim hep görünüyor. |

@@ -46,7 +46,7 @@ export function HermesSection({ focused }: { focused: boolean }) {
     try {
       shown(await window.cortex.hermes.save({ url: url.trim(), profile: profile.trim() || null, ...(typed ? { key: key.trim() } : {}) }));
       // "Key saved" only when one was typed; an address changed alone is just saved.
-      toast({ tone: 'success', title: typed ? t('auth.key.saved', { name: 'Pyn' }) : t('settings.saved') });
+      toast({ tone: 'success', title: typed ? t('auth.key.saved', { name: t('auth.tool.hermes') }) : t('settings.saved') });
       // Offered in the tool chip from now on.
       void useChat.getState().refreshClis();
     } catch (err) {
