@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { CortexApi } from '../shared/api';
 import type { CliId } from '../shared/chat';
+import type { SyncStatus } from '../shared/vaultSync';
 import { plainIpcMessage, rejectionText } from '../shared/ipcError';
 
 /**
@@ -101,6 +102,11 @@ const api: CortexApi = {
     forget: () => invoke('hermes:forget'),
     test: () => invoke('hermes:test'),
   },
+  vaultSync: {
+    status: () => invoke('vaultSync:status'),
+    setOn: (on) => invoke('vaultSync:setOn', on),
+    now: () => invoke('vaultSync:now'),
+  },
   telegram: {
     status: () => invoke('telegram:status'),
     connect: (key) => invoke('telegram:connect', key),
@@ -120,6 +126,7 @@ const api: CortexApi = {
   },
   on: {
     notesChanged: (handler) => subscribe('notes:changed', handler),
+    vaultSync: (handler) => listen<SyncStatus>('vaultSync:status', handler),
     chat: (handler) => listen('chat:event', handler),
     authChanged: (handler) => listen<CliId | null>('chat:authChanged', (cli) => handler(typeof cli === 'string' ? cli : null)),
     setup: (handler) => listen('setup:event', handler),

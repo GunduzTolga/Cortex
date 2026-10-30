@@ -5,6 +5,7 @@ import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem
 import type { OfficeApi } from './office';
 import type { ListenerSeen, SetupApi, SetupPush, VoiceStatus } from './setup';
 import type { TelegramApi } from './telegram';
+import type { SyncStatus, VaultSyncApi } from './vaultSync';
 
 /**
  * Everything the window can ask of the main process: the object the preload
@@ -103,11 +104,15 @@ export interface CortexApi {
   office: OfficeApi;
   /** Notes from the phone through the person's own Telegram bot (shared/telegram.ts). */
   telegram: TelegramApi;
+  /** The vault kept in step with its git remote (shared/vaultSync.ts, Settings › Sunucu). */
+  vaultSync: VaultSyncApi;
   /** A Hermes Agent on another machine as a chat engine: its address, profile and key (shared/hermes.ts). */
   hermes: HermesApi;
   on: {
     /** The vault changed on disk, or another vault was chosen: read the index again. */
     notesChanged(handler: () => void): () => void;
+    /** The vault's sync with its git remote: every change of its status. */
+    vaultSync(handler: (status: SyncStatus) => void): () => void;
     /** A chat going on: an event, its state, its list entry. */
     chat(handler: (push: ChatPush) => void): () => void;
     /** A sign-in window was closed, or a sign-in done (the tool's), or an install ended (null): ask the tools' statuses again. */

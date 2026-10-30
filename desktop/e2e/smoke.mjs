@@ -371,7 +371,7 @@ const windowAlone = await page.evaluate(async () => {
   });
   return { node: typeof require + typeof process, bridge: Object.keys(window.cortex).sort(), fetched, image, opened: window.open('https://example.com/') === null };
 });
-check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,hermes,notes,office,on,settings,setup,telegram,vault');
+check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,hermes,notes,office,on,settings,setup,telegram,vault,vaultSync');
 check('it reaches nothing on the network: no request, no image', windowAlone.fetched === 'blocked' && windowAlone.image === 'blocked');
 check('and opens no window of its own', windowAlone.opened && app.windows().length === 1);
 
@@ -854,6 +854,12 @@ check(
 );
 await page.keyboard.press('Control+,');
 check('Ctrl+, opens them too', await shownSoon(page.locator('[data-settings]')));
+// Settings › Sunucu (src/ui/ServerSection.tsx): a vault that is no git repository is not offered the sync switch, and says why.
+check(
+  'the server section says a vault that is no git repository cannot be synced, and offers no switch',
+  (await shownSoon(page.locator('[data-server-note="missing-repo"]'))) && (await page.locator('[data-server-sync]').count()) === 0 &&
+    (await page.locator('[data-server-pyn]').count()) === 1,
+);
 await page.locator('[data-settings-name-icons]').click();
 await page.keyboard.press('Escape');
 check('and the emoji go again', await page.waitForFunction(() => document.querySelector('[data-tree-path="🎯 100-Command-Center"]')?.textContent?.trim() === '100-Command-Center', null, { timeout: 5_000 }).then(() => true, () => false));

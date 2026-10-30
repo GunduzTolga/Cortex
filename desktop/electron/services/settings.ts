@@ -50,6 +50,8 @@ export interface Settings {
   hermesUrl: string | null;
   /** The Hermes profile served under `/p/<profile>/` on that address; null for the server's own. */
   hermesProfile: string | null;
+  /** The vault kept in step with its git remote (services/vaultSync.ts, Settings › Sunucu); off by default. */
+  vaultSync: boolean;
 }
 
 /** The longest name kept: a way of addressing somebody, not a paragraph. */
@@ -62,7 +64,7 @@ export function tidyName(value: unknown): string | null {
   return name || null;
 }
 
-const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null };
+const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false };
 
 let cache: Settings | null = null;
 let keepOff = false;
@@ -85,6 +87,7 @@ function hydrate(raw: Record<string, unknown>): Settings {
     wakeConsent: raw.wakeConsent === true,
     hermesUrl: typeof raw.hermesUrl === 'string' ? hermesAddress(raw.hermesUrl) : null,
     hermesProfile: typeof raw.hermesProfile === 'string' && HERMES_PROFILE.test(raw.hermesProfile) ? raw.hermesProfile : null,
+    vaultSync: raw.vaultSync === true,
   };
 }
 

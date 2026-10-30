@@ -11,6 +11,7 @@ import { captureToInbox } from './services/inbox';
 import * as officeTalk from './services/officeTalk';
 import * as setup from './services/setup';
 import * as telegram from './services/telegram';
+import * as vaultSync from './services/vaultSync';
 import * as vaultNotes from './services/vaultNotes';
 
 /**
@@ -135,6 +136,8 @@ export function registerIpc(): void {
     // Telegram listener writes into the vault chosen now once that is done (services/setup.ts, settleVault).
     const settled = setup.settleVault();
     if (changed) void settled.then(() => telegram.restartTelegram());
+    // Kept in step from the vault opened now, where it is a git repository and the switch is on (services/vaultSync.ts).
+    if (changed) void settled.then(() => vaultSync.startVaultSync());
     // Yakala - the key, "Pyn, not al", Send To - kept writing into the vault left (yakala-3): it follows, once bound.
     // Chosen again, the same vault tries again where moving it failed; where it is this vault's already, nothing runs.
     void settled.then(() => moveYakala());
@@ -142,8 +145,13 @@ export function registerIpc(): void {
   });
 
   // The whole vault, for the person's own notes screen (services/vaultNotes.ts): a reader nothing else is given.
+  // A change on disk: read again by the window, and in step with the vault's remote a little after (services/vaultSync.ts).
+  const vaultTouched = () => {
+    broadcast('notes:changed', null);
+    vaultSync.vaultFilesChanged();
+  };
   handle('notes:index', () => {
-    vaultNotes.watchVault(() => broadcast('notes:changed', null));
+    vaultNotes.watchVault(vaultTouched);
     return vaultNotes.vaultIndex();
   });
   handle('notes:read', (file) => vaultNotes.readVaultNote(file));
@@ -291,6 +299,37 @@ export function registerIpc(): void {
   handle('telegram:connect', (key) => telegram.connectTelegram(key));
   handle('telegram:pairAgain', () => telegram.pairTelegramAgain());
   handle('telegram:disconnect', () => telegram.disconnectTelegram());
+
+  // The vault kept in step with its git remote (services/vaultSync.ts, Settings › Sunucu): a switch, a status, now.
+  handle('vaultSync:status', () => vaultSync.vaultSyncStatus());
+  handle('vaultSync:setOn', (on) => vaultSync.setVaultSync(on));
+  handle('vaultSync:now', () => vaultSync.syncVaultNow());
+  vaultSync.onVaultSync((status) => broadcast('vaultSync:status', status));
+  vaultSync.onVaultSyncTrouble((state, detail) => {
+    const say = (tr: string, en: string) => (readSettings().language === 'en' ? en : tr);
+    const lines = detail.join('\n');
+    if (state === 'conflict') {
+      notice({
+        tone: 'error',
+        title: say('Kasa eşitlemesi durdu: çakışma', 'Vault sync stopped: a conflict'),
+        detail: say(
+          `Bu bilgisayardaki ve sunucudaki notlar aynı yerde ayrıştı; hiçbir şey silinmedi. Pyn'e "kasa çakışmasını çöz" de.\n${lines}`,
+          `The notes here and on the server changed in the same place; nothing was deleted. Ask Pyn to solve the vault conflict.\n${lines}`,
+        ),
+      });
+    } else if (state === 'secret') {
+      notice({
+        tone: 'error',
+        title: say('Kasa eşitlemesi durdu: notta sır olabilir', 'Vault sync stopped: a note may hold a secret'),
+        detail: say(
+          `Hiçbir şey gönderilmedi. Sırrı nottan sil; bir örnekse satıra sir-tarama:izin yaz.\n${lines}`,
+          `Nothing was sent. Take the secret out of the note; if it is an example, write sir-tarama:izin on the line.\n${lines}`,
+        ),
+      });
+    } else {
+      notice({ tone: 'error', title: say('Kasa eşitlenemedi', 'The vault could not be synced'), detail: lines });
+    }
+  });
 }
 
 export function stopWatching(): void {

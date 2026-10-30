@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.39" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.39-E8B23A">
+  <img alt="Sürüm 1.0.40" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.40-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -55,6 +55,7 @@ Cortex'le birlikte bir düşünme ortağı gelir: ananas **Pyn**. Seni tanır, f
 | **Not al ve sesle yazma** | Her uygulamanın üstünde `Ctrl+Alt+C` ile açılan pencere; Windows'ta "Pyn, not al" ya da "Hey Pyn" demek de açar. Ses yerel Whisper ile yazıya dökülür, bilgisayardan çıkmaz. |
 | **Yakala** | Tarayıcıdaki sayfa, video, makale, ekran görüntüsü ya da dosya tek tuşla kasaya; asistan metni çıkarıp derslerini notlara bağlar. |
 | **Telegram** | Telefondan kendi botuna gönderdiğin yazı, bağlantı, fotoğraf, dosya ya da sesli not gelen kutusuna düşer. |
+| **Birden çok cihaz** | Kasa bağlı olduğu git deposuyla (örneğin GitHub) eşitlenir: bir bilgisayarda yazılan not sunucuya ve öbür cihazlara gider. Ayarlar › Sunucu'da tek anahtar; sır taraması ve çakışmada üstüne yazmama. |
 | **Gizlilik** | Notlar ve arama indeksi senin bilgisayarında. Özel işaretli notlar ve hassas adlı klasörler otomatik bağlama girmez. |
 
 ## Görüntüler
@@ -185,11 +186,11 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.40](docs/v3/releases/1.0.40.md) | Kasa bağlı olduğu git deposuyla eşitlenebiliyor: bir bilgisayarda yazılan not sunucuya ve öbür cihazlara gidiyor; Ayarlar › Sunucu'da tek anahtar, sır taraması ve çakışmada üstüne yazmama. |
 | [1.0.39](docs/v3/releases/1.0.39.md) | AMD / Intel ekran kartında ses yarı boyutlu modelle (yaklaşık 870 MB) yazıyor; daha çabuk hazır oluyor. |
 | [1.0.38](docs/v3/releases/1.0.38.md) | 1.0.37'nin düzeltmeleri yeniden denendi: yeniden açılan sohbet gösterdiği izin moduyla çalışıyor, kilitli sohbet listesi silinmiyor, Windows satır sonlu notlarda başlıklar okunuyor. |
 | [1.0.37](docs/v3/releases/1.0.37.md) | Uygulama baştan sona bir kullanıcı gibi denendi; 70'ten fazla sorun düzeltildi. |
 | [1.0.36](docs/v3/releases/1.0.36.md) | Sohbette yeni Pyn; uygulama ekranı doldurarak açılıyor; ilk kurulumda giriş durumu görünüyor. |
-| [1.0.35](docs/v3/releases/1.0.35.md) | Pyn'in yeni logosu ve çizimleri; masaüstü sohbeti başka bir bilgisayarda çalışan Pyn'le konuşuyor. |
 
 [Bütün sürümler](docs/v3/releases/README.md)
 

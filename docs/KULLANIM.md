@@ -9,6 +9,7 @@ Cortex'in her parçasının ayrıntılı anlatımı: masaüstü uygulaması, Not
 - [Not al ve sesle yazma](#not-al-ve-sesle-yazma)
 - [Yakala: tek tuşla beyne at](#yakala-tek-tuşla-beyne-at)
 - [Telegram: telefondan gelen kutusuna](#telegram-telefondan-gelen-kutusuna)
+- [Sunucu: kasayı eşitlemek](#sunucu-kasayı-eşitlemek)
 - [Günlük kullanım ve komutlar](#günlük-kullanım-ve-komutlar)
 - [Gizlilik ve güvenlik](#gizlilik-ve-güvenlik)
 - [Terminalden kurulum (macOS, Linux, geliştiriciler)](#terminalden-kurulum-macos-linux-geliştiriciler)
@@ -129,6 +130,16 @@ Neler gelir:
 - Dinleyici masaüstü uygulaması açıkken (sağ altta da) çalışır; terminalden `beyin.py telegram dinle` ile de çalıştırılabilir.
 
 [Ayrıntılar](v3/TELEGRAM.md)
+
+## Sunucu: kasayı eşitlemek
+
+Aynı kasayı birkaç bilgisayarda ve bir sunucuda kullanıyorsan, masaüstü uygulaması onu bağlı olduğu git deposuyla (örneğin GitHub'daki özel bir depo) eşitleyebilir. Kasa bunun için o deponun bir kopyası olmalı ve bilgisayarda Git kurulu olmalı. O zaman **Ayarlar › Sunucu**'da **Kasayı eşitle** anahtarı çıkar; varsayılan kapalıdır ve kapalıyken hiçbir şey bilgisayardan çıkmaz.
+
+- **Ne zaman:** uygulama açılınca, beş dakikada bir, kasada bir dosya değişince (yarım dakika sonra) ve uygulama kapanırken. **Şimdi eşitle** hemen yapar.
+- **Nasıl:** yeni satırlarda sır taraması, sonra commit, `pull --rebase`, push. Token, API anahtarı ya da parola bulunursa hiçbir şey gönderilmez; hangi dosyanın hangi satırı olduğu söylenir (sırrın kendisi değil). Bilerek yazılmış bir örnekse satıra `sir-tarama:izin` yaz.
+- **Çakışma:** iki yerde aynı notun aynı yeri değiştiyse eşitleme geri çekilir; hiçbir şeyin üstüne yazılmaz ve bildirim gelir. Pyn'e "kasa çakışmasını çöz" demek yeter.
+- **İnternet yokken** notlar burada kalır, bağlanınca gider.
+- Hangi dosyaların eşitlenip hangilerinin her makinede ayrı kaldığı: [Birden çok makine](v3/MULTI-MACHINE.md).
 
 ## Günlük kullanım ve komutlar
 

@@ -6,6 +6,7 @@ import { moveYakala, registerIpc, stopWatching, trustPagesWhere } from './ipc';
 import { readSettings } from './services/settings';
 import { settleVault, setupBusy, whenSetupIdle } from './services/setup';
 import { startTelegram } from './services/telegram';
+import { startVaultSync, syncBeforeQuit } from './services/vaultSync';
 import { startMicrophoneWord, stopMicrophoneWord } from './services/microphone';
 import { keepStartWithWindows, listeningNow, startTray, trayNotice } from './services/tray';
 import { WINDOW_MIN, keepWindowState, readWindowState } from './services/windowState';
@@ -286,11 +287,14 @@ function createWindow(showNow = true): void {
       event.preventDefault();
       if (flushed === 'asking') return;
       flushed = 'asking';
-      void flushPage(closing.webContents).then(() => {
-        flushed = 'done';
-        if (quitting) app.quit();
-        else if (!closing.isDestroyed()) closing.close();
-      });
+      // Quitting, what was written goes to the vault's remote too, waited for a few seconds at most (services/vaultSync.ts).
+      void flushPage(closing.webContents)
+        .then(() => (quitting ? syncBeforeQuit() : undefined))
+        .then(() => {
+          flushed = 'done';
+          if (quitting) app.quit();
+          else if (!closing.isDestroyed()) closing.close();
+        });
       return;
     }
     event.preventDefault();
@@ -455,6 +459,8 @@ if (!app.requestSingleInstanceLock()) {
       void settled.then(() => {
         startTelegram();
         moveYakala(true);
+        // Kept in step with its git remote, where the switch is on (services/vaultSync.ts).
+        startVaultSync();
       });
     }
 
