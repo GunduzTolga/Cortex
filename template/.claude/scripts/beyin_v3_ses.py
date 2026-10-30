@@ -82,6 +82,11 @@ VULKAN_BUILD = {
     'url': 'https://github.com/GunduzTolga/Cortex/releases/download/whisper-vulkan-1.9.5/whisper-vulkan-win-x64.zip',
     'sha256': '720c36dcce8f2bc007af973aa065ab9f06a1575ba18ae84756afea0ff2f5506e',
 }
+# The build as the desktop app carries it among its resources (`whisper-vulkan/`), named by this variable:
+# used when its digest is the pinned one, so nothing is downloaded for what the app brings. The release it
+# is published in can be out of reach - a private repository answers 404 - and the card was then given up
+# for the processor at a first install (30 October).
+VULKAN_BUNDLE_ENV = 'BEYIN_VULKAN_PAKET'
 # The voice packages publish wheels for these first; a newer Python may have none yet.
 PYTHON_VERSIONS = ('3.12', '3.13', '3.11', '3.10')
 NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
@@ -999,6 +1004,23 @@ def worker_env(state):
     return env
 
 
+def _bundled_vulkan():
+    """The Vulkan build the desktop app carries (VULKAN_BUNDLE_ENV) when it is the pinned one, its
+    digest checked; None otherwise, and the release is downloaded as before."""
+    given = os.environ.get(VULKAN_BUNDLE_ENV)
+    if not given or not VULKAN_BUILD['sha256']:
+        return None
+    import hashlib
+    digest = hashlib.sha256()
+    try:
+        with open(given, 'rb') as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b''):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return Path(given) if digest.hexdigest() == VULKAN_BUILD['sha256'] else None
+
+
 def _vulkan_ready(state, say, download_checked):
     """whisper.cpp's Vulkan server and its model in place; False when the build cannot be had."""
     exe = server_exe(state)
@@ -1006,10 +1028,15 @@ def _vulkan_ready(state, say, download_checked):
         if not VULKAN_BUILD['sha256']:
             say('Vulkan derlemesi bu sürümde henüz yayımlanmadı.')
             return False
-        say('whisper.cpp (Vulkan) indiriliyor…')
+        bundled = _bundled_vulkan()
+        say('whisper.cpp (Vulkan) uygulamayla gelen paketten kuruluyor…' if bundled else 'whisper.cpp (Vulkan) indiriliyor…')
         archive = ses_dir(state) / 'whisper-vulkan.zip'
         try:
-            download_checked(VULKAN_BUILD['url'], archive, VULKAN_BUILD['sha256'], say)
+            if bundled:
+                archive.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(bundled, archive)
+            else:
+                download_checked(VULKAN_BUILD['url'], archive, VULKAN_BUILD['sha256'], say)
             _unpack(archive, exe.parent)  # the same guarded unpack: nothing outside the folder
         except Exception as exc:
             say('whisper.cpp (Vulkan) indirilemedi: ' + str(exc)[:200])

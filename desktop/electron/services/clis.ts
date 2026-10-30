@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { CliId, CliInfo } from '../../shared/chat';
-import { HERMES_NAME, hermesConfigured } from './hermesChat';
+import { hermesConfigured, hermesName } from './hermesChat';
 import { keyEnv } from './keys';
 import { LOCAL, type LocalId, lastSeen } from './localModels';
 
@@ -298,7 +298,7 @@ export function listClis(env: NodeJS.ProcessEnv = process.env): CliInfo[] {
     const up = lastSeen(id).models.length > 0;
     out.push({ id, name: LOCAL[id].name, available: up || onPathAny(LOCAL[id].tools, env), local: up ? 'up' : 'off' });
   }
-  if (hermesConfigured()) out.push({ id: 'hermes', name: HERMES_NAME, available: true });
+  if (hermesConfigured()) out.push({ id: 'hermes', name: hermesName(), available: true });
   if (testLaunch('test', env)) out.push({ id: 'test', name: 'Test agent', available: true });
   if (testLaunch('test-claude', env)) out.push({ id: 'test-claude', name: 'Test Claude', available: true });
   if (testLaunch('test-codex', env)) out.push({ id: 'test-codex', name: 'Test Codex', available: true });

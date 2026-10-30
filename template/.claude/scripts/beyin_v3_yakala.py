@@ -1755,6 +1755,10 @@ def _fit(canvas, text, font, width):
 # clipboard_get() as text, so the popup saved the path and lost the picture. Pure helpers first,
 # then the reader and the card.
 
+# Seconds of listening with nothing at all coming in before the window says the microphone gives no
+# sound. A headset with a noise gate (Tolga's HyperX) sends exact silence until a word is spoken, so
+# after three seconds a pause before the first word was called a dead microphone (30 October).
+SILENT_MIC_AFTER = 8
 IMAGE_FRESH = 600  # seconds; only a screenshot younger than this starts switched on, the rest waits for Tab
 # Seconds since the clipboard last changed (the listener sees it change) within which copied text
 # or a copied link starts switched on; older, it is shown and waits for Tab.
@@ -2773,10 +2777,10 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
                 height = 2 + round(value * (11 - 3 * abs(2 - i)))
                 x1, _y1, x2, _y2 = canvas.coords(bar)
                 canvas.coords(bar, x1, middle - height, x2, middle + height)
-            # Three seconds of listening and nothing came in, not even a room's noise: the
+            # Listening a while (SILENT_MIC_AFTER) and nothing came in, not even a room's noise: the
             # microphone is muted, or another one is listened to. A quiet headset that hears is
             # not that (seen: the warning over a sentence being written).
-            if heard['since'] is not None and not heard['voice'] and time_now() - heard['since'] > 3 and heard['peak'] < 0.05:
+            if heard['since'] is not None and not heard['voice'] and time_now() - heard['since'] > SILENT_MIC_AFTER and heard['peak'] < 0.05:
                 heard.update(since=None, warned=True)
                 voice_set('dinliyor', say('Mikrofondan ses gelmiyor') + ((' · ' + heard['device']) if heard['device'] else ''), 'bad',
                           say('Mikrofon kapalı ya da sessizde olabilir; Windows ses ayarlarından doğru mikrofonu seç'))

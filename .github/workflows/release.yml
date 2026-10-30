@@ -212,6 +212,10 @@ jobs:
       - name: Python for a machine without one
         working-directory: desktop
         run: npm run python-paket
+      - name: whisper.cpp for Vulkan, as the engine pins it
+        working-directory: desktop
+        # Fetched with the job's GH_TOKEN where a plain download is refused (a private repository).
+        run: npm run vulkan-paket
       - name: The verified engine package, as it is published
         shell: bash
         run: |

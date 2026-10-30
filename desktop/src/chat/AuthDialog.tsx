@@ -17,7 +17,7 @@ import { HermesSection } from './HermesSection';
  * only whether one is kept.
  */
 
-export const TOOL_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code', lmstudio: 'LM Studio', ollama: 'Ollama', hermes: 'Pyn' };
+export const TOOL_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code', lmstudio: 'LM Studio', ollama: 'Ollama', hermes: 'Sunucudaki Pyn' };
 const NOTES: Record<string, Key> = {
   claude: 'auth.note.claude',
   codex: 'auth.note.codex',
@@ -49,6 +49,8 @@ function Status({ tool, refused }: { tool: CliAuth; refused: boolean }) {
 
 function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; refused: boolean }) {
   const t = useT();
+  // The server's Pyn by its name in the language shown (electron/services/hermesChat.ts, hermesName); the rest are names of their own.
+  const name = tool.id === 'hermes' ? t('auth.tool.hermes') : TOOL_NAMES[tool.id];
   const toast = useApp((s) => s.toast);
   const [keying, setKeying] = useState(false);
   const [key, setKey] = useState('');
@@ -92,7 +94,7 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
       setKey('');
       setBaseUrl('');
       setKeying(false);
-      toast({ tone: 'success', title: t('auth.key.saved', { name: TOOL_NAMES[tool.id] }) });
+      toast({ tone: 'success', title: t('auth.key.saved', { name }) });
     } catch (err) {
       failed(err);
     }
@@ -109,7 +111,7 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
   return (
     <li className={`rounded-xl border px-4 py-3 ${focused ? 'border-darkDelegation/40 bg-paper-2' : 'border-zinc-100'}`} data-auth-tool={tool.id}>
       <div className="flex items-center gap-2">
-        <p className="flex-1 text-[13.5px] font-semibold text-darkDelegation">{TOOL_NAMES[tool.id]}</p>
+        <p className="flex-1 text-[13.5px] font-semibold text-darkDelegation">{name}</p>
         <Status tool={tool} refused={refused} />
       </div>
       {tool.detail ? <p className="mt-0.5 truncate text-[11.5px] text-zinc-500" data-auth-detail>{tool.detail}</p> : null}

@@ -1226,8 +1226,8 @@ await page.locator('[data-auth-list]').waitFor({ state: 'detached' });
 await page.locator('[data-chat-chip="cli"]').click();
 await page.locator('[data-chat-choice="hermes"]').click();
 check(
-  'then it is offered as Pyn, its sessions on a chip before the first message',
-  (await shownSoon(page.locator('[data-chat-chip="session"]'))) && (await page.locator('[data-chat-chip="cli"]').textContent())?.trim() === 'Pyn',
+  'then it is offered as Pyn on the server, its sessions on a chip before the first message',
+  (await shownSoon(page.locator('[data-chat-chip="session"]'))) && (await page.locator('[data-chat-chip="cli"]').textContent())?.trim() === 'Pyn on the server',
 );
 await page.locator('[data-chat-chip="session"]').click();
 check('the session begun on the phone is listed by its title', await shownSoon(page.locator('[data-chat-choice="phone_1"]', { hasText: 'Telefondan' })));
@@ -1272,6 +1272,41 @@ await page.waitForTimeout(500);
 const withReceipts = await page.locator('[data-notes-graph="vault"]').evaluate((element) => Number(element.dataset.graphNodes));
 check('receipts are left out of the vault’s graph until asked for', withReceipts === graphSize.nodes + 1);
 await page.locator('[data-notes-graph="vault"] [data-graph-toggle="receipts"]').click();
+
+// Its guide (src/notes/GraphGuide.tsx), beside it: what the graph is and what to do from it. 30 October: a person
+// who opened the graph did not know what it was for.
+const guide = page.locator('[data-notes-graph="vault"] [data-graph-guide]');
+const stat = async (key) => Number(await guide.locator(`[data-graph-stat="${key}"] span`).first().textContent());
+check('beside the graph, a guide says how many notes and links there are', (await guide.isVisible()) && (await stat('notes')) >= 4 && (await stat('links')) >= 2);
+const waiting = guide.locator('[data-graph-section="unlinked"] [data-graph-note]').first();
+const waitingPath = (await waiting.getAttribute('data-graph-note')) ?? '';
+await waiting.hover();
+check(
+  'a note it lists as waiting for a link lights its point when hovered, and the corner says what it is',
+  waitingPath !== '' && (await page.locator('[data-graph-hovered]').getAttribute('data-graph-hovered')) === waitingPath,
+);
+await page.locator('[data-notes-graph="vault"] [data-graph-guide] h2').hover();
+check('and lets it go when the pointer leaves', await page.locator('[data-graph-hovered]').waitFor({ state: 'detached', timeout: 3_000 }).then(() => true, () => false));
+const drafts = guide.locator('[data-graph-folder="Drafts"]');
+await drafts.click();
+const chosen = (await drafts.getAttribute('aria-pressed')) === 'true';
+await drafts.click();
+check('a folder chosen in its key is marked, and chosen again let go', chosen && (await drafts.getAttribute('aria-pressed')) === 'false');
+await guide.locator('[data-graph-guide-fold]').click();
+const folded = (await guide.count()) === 0 && (await page.locator('[data-graph-guide-open]').isVisible());
+await page.locator('[data-graph-guide-open]').click();
+check('the guide folds away and comes back', folded && (await guide.isVisible()));
+await guide.locator('[data-graph-ask-pyn]').click();
+const asked = await page
+  .locator('[data-chat-input]')
+  .inputValue({ timeout: 5_000 })
+  .catch(() => '');
+check(
+  'asking Pyn to link them puts the request, naming them, in a new chat’s field, and does not send it',
+  (await page.locator('[data-app-view="pyn"]').getAttribute('aria-pressed')) === 'true' && asked.includes(`[[${waitingPath.replace(/[.]md$/i, '')}]]`),
+);
+await page.locator('[data-chat-input]').fill('');
+await page.locator('[data-app-view="graph"]').click();
 await shoot('06-graph.png');
 
 /*

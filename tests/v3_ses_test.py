@@ -5,6 +5,7 @@ in for by a small script that speaks the same protocol, and the installer's comm
 recorded instead of run.
 """
 import gc
+import hashlib
 import importlib.util
 import io
 import json
@@ -682,6 +683,35 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(fetched[0], (ses.VULKAN_BUILD['url'], 'ab' * 32), 'the build is checked by its digest')
         self.assertTrue(ses.server_exe(self.state).is_file())
         self.assertFalse((ses.ses_dir(self.state) / 'whisper-vulkan.zip').exists(), 'the archive is removed')
+
+    def test_the_build_the_app_carries_is_used_without_a_download(self):
+        # 30 October: the release the build is published in answered 404 (a private repository), and a first
+        # install on an AMD card went to the processor. The desktop app carries the build; it is checked by its digest.
+        build = Path(self.tmp.name) / 'whisper-vulkan-win-x64.zip'
+        with zipfile.ZipFile(build, 'w') as zipped:
+            zipped.writestr(ses.SERVER_EXE, b'MZ')
+            zipped.writestr('LICENSE-whisper.cpp.txt', b'MIT')
+        digest = hashlib.sha256(build.read_bytes()).hexdigest()
+        fetched = []
+        with mock.patch.dict(ses.VULKAN_BUILD, sha256=digest), mock.patch.dict(os.environ, {ses.VULKAN_BUNDLE_ENV: str(build)}):
+            result, _pip, said = self.vulkan_install(fetched)
+        self.assertEqual(result['motor'], 'vulkan')
+        self.assertEqual(fetched, [(ses.GGML_MODEL['url'], ses.GGML_MODEL['sha256'])], 'only the model is downloaded')
+        self.assertTrue(ses.server_exe(self.state).is_file())
+        self.assertTrue(any('uygulamayla gelen paketten' in line for line in said), said)
+
+    def test_a_carried_build_with_another_digest_is_not_used(self):
+        build = Path(self.tmp.name) / 'whisper-vulkan-win-x64.zip'
+        with zipfile.ZipFile(build, 'w') as zipped:
+            zipped.writestr(ses.SERVER_EXE, b'MZ')
+        other = Path(self.tmp.name) / 'baska.zip'
+        other.write_bytes(b'not the build')
+        fetched = []
+        with mock.patch.dict(ses.VULKAN_BUILD, sha256=hashlib.sha256(build.read_bytes()).hexdigest()), \
+                mock.patch.dict(os.environ, {ses.VULKAN_BUNDLE_ENV: str(other)}):
+            result, _pip, _said = self.vulkan_install(fetched, build)
+        self.assertEqual(result['motor'], 'vulkan')
+        self.assertEqual(fetched[0][0], ses.VULKAN_BUILD['url'], 'downloaded, as the carried one was not the pinned build')
 
     def test_a_failed_reinstall_leaves_the_working_install_as_it_was(self):
         folder = ses.ses_dir(self.state)
@@ -1694,11 +1724,15 @@ class PopupVoiceTest(unittest.TestCase):
             win.voice_event({'olay': 'dinliyor', 'mikrofon': 'HyperX'})
             clock.t += 4
             win.voice_event({'olay': 'seviye', 'deger': 0.0})
-            self.assertTrue(any('Mikrofondan ses gelmiyor · HyperX' in text for text in self.texts(win)), 'nothing at all: said')
+            # 30 October: a headset with a noise gate sends exact silence until the first word; a pause is not a dead microphone.
+            self.assertFalse(any('ses gelmiyor' in text for text in self.texts(win)), 'a pause before the first word: not said')
+            clock.t += yakala.SILENT_MIC_AFTER
+            win.voice_event({'olay': 'seviye', 'deger': 0.0})
+            self.assertTrue(any('Mikrofondan ses gelmiyor · HyperX' in text for text in self.texts(win)), 'nothing at all for long: said')
             win.voice_event({'olay': 'metin', 'metin': 'Beni duyuyor musun?', 'son': False})
             self.assertFalse(any('ses gelmiyor' in text for text in self.texts(win)), 'a sentence written: the warning goes')
             self.assertTrue(any('Dinliyorum' in text for text in self.texts(win)))
-            clock.t += 4
+            clock.t += yakala.SILENT_MIC_AFTER + 1
             win.voice_event({'olay': 'seviye', 'deger': 0.0})
             self.assertFalse(any('ses gelmiyor' in text for text in self.texts(win)), 'and does not come back in that dictation')
 

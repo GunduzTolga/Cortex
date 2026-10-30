@@ -933,6 +933,66 @@ export function vaultGraph(notes: readonly IndexedNote[], files: readonly string
   };
 }
 
+export interface GraphInsights {
+  /** The notes counted: receipts left out unless they are drawn. */
+  notes: number;
+  /** Links between two notes that are there, each pair once. */
+  links: number;
+  /** The person's own notes no link touches, the most recently changed first: the ones waiting to be linked. */
+  unlinked: string[];
+  /** Names linked to that no note answers to, with the notes that link to them, the most linked to first. */
+  missing: Array<{ name: string; from: string[] }>;
+  /** The person's own notes the most links meet at, with how many. */
+  hubs: Array<{ path: string; links: number }>;
+  /** The top folders, as the graph colours them, and how many notes each holds. */
+  folders: Array<{ folder: string; notes: number }>;
+}
+
+/**
+ * What the vault's graph says, beside it: how much is there, what waits to be linked or written, and where the
+ * links meet. 30 October: the graph alone was points and lines, and a person who opened it did not know what it was
+ * for. What Cortex's engine keeps is counted and never listed: it is not the person's to link or to write.
+ */
+export function graphInsights(notes: readonly IndexedNote[], options: { receipts?: boolean; hubs?: number } = {}): GraphInsights {
+  const graph = vaultGraph(notes, [], { around: null, depth: 1, orphans: true, missing: false, tags: false, files: false, receipts: options.receipts });
+  const counted = options.receipts === false ? notes.filter((note) => note.keeper !== 'receipt') : notes;
+  const degree = new Map(graph.nodes.map((node) => [node.id, node.degree]));
+  const own = counted.filter((note) => !note.keeper);
+  const missing = new Map<string, { name: string; from: string[] }>();
+  for (const note of counted) {
+    for (const name of note.unresolved) {
+      // Only a name a note can be made for: a picture, or a folder linked to (`[[300-Projects/]]`), is not one.
+      if (!missingNoteAt(name, note.path, [])) continue;
+      const key = pathKey(name);
+      const one = missing.get(key) ?? { name, from: [] };
+      if (!one.from.includes(note.path)) one.from.push(note.path);
+      missing.set(key, one);
+    }
+  }
+  const folders = new Map<string, number>();
+  for (const note of counted) {
+    const top = note.path.includes('/') ? note.path.slice(0, note.path.indexOf('/')) : '';
+    folders.set(top, (folders.get(top) ?? 0) + 1);
+  }
+  return {
+    notes: counted.length,
+    links: graph.edges.length,
+    // Too large to read, a note's links are not known: it is not said to have none.
+    unlinked: own
+      .filter((note) => !note.tooLarge && !degree.get(note.path))
+      .sort((a, b) => b.modified - a.modified || a.path.localeCompare(b.path))
+      .map((note) => note.path),
+    missing: [...missing.values()].sort((a, b) => b.from.length - a.from.length || a.name.localeCompare(b.name)),
+    hubs: own
+      .map((note) => ({ path: note.path, links: degree.get(note.path) ?? 0 }))
+      .filter((one) => one.links > 0)
+      .sort((a, b) => b.links - a.links || a.path.localeCompare(b.path))
+      .slice(0, options.hubs ?? 5),
+    // In the order the graph gives them their colours (GraphView, `tops`).
+    folders: [...folders.keys()].sort().map((folder) => ({ folder, notes: folders.get(folder)! })),
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* Templates and new notes, in Cortex's way                            */
 /* ------------------------------------------------------------------ */
