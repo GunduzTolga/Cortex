@@ -209,7 +209,10 @@ export const useChat = create<ChatState>((set, get) => {
           if (!frame) frame = requestAnimationFrame(flush);
         });
         // A sign-in or an install ended: every tool asked again, and the CLIs, one of which may be new.
-        window.cortex.on.authChanged(() => {
+        // A tool a chat was refused for, signed in to again: what it says of itself is shown, and a chat refused again
+        // marks it again. Its row said "Sign-in refused" after the sign-in until a chat went through (31 October).
+        window.cortex.on.authChanged((cli) => {
+          if (cli && get().authFailed.includes(cli)) set({ authFailed: get().authFailed.filter((one) => one !== cli) });
           void get()
             .loadAuth()
             .then(() => {

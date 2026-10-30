@@ -15,7 +15,7 @@ let auth: CliAuth[] = [];
 const answers: Array<[string, string, string | null]> = [];
 let answerFails = false;
 let pushTo: (push: ChatPush) => void = () => undefined;
-let authChanged: () => void = () => undefined;
+let authChanged: (cli?: string | null) => void = () => undefined;
 const opened: Record<string, ChatOpened> = {};
 
 const claudeAuth = (): CliAuth => ({ id: 'claude', installed, signedIn: installed ? false : null, detail: null, canLogin: installed, canInstall: !installed, key: null, baseUrl: false, hasKey: false, kept: false });
@@ -33,7 +33,7 @@ Object.assign(globalThis, {
           pushTo = handler;
           return () => undefined;
         },
-        authChanged: (handler: () => void) => {
+        authChanged: (handler: (cli?: string | null) => void) => {
           authChanged = handler;
           return () => undefined;
         },
@@ -149,4 +149,16 @@ test('a turn that ends is counted, for the notes to be read again (App.tsx)', as
   pushTo({ chatId: 'c1', event: { type: 'text', id: 'm', text: 'tamam' }, seq: 4 });
   await until(() => useChat.getState().open.c1.seq === 4, 'the frame taken in');
   assert.equal(useChat.getState().turnsEnded, before + 1);
+});
+
+test('a tool a chat was refused for is said refused until its own sign-in ends; another tool’s ending leaves it so', async () => {
+  // Its row said "Sign-in refused" after the person signed in again, until a chat went through (31 October).
+  pushTo({ chatId: 'r1', summary: { id: 'r1', title: 'r1', cli: 'claude', createdAt: 2, updatedAt: 2 }, event: { type: 'error', message: 'Not logged in', kind: 'auth' } });
+  await until(() => useChat.getState().authFailed.includes('claude'), 'claude said refused');
+  authChanged('codex');
+  assert.ok(useChat.getState().authFailed.includes('claude'), 'another tool signed in to');
+  authChanged(null);
+  assert.ok(useChat.getState().authFailed.includes('claude'), 'an installer ended');
+  authChanged('claude');
+  assert.ok(!useChat.getState().authFailed.includes('claude'), 'its own sign-in ended');
 });

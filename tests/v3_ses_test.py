@@ -2056,6 +2056,13 @@ class ServeTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-dongu-')
         self.addCleanup(self.tmp.cleanup)
+        # The helper asks the desktop app's word (desktop_file, %LOCALAPPDATA%/beyin-v3/masaustu.json) whether the
+        # microphone may listen all the time. On a machine where Cortex runs that file said no, and the sixteen
+        # wake tests waited for a listener that never started (30 October). Here there is no app, and nothing the
+        # helper writes beside that file reaches the person's own.
+        patcher = mock.patch.dict(os.environ, {'LOCALAPPDATA': self.tmp.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         spec = importlib.util.spec_from_file_location('isci_dongu_testi', ses.write_worker(Path(self.tmp.name) / 'state'))
         helper = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(helper)

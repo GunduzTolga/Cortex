@@ -17,7 +17,9 @@ import { HermesSection } from './HermesSection';
  * only whether one is kept.
  */
 
-export const TOOL_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code', lmstudio: 'LM Studio', ollama: 'Ollama', hermes: 'Sunucudaki Pyn' };
+export const TOOL_NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code', lmstudio: 'LM Studio', ollama: 'Ollama' };
+/** A tool by its own name; the server's Pyn by its name in the language shown (electron/services/hermesChat.ts, hermesName). */
+export const toolName = (id: string, t: ReturnType<typeof useT>): string | undefined => (id === 'hermes' ? t('auth.tool.hermes') : TOOL_NAMES[id]);
 const NOTES: Record<string, Key> = {
   claude: 'auth.note.claude',
   codex: 'auth.note.codex',
@@ -49,8 +51,7 @@ function Status({ tool, refused }: { tool: CliAuth; refused: boolean }) {
 
 function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; refused: boolean }) {
   const t = useT();
-  // The server's Pyn by its name in the language shown (electron/services/hermesChat.ts, hermesName); the rest are names of their own.
-  const name = tool.id === 'hermes' ? t('auth.tool.hermes') : TOOL_NAMES[tool.id];
+  const name = toolName(tool.id, t) ?? tool.id;
   const toast = useApp((s) => s.toast);
   const [keying, setKeying] = useState(false);
   const [key, setKey] = useState('');
@@ -62,10 +63,13 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
   const failed = (err: unknown) => toast({ tone: 'error', title: t('auth.failed'), detail: messageOf(err) });
 
   // The sign-in's window closed, or the tool says it is signed in: "finish signing in" is no longer what goes on.
+  // Only its own: another tool's sign-in ending left this one's still going on (as on the first-run screen, 30 October).
   useEffect(() => {
     if (!signingIn) return;
-    return window.cortex.on.authChanged(() => setSigningIn(false));
-  }, [signingIn]);
+    return window.cortex.on.authChanged((cli) => {
+      if (cli === tool.id) setSigningIn(false);
+    });
+  }, [signingIn, tool.id]);
   useEffect(() => {
     if (tool.signedIn) setSigningIn(false);
   }, [tool.signedIn]);
