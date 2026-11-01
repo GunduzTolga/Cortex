@@ -5,7 +5,7 @@ import { childEnv } from './acp';
 import { LOCAL_IDS, onPathAny, powerShellExe, programOf, refreshPath } from './clis';
 import { LOCAL, type LocalId, findLocal, localModel, shortContext } from './localModels';
 import { KEY_ENV, KeyRefusal, forgetKey, hasKey, keptHere, keptReadable, saveKey } from './keys';
-import { readSettings } from './settings';
+import { chooseChatTool, readSettings } from './settings';
 import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts } from './toolPackages';
 
 /**
@@ -194,6 +194,7 @@ export function startLogin(id: unknown): void {
   const program = programOf(tool.id);
   if (!tool.login || !program) throw new KeyRefusal('This tool is not signed in to from here.');
   if (process.platform !== 'win32') throw new KeyRefusal('Signing in from Cortex opens a console window, which only Windows does here.');
+  chooseChatTool(tool.id);
   const child = spawn(program.command, [...program.args, ...tool.login], { cwd: os.homedir(), env: childEnv(program.env), detached: true, stdio: 'ignore', windowsHide: !SHOW_CONSOLE, shell: false });
   let open = true;
   child.on('error', () => {
@@ -255,6 +256,7 @@ export async function installTool(id: unknown): Promise<void> {
   if (!INSTALLERS[tool.id] && !PACKAGES[tool.id]) throw new KeyRefusal('Cortex does not install this tool.');
   if (process.platform !== 'win32') throw new KeyRefusal('Installing from Cortex opens a console window, which only Windows does here.');
   if (programOf(tool.id)) throw new KeyRefusal('This tool is installed already.');
+  chooseChatTool(tool.id);
   if (PACKAGES[tool.id]) {
     if (installing.has(tool.id)) throw new KeyRefusal('This tool is being installed already.');
     installing.add(tool.id);
@@ -301,6 +303,7 @@ export async function setToolKey(id: unknown, key: unknown, baseUrl: unknown): P
   const tool = toolOf(id);
   if (tool.key === 'cortex') {
     saveKey(tool.id, key, baseUrl);
+    chooseChatTool(tool.id);
     return;
   }
   if (tool.key !== 'cli') throw new KeyRefusal('This tool keeps its keys in its own sign-in.');
@@ -319,6 +322,7 @@ export async function setToolKey(id: unknown, key: unknown, baseUrl: unknown): P
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new KeyRefusal(stderr.trim().split('\n').pop() || 'Codex did not take the key.'))));
     child.stdin.end(`${key.trim()}\n`);
   });
+  chooseChatTool(tool.id);
 }
 
 export function forgetToolKey(id: unknown): void {
