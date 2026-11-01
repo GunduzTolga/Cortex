@@ -207,6 +207,16 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(ses.command_of('notu kaydettim'), (None, 'notu kaydettim'), 'a word that starts like a command is a word')
         self.assertEqual(ses.command_of('bu satırı sil'), (None, 'bu satırı sil'), 'sil inside a sentence is written')
         self.assertEqual(ses.command_of('   '), (None, ''))
+
+    def test_a_deleting_command_said_alone_counts_as_whisper_writes_its_verb(self):
+        # "hepsini sil diyorum, sürekli hepsini sildim yazıyor" (1 November): Whisper writes the verb as a text has it.
+        for said in ('Hepsini sildim.', 'Tümünü sildim', 'Hepsini silin.', 'Hepsini siliyorum.', 'Hepsini temizledim.', 'Pyn, hepsini sildim.'):
+            self.assertEqual(ses.command_of(said), ('sil', ''), said)
+        self.assertEqual(ses.command_of('Son cümleyi sildim.'), ('cumle_sil', ''))
+        self.assertEqual(ses.command_of('Son kelimeyi silin.'), ('kelime_sil', ''))
+        # Never a negative, a one-word command, another word, or a sentence with more in it.
+        for note in ('Hepsini silme.', 'Sildim.', 'Hepsini silah.', 'Dosyaların hepsini sildim.', 'Notu yazdım. Hepsini sildim.', 'Kaydettim.'):
+            self.assertEqual(ses.command_of(note), (None, note), note)
         self.assertEqual(ses.command_of('Haftalık plan kaydı kaydet'), ('kaydet', 'Haftalık plan kaydı'))
 
     def test_pyn_kaydet_saves_and_the_name_is_not_written(self):
@@ -275,7 +285,9 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(ses.command_of('Pin, son kelime sil'), ('kelime_sil', ''))
         self.assertEqual(ses.command_of('Hepsi sil.'), ('sil', ''))
         self.assertEqual(ses.command_of('son cümleyi sil'), ('cumle_sil', ''), 'the exact words first')
-        for note in ('notu kaydettim', 'son kelimeyi sildim', 'Hepsi silindi', 'Son dakika sil', 'herkesi sil',
+        # "son kelimeyi sildim" said alone is the command since 1.0.44: Whisper writes "sil" so
+        # (test_a_deleting_command_said_alone_counts_as_whisper_writes_its_verb). A passive is still a note.
+        for note in ('notu kaydettim', 'Hepsi silindi', 'Son dakika sil', 'herkesi sil',
                      'Sunuma bir resim ekle', 'Listeye görüntü ekle'):
             self.assertEqual(ses.command_of(note), (None, note), note)
 

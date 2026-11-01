@@ -665,16 +665,30 @@ def _named(word):
     return (word in NAME_SPELLINGS or word == 'pyn') and word not in WAKE_NAMES
 
 
-def _said_as(heard, wanted, loose=False):
+# How Whisper writes a command's verb said to it on its own: as it most often reads in a text, "Hepsini
+# sildim." for "hepsini sil" (1 November: "hepsini sil diyorum, sürekli hepsini sildim yazıyor"). These
+# endings count for a command of more than one word said alone (command_of): the past, the polite and the
+# first person, never a negative ("hepsini silme"), and never inside a longer sentence ("Dosyaların hepsini
+# sildim" is a note).
+SAID_FORMS = ('dim', 'di', 'dik', 'din', 'in', 'yin', 'iniz', 'yiniz', 'sin', 'elim', 'yelim', 'eyim', 'yeyim',
+              'iyorum', 'yorum', 'iyor', 'yor')
+
+
+def _said_as(heard, wanted, loose=False, forms=False):
     """Whether heard words are a command's words as Whisper wrote them: the same letters with the
     spaces elsewhere ("kayd et", "sonkelimeyi sil"); `loose`, for a command of more than one
     word, also its last word the same and the words before it a letter or two off ("son kelime
-    sil", "hepsi sil"). A one-word command is never loose: "kaydettim" is a word, not "kaydet"."""
+    sil", "hepsi sil"); `forms`, its last word also with one of Whisper's endings (SAID_FORMS:
+    "hepsini sildim"). A one-word command is never loose: "kaydettim" is a word, not "kaydet"."""
     if not heard or not wanted:
         return False
     if ''.join(heard) == ''.join(wanted):
         return True
-    if not loose or len(wanted) < 2 or len(heard) != len(wanted) or heard[-1] != wanted[-1]:
+    if not loose or len(wanted) < 2 or len(heard) != len(wanted):
+        return False
+    last = heard[-1] == wanted[-1] or (forms and heard[-1].startswith(wanted[-1])
+                                        and heard[-1][len(wanted[-1]):] in SAID_FORMS)
+    if not last:
         return False
     return difflib.SequenceMatcher(None, ' '.join(heard[:-1]), ' '.join(wanted[:-1])).ratio() >= 0.8
 
@@ -715,8 +729,8 @@ def command_of(text, commands=None, after_name=None):
             named = spoken + [words(p) for p in after_name] if name == 'kaydet' else spoken
             if loose and name not in LOOSE_COMMANDS:
                 continue
-            if any(_said_as(said, one, loose) for one in spoken) or (
-                    len(said) > 1 and _named(said[0]) and any(_said_as(said[1:], one, loose) for one in named)):
+            if any(_said_as(said, one, loose, loose) for one in spoken) or (
+                    len(said) > 1 and _named(said[0]) and any(_said_as(said[1:], one, loose, loose) for one in named)):
                 return name, ''
     # "hepsini sil" said straight on after the note, without the pause that would make it a
     # sentence of its own, was written in: each try made the note longer (1 November). At the end
