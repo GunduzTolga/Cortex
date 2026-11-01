@@ -69,7 +69,7 @@ class ReinstallAfterEverythingWasRemovedTest(unittest.TestCase):
         self.installer.install(self.vault, self.state, version='1.0.43')
         # The earlier version's engine: one of its files as that version wrote it.
         self.ses = self.vault / '.claude/scripts/beyin_v3_ses.py'
-        self.ses.write_text('# 1.0.43\n', encoding='utf-8')
+        self.ses.write_bytes(b'# 1.0.43\n')  # bytes: Windows would write its own line ending
         (self.vault / 'Notlarım.md').write_text('Benim notum.\n', encoding='utf-8')
 
     def test_the_next_version_installs_over_cortex_s_own_earlier_engine_once_its_record_is_gone(self):
