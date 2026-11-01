@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
+import type { AppUpdate } from '@shared/api';
+import { appLanguage } from '@shared/language';
 import { engineAction } from '@shared/setup';
 import { BookOpen, Building2, FolderOpen, MessageCircle, Network, Settings } from 'lucide-react';
 import logo from '../../tema/ananas/marka/pyn-logo-512.png';
 import smallLogo from '../../tema/ananas/marka/pyn-logo-96.png';
-import type { Key } from './i18n';
+import { translate, type Key } from './i18n';
 import { useT } from './i18n/useT';
 import { AuthDialog } from './chat/AuthDialog';
 import { ChatView } from './chat/ChatView';
@@ -78,6 +80,32 @@ export function App() {
   useEffect(() => window.cortex.on.askWake(() => void useSetup.getState().voice({ wake: true })), []);
   // The window going for good: the note open saves what it holds first, or keeps it aside (src/notes/openNotes.ts).
   useEffect(() => window.cortex.on.flush(() => leaveOpenNotes()), []);
+  // A newer Cortex downloaded (electron/services/updater.ts): said once, until it is closed or installed; one that came
+  // before this window was there is asked for.
+  useEffect(() => {
+    let told = '';
+    const tell = (update: AppUpdate | null) => {
+      if (!update || update.version === told) return;
+      told = update.version;
+      // Read at the time it is said, in the language chosen then: this runs outside a render.
+      const tr = (key: Key, values?: Record<string, string>) => translate(appLanguage(useApp.getState().settings.language), key, values);
+      void useApp.getState().toast({
+        tone: 'info',
+        title: tr('app.update.title', { version: update.version }),
+        detail: tr('app.update.detail'),
+        sticky: true,
+        action: {
+          label: tr('app.update.restart'),
+          run: () =>
+            void window.cortex.update.install().then((answer) => {
+              if (answer.reason === 'busy') void useApp.getState().toast({ tone: 'info', title: 'Cortex', detail: tr('app.update.busy') });
+            }),
+        },
+      });
+    };
+    void window.cortex.update.ready().then(tell, () => undefined);
+    return window.cortex.on.update(tell);
+  }, []);
   // A word from work done in the background (yakala moved to the vault chosen): a failure stays until it is closed.
   useEffect(() => window.cortex.on.notice((word) => void useApp.getState().toast({ ...word, sticky: word.tone === 'error' })), []);
 

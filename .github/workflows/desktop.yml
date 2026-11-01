@@ -117,6 +117,17 @@ jobs:
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
+      # What the installed app's updater reads from a release (electron/services/updater.ts): written beside the
+      # installer by the build's publish settings, and naming it. Checked here so a release never lacks it.
+      - name: Guncelleme dosyasi
+        shell: bash
+        working-directory: desktop
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          test -s "release/Cortex-Setup-$version.exe"
+          grep -Fq "path: Cortex-Setup-$version.exe" release/latest.yml
+
       - uses: actions/upload-artifact@v4
         with:
           name: cortex-setup-windows

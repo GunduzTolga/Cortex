@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from 'elect
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { moveYakala, registerIpc, stopWatching, trustPagesWhere } from './ipc';
+import { moveYakala, registerIpc, startAppUpdates, stopWatching, trustPagesWhere } from './ipc';
 import { readSettings } from './services/settings';
 import { settleVault, setupBusy, whenSetupIdle } from './services/setup';
 import { startTelegram } from './services/telegram';
@@ -450,6 +450,8 @@ if (!app.requestSingleInstanceLock()) {
       });
       // Written where it is missing, not at every start: a person who turned Cortex off in Windows' own start-up list keeps it off.
       keepStartWithWindows(readSettings().background);
+      // A newer Cortex from the releases, fetched in the background and installed when the person says, or at the next quit.
+      startAppUpdates(trayNotice);
     }
     // The vault kept from the last run bound to where it is now, in the background (services/setup.ts); notes
     // from the phone then keep coming in while Cortex runs, in the notification area too. Yakala, where it was left

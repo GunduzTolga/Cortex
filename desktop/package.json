@@ -1,7 +1,7 @@
 {
   "name": "cortex-desktop",
   "productName": "Cortex",
-  "version": "1.0.42",
+  "version": "1.0.43",
   "description": "Cortex'in masaüstü uygulaması: kasayı Obsidian gibi okur ve yazar.",
   "private": true,
   "type": "module",
@@ -53,6 +53,7 @@
     "@lezer/highlight": "^1.2.5",
     "@lezer/markdown": "^1.8.0",
     "d3-force": "^3.0.0",
+    "electron-updater": "6.8.11",
     "js-yaml": "^4.3.2",
     "lucide-react": "^0.546.0",
     "react": "^19.0.0",
@@ -65,7 +66,14 @@
     "appId": "com.soleluna.cortex",
     "productName": "Cortex",
     "copyright": "Copyright © SoleLuna Tech",
-    "publish": null,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "GunduzTolga",
+        "repo": "Cortex",
+        "releaseType": "release"
+      }
+    ],
     "beforePack": "./scripts/check-resources.cjs",
     "directories": {
       "output": "release",
@@ -133,6 +141,7 @@
       "icon": "../tema/ananas/marka/pyn.ico"
     },
     "nsis": {
+      "artifactName": "Cortex-Setup-${version}.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false,

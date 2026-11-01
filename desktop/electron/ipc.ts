@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron';
-import type { AppNotice, BootstrapPayload, WindowSettings } from '../shared/api';
+import type { AppNotice, AppUpdate, BootstrapPayload, WindowSettings } from '../shared/api';
 import { readSettings, settingsUnreadable, tidyName, updateSettings } from './services/settings';
 import { restartingListener, sayMicrophone } from './services/microphone';
 import { currentListener, expectVoiceTurn, onHelperChange, startWithWindows, trayChanged } from './services/tray';
@@ -13,6 +13,7 @@ import * as setup from './services/setup';
 import * as telegram from './services/telegram';
 import * as vaultSync from './services/vaultSync';
 import * as vaultNotes from './services/vaultNotes';
+import { installUpdate, pendingUpdate, startUpdates, updatesWanted } from './services/updater';
 
 /**
  * What the window can ask, and nothing else (shared/api.ts, electron/preload.ts).
@@ -79,12 +80,32 @@ export function moveYakala(onlyWhereGone = false): void {
   );
 }
 
+/**
+ * The app following its releases (services/updater.ts), from its start: a newer one downloaded and checked is said in
+ * the window, and in the notification area for a person who has the window closed.
+ */
+export function startAppUpdates(trayWord: (title: string, body: string) => void): void {
+  if (!updatesWanted()) return;
+  void startUpdates((update: AppUpdate) => {
+    broadcast('app:update', update);
+    const english = readSettings().language === 'en';
+    trayWord(
+      english ? `Cortex ${update.version} is ready` : `Cortex ${update.version} hazır`,
+      english ? 'It is installed when Cortex restarts. Open Cortex to restart now.' : 'Cortex yeniden başlayınca kurulur. Şimdi kurmak için Cortex’i aç.',
+    );
+  }).catch((err: unknown) => console.warn('[updates]', err instanceof Error ? err.message : err));
+}
+
 function windowSettings(): WindowSettings {
   const { language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent } = readSettings();
   return { language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent };
 }
 
 export function registerIpc(): void {
+  // The app's own update: the one waiting, and installing it now - not while a setup runs, which quitting would cut short.
+  handle('update:ready', () => pendingUpdate());
+  handle('update:install', () => installUpdate(setup.setupBusy() !== null));
+
   handle('app:bootstrap', async (): Promise<BootstrapPayload> => ({
     settings: windowSettings(),
     vault: await vaultStatus(),
