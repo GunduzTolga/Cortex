@@ -28,7 +28,7 @@ import { Button, Spinner, Switch, inputClass } from '../ui/ui';
 
 type StepId = 'name' | 'vault' | 'python' | 'engine' | 'tools' | 'voice' | 'done';
 /** A tool being installed from here (`failed`: its installer ended without it). */
-/** A tool being installed; `why`, where the main process refused before any window opened (Node.js missing). */
+/** A tool being installed; `why`, where the main process refused before any window opened. */
 type Installing = { id: CliId; failed: boolean; why?: string } | null;
 
 const TITLE: Record<StepId, Key> = {

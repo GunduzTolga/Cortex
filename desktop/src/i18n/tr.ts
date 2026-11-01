@@ -166,7 +166,7 @@ export const tr: Record<keyof typeof en, string> = {
   'onboarding.tools.install.more': 'Başka bir araç kur',
   'onboarding.tools.install.body': 'Hangisini kullanıyorsan onu seç. Kurucu bir pencerede çalışır, bitince giriş penceresi kendiliğinden açılır.',
   'onboarding.tools.install.claudeNote': 'Anthropic\'in kurucusu · Claude Pro ya da Max aboneliği ister',
-  'onboarding.tools.install.npmNote': 'npm ile kurulur · Node.js gerekir (nodejs.org)',
+  'onboarding.tools.install.npmNote': 'npm ile kurulur; Node.js yoksa o da kendiliğinden kurulur',
   'onboarding.tools.install': 'Kur ve giriş yap',
   'onboarding.tools.installing': 'Kurulum penceresi açık. Bitince giriş penceresi açılacak; tarayıcıda girişi tamamla, burası kendiliğinden yenilenir.',
   'onboarding.tools.installFailed': '{name} kurulamadı ya da bulunamadı. Açılan pencerede ne yazdığına bak; yeniden deneyebilirsin.',

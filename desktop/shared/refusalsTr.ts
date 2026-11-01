@@ -107,7 +107,6 @@ const RULES: Rule[] = [
   { pattern: /^Cortex does not install this tool\.$/, say: () => 'Cortex bu aracı kurmuyor.' },
   { pattern: /^Installing from Cortex opens a console window, which only Windows does here\.$/, say: () => 'Cortex’ten kurmak bir konsol penceresi açar; bu yalnız Windows’ta çalışır.' },
   { pattern: /^This tool is installed already\.$/, say: () => 'Bu araç zaten kurulu.' },
-  { pattern: /^Node\.js is needed first: install it from nodejs\.org \(the LTS one\), then try again\.$/, say: () => 'Önce Node.js gerekiyor: nodejs.org’dan (LTS sürümünü) kur, sonra yeniden dene.' },
   { pattern: /^This tool keeps its keys in its own sign-in\.$/, say: () => 'Bu araç anahtarlarını kendi girişinde saklar.' },
   { pattern: /^That is not a key\.$/, say: () => 'Bu bir anahtar değil.' },
   { pattern: /^Codex did not take the key\.$/, say: () => 'Codex anahtarı kabul etmedi.' },

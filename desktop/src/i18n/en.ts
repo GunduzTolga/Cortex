@@ -172,7 +172,7 @@ export const en = {
   'onboarding.tools.install.more': 'Install another tool',
   'onboarding.tools.install.body': 'Choose the one you use. Its installer runs in a window; the sign-in window opens by itself when it is done.',
   'onboarding.tools.install.claudeNote': 'Anthropic’s installer · needs a Claude Pro or Max plan',
-  'onboarding.tools.install.npmNote': 'Installed with npm · needs Node.js (nodejs.org)',
+  'onboarding.tools.install.npmNote': 'Installed with npm; Node.js too, where it is missing',
   'onboarding.tools.install': 'Install and sign in',
   'onboarding.tools.installing': 'The installer window is open. The sign-in window opens after it; finish signing in in the browser and this updates by itself.',
   'onboarding.tools.installFailed': '{name} was not installed or not found. See what the window said; you can try again.',

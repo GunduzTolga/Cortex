@@ -182,6 +182,8 @@ export function powerShellExe(env: NodeJS.ProcessEnv = process.env): string {
 export const installedDirs = (): string[] => [
   path.join(os.homedir(), '.local', 'bin'),
   ...(process.env.APPDATA ? [path.join(process.env.APPDATA, 'npm')] : []),
+  // Node.js as Cortex sets it up for the npm tools (auth.ts, nodeStep): their .cmd files start node.exe from the PATH.
+  ...(process.env.LOCALAPPDATA ? [path.join(process.env.LOCALAPPDATA, 'Programs', 'nodejs')] : []),
 ];
 
 let refreshing: Promise<void> | null = null;
