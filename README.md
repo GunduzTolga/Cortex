@@ -186,7 +186,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
-| [1.0.42](docs/v3/releases/1.0.42.md) | İlk açılış kolaylaştı: kasa Belgeler'de kendiliğinden açılıyor; OpenCode, Codex, Gemini CLI ve Qwen Code da uygulamadan kuruluyor; sesle yazma arka planda kuruluyor; kurulum sürerken yanlış "kurulamadı" uyarısı çıkmıyor. |
+| [1.0.42](docs/v3/releases/1.0.42.md) | İlk açılış kolaylaştı: kasa Belgeler'de kendiliğinden açılıyor; OpenCode, Codex, Gemini CLI ve Qwen Code da uygulamadan kuruluyor; sesle yazma arka planda kuruluyor; kurulum sürerken yanlış "kurulamadı" uyarısı çıkmıyor. Sesli asistanda "Hey Pyn" varsayılan, cümle sonundaki "hepsini sil" çalışıyor, kapatılan kaydın yazısı sonraki pencereye düşmüyor. |
 | [1.0.41](docs/v3/releases/1.0.41.md) | Grafiğin yanında bir rehber var: sayılar, klasör renkleri, bağlantı bekleyen ve yazılmayı bekleyen notlar, en çok bağlananlar. Sesin ekran kartı derlemesi kurulum dosyasıyla geliyor; "Mikrofondan ses gelmiyor" kısa bir duraksamada çıkmıyor; sunucudaki asistan araç listesinde "Sunucudaki Pyn". |
 | [1.0.40](docs/v3/releases/1.0.40.md) | Kasa bağlı olduğu git deposuyla eşitlenebiliyor: bir bilgisayarda yazılan not sunucuya ve öbür cihazlara gidiyor; Ayarlar › Sunucu'da tek anahtar, sır taraması ve çakışmada üstüne yazmama. |
 | [1.0.39](docs/v3/releases/1.0.39.md) | AMD / Intel ekran kartında ses yarı boyutlu modelle (yaklaşık 870 MB) yazıyor; daha çabuk hazır oluyor. |
