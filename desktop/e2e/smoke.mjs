@@ -1512,11 +1512,13 @@ if ((await notesAgain.locator('[data-note-mode="edit"]').getAttribute('aria-pres
 await notesAgain.locator('.cm-content').click();
 await page.keyboard.press('Control+End');
 await page.keyboard.type(' closed');
+// The keys are in the note before it is closed: what is checked is the save on quit, not the typing. Which of the three
+// failed is said (1 November, once on the Windows runner, with nothing to tell which).
+const typedIn = await shownSoon(notesAgain.locator('[data-note-pane="Drafts/E2E Closing.md"] .cm-content', { hasText: 'Start closed' }), 5_000);
 await app.close();
-check(
-  'a note written a moment before Cortex quits is saved before the window goes',
-  closingOpen && fs.readFileSync(vaultNote('Drafts/E2E Closing.md'), 'utf8') === '# Closing\n\nStart closed',
-);
+const closedText = fs.readFileSync(vaultNote('Drafts/E2E Closing.md'), 'utf8');
+check('a note written a moment before Cortex quits is saved before the window goes', closingOpen && typedIn && closedText === '# Closing\n\nStart closed');
+if (!(closingOpen && typedIn && closedText === '# Closing\n\nStart closed')) console.log(`       opened ${closingOpen}, typed ${typedIn}, saved ${JSON.stringify(closedText)}`);
 
 /*
   The page dying - out of memory on a large vault, the GPU process gone on a laptop - is loaded again by itself
