@@ -94,3 +94,29 @@ test('uninstalled, Cortex no longer starts with Windows; updated, it still does 
   }
   assert.ok(!macro.replace(guarded, '').includes('DeleteRegValue'), 'nothing deleted outside the guard: an update keeps it');
 });
+
+test('uninstalled, the person is asked whether everything Cortex kept goes too; updated or silent, nothing is asked or taken', () => {
+  const script = fs.readFileSync(packaged.build.nsis.include, 'utf8');
+  const macro = /!macro customUnInstall([\s\S]*?)!macroend/.exec(script)?.[1] ?? '';
+  const guarded = /\$\{ifNot\} \$\{isUpdated\}([\s\S]*)\$\{endIf\}/.exec(macro)?.[1] ?? '';
+  const asked = /\$\{If\} \$\{Cmd\} `MessageBox ([^`]*)`([\s\S]*?)\$\{EndIf\}/.exec(guarded);
+  assert.ok(asked, 'asked first');
+  // "No" is the default, and the answer of a silent uninstall.
+  assert.match(asked[1], /MB_DEFBUTTON2/);
+  assert.match(asked[1], /\/SD IDNO IDYES$/);
+  assert.match(asked[1], /Notların \(kasa klasörün\) silinmez/);
+  const removed = asked[2];
+  for (const line of ['RMDir /r "$APPDATA\\Cortex"', 'RMDir /r "$LOCALAPPDATA\\beyin-v3"', 'Delete "$APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\Pyn Yakala.lnk"', 'Delete "$APPDATA\\Microsoft\\Windows\\SendTo\\Beyne At.lnk"']) {
+    assert.ok(removed.includes(line), line);
+  }
+  // The listener and the voice helper stopped first, the uninstaller's own PowerShell spared.
+  assert.ok(removed.indexOf('Stop-Process') < removed.indexOf('RMDir'));
+  assert.match(removed, /\$\$_\.ProcessId -ne \$\$PID/);
+  // Nothing of the person's notes: no Documents, no vault.
+  assert.doesNotMatch(removed, /DOCUMENTS|Belgeler|\$PROFILE/i);
+  assert.ok(!macro.replace(guarded, '').includes('RMDir'), 'nothing taken outside the guard: an update keeps it');
+  // The folders it takes are the ones the app and the engine write (electron settings, beyin_v3 default_state).
+  assert.equal(packaged.build.productName, 'Cortex');
+  const states = /def default_state[\s\S]*?return base \/ "beyin-v3"/.exec(fs.readFileSync('../template/.claude/scripts/beyin_v3.py', 'utf8'))?.[0] ?? '';
+  assert.match(states, /LOCALAPPDATA/);
+});

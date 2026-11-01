@@ -198,15 +198,29 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
       const action = engineAction(engine);
       if (!engine?.installed || !engine.bundled || !action || action === 'install') return;
       const values = { installed: engine.installed, bundled: engine.bundled };
+      // The vault's engine behind the app's own (a new version installed): brought up to it by itself, as the app was.
+      // Asked, it read as a second update of what had just been installed (1 November: "zaten 42 kurdum"). Said only
+      // if it fails, with the button to try again; a predecessor's engine is still asked about, as moving it is a choice.
+      if (action === 'update' || action === 'refresh') {
+        if (useSetup.getState().status?.job) return;
+        await useSetup.getState().run('engine');
+        const failed = useSetup.getState().error;
+        if (failed?.job !== 'engine') return;
+        useApp.getState().toast({
+          tone: 'error',
+          title: t('setup.update.autoFailed', values),
+          detail: failed.text,
+          sticky: true,
+          action: { label: t('setup.update.action'), run: () => void useSetup.getState().run('engine') },
+        });
+        return;
+      }
       useApp.getState().toast({
         tone: 'info',
-        title: t(action === 'refresh' ? 'setup.update.refreshTitle' : action === 'migrate' ? 'setup.update.migrateTitle' : 'setup.update.title', values),
-        detail: t(action === 'refresh' ? 'setup.update.refreshDetail' : action === 'migrate' ? 'setup.update.migrateDetail' : 'setup.update.detail', values),
+        title: t('setup.update.migrateTitle', values),
+        detail: t('setup.update.migrateDetail', values),
         sticky: true,
-        action: {
-          label: t(action === 'refresh' ? 'setup.update.refreshAction' : action === 'migrate' ? 'setup.update.migrateAction' : 'setup.update.action'),
-          run: () => void useSetup.getState().run('engine'),
-        },
+        action: { label: t('setup.update.migrateAction'), run: () => void useSetup.getState().run('engine') },
       });
     })();
     // Once per vault opened: chosen again counts, the same folder name or not.

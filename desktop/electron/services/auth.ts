@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import os from 'node:os';
 import type { CliAuth, CliId } from '../../shared/chat';
 import { childEnv } from './acp';
-import { LOCAL_IDS, onPathAny, powerShellExe, programOf, refreshPath } from './clis';
+import { LOCAL_IDS, onPathAny, onPathFile, powerShellExe, programOf, refreshPath } from './clis';
 import { LOCAL, type LocalId, findLocal, localModel, shortContext } from './localModels';
 import { KEY_ENV, KeyRefusal, forgetKey, hasKey, keptHere, keptReadable, saveKey } from './keys';
 import { readSettings } from './settings';
@@ -255,11 +255,17 @@ export function installScript(id: CliId, turkish: boolean): string {
  * by Anthropic's, the others by npm. When it ends, the PATH is read again, the window told, and the tool's
  * sign-in opened where it is not signed in yet.
  */
-export function installTool(id: unknown): void {
+export async function installTool(id: unknown): Promise<void> {
   const tool = toolOf(id);
   if (!INSTALLERS[tool.id]) throw new KeyRefusal('Cortex does not install this tool.');
   if (process.platform !== 'win32') throw new KeyRefusal('Installing from Cortex opens a console window, which only Windows does here.');
   if (programOf(tool.id)) throw new KeyRefusal('This tool is installed already.');
+  // The npm packages need Node.js. Without it the console only said so and closed, and the window said the install
+  // had failed, as if something had been tried (1 November, OpenCode on a fresh laptop): it is said here instead.
+  if (tool.id !== 'claude' && !onPathFile(['npm.cmd', 'npm.exe'])) {
+    await refreshPath(true);
+    if (!onPathFile(['npm.cmd', 'npm.exe'])) throw new KeyRefusal('Node.js is needed first: install it from nodejs.org (the LTS one), then try again.');
+  }
   const script = installScript(tool.id, readSettings().language !== 'en');
   const child = spawn(powerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { cwd: os.homedir(), env: childEnv(), detached: true, stdio: 'ignore', windowsHide: !SHOW_CONSOLE, shell: false });
   let ended = false;

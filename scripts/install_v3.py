@@ -561,6 +561,15 @@ def _install(vault, state, uninstall=False, plan_only=False, version="0.0.0", le
         if kept_user_text:
             result["kept_user_text"] = sorted(kept_user_text)
         return result
+    # A record whose engine is gone from the vault altogether describes a vault no longer here: the folder deleted
+    # and made again where it was (the desktop's first run makes Documents\Cortex, and default_state is per vault
+    # path), or emptied. Read as it is, every file in it was one the person had deleted, and a fresh install stopped
+    # for good (1 November). With not one of its engine files left this is a first install; the record is replaced
+    # when it completes, and the journal keeps the old one until then. One engine file missing beside the others is
+    # still the person's change, and still a conflict below.
+    engine_files = [name for name in manifest.get("files", {}) if name == "beyin.py" or name.startswith(".claude/scripts/")]
+    if engine_files and not any((vault / name).exists() for name in engine_files):
+        manifest = {"files": {}}
     planned = {}
     modes = {}
     if legacy_hashes is None:

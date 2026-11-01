@@ -91,9 +91,9 @@ test('with no tool installed, each is said to be missing and nothing is offered;
     // (1 November: a fresh install offered only Claude Code; OpenCode could not be had from the app).
     assert.deepEqual(tools.filter((one) => one.canInstall).map((one) => one.id), process.platform === 'win32' ? ['claude', 'codex', 'opencode', 'gemini', 'qwen'] : []);
     assert.ok(servers.every((one) => !one.canInstall));
-    if (process.platform !== 'win32') assert.throws(() => installTool('claude'), /only Windows/);
-    if (process.platform !== 'win32') assert.throws(() => installTool('opencode'), /only Windows/);
-    assert.throws(() => installTool('nope'), /Not a tool/);
+    if (process.platform !== 'win32') await assert.rejects(installTool('claude'), /only Windows/);
+    if (process.platform !== 'win32') await assert.rejects(installTool('opencode'), /only Windows/);
+    await assert.rejects(installTool('nope'), /Not a tool/);
     assert.ok(servers.every((one) => !one.installed && !one.canLogin && one.key === null && one.signedIn === false && one.local?.models === 0), 'a model server off and not installed: nothing to sign in to');
     assert.throws(() => startLogin('claude'), /not signed in to from here/);
     assert.throws(() => startLogin('nope'), /Not a tool/);
