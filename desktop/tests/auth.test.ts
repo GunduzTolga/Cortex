@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
-import { authStatuses, claudeStatus, codexStatus, installScript, installTool, nodeStep, opencodeStatus, setToolKey, startLogin } from '../electron/services/auth';
+import { authStatuses, claudeStatus, codexStatus, installScript, installTool, opencodeStatus, setToolKey, startLogin } from '../electron/services/auth';
 import { READ_PATH, pathOutput, powerShellExe, withDirs } from '../electron/services/clis';
 import { forgetKey, hasKey, keyEnv, saveKey } from '../electron/services/keys';
 
@@ -124,81 +124,17 @@ test('Claude Code is installed by Anthropic’s own installer, its window kept o
   assert.throws(() => installScript('nope' as never, true), /does not install/);
 });
 
-test('OpenCode, Codex, Gemini CLI and Qwen Code are installed by npm, Node.js set up first where npm is missing', () => {
-  const expected = { opencode: 'opencode-ai', codex: '@openai/codex', gemini: '@google/gemini-cli', qwen: '@qwen-code/qwen-code' } as const;
-  for (const [id, pkg] of Object.entries(expected)) {
-    for (const turkish of [true, false]) {
-      const script = installScript(id as keyof typeof expected, turkish);
-      assert.ok(script.includes(`npm install -g ${pkg}`), `${id}: its npm package`);
-      assert.ok(script.indexOf(nodeStep(turkish)) >= 0 && script.indexOf(nodeStep(turkish)) < script.indexOf('npm install'), `${id}: Node.js before npm`);
-      assert.ok(script.includes(`'npm\\${id}.cmd'`), `${id}: checked where npm puts it`);
-      assert.ok(!script.includes('"'), 'no double quote');
-      for (const said of script.match(/'[^']*'/g) ?? []) assert.ok(!said.slice(1, -1).includes("'"), said);
-    }
-  }
-  assert.ok(!installScript('claude', true).includes('nodejs'), 'Claude Code needs no Node.js');
-  assert.ok(installScript('opencode', true).includes('OpenCode kuruluyor'), 'named in the window’s language');
-  const step = nodeStep(true);
-  assert.ok(step.startsWith('if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {'), 'only where npm is not found');
-  assert.ok(step.includes("'https://nodejs.org/dist/index.json'") && step.includes("'SHASUMS256.txt'") && step.includes('SHA256]::Create().ComputeHash($stream)') && !step.includes('Get-FileHash'), 'from nodejs.org, checked');
-  assert.ok(step.includes("Join-Path $env:LOCALAPPDATA 'Programs\\nodejs'"), 'for this person, no administrator');
-  assert.ok(step.includes("'prefix=${APPDATA}\\npm'"), 'npm’s global folder where its installer would have it');
-  assert.ok(step.includes("'DoNotExpandEnvironmentNames'"), 'the PATH’s %…% names kept');
-  assert.ok(step.includes('Önce Node.js kuruluyor') && nodeStep(false).includes('Setting up Node.js first'));
-  assert.ok(!/[{;]\s*;|;\s*}/.test(step), 'no empty statement');
+test('only Claude Code has a console installer: OpenCode, Codex, Gemini CLI and Qwen Code are Cortex’s to install, with no npm and no Node.js', () => {
+  for (const id of ['opencode', 'codex', 'gemini', 'qwen'] as const) assert.throws(() => installScript(id, true), /does not install/);
+  const source = fs.readFileSync('electron/services/auth.ts', 'utf8');
+  assert.ok(!/npm install|nodejs\.org|Node\.js is needed/.test(source), 'no npm and no Node.js anywhere in the installers');
 });
 
-/** Windows' own PowerShell, given what a script would be given: the console's script as one argument, as installTool does. */
-function powerShell(args: string[], env: NodeJS.ProcessEnv = process.env): string {
-  return execFileSync(powerShellExe(), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', ...args], { encoding: 'utf8', env, timeout: 600_000, windowsHide: true });
-}
-
-test('every install console’s script is PowerShell without a fault (Windows)', { skip: process.platform !== 'win32' }, () => {
-  for (const id of ['claude', 'opencode', 'codex', 'gemini', 'qwen'] as const) {
-    for (const turkish of [true, false]) {
-      const parse = '$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($env:CORTEX_SCRIPT, [ref]$null, [ref]$errors); $errors | ForEach-Object { $_.Message }';
-      assert.equal(powerShell(['-Command', parse], { ...process.env, CORTEX_SCRIPT: installScript(id, turkish) }).trim(), '', `${id} ${turkish ? 'tr' : 'en'}`);
-    }
-  }
-});
-
-// Downloads Node.js and writes the person's PATH: on a CI runner only, whose PATH is put back after.
-test('Node.js is set up where npm is missing: unpacked for the person, npm’s global folder in %APPDATA%, both on the PATH (Windows CI)', { skip: process.platform !== 'win32' || process.env.GITHUB_ACTIONS !== 'true', timeout: 600_000 }, () => {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-node-'));
-  const [local, roaming, temp] = ['Yerel', 'Dolaşan', 'Geçici'].map((name) => path.join(base, name));
-  for (const dir of [local, roaming, temp]) fs.mkdirSync(dir, { recursive: true });
-  const system = process.env.SystemRoot ?? 'C:\\Windows';
-  const env = { ...process.env, LOCALAPPDATA: local, APPDATA: roaming, TEMP: temp, TMP: temp, PATH: [path.join(system, 'System32'), system, path.dirname(powerShellExe())].join(';') };
-  delete env.Path;
-  // Run under `npm test`, npm's own settings are in the environment (npm_config_*): a prefix there would hide the one set up.
-  for (const key of Object.keys(env)) if (/^npm_/i.test(key)) delete env[key];
-  const readPath = "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false; [string](Get-Item 'HKCU:\\Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')";
-  const before = powerShell(['-Command', readPath]).trim();
-  try {
-    const said = powerShell(['-Command', `${nodeStep(false)}; Write-Host ('NPM=' + (Get-Command npm).Source)`], env);
-    const node = path.join(local, 'Programs', 'nodejs');
-    assert.ok(fs.existsSync(path.join(node, 'node.exe')) && fs.existsSync(path.join(node, 'npm.cmd')), said);
-    // A folder said by its short name (RUNNER~1) or its long one is the same folder.
-    const real = (dir: string) => {
-      try {
-        return fs.realpathSync.native(dir).toLowerCase();
-      } catch {
-        return dir.toLowerCase();
-      }
-    };
-    const npmSaid = /NPM=(.+)/.exec(said)?.[1]?.trim() ?? '';
-    assert.equal(real(path.dirname(npmSaid)), real(node), `this console's npm is the one set up: ${said}`);
-    assert.ok(!fs.existsSync(`${node}-indiriliyor`), 'nothing half-unpacked left');
-    const prefix = execFileSync(path.join(node, 'node.exe'), [path.join(node, 'node_modules', 'npm', 'bin', 'npm-cli.js'), 'prefix', '-g'], { encoding: 'utf8', env: { ...env, PATH: `${node};${env.PATH}` } }).trim();
-    assert.equal(real(prefix), real(path.join(roaming, 'npm')), 'npm -g puts the tools in %APPDATA%\\npm, where Cortex looks');
-    const after = powerShell(['-Command', readPath]).trim().split(';').map(real);
-    for (const dir of [node, path.join(roaming, 'npm')]) assert.ok(after.includes(real(dir)), `${dir} on the person's PATH`);
-    // Set up already: taken as it is, nothing downloaded again.
-    const again = powerShell(['-Command', nodeStep(false)], env);
-    assert.ok(!again.includes('Setting up Node.js'), again);
-  } finally {
-    powerShell(['-Command', "[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment').SetValue('Path', $env:CORTEX_PATH_BEFORE, 'ExpandString')"], { ...process.env, CORTEX_PATH_BEFORE: before });
-    fs.rmSync(base, { recursive: true, force: true });
+test('Claude Code’s console script is PowerShell without a fault (Windows)', { skip: process.platform !== 'win32' }, () => {
+  for (const turkish of [true, false]) {
+    const parse = '$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($env:CORTEX_SCRIPT, [ref]$null, [ref]$errors); $errors | ForEach-Object { $_.Message }';
+    const said = execFileSync(powerShellExe(), ['-NoProfile', '-NonInteractive', '-Command', parse], { encoding: 'utf8', env: { ...process.env, CORTEX_SCRIPT: installScript('claude', turkish) }, windowsHide: true });
+    assert.equal(said.trim(), '', turkish ? 'tr' : 'en');
   }
 });
 

@@ -106,17 +106,22 @@ test('uninstalled, the person is asked whether everything Cortex kept goes too; 
   assert.match(asked[1], /\/SD IDNO IDYES$/);
   assert.match(asked[1], /Notların \(kasa klasörün\) silinmez/);
   const removed = asked[2];
-  for (const line of ['RMDir /r "$APPDATA\\Cortex"', 'RMDir /r "$LOCALAPPDATA\\beyin-v3"', 'Delete "$APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\Pyn Yakala.lnk"', 'Delete "$APPDATA\\Microsoft\\Windows\\SendTo\\Beyne At.lnk"']) {
+  for (const line of ['RMDir /r "$APPDATA\\Cortex"', 'RMDir /r "$LOCALAPPDATA\\beyin-v3"', 'RMDir /r "$LOCALAPPDATA\\Cortex\\tools"', 'Delete "$APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\Pyn Yakala.lnk"', 'Delete "$APPDATA\\Microsoft\\Windows\\SendTo\\Beyne At.lnk"']) {
     assert.ok(removed.includes(line), line);
   }
   // The listener and the voice helper stopped first, the uninstaller's own PowerShell spared.
   assert.ok(removed.indexOf('Stop-Process') < removed.indexOf('RMDir'));
   assert.match(removed, /\$\$_\.ProcessId -ne \$\$PID/);
+  // A tool Cortex installed, running from its folder, is stopped with them; the folder above goes only if it is empty.
+  assert.ok(removed.includes("-like '*\\Cortex\\tools\\*'"));
+  assert.ok(removed.includes('RMDir "$LOCALAPPDATA\\Cortex"') && !removed.includes('RMDir /r "$LOCALAPPDATA\\Cortex"\n'));
   // Nothing of the person's notes: no Documents, no vault.
   assert.doesNotMatch(removed, /DOCUMENTS|Belgeler|\$PROFILE/i);
   assert.ok(!macro.replace(guarded, '').includes('RMDir'), 'nothing taken outside the guard: an update keeps it');
   // The folders it takes are the ones the app and the engine write (electron settings, beyin_v3 default_state).
   assert.equal(packaged.build.productName, 'Cortex');
+  const tools = /export function toolsDir[\s\S]*?\n\}/.exec(fs.readFileSync('electron/services/toolPackages.ts', 'utf8'))?.[0] ?? '';
+  assert.ok(tools.includes('env.LOCALAPPDATA') && tools.includes("'Cortex', 'tools')"), tools);
   const states = /def default_state[\s\S]*?return base \/ "beyin-v3"/.exec(fs.readFileSync('../template/.claude/scripts/beyin_v3.py', 'utf8'))?.[0] ?? '';
   assert.match(states, /LOCALAPPDATA/);
 });

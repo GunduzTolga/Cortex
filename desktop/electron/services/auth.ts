@@ -6,6 +6,7 @@ import { LOCAL_IDS, onPathAny, powerShellExe, programOf, refreshPath } from './c
 import { LOCAL, type LocalId, findLocal, localModel, shortContext } from './localModels';
 import { KEY_ENV, KeyRefusal, forgetKey, hasKey, keptHere, keptReadable, saveKey } from './keys';
 import { readSettings } from './settings';
+import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts } from './toolPackages';
 
 /**
  * Signing in to the person's AI tools, from the chat: each one asked, with
@@ -58,24 +59,12 @@ const LOGIN_POLL = 4_000;
 const LOGIN_WATCH = 10 * 60_000;
 
 /**
- * The tools installed from here, each by its maker's own installer run by Windows' PowerShell, and where it puts the
- * program. Claude Code has an installer of its own; the others are npm packages (their makers' Windows instructions),
- * and npm comes with Node.js: where there is none, the console sets Node.js up first (nodeStep). 1 November: Node.js
- * was left to the person ("opencode node.js ne alaka… tarayıcıdan oturumunu açacak, bu kadar"); signing in is the
- * browser's, but the program has to be on the computer, and these four run on Node.js.
+ * Claude Code, installed by Anthropic's own installer run by Windows' PowerShell in a console window, and where it
+ * puts the program. OpenCode, Codex, Gemini CLI and Qwen Code are installed by Cortex itself, with no window, no npm
+ * and no Node.js (toolPackages.ts).
  */
-const npm = (pkg: string, bin: string) => ({
-  run: `npm install -g ${pkg}`,
-  puts: `(Join-Path $env:APPDATA 'npm\\${bin}.cmd')`,
-  from: `npm: ${pkg}`,
-  node: true,
-});
-const INSTALLERS: Partial<Record<CliId, { run: string; puts: string; from: string; node?: boolean }>> = {
+const INSTALLERS: Partial<Record<CliId, { run: string; puts: string; from: string }>> = {
   claude: { run: 'irm https://claude.ai/install.ps1 | iex', puts: "(Join-Path $env:USERPROFILE '.local\\bin\\claude.exe')", from: 'Anthropic: claude.ai/install.ps1' },
-  opencode: npm('opencode-ai', 'opencode'),
-  codex: npm('@openai/codex', 'codex'),
-  gemini: npm('@google/gemini-cli', 'gemini'),
-  qwen: npm('@qwen-code/qwen-code', 'qwen'),
 };
 const TOOL_NAMES: Record<CliId, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code' } as Record<CliId, string>;
 
@@ -140,7 +129,7 @@ async function statusOf(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
     signedIn: null,
     detail: null,
     canLogin: installed && tool.login !== null && process.platform === 'win32',
-    canInstall: !installed && Boolean(INSTALLERS[tool.id]) && process.platform === 'win32',
+    canInstall: !installed && Boolean(INSTALLERS[tool.id] || PACKAGES[tool.id]) && process.platform === 'win32',
     key: installed ? tool.key : null,
     baseUrl: Boolean(KEY_ENV[tool.id]?.baseUrl),
     hasKey: hasKey(tool.id),
@@ -249,86 +238,39 @@ export function installScript(id: CliId, turkish: boolean): string {
   const [going, failed] = turkish
     ? [`${name} kuruluyor (${installer.from})...`, `${name} kurulamadı. Yukarıda ne yazdığına bak; kapatmak için Enter`]
     : [`Installing ${name} (${installer.from})...`, `${name} was not installed. See what is written above; press Enter to close`];
-  const run = installer.node ? `${nodeStep(turkish)}; ${installer.run}` : installer.run;
-  return `Write-Host '${going}'; try { ${run} } catch { Write-Host $_ -ForegroundColor Red }; if (-not (Test-Path ${installer.puts})) { Read-Host '${failed}' }`;
+  return `Write-Host '${going}'; try { ${installer.run} } catch { Write-Host $_ -ForegroundColor Red }; if (-not (Test-Path ${installer.puts})) { Read-Host '${failed}' }`;
 }
 
-const block = (head: string, body: string[]) => `${head} { ${body.join('; ')} }`;
+/** The tools being installed by Cortex itself: a second click while one is downloading is not a second download. */
+const installing = new Set<CliId>();
 
 /**
- * Node.js, where npm is not found, set up the way its own Windows installer would, without asking for an administrator:
- * the newest LTS release's Windows zip from nodejs.org, checked against the release's SHA-256 list, unpacked into
- * %LOCALAPPDATA%\Programs\nodejs; npm's global folder %APPDATA%\npm, as the installer's npmrc says (the zip has none, and
- * its npm would put the tools beside node.exe); both folders added to the person's PATH (the registry's own value, its
- * %…% names kept) and to this console's. One already unpacked there is taken as it is. The same single-quoted
- * PowerShell as the rest of the console's script, and only what Windows PowerShell has without a module.
- */
-export function nodeStep(turkish: boolean): string {
-  const going = turkish ? 'Önce Node.js kuruluyor (nodejs.org, LTS)...' : 'Setting up Node.js first (nodejs.org, LTS)...';
-  const download = [
-    `Write-Host '${going}'`,
-    '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072',
-    "$ProgressPreference = 'SilentlyContinue'",
-    "$arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }",
-    // Parenthesised: Windows PowerShell hands a JSON array down the pipeline as one object.
-    "$release = (Invoke-RestMethod -UseBasicParsing 'https://nodejs.org/dist/index.json') | Where-Object { $_.lts -and ($_.files -contains ('win-' + $arch + '-zip')) } | Select-Object -First 1",
-    "$name = 'node-' + $release.version + '-win-' + $arch",
-    "$url = 'https://nodejs.org/dist/' + $release.version + '/'",
-    "$zip = Join-Path $env:TEMP ($name + '.zip')",
-    "$sums = Join-Path $env:TEMP ($name + '.SHASUMS256.txt')",
-    "Invoke-WebRequest -UseBasicParsing ($url + $name + '.zip') -OutFile $zip",
-    "Invoke-WebRequest -UseBasicParsing ($url + 'SHASUMS256.txt') -OutFile $sums",
-    "$sum = Get-Content $sums | Where-Object { $_ -like ('*  ' + $name + '.zip') } | Select-Object -First 1",
-    // .NET's own SHA-256, not Get-FileHash: a module command, missing where the PowerShell 7 modules come first on the
-    // module path (a console started from PowerShell 7; the Windows CI runner).
-    '$stream = [IO.File]::OpenRead($zip)',
-    "$hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($stream)).Replace('-', '')",
-    '$stream.Close()',
-    block("if (-not $sum -or ($sum -split '\\s+')[0] -ne $hash)", ["throw ($name + '.zip: SHA-256')"]),
-    // Unpacked beside where it goes, so it is moved within one drive.
-    "$part = $node + '-indiriliyor'",
-    block('if (Test-Path $part)', ['Remove-Item $part -Recurse -Force']),
-    'Add-Type -AssemblyName System.IO.Compression.FileSystem',
-    '[IO.Compression.ZipFile]::ExtractToDirectory($zip, $part)',
-    block('if (Test-Path $node)', ['Remove-Item $node -Recurse -Force']),
-    'Move-Item (Join-Path $part $name) $node',
-    'Remove-Item $part, $zip, $sums -Recurse -Force -ErrorAction SilentlyContinue',
-    "Set-Content -Path (Join-Path $node 'node_modules\\npm\\npmrc') -Value 'prefix=${APPDATA}\\npm' -Encoding ASCII",
-  ];
-  const onPath = [
-    'New-Item -ItemType Directory -Force $npmDir | Out-Null',
-    "$key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')",
-    "$path = [string]$key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')",
-    "$kind = if ($path) { $key.GetValueKind('Path') } else { 'ExpandString' }",
-    "$dirs = @($path -split ';' | Where-Object { $_ })",
-    block('foreach ($dir in @($node, $npmDir))', [block('if ($dirs -notcontains $dir)', ['$dirs += $dir'])]),
-    "$key.SetValue('Path', ($dirs -join ';'), $kind)",
-    '$key.Close()',
-    // Writing nothing, it tells the open windows that the environment changed, as an installer does.
-    "[Environment]::SetEnvironmentVariable('CORTEX_PATH', $null, 'User')",
-    "$env:Path = $node + ';' + $npmDir + ';' + $env:Path",
-  ];
-  // Any failure ends the step, and the console's catch says it: a download that failed went on to unpack nothing.
-  return block('if (-not (Get-Command npm -ErrorAction SilentlyContinue))', [
-    "$ErrorActionPreference = 'Stop'",
-    "$node = Join-Path $env:LOCALAPPDATA 'Programs\\nodejs'",
-    "$npmDir = Join-Path $env:APPDATA 'npm'",
-    block("if (-not (Test-Path (Join-Path $node 'npm.cmd')))", download),
-    ...onPath,
-    "$ErrorActionPreference = 'Continue'",
-  ]);
-}
-
-/**
- * A tool installed by its maker's own installer, in a console window of its own: Claude Code
- * by Anthropic's, the others by npm. When it ends, the PATH is read again, the window told, and the tool's
- * sign-in opened where it is not signed in yet.
+ * A tool installed: Claude Code by Anthropic's own installer, in a console window of its own; the others by Cortex,
+ * their makers' packages downloaded and checked here (toolPackages.ts), the promise ending when they are in place or
+ * with what went wrong. Either way, at the end the window is told and the tool's sign-in opened where it has one and
+ * is not signed in yet.
  */
 export async function installTool(id: unknown): Promise<void> {
   const tool = toolOf(id);
-  if (!INSTALLERS[tool.id]) throw new KeyRefusal('Cortex does not install this tool.');
+  if (!INSTALLERS[tool.id] && !PACKAGES[tool.id]) throw new KeyRefusal('Cortex does not install this tool.');
   if (process.platform !== 'win32') throw new KeyRefusal('Installing from Cortex opens a console window, which only Windows does here.');
   if (programOf(tool.id)) throw new KeyRefusal('This tool is installed already.');
+  if (PACKAGES[tool.id]) {
+    if (installing.has(tool.id)) throw new KeyRefusal('This tool is being installed already.');
+    installing.add(tool.id);
+    try {
+      await installPackage(tool.id);
+      // A program built for a newer processor ends at once on an older one: its maker's build for those instead.
+      const own = ownProgram(tool.id);
+      if (own && PACKAGES[tool.id]?.older?.(archOf()) && !(await starts(own))) await installPackage(tool.id, { older: true });
+    } catch (err) {
+      throw err instanceof PackageRefusal ? new KeyRefusal(err.message) : err;
+    } finally {
+      installing.delete(tool.id);
+    }
+    await afterInstall(tool);
+    return;
+  }
   const script = installScript(tool.id, readSettings().language !== 'en');
   const child = spawn(powerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { cwd: os.homedir(), env: childEnv(), detached: true, stdio: 'ignore', windowsHide: !SHOW_CONSOLE, shell: false });
   let ended = false;

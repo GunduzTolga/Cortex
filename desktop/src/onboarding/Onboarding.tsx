@@ -577,7 +577,7 @@ function ToolsStep({
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                     <span className="min-w-[7rem] flex-1 text-[13px] font-semibold text-darkDelegation">
                       {TOOL_NAMES[tool.id] ?? tool.id}
-                      <span className="mt-0.5 block text-[11.5px] font-normal text-zinc-500">{t(tool.id === 'claude' ? 'onboarding.tools.install.claudeNote' : 'onboarding.tools.install.npmNote')}</span>
+                      <span className="mt-0.5 block text-[11.5px] font-normal text-zinc-500">{t(tool.id === 'claude' ? 'onboarding.tools.install.claudeNote' : 'onboarding.tools.install.packageNote')}</span>
                     </span>
                     <Button
                       tone={tool.id === installable[0].id ? 'primary' : 'ghost'}
