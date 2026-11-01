@@ -160,7 +160,7 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
       ) : null}
       {installing && !tool.installed ? (
         <p className={`mt-2 text-[11.5px] ${installing.failed ? 'text-bad' : 'text-zinc-500'}`} data-auth-install-state={installing.failed ? 'failed' : 'running'}>
-          {t(installing.failed ? 'onboarding.tools.installFailed' : 'auth.install.waiting')}
+          {t(installing.failed ? 'onboarding.tools.installFailed' : 'auth.install.waiting', { name: TOOL_NAMES[tool.id] ?? tool.id })}
         </p>
       ) : signingIn ? (
         <p className="mt-2 text-[11.5px] text-zinc-500">{t('auth.login.waiting')}</p>

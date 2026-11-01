@@ -94,6 +94,8 @@ export interface CortexApi {
     status(): Promise<VaultStatus>;
     /** The system's folder dialog; null when it was closed without a choice. */
     choose(): Promise<VaultStatus | null>;
+    /** `Cortex` made in the person's Documents and taken as the vault: the first run's default. */
+    createDefault(): Promise<VaultStatus>;
   };
   notes: NotesApi;
   /** The chat with the person's own AI CLIs (shared/chat.ts). */

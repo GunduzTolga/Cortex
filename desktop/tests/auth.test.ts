@@ -87,11 +87,12 @@ test('with no tool installed, each is said to be missing and nothing is offered;
     assert.deepEqual(statuses.map((one) => one.id), ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'lmstudio', 'ollama']);
     const [tools, servers] = [statuses.slice(0, 5), statuses.slice(5)];
     assert.ok(tools.every((one) => !one.installed && !one.canLogin && one.key === null && one.signedIn === null && !one.local));
-    // Claude Code is installed from the app by Anthropic's installer in a console window: Windows only, Claude Code only.
-    assert.deepEqual(tools.filter((one) => one.canInstall).map((one) => one.id), process.platform === 'win32' ? ['claude'] : []);
+    // Installed from the app in a console window, Windows only: Claude Code by Anthropic's installer, the others by npm
+    // (1 November: a fresh install offered only Claude Code; OpenCode could not be had from the app).
+    assert.deepEqual(tools.filter((one) => one.canInstall).map((one) => one.id), process.platform === 'win32' ? ['claude', 'codex', 'opencode', 'gemini', 'qwen'] : []);
     assert.ok(servers.every((one) => !one.canInstall));
     if (process.platform !== 'win32') assert.throws(() => installTool('claude'), /only Windows/);
-    assert.throws(() => installTool('codex'), /does not install/);
+    if (process.platform !== 'win32') assert.throws(() => installTool('opencode'), /only Windows/);
     assert.throws(() => installTool('nope'), /Not a tool/);
     assert.ok(servers.every((one) => !one.installed && !one.canLogin && one.key === null && one.signedIn === false && one.local?.models === 0), 'a model server off and not installed: nothing to sign in to');
     assert.throws(() => startLogin('claude'), /not signed in to from here/);
@@ -119,7 +120,23 @@ test('Claude Code is installed by Anthropic’s own installer, its window kept o
     assert.ok(!one.includes('"'), 'no double quote');
     for (const said of one.match(/'[^']*'/g) ?? []) assert.ok(!said.slice(1, -1).includes("'"), said);
   }
-  assert.throws(() => installScript('codex', true), /does not install/);
+  assert.throws(() => installScript('nope' as never, true), /does not install/);
+});
+
+test('OpenCode, Codex, Gemini CLI and Qwen Code are installed by npm, and where Node.js is missing the console says so', () => {
+  const expected = { opencode: 'opencode-ai', codex: '@openai/codex', gemini: '@google/gemini-cli', qwen: '@qwen-code/qwen-code' } as const;
+  for (const [id, pkg] of Object.entries(expected)) {
+    for (const turkish of [true, false]) {
+      const script = installScript(id as keyof typeof expected, turkish);
+      assert.ok(script.includes(`npm install -g ${pkg}`), `${id}: its npm package`);
+      assert.ok(script.includes('Get-Command npm'), `${id}: npm looked for first`);
+      assert.ok(script.includes(`'npm\\${id}.cmd'`), `${id}: checked where npm puts it`);
+      assert.ok(!script.includes('"'), 'no double quote');
+      for (const said of script.match(/'[^']*'/g) ?? []) assert.ok(!said.slice(1, -1).includes("'"), said);
+    }
+  }
+  assert.ok(installScript('opencode', true).includes('OpenCode kuruluyor'), 'named in the window’s language');
+  assert.ok(installScript('opencode', true).includes('Node.js LTS'), 'says to install Node.js first where npm is missing');
 });
 
 test('the PATH is read again for a tool installed while the app was open: what it lacks is added after it, once, whatever its case', () => {

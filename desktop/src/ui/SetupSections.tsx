@@ -41,7 +41,7 @@ export function Bar({ percent }: { percent: number | null }) {
       aria-valuenow={percent ?? undefined}
       data-setup-bar={percent ?? 'busy'}
     >
-      <div className={`h-full rounded-full bg-darkDelegation transition-[width] duration-500 ${percent === null ? 'w-1/3 animate-pulse' : ''}`} style={percent === null ? undefined : { width: `${percent}%` }} />
+      <div className={`h-full rounded-full bg-darkDelegation transition-[width] duration-500 ${percent === null ? 'setup-busy w-1/4' : ''}`} style={percent === null ? undefined : { width: `${percent}%` }} />
     </div>
   );
 }
@@ -50,11 +50,22 @@ export function Bar({ percent }: { percent: number | null }) {
 export function Progress({ job, lines }: { job: SetupJob; lines: string[] }) {
   const t = useT();
   const last = lines.length ? percentOfStep(lines[lines.length - 1]) : null;
+  // How long it has run, so a step with no percent (Python's quiet installer) is seen moving (1 November).
+  const [began] = useState(() => Date.now());
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const seconds = Math.floor((Date.now() - began) / 1000);
   return (
     <div className="mx-3 mt-2 rounded-xl border border-zinc-100 bg-zinc-50 px-3 py-2" data-setup-progress={job}>
       <div className="flex items-center gap-2 text-[12px] font-semibold text-darkDelegation">
         <Spinner size={12} label={t('setup.working')} />
         {t(job === 'python' ? 'setup.python.working' : job === 'engine' ? 'setup.engine.working' : 'setup.voice.working')}
+        <span className="ml-auto font-mono text-[11px] font-normal text-zinc-500" data-setup-elapsed>
+          {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}
+        </span>
       </div>
       <Bar percent={last} />
       {lines.length ? (

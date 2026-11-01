@@ -3,7 +3,7 @@ import type { AppNotice, BootstrapPayload, WindowSettings } from '../shared/api'
 import { readSettings, settingsUnreadable, tidyName, updateSettings } from './services/settings';
 import { restartingListener, sayMicrophone } from './services/microphone';
 import { currentListener, expectVoiceTurn, onHelperChange, startWithWindows, trayChanged } from './services/tray';
-import { setVault, vaultStatus } from './services/vault';
+import { defaultVaultDir, setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
 import * as hermes from './services/hermesChat';
@@ -115,13 +115,8 @@ export function registerIpc(): void {
   });
 
   handle('vault:status', () => vaultStatus());
-  // The system's dialog, in the main process: the window names no folder, and learns the chosen one's name only.
-  handle('vault:choose', async () => {
-    const win = BrowserWindow.getAllWindows()[0];
-    const options: Electron.OpenDialogOptions = { title: 'Cortex', properties: ['openDirectory', 'createDirectory'] };
-    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
-    const dir = result.canceled ? null : (result.filePaths[0] ?? null);
-    if (!dir) return null;
+  // A folder taken as the vault, chosen or made, and everything held to the vault left moved to it.
+  const adoptVault = async (dir: string) => {
     const before = readSettings().vault;
     const status = await setVault(dir);
     const changed = before !== readSettings().vault;
@@ -142,7 +137,17 @@ export function registerIpc(): void {
     // Chosen again, the same vault tries again where moving it failed; where it is this vault's already, nothing runs.
     void settled.then(() => moveYakala());
     return status;
+  };
+  // The system's dialog, in the main process: the window names no folder, and learns the chosen one's name only.
+  handle('vault:choose', async () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    const options: Electron.OpenDialogOptions = { title: 'Cortex', properties: ['openDirectory', 'createDirectory'] };
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    const dir = result.canceled ? null : (result.filePaths[0] ?? null);
+    return dir ? adoptVault(dir) : null;
   });
+  // The first run's vault, made in Documents without a dialog (services/vault.ts, defaultVaultDir).
+  handle('vault:createDefault', async () => adoptVault(await defaultVaultDir(app.getPath('documents'))));
 
   // The whole vault, for the person's own notes screen (services/vaultNotes.ts): a reader nothing else is given.
   // A change on disk: read again by the window, and in step with the vault's remote a little after (services/vaultSync.ts).

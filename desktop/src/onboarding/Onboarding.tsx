@@ -26,6 +26,8 @@ import { Button, Spinner, Switch, inputClass } from '../ui/ui';
  */
 
 type StepId = 'name' | 'vault' | 'python' | 'engine' | 'tools' | 'voice' | 'done';
+/** A tool being installed from here (`failed`: its installer ended without it). */
+type Installing = { id: CliId; failed: boolean } | null;
 
 const TITLE: Record<StepId, Key> = {
   name: 'onboarding.step.name',
@@ -71,12 +73,15 @@ export function Onboarding() {
   const [unfinished, setUnfinished] = useState<Set<CliId>>(new Set());
   const signingRef = useRef(signingIn);
   signingRef.current = signingIn;
-  // Claude Code being installed from here, or its installer ended without it.
-  const [installing, setInstalling] = useState<'running' | 'failed' | null>(null);
+  // A tool being installed from here, or its installer ended without it.
+  const [installing, setInstalling] = useState<Installing>(null);
   const installRef = useRef(installing);
   installRef.current = installing;
   useEffect(() => {
-    const reread = () =>
+    // `ended`: told by the main process that an installer closed. Only then is a tool still missing a failed install:
+    // read again on coming back to the window, it was said failed while its installer was still running, the console
+    // having taken the focus (1 November: "Claude Code kurulamadı" under the button of a fresh install).
+    const reread = (ended = false) =>
       useChat
         .getState()
         .loadAuth()
@@ -86,7 +91,11 @@ export function Onboarding() {
           // One not signed in yet stays tried: its sign-in may still be going on, or come after its install.
           for (const id of signed) trying.current.delete(id);
           if (signed.length) setFresh((before) => new Set([...before, ...signed]));
-          if (installRef.current === 'running') setInstalling(now.find((tool) => tool.id === 'claude')?.installed ? null : 'failed');
+          const going = installRef.current;
+          if (going && !going.failed) {
+            if (now.find((tool) => tool.id === going.id)?.installed) setInstalling(null);
+            else if (ended) setInstalling({ id: going.id, failed: true });
+          }
           return signed;
         });
     // Told by the main process: a sign-in done (its console may still be open), or its console closed.
@@ -95,7 +104,7 @@ export function Onboarding() {
     // when the other's closed (30 October).
     const stop = window.cortex.on.authChanged(
       (cli) =>
-        void reread().then((signed) => {
+        void reread(cli === null).then((signed) => {
           const now = useChat.getState().auth ?? [];
           if (cli && signingRef.current.has(cli) && !signed.includes(cli) && now.find((tool) => tool.id === cli)?.signedIn !== true) {
             setUnfinished((before) => new Set(before).add(cli));
@@ -129,10 +138,10 @@ export function Onboarding() {
   };
   const install = (id: CliId) => {
     trying.current.add(id);
-    setInstalling('running');
+    setInstalling({ id, failed: false });
     void window.cortex.chat.install(id).catch(() => {
       trying.current.delete(id);
-      setInstalling('failed');
+      setInstalling({ id, failed: true });
     });
   };
 
@@ -242,7 +251,7 @@ export function Onboarding() {
           {at === 'python' ? <PythonStep status={status} /> : null}
           {at === 'engine' ? <EngineStep status={status} /> : null}
           {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} signingIn={signingIn} unfinished={unfinished} installing={installing} onLogin={login} onInstall={install} /> : null}
-          {at === 'voice' ? <VoiceStep status={status} /> : null}
+          {at === 'voice' ? <VoiceStep status={status} onStarted={next} /> : null}
           {at === 'done' ? <DoneStep order={order} done={done} skipped={skipped} canFinish={Boolean(vault)} /> : null}
 
           {steps && at === steps.job ? <Progress job={steps.job} lines={steps.lines} /> : busy && at === busy ? <Progress job={busy} lines={[]} /> : null}
@@ -386,6 +395,19 @@ function VaultStep({ name, missing }: { name: string | null; missing: string | n
   const t = useT();
   const who = useApp((s) => s.settings.userName);
   const choose = () => void useApp.getState().chooseVault(t('app.vault.failed'));
+  // No vault yet: made in Documents at once, without a folder dialog; another folder is a button away (1 November:
+  // choosing a folder was hard for a first run). Tried once; where it fails, the dialog is what is left.
+  const made = useRef(false);
+  const [making, setMaking] = useState(false);
+  useEffect(() => {
+    if (name || missing || made.current) return;
+    made.current = true;
+    setMaking(true);
+    void useApp
+      .getState()
+      .createDefaultVault(t('app.vault.failed'))
+      .finally(() => setMaking(false));
+  }, [name, missing, t]);
   return (
     <div>
       <Heading title={who ? t('onboarding.vault.titleNamed', { name: who }) : t('onboarding.vault.title')}>
@@ -402,9 +424,14 @@ function VaultStep({ name, missing }: { name: string | null; missing: string | n
           <Done>{t('onboarding.vault.chosen', { name })}</Done>
           <Button tone="ghost" className="mt-3" onClick={choose} data-onboarding-vault-change>
             <FolderOpen size={13} />
-            {t('settings.vault.change')}
+            {t('onboarding.vault.other')}
           </Button>
         </>
+      ) : making ? (
+        <p className="mt-5 flex items-center gap-2 text-[13px] text-zinc-500" data-onboarding-vault-making>
+          <Spinner size={12} />
+          {t('onboarding.vault.making')}
+        </p>
       ) : (
         <Button tone="primary" className="mt-5" onClick={choose} data-welcome-choose>
           <FolderOpen size={14} />
@@ -490,16 +517,16 @@ function ToolsStep({
   fresh: Set<CliId>;
   signingIn: Set<CliId>;
   unfinished: Set<CliId>;
-  installing: 'running' | 'failed' | null;
+  installing: Installing;
   onLogin: (id: CliId) => void;
   onInstall: (id: CliId) => void;
 }) {
   const t = useT();
   const refused = useChat((s) => s.authFailed);
   const tools = (auth ?? []).filter((tool) => tool.installed);
-  // Claude Code missing, and installable from here (Windows): offered first, with its sign-in after.
-  const claude = auth?.find((tool) => tool.id === 'claude');
-  const offerInstall = Boolean(claude && !claude.installed && claude.canInstall);
+  // The tools missing here and installable from here (Windows): Claude Code first, by Anthropic's installer, then the
+  // others by npm, each with its sign-in after. Only Claude Code was offered, and OpenCode could not be had (1 November).
+  const installable = (auth ?? []).filter((tool) => !tool.installed && tool.canInstall);
   const state = (tool: CliAuth): [Key, string] =>
     tool.local
       ? // A server that is not running is off, as the AI tools window says; "no model" is one running with none loaded.
@@ -527,18 +554,44 @@ function ToolsStep({
         <p>{t('onboarding.tools.body')}</p>
         <p className="text-[12.5px] text-zinc-500">{t('onboarding.tools.honest')}</p>
       </Heading>
-      {offerInstall ? (
-        <div className="mt-5 rounded-xl border border-darkDelegation/25 bg-white px-4 py-3.5" data-onboarding-install="claude">
-          <p className="text-[13.5px] font-semibold text-darkDelegation">{t('onboarding.tools.install.title')}</p>
+      {installable.length ? (
+        <div className="mt-5 rounded-xl border border-darkDelegation/25 bg-white px-4 py-3.5" data-onboarding-install={installable[0].id}>
+          <p className="text-[13.5px] font-semibold text-darkDelegation">{t(tools.length ? 'onboarding.tools.install.more' : 'onboarding.tools.install.title')}</p>
           <p className="mt-1 text-[12.5px] leading-relaxed text-zinc-600">{t('onboarding.tools.install.body')}</p>
-          <Button tone="primary" className="mt-3" disabled={installing === 'running'} onClick={() => onInstall('claude')} data-onboarding-install-start>
-            <Download size={14} />
-            {t('onboarding.tools.install')}
-          </Button>
-          {installing === 'running' ? <p className="mt-2 text-[12px] text-zinc-500" data-onboarding-installing>{t('onboarding.tools.installing')}</p> : null}
-          {installing === 'failed' ? <p className="mt-2 text-[12px] font-semibold text-bad" data-onboarding-install-failed>{t('onboarding.tools.installFailed')}</p> : null}
+          <ul className="mt-3 divide-y divide-zinc-100" data-onboarding-install-list>
+            {installable.map((tool) => {
+              const mine = installing?.id === tool.id ? installing : null;
+              return (
+                <li key={tool.id} className="py-2" data-onboarding-install-row={tool.id}>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <span className="min-w-[7rem] flex-1 text-[13px] font-semibold text-darkDelegation">
+                      {TOOL_NAMES[tool.id] ?? tool.id}
+                      <span className="mt-0.5 block text-[11.5px] font-normal text-zinc-500">{t(tool.id === 'claude' ? 'onboarding.tools.install.claudeNote' : 'onboarding.tools.install.npmNote')}</span>
+                    </span>
+                    <Button
+                      tone={tool.id === installable[0].id ? 'primary' : 'ghost'}
+                      className="h-8 shrink-0"
+                      disabled={Boolean(installing && !installing.failed)}
+                      onClick={() => onInstall(tool.id)}
+                      data-onboarding-install-start={tool.id}
+                    >
+                      <Download size={13} />
+                      {t('onboarding.tools.install')}
+                    </Button>
+                  </div>
+                  {mine && !mine.failed ? <p className="mt-1.5 text-[12px] text-zinc-500" data-onboarding-installing>{t('onboarding.tools.installing')}</p> : null}
+                  {mine?.failed ? (
+                    <p className="mt-1.5 text-[12px] font-semibold text-bad" data-onboarding-install-failed>
+                      {t('onboarding.tools.installFailed', { name: TOOL_NAMES[tool.id] ?? tool.id })}
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
         </div>
-      ) : auth && !tools.length ? (
+      ) : null}
+      {auth && !tools.length && !installable.length ? (
         <p className="mt-5 text-[13px] text-zinc-600">{t('onboarding.tools.none')}</p>
       ) : null}
       <ul className={`mt-5 divide-y divide-zinc-100 rounded-xl border border-darkDelegation/15 bg-white${tools.length ? '' : ' hidden'}`} data-onboarding-tool-list>
@@ -585,12 +638,21 @@ function ToolsStep({
   );
 }
 
-function VoiceStep({ status }: { status: SetupStatus | null }) {
+function VoiceStep({ status, onStarted }: { status: SetupStatus | null; onStarted: () => void }) {
   const t = useT();
   const english = useLanguage() === 'en';
   const wakeConsent = useApp((s) => s.settings.wakeConsent);
   const run = useSetup((s) => s.run);
   const voice = status?.voice ?? null;
+  // Its install goes on in the background (the main process): once it has begun - after the microphone question - the
+  // next step comes, rather than its progress watched here for minutes (1 November). The end is told by a toast.
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current && status?.job === 'voice') {
+      started.current = false;
+      onStarted();
+    }
+  }, [status?.job, onStarted]);
   return (
     <div>
       <Heading title={t('onboarding.voice.title')}>
@@ -619,10 +681,26 @@ function VoiceStep({ status }: { status: SetupStatus | null }) {
           </div>
         </>
       ) : voice || status.job === 'voice' ? (
-        <Button tone="primary" className="mt-5" disabled={Boolean(status.job)} onClick={() => void run('voice')} data-onboarding-voice>
-          <Mic size={14} />
-          {t('setup.voice.install')}
-        </Button>
+        <>
+          <Button
+            tone="primary"
+            className="mt-5"
+            disabled={Boolean(status.job)}
+            onClick={() => {
+              started.current = true;
+              void run('voice');
+            }}
+            data-onboarding-voice
+          >
+            <Mic size={14} />
+            {t('setup.voice.install')}
+          </Button>
+          {status.job === 'voice' ? (
+            <p className="mt-2 text-[12.5px] text-zinc-500" data-onboarding-voice-background>
+              {t('onboarding.voice.background')}
+            </p>
+          ) : null}
+        </>
       ) : (
         <p className="mt-5 text-[13px] text-zinc-600">{t('setup.voice.oldEngine')}</p>
       )}

@@ -57,10 +57,25 @@ const SHOW_CONSOLE = process.env.CORTEX_HIDDEN !== '1';
 const LOGIN_POLL = 4_000;
 const LOGIN_WATCH = 10 * 60_000;
 
-/** The tools installed from here, each by its maker's own installer run by Windows' PowerShell, and where it puts the program. */
-const INSTALLERS: Partial<Record<CliId, { run: string; puts: string }>> = {
-  claude: { run: 'irm https://claude.ai/install.ps1 | iex', puts: "(Join-Path $env:USERPROFILE '.local\\bin\\claude.exe')" },
+/**
+ * The tools installed from here, each by its maker's own installer run by Windows' PowerShell, and where it puts the
+ * program. Claude Code has an installer of its own; the others are npm packages (their makers' Windows instructions),
+ * installed where Node.js is there and, where it is not, the console says to install Node.js first (1 November: a fresh
+ * install offered only Claude Code, and OpenCode could not be had from the app).
+ */
+const npm = (pkg: string, bin: string) => ({
+  run: `if (Get-Command npm -ErrorAction SilentlyContinue) { npm install -g ${pkg} } else { Write-Host $nodeFirst -ForegroundColor Yellow }`,
+  puts: `(Join-Path $env:APPDATA 'npm\\${bin}.cmd')`,
+  from: `npm: ${pkg}`,
+});
+const INSTALLERS: Partial<Record<CliId, { run: string; puts: string; from: string }>> = {
+  claude: { run: 'irm https://claude.ai/install.ps1 | iex', puts: "(Join-Path $env:USERPROFILE '.local\\bin\\claude.exe')", from: 'Anthropic: claude.ai/install.ps1' },
+  opencode: npm('opencode-ai', 'opencode'),
+  codex: npm('@openai/codex', 'codex'),
+  gemini: npm('@google/gemini-cli', 'gemini'),
+  qwen: npm('@qwen-code/qwen-code', 'qwen'),
 };
+const TOOL_NAMES: Record<CliId, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code' } as Record<CliId, string>;
 
 /** Told with the tool whose sign-in ended or was done; null for an install ended. */
 let changed: (cli: CliId | null) => void = () => undefined;
@@ -228,15 +243,16 @@ async function watchLogin(tool: (typeof TOOLS)[number], open: () => boolean): Pr
 export function installScript(id: CliId, turkish: boolean): string {
   const installer = INSTALLERS[id];
   if (!installer) throw new KeyRefusal('Cortex does not install this tool.');
-  const [going, failed] = turkish
-    ? ['Claude Code kuruluyor (Anthropic kurucusu: claude.ai/install.ps1)...', 'Claude Code kurulamadı. Yukarıda ne yazdığına bak; kapatmak için Enter']
-    : ['Installing Claude Code (the Anthropic installer: claude.ai/install.ps1)...', 'Claude Code was not installed. See what is written above; press Enter to close'];
-  return `Write-Host '${going}'; try { ${installer.run} } catch { Write-Host $_ -ForegroundColor Red }; if (-not (Test-Path ${installer.puts})) { Read-Host '${failed}' }`;
+  const name = TOOL_NAMES[id] ?? id;
+  const [going, failed, node] = turkish
+    ? [`${name} kuruluyor (${installer.from})...`, `${name} kurulamadı. Yukarıda ne yazdığına bak; kapatmak için Enter`, `${name} Node.js ile kurulur. Önce nodejs.org adresinden Node.js LTS kur, sonra Cortex içinden yeniden dene.`]
+    : [`Installing ${name} (${installer.from})...`, `${name} was not installed. See what is written above; press Enter to close`, `${name} is installed with Node.js. Install Node.js LTS from nodejs.org first, then try again in Cortex.`];
+  return `$nodeFirst = '${node}'; Write-Host '${going}'; try { ${installer.run} } catch { Write-Host $_ -ForegroundColor Red }; if (-not (Test-Path ${installer.puts})) { Read-Host '${failed}' }`;
 }
 
 /**
  * A tool installed by its maker's own installer, in a console window of its own: Claude Code
- * by Anthropic's. When it ends, the PATH is read again, the window told, and the tool's
+ * by Anthropic's, the others by npm. When it ends, the PATH is read again, the window told, and the tool's
  * sign-in opened where it is not signed in yet.
  */
 export function installTool(id: unknown): void {

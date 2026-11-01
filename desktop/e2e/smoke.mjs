@@ -377,9 +377,12 @@ check('and opens no window of its own', windowAlone.opened && app.windows().leng
 
 console.log('\nThe vault');
 // The system's dialog answers with the vault for this run; the window names no folder.
-await app.evaluate(({ dialog }, dir) => {
+// Documents is a folder of this run's own: the first run makes its vault there without a dialog (services/vault.ts).
+const documentsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-belgeler-'));
+await app.evaluate(({ app: electronApp, dialog }, [dir, documents]) => {
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
-}, vaultDir);
+  electronApp.setPath('documents', documents);
+}, [vaultDir, documentsDir]);
 /*
   The first-run screen (src/onboarding/): the name first, then each thing to
   set up in turn, each skippable but the vault; nothing is installed here.
@@ -397,9 +400,11 @@ check(
   await page.waitForFunction(async () => (await window.cortex.bootstrap()).settings.userName === 'Tolga Bey', null, { timeout: 5_000 }).then(() => true, () => false),
 );
 check('and the next step says it', (await shownSoon(page.locator('[data-onboarding-step="vault"]'))) && (await page.locator('[data-onboarding] h1').textContent())?.includes('Tolga Bey'));
-check('the vault cannot be skipped: Next waits for it', (await page.locator('[data-onboarding-skip]').count()) === 0 && (await page.locator('[data-onboarding-next]').isDisabled()));
-await page.locator('[data-welcome-choose]').click();
-check('a vault chosen there is said by its name', await shownSoon(page.locator('[data-onboarding-ready]')));
+check('the vault cannot be skipped', (await page.locator('[data-onboarding-skip]').count()) === 0);
+check('a vault is made in Documents without a dialog', (await shownSoon(page.locator('[data-onboarding-ready]'))) && fs.existsSync(path.join(documentsDir, 'Cortex')));
+// Another folder is a button away: the run's own vault chosen through the dialog, as before.
+await page.locator('[data-onboarding-vault-change]').click();
+check('a vault chosen there is said by its name', await page.waitForFunction(async (name) => (await window.cortex.vault.status()).vault?.name === name, path.basename(vaultDir), { timeout: 10_000 }).then(() => true, () => false));
 await shoot('01b-onboarding-vault.png');
 await page.locator('[data-onboarding-next]').click();
 if (await page.locator('[data-onboarding-step="python"]').count()) await onward();

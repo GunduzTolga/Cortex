@@ -133,6 +133,7 @@ const RULES: Rule[] = [
   { pattern: /^A chat needs a name\.$/, say: () => 'Sohbetin bir adı olmalı.' },
 
   // electron/services/vault.ts: choosing the vault
+  { pattern: /^No folder could be made for the vault in Documents\. Choose one\.$/, say: () => 'Belgeler içinde kasa için klasör açılamadı. Bir klasör seç.' },
   { pattern: /^([\s\S]+?) cannot be the vault: the app keeps its own files in or around it\. Choose the folder your notes are in\.$/, say: ([name]) => `${name} kasa olamaz: uygulama kendi dosyalarını onun içinde ya da çevresinde tutuyor. Notlarının durduğu klasörü seç.` },
   { pattern: /^The vault ([\s\S]+?) leads elsewhere through a link now\. Choose it again\.$/, say: ([name]) => `${name} kasası artık bir bağlantı üzerinden başka bir yere çıkıyor. Onu yeniden seç.` },
   { pattern: /^([\s\S]+?) leads elsewhere through a link\. Choose the folder itself\.$/, say: ([name]) => `${name} bir bağlantı üzerinden başka bir yere çıkıyor. Klasörün kendisini seç.` },
