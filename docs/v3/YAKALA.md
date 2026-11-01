@@ -183,7 +183,7 @@ Pencereye konuşarak yazarsın; ses bilgisayardan çıkmaz, çeviriyi yerelde Wh
    - **Ctrl+Alt+C**'ye yeniden bas: dinleme biter, söylediğin yazılır; Enter ile kaydedersin.
 4. Düzeltmek için:
    - **"Son kelimeyi sil"**: son kelimeyi geri alır. **"Son cümleyi sil"**: son cümleyi geri alır. İkisi de tek başına ya da cümlenin sonunda söylenebilir ("Saat beş, son kelimeyi sil").
-   - **"Hepsini sil"** (ya da tek başına "sil", "temizle"): kutuyu boşaltır.
+   - **"Hepsini sil"** ("tümünü sil", "hepsini temizle"; ya da tek başına "sil", "temizle"): kutuyu boşaltır. Cümlenin sonunda da sayılır, Whisper onu cümleden nokta ya da virgülle ayırdıysa ya da önünde Pyn'in adı varsa ("Yanlış oldu. Hepsini sil."): o cümle de yazılmaz. Araya bir şey girmeden söylenen "Dosyaların hepsini sil" nottur.
    - **"Panodaki resmi ekle"** (ya da "resmi ekle", "ekran görüntüsünü ekle"): son kopyalanan görüntüyü nota ekler; sonra notu söyleyip "Pyn, kaydet" dersin. Pencere panodaki görüntüyü açılırken bulduysa onu ekler, bulmadıysa panoyu o an okur.
    - Tek başına **"iptal"** ya da **"vazgeç"** pencereyi kaydetmeden kapatır. **Esc**, duyduğunu bırakır ve pencereyi kapatır.
    - Her komutun önüne Pyn'in adı gelebilir: "Pyn, son cümleyi sil".
@@ -197,7 +197,7 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
 
 **Sürekli dinle ("Pyn, not al" ya da "Hey Pyn"):** masaüstü uygulamasında Ayarlar → Sesle yazma → "Sürekli dinle", ya da `py -3 beyin.py ses ayar --uyandirma ac`. Masaüstünün sağ alttaki simgesinden de açılıp kapanır.
 - **İzin ve kapanış:** masaüstü uygulaması "Sürekli dinle"yi açmadan önce mikrofon iznini sorar. Uygulama bu bilgisayarda bir kez çalıştıysa mikrofon yalnız uygulama çalışırken (pencere kapalı, simge sağ alttayken de) ve izin verildiyse dinler: uygulama çalıştığını birkaç saniyede bir `%LOCALAPPDATA%\beyin-v3\masaustu.json` dosyasına yazar, dinleyici buna iki saniyede bir bakar. Çık'a basınca ya da uygulama kapanınca mikrofon en geç birkaç saniye içinde kapanır. Masaüstü uygulaması hiç çalışmamış bir bilgisayarda (yalnız terminal) ayar tek başına yeter.
-- **Uyandırma sözü:** Ayarlar → Sesle yazma → Uyandırma sözü: "Pyn, not al", "Hey Pyn" ya da **İkisi de**. Terminalden: `beyin.py ses ayar --uyandirma-sozu "hey pyn"` (ya da `"pyn not al"`, `ikisi`). "Pyn, not al" ne istediğini de söyler ve konuşmada nadiren geçer. "Hey Pyn" daha kısa ve daha kolay tutar, ama konuşmada geçen her "hey"i Whisper bir an dinleyip eler: sesli sohbette mikrofonu kapatmak iyi olur.
+- **Uyandırma sözü:** Ayarlar → Sesle yazma → Uyandırma sözü: "Pyn, not al", "Hey Pyn" ya da **İkisi de** (varsayılan). Terminalden: `beyin.py ses ayar --uyandirma-sozu "hey pyn"` (ya da `"pyn not al"`, `ikisi`). "Pyn, not al" ne istediğini de söyler ve konuşmada nadiren geçer. "Hey Pyn" daha kısa ve daha kolay tutar, ama konuşmada geçen her "hey"i Whisper bir an dinleyip eler: sesli sohbette mikrofonu kapatmak iyi olur.
 - "Pyn, not al" deyince pencere Ctrl+Alt+C'ye basmışsın gibi açılır ve dinlemeye başlar. Bitince "Pyn, kaydet" de: tuşsuz not.
 - Başta kapalıdır, çünkü açıkken mikrofon sürekli dinler.
 - Sözü küçük bir Türkçe Vosk modeli yakalar, böylece kimse konuşmazken Whisper çalışmaz ve işlemci boşuna yorulmaz.
