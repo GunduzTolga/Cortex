@@ -257,6 +257,10 @@ export function registerIpc(): void {
     chat.restartIdleChats();
     return auth.authStatuses();
   });
+  handle('chat:choose', (cli, offered) => {
+    auth.chooseTool(cli, offered === true);
+    return auth.authStatuses();
+  });
 
   // The office's live conversations (services/officeTalk.ts): the window names a tool and a model it was offered.
   handle('office:models', (tool) => officeTalk.talkModels(tool));

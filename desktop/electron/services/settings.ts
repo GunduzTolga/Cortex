@@ -180,3 +180,16 @@ export function chooseChatTool(id: CliId): void {
     settings.chatTools = [...(settings.chatTools ?? []), id];
   });
 }
+
+/**
+ * A tool added to the chat, or taken from it, from the AI tools window (1 November: Codex, signed in only in a
+ * terminal, said "Giriş kayıtlı" there and was missing from the chat). A list not begun yet - every installed tool
+ * offered - is begun with the installed ones, so that only the one taken away goes.
+ */
+export function setChatTool(id: CliId, offered: boolean, installed: readonly CliId[]): void {
+  if (!CHAT_TOOLS.includes(id)) return;
+  updateSettings((settings) => {
+    const now = settings.chatTools ?? CHAT_TOOLS.filter((one) => installed.includes(one));
+    settings.chatTools = offered ? (now.includes(id) ? now : [...now, id]) : now.filter((one) => one !== id);
+  });
+}

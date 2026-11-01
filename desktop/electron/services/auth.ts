@@ -5,7 +5,7 @@ import { childEnv } from './acp';
 import { LOCAL_IDS, onPathAny, powerShellExe, programOf, refreshPath } from './clis';
 import { LOCAL, type LocalId, findLocal, localModel, shortContext } from './localModels';
 import { KEY_ENV, KeyRefusal, forgetKey, hasKey, keptHere, keptReadable, saveKey } from './keys';
-import { chooseChatTool, readSettings } from './settings';
+import { CHAT_TOOLS, chooseChatTool, readSettings, setChatTool } from './settings';
 import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts } from './toolPackages';
 
 /**
@@ -134,6 +134,7 @@ async function statusOf(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
     baseUrl: Boolean(KEY_ENV[tool.id]?.baseUrl),
     hasKey: hasKey(tool.id),
     kept: keptHere(tool.id),
+    chosen: offeredInChat(tool.id),
   };
   if (!installed) return base;
   // A key kept here that this computer cannot read back (kept on another one, or under another Windows account) is not
@@ -175,6 +176,19 @@ async function localStatus(id: LocalId): Promise<CliAuth> {
 export async function authStatuses(): Promise<CliAuth[]> {
   await refreshPath();
   return Promise.all([...TOOLS.map(statusOf), ...LOCAL_IDS.map(localStatus)]);
+}
+
+/** Whether the chat offers the tool (settings' chatTools; every one where no list is kept). */
+const offeredInChat = (id: CliId): boolean => {
+  const chosen = readSettings().chatTools;
+  return chosen === null || chosen.includes(id);
+};
+
+/** A tool added to the chat from the AI tools window, its sign-in as it is; or taken from it. */
+export function chooseTool(id: unknown, offered: boolean): void {
+  const tool = toolOf(id);
+  if (offered && !programOf(tool.id)) throw new KeyRefusal('This tool is not installed on this computer.');
+  setChatTool(tool.id, offered, CHAT_TOOLS.filter((one) => programOf(one) !== null));
 }
 
 const toolOf = (id: unknown) => {

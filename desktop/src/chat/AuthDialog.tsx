@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, KeyRound, LogIn, RefreshCw, Trash2 } from 'lucide-react';
+import { Check, Download, KeyRound, LogIn, MessageSquarePlus, RefreshCw, Trash2, X } from 'lucide-react';
 import type { CliAuth, CliId } from '@shared/chat';
 import { messageOf } from '@shared/ipcError';
 import type { Key } from '../i18n';
@@ -30,7 +30,11 @@ const NOTES: Record<string, Key> = {
   ollama: 'auth.note.ollama',
 };
 
-/** What the tool says of its own saved sign-in; one a chat was just refused for is said to be refused, whatever the tool says. */
+/**
+ * What the tool says of its own saved sign-in, for a tool the chat offers; one a chat was just refused for is said to be
+ * refused, whatever the tool says. A tool the chat does not offer is said to be unused in Cortex, whatever sign-in it
+ * keeps: Codex, signed in only in a terminal, said "Giriş kayıtlı" and was not in the chat (1 November).
+ */
 function Status({ tool, refused }: { tool: CliAuth; refused: boolean }) {
   const t = useT();
   const [words, colours]: [Key, string] = !tool.installed
@@ -39,14 +43,22 @@ function Status({ tool, refused }: { tool: CliAuth; refused: boolean }) {
       ? tool.signedIn
         ? ['auth.status.running', 'bg-good/15 text-good']
         : ['auth.status.off', 'bg-bad/10 text-bad']
-      : refused && tool.signedIn !== false
-      ? ['auth.status.refused', 'bg-bad/10 text-bad']
-      : tool.signedIn === true
-        ? ['auth.status.in', 'bg-good/15 text-good']
-        : tool.signedIn === false
-          ? ['auth.status.out', 'bg-gold/25 text-darkDelegation']
-          : ['auth.status.unknown', 'bg-zinc-100 text-zinc-500'];
-  return <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${colours}`}>{t(words)}</span>;
+      : tool.chosen === false
+        ? ['auth.status.unused', 'bg-zinc-100 text-zinc-500']
+        : refused && tool.signedIn !== false
+          ? ['auth.status.refused', 'bg-bad/10 text-bad']
+          : tool.signedIn === true
+            ? ['auth.status.in', 'bg-good text-white']
+            : tool.signedIn === false
+              ? ['auth.status.out', 'bg-gold/25 text-darkDelegation']
+              : ['auth.status.unknown', 'bg-zinc-100 text-zinc-500'];
+  const signed = words === 'auth.status.in';
+  return (
+    <span className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ${colours}`} data-auth-status={words}>
+      {signed ? <Check size={11} strokeWidth={3} /> : null}
+      {t(words)}
+    </span>
+  );
 }
 
 function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; refused: boolean }) {
@@ -111,6 +123,16 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
       failed(err);
     }
   };
+  // Added to the chat with the sign-in it keeps, or taken from it; the chat's tool chip follows.
+  const choose = async (offered: boolean) => {
+    try {
+      useChat.setState({ auth: await window.cortex.chat.choose(tool.id, offered) });
+      void useChat.getState().refreshClis();
+    } catch (err) {
+      failed(err);
+    }
+  };
+  const unused = tool.installed && !tool.local && tool.chosen === false;
 
   return (
     <li className={`rounded-xl border px-4 py-3 ${focused ? 'border-darkDelegation/40 bg-paper-2' : 'border-zinc-100'}`} data-auth-tool={tool.id}>
@@ -125,7 +147,12 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
         </p>
       ) : null}
       {tool.local?.shortContext ? <p className="mt-1 text-[11.5px] font-semibold text-bad" data-auth-short>{t('auth.local.short', { tokens: tool.local.shortContext })}</p> : null}
-      {refused && tool.signedIn ? <p className="mt-1 text-[11.5px] font-semibold text-bad" data-auth-expired>{t('auth.expired')}</p> : null}
+      {refused && tool.signedIn && !unused ? <p className="mt-1 text-[11.5px] font-semibold text-bad" data-auth-expired>{t('auth.expired')}</p> : null}
+      {unused ? (
+        <p className="mt-1 text-[11.5px] text-zinc-600" data-auth-unused>
+          {t(tool.signedIn ? 'auth.unused.signedIn' : 'auth.unused.note')}
+        </p>
+      ) : null}
       <p className="mt-1.5 text-[11.5px] leading-relaxed text-zinc-400">{t(NOTES[tool.id])}</p>
       {!tool.installed && tool.canInstall ? (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
@@ -137,7 +164,13 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
       ) : null}
       {tool.installed ? (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          {tool.canLogin ? (
+          {unused ? (
+            <Button tone={tool.signedIn || !tool.canLogin ? 'primary' : 'ghost'} onClick={() => void choose(true)} data-auth-choose>
+              <MessageSquarePlus size={13} />
+              {t('auth.choose')}
+            </Button>
+          ) : null}
+          {tool.canLogin && !(unused && tool.signedIn) ? (
             <Button tone={tool.signedIn ? 'ghost' : 'primary'} onClick={() => void login()} data-auth-login>
               <LogIn size={13} />
               {t(tool.signedIn ? 'auth.login.again' : 'auth.login')}
@@ -154,6 +187,12 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
             <Button tone="danger" onClick={() => void forget()} data-auth-forget>
               <Trash2 size={13} />
               {t('auth.key.forget')}
+            </Button>
+          ) : null}
+          {!tool.local && tool.chosen === true ? (
+            <Button tone="quiet" onClick={() => void choose(false)} data-auth-unchoose>
+              <X size={13} />
+              {t('auth.unchoose')}
             </Button>
           ) : null}
         </div>
