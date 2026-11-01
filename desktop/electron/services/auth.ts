@@ -261,7 +261,7 @@ const block = (head: string, body: string[]) => `${head} { ${body.join('; ')} }`
  * %LOCALAPPDATA%\Programs\nodejs; npm's global folder %APPDATA%\npm, as the installer's npmrc says (the zip has none, and
  * its npm would put the tools beside node.exe); both folders added to the person's PATH (the registry's own value, its
  * %…% names kept) and to this console's. One already unpacked there is taken as it is. The same single-quoted
- * PowerShell as the rest of the console's script.
+ * PowerShell as the rest of the console's script, and only what Windows PowerShell has without a module.
  */
 export function nodeStep(turkish: boolean): string {
   const going = turkish ? 'Önce Node.js kuruluyor (nodejs.org, LTS)...' : 'Setting up Node.js first (nodejs.org, LTS)...';
@@ -279,7 +279,12 @@ export function nodeStep(turkish: boolean): string {
     "Invoke-WebRequest -UseBasicParsing ($url + $name + '.zip') -OutFile $zip",
     "Invoke-WebRequest -UseBasicParsing ($url + 'SHASUMS256.txt') -OutFile $sums",
     "$sum = Get-Content $sums | Where-Object { $_ -like ('*  ' + $name + '.zip') } | Select-Object -First 1",
-    block("if (-not $sum -or ($sum -split '\\s+')[0] -ne (Get-FileHash $zip -Algorithm SHA256).Hash)", ["throw ($name + '.zip: SHA-256')"]),
+    // .NET's own SHA-256, not Get-FileHash: a module command, missing where the PowerShell 7 modules come first on the
+    // module path (a console started from PowerShell 7; the Windows CI runner).
+    '$stream = [IO.File]::OpenRead($zip)',
+    "$hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($stream)).Replace('-', '')",
+    '$stream.Close()',
+    block("if (-not $sum -or ($sum -split '\\s+')[0] -ne $hash)", ["throw ($name + '.zip: SHA-256')"]),
     // Unpacked beside where it goes, so it is moved within one drive.
     "$part = $node + '-indiriliyor'",
     block('if (Test-Path $part)', ['Remove-Item $part -Recurse -Force']),
@@ -303,11 +308,14 @@ export function nodeStep(turkish: boolean): string {
     "[Environment]::SetEnvironmentVariable('CORTEX_PATH', $null, 'User')",
     "$env:Path = $node + ';' + $npmDir + ';' + $env:Path",
   ];
+  // Any failure ends the step, and the console's catch says it: a download that failed went on to unpack nothing.
   return block('if (-not (Get-Command npm -ErrorAction SilentlyContinue))', [
+    "$ErrorActionPreference = 'Stop'",
     "$node = Join-Path $env:LOCALAPPDATA 'Programs\\nodejs'",
     "$npmDir = Join-Path $env:APPDATA 'npm'",
     block("if (-not (Test-Path (Join-Path $node 'npm.cmd')))", download),
     ...onPath,
+    "$ErrorActionPreference = 'Continue'",
   ]);
 }
 

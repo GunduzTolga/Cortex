@@ -140,7 +140,7 @@ test('OpenCode, Codex, Gemini CLI and Qwen Code are installed by npm, Node.js se
   assert.ok(installScript('opencode', true).includes('OpenCode kuruluyor'), 'named in the window’s language');
   const step = nodeStep(true);
   assert.ok(step.startsWith('if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {'), 'only where npm is not found');
-  assert.ok(step.includes("'https://nodejs.org/dist/index.json'") && step.includes("'SHASUMS256.txt'") && step.includes('Get-FileHash $zip -Algorithm SHA256'), 'from nodejs.org, checked');
+  assert.ok(step.includes("'https://nodejs.org/dist/index.json'") && step.includes("'SHASUMS256.txt'") && step.includes('SHA256]::Create().ComputeHash($stream)') && !step.includes('Get-FileHash'), 'from nodejs.org, checked');
   assert.ok(step.includes("Join-Path $env:LOCALAPPDATA 'Programs\\nodejs'"), 'for this person, no administrator');
   assert.ok(step.includes("'prefix=${APPDATA}\\npm'"), 'npm’s global folder where its installer would have it');
   assert.ok(step.includes("'DoNotExpandEnvironmentNames'"), 'the PATH’s %…% names kept');
@@ -178,12 +178,21 @@ test('Node.js is set up where npm is missing: unpacked for the person, npm’s g
     const said = powerShell(['-Command', `${nodeStep(false)}; Write-Host ('NPM=' + (Get-Command npm).Source)`], env);
     const node = path.join(local, 'Programs', 'nodejs');
     assert.ok(fs.existsSync(path.join(node, 'node.exe')) && fs.existsSync(path.join(node, 'npm.cmd')), said);
-    assert.ok(said.toLowerCase().includes(`npm=${node}`.toLowerCase()), `this console's npm is the one set up: ${said}`);
+    // A folder said by its short name (RUNNER~1) or its long one is the same folder.
+    const real = (dir: string) => {
+      try {
+        return fs.realpathSync.native(dir).toLowerCase();
+      } catch {
+        return dir.toLowerCase();
+      }
+    };
+    const npmSaid = /NPM=(.+)/.exec(said)?.[1]?.trim() ?? '';
+    assert.equal(real(path.dirname(npmSaid)), real(node), `this console's npm is the one set up: ${said}`);
     assert.ok(!fs.existsSync(`${node}-indiriliyor`), 'nothing half-unpacked left');
     const prefix = execFileSync(path.join(node, 'node.exe'), [path.join(node, 'node_modules', 'npm', 'bin', 'npm-cli.js'), 'prefix', '-g'], { encoding: 'utf8', env: { ...env, PATH: `${node};${env.PATH}` } }).trim();
-    assert.equal(prefix.toLowerCase(), path.join(roaming, 'npm').toLowerCase(), 'npm -g puts the tools in %APPDATA%\\npm, where Cortex looks');
-    const after = powerShell(['-Command', readPath]).trim().split(';').map((dir) => dir.toLowerCase());
-    for (const dir of [node, path.join(roaming, 'npm')]) assert.ok(after.includes(dir.toLowerCase()), `${dir} on the person's PATH`);
+    assert.equal(real(prefix), real(path.join(roaming, 'npm')), 'npm -g puts the tools in %APPDATA%\\npm, where Cortex looks');
+    const after = powerShell(['-Command', readPath]).trim().split(';').map(real);
+    for (const dir of [node, path.join(roaming, 'npm')]) assert.ok(after.includes(real(dir)), `${dir} on the person's PATH`);
     // Set up already: taken as it is, nothing downloaded again.
     const again = powerShell(['-Command', nodeStep(false)], env);
     assert.ok(!again.includes('Setting up Node.js'), again);
