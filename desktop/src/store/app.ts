@@ -42,6 +42,8 @@ interface AppState {
   openSettings(open: boolean): void;
   /** The system's dialog; the vault chosen, or the reason it could not be, said in a toast. */
   chooseVault(failed: string): Promise<void>;
+  /** `Cortex` made in Documents and taken as the vault (the first run's default); false where it could not be. */
+  createDefaultVault(failed: string): Promise<boolean>;
   refreshVault(): Promise<void>;
   /** Returns the toast's id, for one that goes when what it says is over (dismissToast). */
   toast(toast: Omit<Toast, 'id'>): string;
@@ -104,6 +106,18 @@ export const useApp = create<AppState>((set, get) => ({
       if (status) set((state) => ({ vault: status, vaultSeq: state.vaultSeq + 1 }));
     } catch (err) {
       get().toast({ tone: 'error', title: failed, detail: messageOf(err) });
+    }
+  },
+
+  async createDefaultVault(failed) {
+    await leaveOpenNotes();
+    try {
+      const status = await window.cortex.vault.createDefault();
+      set((state) => ({ vault: status, vaultSeq: state.vaultSeq + 1 }));
+      return true;
+    } catch (err) {
+      get().toast({ tone: 'error', title: failed, detail: messageOf(err) });
+      return false;
     }
   },
 

@@ -175,8 +175,14 @@ export function powerShellExe(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(env.SystemRoot ?? env.SYSTEMROOT ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 }
 
-/** Claude Code's own installer's folder (claude.ai/install.ps1: `%USERPROFILE%\.local\bin`), looked in should it have left the PATH alone. */
-export const installedDirs = (): string[] => [path.join(os.homedir(), '.local', 'bin')];
+/**
+ * Where the installers run from here put the programs, looked in should they have left the PATH alone: Claude Code's own
+ * (claude.ai/install.ps1: `%USERPROFILE%\.local\bin`) and npm's global folder on Windows (`%APPDATA%\npm`).
+ */
+export const installedDirs = (): string[] => [
+  path.join(os.homedir(), '.local', 'bin'),
+  ...(process.env.APPDATA ? [path.join(process.env.APPDATA, 'npm')] : []),
+];
 
 let refreshing: Promise<void> | null = null;
 let refreshedAt = 0;

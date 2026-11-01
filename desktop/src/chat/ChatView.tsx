@@ -335,25 +335,32 @@ export function ChatView({ visible }: { visible: boolean }) {
               ) : (
                 <div className="rounded-xl border border-zinc-200 bg-paper-2 px-4 py-3 text-[13px] leading-relaxed text-zinc-600" data-chat-no-cli>
                   {t('chat.noCli', { names: clis.map((one) => one.name).join(', ') })}
-                  {auth?.find((one) => one.id === 'claude')?.canInstall ? (
-                    <div className="mt-3">
-                      <Button
-                        tone="primary"
-                        disabled={Boolean(installing && !installing.failed)}
-                        onClick={() => {
-                          state.install('claude').catch((err: unknown) => toast({ tone: 'error', title: t('auth.failed'), detail: messageOf(err) }));
-                        }}
-                        data-chat-install
-                      >
-                        <Download size={13} />
-                        {t('chat.noCli.install')}
-                      </Button>
-                      {installing ? (
-                        <p className={`mt-2 text-[12px] ${installing.failed ? 'text-bad' : 'text-zinc-500'}`} data-chat-install-state={installing.failed ? 'failed' : 'running'}>
-                          {t(installing.failed ? 'onboarding.tools.installFailed' : 'auth.install.waiting')}
-                        </p>
-                      ) : null}
-                    </div>
+                  {/* Every tool installable from here, not Claude Code only: OpenCode could not be had from this screen (1 November). */}
+                  <div className="mt-3 flex flex-wrap gap-2" data-chat-install-list>
+                    {(auth ?? [])
+                      .filter((one) => !one.installed && one.canInstall)
+                      .map((one, i) => (
+                        <Button
+                          key={one.id}
+                          tone={i === 0 ? 'primary' : 'ghost'}
+                          disabled={Boolean(installing && !installing.failed)}
+                          onClick={() => {
+                            state.install(one.id).catch((err: unknown) => toast({ tone: 'error', title: t('auth.failed'), detail: messageOf(err) }));
+                          }}
+                          data-chat-install={one.id}
+                        >
+                          <Download size={13} />
+                          {t('chat.noCli.install', { name: toolName(one.id, t) ?? one.id })}
+                        </Button>
+                      ))}
+                    <Button tone="quiet" onClick={() => state.openAuth()} data-chat-open-auth>
+                      {t('chat.noCli.tools')}
+                    </Button>
+                  </div>
+                  {installing ? (
+                    <p className={`mt-2 text-[12px] ${installing.failed ? 'text-bad' : 'text-zinc-500'}`} data-chat-install-state={installing.failed ? 'failed' : 'running'}>
+                      {t(installing.failed ? 'onboarding.tools.installFailed' : 'auth.install.waiting', { name: toolName(installing.id, t) ?? installing.id })}
+                    </p>
                   ) : null}
                 </div>
               )}

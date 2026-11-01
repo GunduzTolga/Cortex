@@ -237,15 +237,17 @@ async function shoot(name) {
 try {
   // The first-run screen, in Turkish: the name, then the vault.
   await wait(page.locator('[data-onboarding-step="name"]'), 30_000);
-  await app.evaluate(({ dialog }, dir) => {
+  await app.evaluate(({ app: electronApp, dialog }, [dir, documents]) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
-  }, vaultDir);
+    electronApp.setPath('documents', documents);
+  }, [vaultDir, fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-vitrin-belgeler-'))]);
   await page.locator('[data-onboarding-name]').fill('Tolga');
   await page.locator('[data-onboarding-name-chip="Tolga Bey"]').click();
   await page.locator('[data-onboarding-next]').click();
   await wait(page.locator('[data-onboarding-step="vault"]'));
-  await page.locator('[data-welcome-choose]').click();
   await wait(page.locator('[data-onboarding-ready]'));
+  await page.locator('[data-onboarding-vault-change]').click();
+  await page.waitForFunction(async (name) => (await window.cortex.vault.status()).vault?.name === name, path.basename(vaultDir));
   await page.waitForTimeout(300);
   await shoot('ilk-kurulum.png');
   await page.locator('[data-onboarding-next]').click();

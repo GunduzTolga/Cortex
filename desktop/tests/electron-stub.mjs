@@ -18,7 +18,8 @@ const userData = path.join(os.tmpdir(), 'cortex-desktop-test', bundle || 'shared
 if (bundle) fs.rmSync(userData, { recursive: true, force: true });
 
 export const app = {
-  getPath: () => userData,
+  // Documents beside the data folder, not in it: the default vault is made there and the data folder is refused as one.
+  getPath: (name) => (name === 'documents' ? path.join(userData + '-belgeler') : userData),
   getVersion: () => '0.0.0-test',
   // Where the app's own files are: an empty folder here, so nothing beside it is taken for the app's.
   getAppPath: () => path.join(userData, 'app'),

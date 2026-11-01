@@ -102,6 +102,25 @@ export async function setVault(dir: string): Promise<VaultStatus> {
 }
 
 /**
+ * The vault made for the person on the first run: `Cortex` in their Documents folder (Electron's `documents`, which
+ * follows a Documents moved to OneDrive), so a first run need not begin with a folder dialog (1 November: "kasa
+ * Belgelerim içine otomatik oluşsun, isteyen değiştirebilsin"). A `Cortex` there already that is a vault or is empty is
+ * taken; one holding other things is left alone and `Cortex 2`, `Cortex 3`, … tried.
+ */
+export async function defaultVaultDir(documents: string): Promise<string> {
+  for (let n = 1; n < 100; n += 1) {
+    const dir = path.join(documents, n === 1 ? 'Cortex' : `Cortex ${n}`);
+    const entries = await fs.readdir(dir).catch((err: NodeJS.ErrnoException) => (err.code === 'ENOENT' ? null : ['?']));
+    if (entries === null) {
+      await fs.mkdir(dir, { recursive: true });
+      return dir;
+    }
+    if (!entries.length || entries.includes('beyin.py') || entries.includes('.beyin-version')) return dir;
+  }
+  throw new Error('No folder could be made for the vault in Documents. Choose one.');
+}
+
+/**
  * Whether Cortex may write in the folder, tried by writing a small file and taking it away: Windows says a folder
  * may be written to (`fs.access`) from its read-only flag alone, not from who is let in. A folder only to be read
  * was taken as the vault, and the first note written failed with a bare EPERM (29 October).

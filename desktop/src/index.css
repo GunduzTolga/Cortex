@@ -80,6 +80,19 @@ a {
   }
 }
 
+/* A job going on whose share done is not known (Python's quiet installer, pip): a stripe running across the track, not a
+   third of it pulsing in place, which read as stuck at a third (1 November). */
+@keyframes setup-busy {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+.setup-busy {
+  animation: setup-busy 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .setup-busy { animation: none; opacity: 0.6; }
+}
+
 @keyframes rise {
   from {
     opacity: 0;

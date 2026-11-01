@@ -53,6 +53,7 @@ const api: CortexApi = {
   vault: {
     status: () => invoke('vault:status'),
     choose: () => invoke('vault:choose'),
+    createDefault: () => invoke('vault:createDefault'),
   },
   notes: {
     index: () => invoke('notes:index'),

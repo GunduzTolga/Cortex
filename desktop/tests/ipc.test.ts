@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { dialogAnswer, handlers, sent } from 'electron';
+import { app, dialogAnswer, handlers, sent } from 'electron';
 import { registerIpc, trustPagesWhere } from '../electron/ipc';
 import { forgetSettings, readSettings, settingsPath, updateSettings } from '../electron/services/settings';
 import { pythonOf } from '../electron/services/localChat';
@@ -85,6 +85,15 @@ test('the vault comes through the dialog, and what the window is told of it hold
   const boot = await call('app:bootstrap');
   assert.ok(!JSON.stringify(boot).includes(path.dirname(dir)), 'no path in the bootstrap either');
   assert.equal(readSettings().vault, dir);
+});
+
+test('the first run makes its vault in Documents without a dialog, and the window is told its name alone', async () => {
+  firstRun();
+  sent.length = 0;
+  const made = (await call('vault:createDefault')) as { vault: { name: string } | null; missing: boolean };
+  assert.deepEqual(made, { vault: { name: 'Cortex' }, missing: false });
+  assert.equal(readSettings().vault, fs.realpathSync.native(path.join(app.getPath('documents'), 'Cortex')));
+  assert.deepEqual(sent, [['notes:changed', null]], 'the notes screen is told to read it');
 });
 
 /** A vault with an engine that answers `relocate` and `yakala kur` as beyin.py does, and logs what it was asked. */

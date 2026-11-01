@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
 import { forgetSettings, readSettings, settingsPath } from '../electron/services/settings';
-import { ownDataTouchedBy, setVault, vaultStatus } from '../electron/services/vault';
+import { defaultVaultDir, ownDataTouchedBy, setVault, vaultStatus } from '../electron/services/vault';
 
 /**
  * Which folder is the vault (electron/services/vault.ts): a folder, by its
@@ -79,4 +79,19 @@ test("the app's own data folder, one inside it and one holding it are refused", 
   assert.equal(ownDataTouchedBy(fs.mkdtempSync(path.join(os.tmpdir(), 'elsewhere-'))), null);
   await assert.rejects(setVault(data), /cannot be the vault/);
   await assert.rejects(setVault(path.dirname(data)), /cannot be the vault/);
+});
+
+test('the first run’s vault is made as Cortex in Documents; one holding other things is left alone and Cortex 2 made', async () => {
+  const documents = fs.mkdtempSync(path.join(os.tmpdir(), 'belgeler-'));
+  const first = await defaultVaultDir(documents);
+  assert.equal(first, path.join(documents, 'Cortex'));
+  assert.ok(fs.statSync(first).isDirectory(), 'made');
+  assert.equal(await defaultVaultDir(documents), first, 'an empty Cortex there already is taken');
+  fs.writeFileSync(path.join(first, 'beyin.py'), '');
+  assert.equal(await defaultVaultDir(documents), first, 'a vault there already is taken');
+  fs.rmSync(path.join(first, 'beyin.py'));
+  fs.writeFileSync(path.join(first, 'baska.txt'), 'someone else’s');
+  const second = await defaultVaultDir(documents);
+  assert.equal(second, path.join(documents, 'Cortex 2'), 'a Cortex holding other things is left alone');
+  assert.equal(fs.readFileSync(path.join(first, 'baska.txt'), 'utf8'), 'someone else’s', 'and nothing in it touched');
 });
