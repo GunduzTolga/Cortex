@@ -100,18 +100,21 @@ DEFAULTS = {
     'cpu_model': 'small',           # on the processor (CPU_MODELS): large-v3-turbo is more accurate and far slower there
     'uyandirma': False,             # "Pyn, not al" opens the window: the microphone stays open
     'otomatik_dinle': True,         # the window listens as it opens; typing lets the microphone go
-    'uyandirma_sozu': 'pyn not al',
-    'sessizlik_sn': 1.4,            # after speech, this much silence ends the recording
+    # Both phrases open the window: "Hey Pyn" is what most people say, and with only "Pyn, not al"
+    # listened for it never opened (a Windows user, 1 November). Listening itself stays off.
+    'uyandirma_sozu': 'ikisi',
+    'sessizlik_sn': 1.4,           # after speech, this much silence ends the recording
     'en_uzun_sn': 120,
     'mikrofon': None,
     'ipucu': 'Cortex, Pyn, yakala, kasa, not, makbuz, Claude, Codex.',
     # Said alone, with or without Pyn's name before: "sil" empties the field, "iptal" closes it.
     # "kaydet", the clipboard's picture added ("panodaki resmi ekle") and taking the last word or
-    # sentence back count at a sentence's end too.
+    # sentence back count at a sentence's end too; so does a "sil" of more than one word ("…. Hepsini
+    # sil"), after a full stop, a comma or Pyn's name (command_of).
     'komutlar': {
         'kaydet': ['kaydet'],
         'resim_ekle': ['resmi ekle', 'panodaki resmi ekle', 'görüntüyü ekle', 'panodaki görüntüyü ekle', 'ekran görüntüsünü ekle'],
-        'sil': ['sil', 'temizle', 'hepsini sil'],
+        'sil': ['sil', 'temizle', 'hepsini sil', 'tümünü sil', 'hepsini temizle'],
         'kelime_sil': ['son kelimeyi sil'],
         'cumle_sil': ['son cümleyi sil'],
         'iptal': ['iptal', 'vazgeç'],
@@ -282,7 +285,7 @@ COMMANDS = tuple(DEFAULTS['komutlar'])
 # Commands that count at the end of a sentence too ("…, kaydet"); the others only said alone.
 AT_END = ('kaydet', 'resim_ekle', 'kelime_sil', 'cumle_sil')
 # A command's words as earlier versions wrote them into every settings file: the new default.
-OLD_COMMANDS = {'sil': (['sil', 'temizle'],)}
+OLD_COMMANDS = {'sil': (['sil', 'temizle'], ['sil', 'temizle', 'hepsini sil'])}
 # Commands taken loosely when Whisper writes them a letter or two off ("son kelime sil"). Not
 # the picture's: "sunuma bir resim ekle" is a note, not "resmi ekle".
 LOOSE_COMMANDS = ('sil', 'kelime_sil', 'cumle_sil')
@@ -505,9 +508,10 @@ def _name_like(word, head):
 
 def phrase_label(phrase):
     """A wake phrase as a person says it: "Pyn, not al", "Hey Pyn"; both, one or the other."""
+    phrase = phrase or DEFAULTS['uyandirma_sozu']
     if phrase == 'ikisi':
         return ' ya da '.join(phrase_label(one) for one in BOTH_PHRASES)
-    said = words(phrase or DEFAULTS['uyandirma_sozu'])
+    said = words(phrase)
     at_name = _name_at(said)
     shown = [('Pyn' if at == at_name else word) for at, word in enumerate(said)]
     if at_name == 0 and len(shown) > 1:
@@ -529,11 +533,17 @@ def _matches(got, said, at_name, offset=0):
 
 def _apart(got, said, ends=None):
     """Heard words with the phrase's own words written as one taken apart: Whisper writes
-    "not al" as "notal" too. With `ends` (where each word ends in the text), theirs alongside."""
+    "not al" as "notal" too, and "Hey Pyn" as "Heypin" or "Heypayn": the word before the name
+    and a word like the name (_name_like) after it. With `ends` (where each word ends in the
+    text), theirs alongside."""
     joined = {''.join(said[i:j]): said[i:j] for i in range(len(said)) for j in range(i + 2, len(said) + 1)}
+    at_name = _name_at(said) if said else 0
+    lead = said[at_name - 1] if at_name > 0 else None
     words_out, ends_out = [], []
     for at, word in enumerate(got):
         parts = joined.get(word, [word])
+        if lead and parts == [word] and word.startswith(lead) and _name_like(word[len(lead):], said[at_name]):
+            parts = [lead, word[len(lead):]]
         words_out.extend(parts)
         if ends is not None:
             ends_out.extend([ends[at]] * len(parts))
@@ -598,10 +608,9 @@ def without_wake(text, phrase=DEFAULTS['uyandirma_sozu']):
     """Dictation begun by the wake phrase, without what of the phrase its recording caught at the
     start ("al.", "not al,", "Pyn, not al"; "Pyn," of "Hey Pyn"): the note begins after it."""
     if phrase == 'ikisi':
-        for one in BOTH_PHRASES:
-            if without_wake(text, one) != text.strip():
-                return without_wake(text, one)
-        return text.strip()
+        # The one that takes off most: "Pyn, not al, yarın" lost only its "Pyn," to "Hey Pyn"
+        # tried first, and the note began "not al".
+        return min((without_wake(text, one) for one in BOTH_PHRASES), key=len)
     said = words(phrase)
     at_name = _name_at(said)
     got, ends = _apart(words(text), said, [m.end() for m in re.finditer(r'\w+', tr_lower(text))])
@@ -636,6 +645,15 @@ def _without_last_words(text, count):
     if count > len(spans):
         return ''
     return text[:spans[-count]].rstrip(' ,.;:!?…') if count else text.strip()
+
+
+def _set_apart(text, count):
+    """Whether the text's last `count` words come after a mark that ends a sentence or a clause
+    (". Hepsini sil", ", tümünü sil"), not run on from the words before them."""
+    spans = [m.start() for m in re.finditer(r'\w+', tr_lower(text))]
+    if not 0 < count < len(spans):
+        return False
+    return bool(re.search(r'[.,;:!?…-]\s*$', text[:spans[-count]]))
 
 
 def _named(word):
@@ -673,7 +691,8 @@ def command_of(text, commands=None, after_name=None):
 
     "kaydet" counts only at the very end ("Toplantı notu, kaydet" writes and saves), as do
     "son kelimeyi sil" and "son cümleyi sil" (the window writes, then takes the word or the
-    sentence back); "sil" ("hepsini sil") and "iptal" only when said alone. Anywhere else a command word is just a word: "notu kaydettim"
+    sentence back); "sil" and "iptal" only when said alone, "hepsini sil" also at the end after a
+    full stop, a comma or Pyn's name. Anywhere else a command word is just a word: "notu kaydettim"
     and "bu satırı sil" are written as they are. Pyn's name may come before the command, as
     the wake phrase is said: "…, Pyn kaydet" saves and the name is not written. `after_name`
     ("gönder", "tamam"…) save too, but only right after the name: "Ali'ye gönder" is a note.
@@ -697,6 +716,15 @@ def command_of(text, commands=None, after_name=None):
             if any(_said_as(said, one, loose) for one in spoken) or (
                     len(said) > 1 and _named(said[0]) and any(_said_as(said[1:], one, loose) for one in named)):
                 return name, ''
+    # "hepsini sil" said straight on after the note, without the pause that would make it a
+    # sentence of its own, was written in: each try made the note longer (1 November). At the end
+    # it empties the field, the words before it with it, when Whisper set it apart from them (a
+    # full stop, a comma) or Pyn's name comes before it. Run on, it is the note's own: "Dosyaların
+    # hepsini sil". A "sil" of one word ("bu satırı sil") never counts at the end.
+    for wanted in sorted((words(p) for p in commands.get('sil', ()) if len(words(p)) > 1), key=len, reverse=True):
+        size = _tail(said, wanted, False)
+        if size and len(said) > size and (_named(said[-size - 1]) or _set_apart(text, size)):
+            return 'sil', ''
     at_end = [(name, words(p)) for name in AT_END for p in commands.get(name, ())]
     for loose in (False, True):
         for name, wanted in sorted(at_end, key=lambda one: len(one[1]), reverse=True):
@@ -718,7 +746,31 @@ HALLUCINATIONS = {
     'altyazi m k', 'altyazilar m k', 'altyazi mk', 'izlediginiz icin tesekkurler', 'izlediginiz icin tesekkur ederim',
     'abone olmayi unutmayin', 'begenmeyi ve abone olmayi unutmayin', 'blank audio', 'blank_audio', 'muzik', 'alkis',
     'thank you for watching', 'thanks for watching', 'subtitles by the amara org community',
+    'izlediginiz icin tesekkur ederiz', 'abone olmayi ve begenmeyi unutmayin', 'kanalima abone olmayi unutmayin',
+    'altyazi', 'altyazilar',
 }
+# Whisper given near-silence says its prompt (`ipucu`) back, or a part of it: so many of its words
+# in its order, and nothing else, is never a note ("Cortex, Pyn, yakala.").
+PROMPT_ECHO_WORDS = 3
+
+
+# What faster-whisper says of each piece it wrote: how sure it is nobody spoke (no_speech_prob) and
+# how sure of its words (avg_logprob). It drops a piece itself only when both say so past its own
+# limits (0.6 and -1.0); near silence it still wrote words nobody said. A piece is dropped here when
+# it is fairly sure nobody spoke and not sure of its words, very sure nobody spoke, or its words are
+# a guess.
+NO_SPEECH, UNSURE_LOGPROB = 0.6, -0.8
+SURELY_NO_SPEECH, GUESSED_LOGPROB = 0.9, -1.5
+
+
+def made_up_segment(no_speech, logprob):
+    """Whether a written piece is Whisper's own invention for silence, by what it says of it; a
+    piece it says nothing of (None) is kept."""
+    no_speech, logprob = [one if isinstance(one, (int, float)) and not isinstance(one, bool) else None
+                          for one in (no_speech, logprob)]
+    if no_speech is not None and (no_speech >= SURELY_NO_SPEECH or (no_speech > NO_SPEECH and logprob is not None and logprob < UNSURE_LOGPROB)):
+        return True
+    return logprob is not None and logprob < GUESSED_LOGPROB
 
 
 def clean_spoken(text, prompt=None):
@@ -727,6 +779,9 @@ def clean_spoken(text, prompt=None):
     end, after the words: "…, Pyn kaydet. Altyazı M.K." still ends with the command."""
     text = ' '.join(re.sub(r'\[[^\]]*\]', ' ', text or '').split())
     if ' '.join(words(text)) in HALLUCINATIONS:
+        return ''
+    heard, given = words(text), words(prompt) if prompt else []
+    if len(heard) >= PROMPT_ECHO_WORDS and any(given[at:at + len(heard)] == heard for at in range(len(given) - len(heard) + 1)):
         return ''
     made_up = [line.split() for line in HALLUCINATIONS if ' ' in line] + ([words(prompt)] if prompt and words(prompt) else [])
     trimmed = True
@@ -1754,7 +1809,9 @@ small Vosk model for "Pyn, not al" and starts recording by itself. No audio is k
 A dictation (`dinle` with `surekli`, and every one the wake phrase begins) is one recording: each
 pause hands the sentence to Whisper and the microphone stays open, so nothing said while a
 sentence is written is lost. Its sentences come back in order as `metin` events with `son`
-false; the last one, `son` true, ends it: "kaydet" said, `bitir`, `iptal`, or a long silence.
+false; the last one, `son` true, ends it: "kaydet" said, `bitir`, or a long silence. Each
+recording's events name it (`tur`). `iptal` gives a recording up with all it still has to write:
+nothing more of it comes; with `sakla` (typing began) the sentences said before still do.
 
 Modes for the command line: `--indir` loads the model once (the install fetches it) and exits;
 `--dene N` records N seconds, writes them and exits; `--dene-uyandirma N` listens for the wake
@@ -1780,6 +1837,10 @@ RATE = 16000
 # A sentence is kept from a little before its speech to a little after: Whisper given a long
 # silence makes words up ("Altyazı M.K."), and quiet word endings are below the speech level.
 LEAD_SN, TAIL_SN = 0.3, 0.4
+# Speech is sound above the room's noise for this long without a break: three blocks of it were
+# enough before, and a knock, a chair or a breath into a headset sent near-silence to Whisper,
+# which wrote words nobody said into an open window (1 November). A syllable is longer.
+MIN_VOICE_SN = 0.1
 # What of the wake listener's last moment begins a dictation the wake phrase opened: the words
 # said straight after the phrase, before the dictation's own stream was open, are its first.
 SEED_SN = 0.8
@@ -2153,13 +2214,16 @@ def card_seconds(model, config):
     return time.time() - started
 
 
-def transcribe(model, audio, config, lock):
+def transcribe(model, audio, config, lock, sure=True):
+    """What was said. `sure`: a piece Whisper itself doubts anyone said (ses.made_up_segment) is
+    not written; the wake phrase's check takes every piece, Pyn's name is a word it is unsure of."""
     with lock:
         if isinstance(model, Server):
             return model.write(audio, config)
         segments, _info = model.transcribe(audio, language=config['dil'] or None, vad_filter=True, beam_size=BEAM_SIZE,
                                            initial_prompt=config.get('ipucu') or None, condition_on_previous_text=False)
-        return ' '.join(s.text.strip() for s in segments).strip()
+        return ' '.join(s.text.strip() for s in segments if not (
+            sure and ses.made_up_segment(getattr(s, 'no_speech_prob', None), getattr(s, 'avg_logprob', None)))).strip()
 
 
 def _decode_pyav(path):
@@ -2371,7 +2435,7 @@ class Recorder:
             self.loud += 1
             if self.loud == 1:
                 self.run_from = at
-            if self.loud >= 3:
+            if self.loud >= 3 and self.count - self.run_from >= MIN_VOICE_SN * RATE:
                 self.spoke = True
                 if self.voice_from is None:
                     self.voice_from = self.run_from
@@ -2623,7 +2687,7 @@ def serve(state, config, lines=None):
                 checking = job['is'] == 'dogrula'
                 model = loaded.get('checker', loaded['model']) if checking else loaded['model']
                 started = now()
-                text = transcribe(model, job['audio'], config, lock)
+                text = transcribe(model, job['audio'], config, lock, sure=not checking)
                 log('süre: %s, %.1f sn ses, %.1f sn' % ('uyandırma doğrulaması' if checking else 'yazı', len(job['audio']) / RATE, now() - started))
                 written.put(dict(job, metin=ses.clean_spoken(text, config.get('ipucu'))))
             except Exception as exc:
@@ -2695,13 +2759,13 @@ def serve(state, config, lines=None):
         mode, turn = 'kayit', turn + 1
         turns[turn] = {'continuous': continuous, 'woke': woke, 'first': True, 'checking': checking}
         if checking is None:
-            out(olay='dinliyor', mikrofon=_device_name(config))
+            out(olay='dinliyor', mikrofon=_device_name(config), tur=turn)
         return True
 
     def confirmed():
         turns[turn]['checking'] = None
-        out(olay='dinliyor', mikrofon=_device_name(config))
-        out(olay='uyandi', mikrofon=_device_name(config))
+        out(olay='dinliyor', mikrofon=_device_name(config), tur=turn)
+        out(olay='uyandi', mikrofon=_device_name(config), tur=turn)
 
     def piece(audio, last):
         jobs.put({'is': 'parca', 'turn': turn, 'audio': audio, 'son': last})
@@ -2713,16 +2777,19 @@ def serve(state, config, lines=None):
         audio = recorder.stop()
         # Nothing said (no speech above the room's noise): Whisper given silence makes words up.
         if keep and recorder.spoke and len(audio) >= RATE * 0.3 and 'model' in loaded:
-            out(olay='ceviriyor')
+            out(olay='ceviriyor', tur=turn)
             piece(audio, True)
         else:
             piece(None, True)
         mode = 'ceviri'
 
     def drop():
-        """A recording nobody was told of, let go: it says nothing."""
+        """A recording let go with all it still has to write: one nobody was told of, or one
+        given up (`iptal`). It says nothing more: its sentences still being written are not news,
+        and a window opened next was given them (1 November)."""
         nonlocal mode
-        recorder.stop()
+        if recorder.stream is not None:
+            recorder.stop()
         turns.pop(turn, None)
         mode = 'bos'
 
@@ -2747,7 +2814,7 @@ def serve(state, config, lines=None):
                 if mode == 'kayit':
                     recorder.stop()
                 mode = 'bos'
-            out(olay='hata', neden='ceviri', mesaj=result['hata'])
+            out(olay='hata', neden='ceviri', mesaj=result['hata'], tur=result['turn'])
             return
         text = result['metin']
         if info['woke'] and info['first']:
@@ -2764,11 +2831,12 @@ def serve(state, config, lines=None):
             elif command not in ('kaydet', 'iptal'):
                 # Ended while another recording began: its words go in, its end is not news.
                 if text or command:
-                    out(olay='metin', metin=text, komut=command, son=False)
+                    out(olay='metin', metin=text, komut=command, son=False, tur=result['turn'])
                 return
         elif not (text or command):
             return
-        out(olay='metin', metin=text, komut=command, son=last)
+        # Each sentence names its recording (`tur`): a window takes only those of the one it began.
+        out(olay='metin', metin=text, komut=command, son=last, tur=result['turn'])
 
     while True:
         try:
@@ -2798,12 +2866,20 @@ def serve(state, config, lines=None):
                 turns[turn]['continuous'] = turns[turn]['continuous'] or bool(command.get('surekli'))
                 if checking is not None:
                     turns[turn]['checking'] = checking = None
-                out(olay='dinliyor', mikrofon=_device_name(config))
-            elif name in ('bitir', 'iptal') and mode == 'kayit':
+                out(olay='dinliyor', mikrofon=_device_name(config), tur=turn)
+            elif name == 'bitir' and mode == 'kayit':
                 if checking is not None:
                     drop()
                 else:
-                    end(keep=name == 'bitir')
+                    end()
+            elif name == 'iptal' and mode == 'kayit' and command.get('sakla') and checking is None:
+                # Typing began: the microphone goes, and the sentences said before still go in.
+                end(keep=False)
+            elif name == 'iptal' and mode in ('kayit', 'ceviri'):
+                # The window closed (Esc, saved): nothing of this recording is written any more,
+                # not into it nor into the next window (1 November: a window opened next wrote
+                # it in while its microphone was off).
+                drop()
             elif name == 'uyandirma':
                 allowed = bool(command.get('acik'))
                 if allowed and not wake_on:
@@ -2930,7 +3006,7 @@ def trial_wake(state, config, seconds):
                 wake.forget()
             elif verdict == 'aday':
                 time.sleep(ses.WAKE_AFTER_SN)  # the rest of the phrase, as the listener waits for it
-                text = ses.clean_spoken(transcribe(model, wake.clip(), config, threading.Lock()), config.get('ipucu'))
+                text = ses.clean_spoken(transcribe(model, wake.clip(), config, threading.Lock(), sure=False), config.get('ipucu'))
                 out(olay='karar', karar='aday', duyulan=wake.text, whisper=text,
                     uyanir=ses.wake_heard(text, config['uyandirma_sozu']))
                 wake.forget()

@@ -2689,8 +2689,8 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             # Shown in the window, taken or not, it is no longer news: a copy the person left
             # out came back ticked in the next window.
             _clipboard_saved(vault, sequence, state, context.get('clipboard_generation'))
-        if voice is not None and voice_mode['now'] in ('bekliyor', 'dinliyor'):
-            voice.worker.send('iptal')  # saved: the microphone goes with the window
+        if voice is not None and recording():
+            voice.worker.send('iptal')  # saved: the microphone goes with the window, and what it still writes
         voice_mode['continuous'] = False
         entry.configure(state='disabled', fg=P['muted'])
         canvas.itemconfigure(status, text=say('✓  Kaydedildi'), fill=P['ok'], font=_font(12, 'bold'))
@@ -2705,6 +2705,20 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
     # `save`: Enter pressed while it listened, saved once the words are written. `auto`: listen
     # once the model is loaded. `drop`: the recording was let go; what it still says is not news.
     pending = {'save': False, 'auto': False, 'drop': False}
+    # The helper's recordings this window began or was given (`tur` of its 'dinliyor' and 'uyandi'):
+    # a sentence of another one, still written after its window closed, is not this window's.
+    own_turns = set()
+
+    def recording():
+        """Whether a recording of this window's is still going or still being written."""
+        return voice_mode['now'] in ('bekliyor', 'dinliyor', 'ceviriyor') or pending['drop']
+
+    def ours(event):
+        """Whether a sentence the helper wrote is this window's: of a recording it began, and while
+        it listens or writes that one. A helper without `tur` (an earlier one) by the state alone."""
+        turn = event.get('tur')
+        return (turn is None or turn in own_turns) and recording()
+
     if voice is not None:
         # The microphone: a round button at the field's end (a picture, smooth); a canvas-drawn
         # one only when the pictures cannot be read. Its states: getting ready, ready,
@@ -2806,7 +2820,7 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             pending['auto'] = False
             voice_mode['continuous'] = False
             if voice_mode['now'] in ('bekliyor', 'dinliyor'):
-                voice.worker.send('iptal')
+                voice.worker.send('iptal', sakla=True)  # what was said before typing still comes
                 pending['drop'] = True
                 voice_set('hazir', say('Yazmaya başladın; dinlemeyi bıraktım'), None, say('Konuşmak için mikrofona tıkla'))
         typing['stop'] = stop_for_typing
@@ -2861,6 +2875,12 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
             if kind == 'indiriliyor':
                 if voice_mode['now'] == 'yok':
                     voice_set('yok')  # how much of the model has come, as it comes
+                return
+            if kind in ('dinliyor', 'uyandi') and isinstance(event.get('tur'), int):
+                own_turns.add(event['tur'])
+            if kind in ('metin', 'ceviriyor') and not ours(event):
+                return  # another window's recording, or one this window let go: never written in
+            if kind == 'hata' and event.get('neden') == 'ceviri' and event.get('tur') is not None and not ours(event):
                 return
             if pending['drop']:
                 # Let go for typing: what was said before still goes in, as words only; the
@@ -2955,8 +2975,9 @@ def popup(vault, context=None, master=None, state=None, voice=None, listening=Fa
         return save()
 
     def leave(_event=None):
-        # A window closed while it listens lets the microphone go and keeps nothing it heard.
-        if voice is not None and voice_mode['now'] in ('bekliyor', 'dinliyor'):
+        # A window closed while it listens, or writes what it heard, lets the microphone go and
+        # keeps nothing of it: the helper writes none of it into the next window either.
+        if voice is not None and recording():
             voice.worker.send('iptal')
         close()
 
