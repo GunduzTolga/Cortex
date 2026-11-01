@@ -91,6 +91,7 @@ const api: CortexApi = {
     install: (cli) => invoke('chat:install', cli),
     setKey: (cli, key, baseUrl) => invoke('chat:setKey', cli, key, baseUrl),
     forgetKey: (cli) => invoke('chat:forgetKey', cli),
+    choose: (cli, offered) => invoke('chat:choose', cli, offered),
     toInbox: (text) => invoke('chat:toInbox', text),
   },
   office: {

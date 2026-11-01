@@ -107,6 +107,7 @@ const RULES: Rule[] = [
   { pattern: /^Cortex does not install this tool\.$/, say: () => 'Cortex bu aracı kurmuyor.' },
   { pattern: /^Installing from Cortex opens a console window, which only Windows does here\.$/, say: () => 'Cortex’ten kurmak bir konsol penceresi açar; bu yalnız Windows’ta çalışır.' },
   { pattern: /^This tool is installed already\.$/, say: () => 'Bu araç zaten kurulu.' },
+  { pattern: /^This tool is not installed on this computer\.$/, say: () => 'Bu araç bu bilgisayarda kurulu değil.' },
   { pattern: /^This tool is being installed already\.$/, say: () => 'Bu araç zaten kuruluyor.' },
   // electron/services/toolPackages.ts: OpenCode, Codex, Gemini CLI and Qwen Code installed by Cortex
   { pattern: /^The download did not start: check the internet connection and try again\.$/, say: () => 'İndirme başlamadı: internet bağlantını denetleyip yeniden dene.' },

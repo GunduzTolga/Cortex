@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { offered } from '../electron/services/chat';
-import { chooseChatTool, forgetSettings, readSettings, settingsPath, settingsUnreadable, tidyName, updateSettings } from '../electron/services/settings';
+import { chooseChatTool, forgetSettings, readSettings, setChatTool, settingsPath, settingsUnreadable, tidyName, updateSettings } from '../electron/services/settings';
 import type { CliInfo } from '../shared/chat';
 
 /**
@@ -121,4 +121,21 @@ test('a tool not chosen is listed as not offered; a model server, Hermes and the
   assert.deepEqual(chosen.filter((one) => one.available).map((one) => one.id), ['opencode', 'lmstudio', 'hermes', 'test-claude']);
   assert.deepEqual(chosen.map((one) => one.id), clis.map((one) => one.id), 'still listed: a chat begun with one goes on');
   assert.equal(offered(clis, null), clis, 'no list: every one');
+});
+
+test('from the AI tools window a tool is added to the chat or taken from it; with no list yet, only the one taken goes', () => {
+  fresh();
+  updateSettings((settings) => {
+    settings.onboarded = true;
+  });
+  // Every installed tool offered (an install from before the list): Codex taken away, the others stay.
+  setChatTool('codex', false, ['claude', 'codex', 'opencode']);
+  assert.deepEqual(readSettings().chatTools, ['claude', 'opencode']);
+  // Codex, signed in only in a terminal, added back with that sign-in.
+  setChatTool('codex', true, ['claude', 'codex', 'opencode']);
+  assert.deepEqual(readSettings().chatTools, ['claude', 'opencode', 'codex']);
+  setChatTool('codex', true, ['claude', 'codex', 'opencode']);
+  assert.deepEqual(readSettings().chatTools, ['claude', 'opencode', 'codex'], 'once');
+  setChatTool('lmstudio', false, ['claude']);
+  assert.deepEqual(readSettings().chatTools, ['claude', 'opencode', 'codex'], 'a model server is not one of them');
 });

@@ -225,6 +225,8 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
 - **AMD ve Intel Arc:**
   - whisper.cpp Windows için Vulkan sürümü yayımlamıyor; Cortex onu kendi GitHub iş akışında (`whisper-vulkan`) derler. `ses kur` derlemeyi bu ön sürümden indirir ve SHA-256'sıyla doğrular. Yayımlanmış bir derleme hiçbir zaman değiştirilmez (yenisi kendi etiketiyle yayımlanır), yoksa önceki sürümler onu reddedip işlemciye düşerdi.
   - Model (yaklaşık 1,6 GB) ekran kartında hazır tutulur; ilk cümle de beklemesin diye açılışta bir kez ısıtılır.
+  - Uyandırma sözünü kart değil, işlemcideki küçük `base` modeli doğrular (1.0.44'ten beri). Dizüstünün dahili AMD kartında büyük model sözü bir cümle kadar uzun, 2–3,5 saniyede doğruluyordu; pencere o kadar geç açılıyordu.
+  - whisper.cpp kapanırsa (dizüstü uykudan uyanınca kart sıfırlandığında olabiliyor) bir sonraki doğrulamada ya da cümlede yeniden başlatılır; bir yardımcının ömründe en çok üç kez.
   - whisper.cpp yalnız bu bilgisayardan erişilen bir adreste (127.0.0.1) çalışır ve yakala kapanınca onunla kapanır.
   - Kart açılamazsa işlemcide hızlı model (`small`) yazar; whisper.cpp'nin büyük modeli işlemcide cümle başına 15-30 saniye sürüyordu. 1.0.33'ten önce kurulmuş bir ortamda (faster-whisper yok) whisper.cpp işlemcide yazar; `ses kur` yeniden çalıştırılınca faster-whisper da gelir.
 - **İşlemcide:**
@@ -233,6 +235,8 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
   - İş parçacığı sayısı çekirdek sayısıdır (en çok 8): 2 çekirdekli bir Celeron artık tek iş parçacığıyla yazmaz.
   - Seçtiğin model inemiyorsa (internet yokken seçildiyse) diskte olan öbür model yazar ve hangisinin yazdığı söylenir.
   - Uyandırma sözünü ayrı, küçük bir `base` modeli doğrular: söz duyulduktan kısa süre sonra pencere açılır.
+- **Söz tek başına yazılmaz:** "Hey Pyn" deyip pencereyi beklerken susunca sözün son parçası ayrı bir cümle olarak yazıya çevrilmez (1.0.44'ten beri). Önceden bu parça ilk gerçek cümlenin önünde bir yazma işi daha ekliyor, nota "Pin." yazılabiliyordu. Tek nefeste söylenen ("Hey Pyn, yarın toplantı var") not eskisi gibi tam yazılır.
+- **Pilde:** Windows'un pilde arka plan süreçlerini yavaşlatması (güç kısması) ses yardımcısı ve whisper.cpp için kapatılır.
   - Daha doğru ama işlemcide yavaş modeli seçmek için: Ayarlar → Sesle yazma → Yazı modeli → **En doğru**, ya da `beyin.py ses ayar --islemci-modeli large-v3-turbo`.
 - **Hazırlık süresi:**
   - Model, yakala dinleyicisi başlarken yüklenir. İşlemcide bu birkaç saniyeden yarım dakikaya kadar sürebilir.

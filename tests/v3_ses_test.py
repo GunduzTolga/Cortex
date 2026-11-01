@@ -207,6 +207,16 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(ses.command_of('notu kaydettim'), (None, 'notu kaydettim'), 'a word that starts like a command is a word')
         self.assertEqual(ses.command_of('bu satırı sil'), (None, 'bu satırı sil'), 'sil inside a sentence is written')
         self.assertEqual(ses.command_of('   '), (None, ''))
+
+    def test_a_deleting_command_said_alone_counts_as_whisper_writes_its_verb(self):
+        # "hepsini sil diyorum, sürekli hepsini sildim yazıyor" (1 November): Whisper writes the verb as a text has it.
+        for said in ('Hepsini sildim.', 'Tümünü sildim', 'Hepsini silin.', 'Hepsini siliyorum.', 'Hepsini temizledim.', 'Pyn, hepsini sildim.'):
+            self.assertEqual(ses.command_of(said), ('sil', ''), said)
+        self.assertEqual(ses.command_of('Son cümleyi sildim.'), ('cumle_sil', ''))
+        self.assertEqual(ses.command_of('Son kelimeyi silin.'), ('kelime_sil', ''))
+        # Never a negative, a one-word command, another word, or a sentence with more in it.
+        for note in ('Hepsini silme.', 'Sildim.', 'Hepsini silah.', 'Dosyaların hepsini sildim.', 'Notu yazdım. Hepsini sildim.', 'Kaydettim.'):
+            self.assertEqual(ses.command_of(note), (None, note), note)
         self.assertEqual(ses.command_of('Haftalık plan kaydı kaydet'), ('kaydet', 'Haftalık plan kaydı'))
 
     def test_pyn_kaydet_saves_and_the_name_is_not_written(self):
@@ -275,7 +285,9 @@ class WordsTest(unittest.TestCase):
         self.assertEqual(ses.command_of('Pin, son kelime sil'), ('kelime_sil', ''))
         self.assertEqual(ses.command_of('Hepsi sil.'), ('sil', ''))
         self.assertEqual(ses.command_of('son cümleyi sil'), ('cumle_sil', ''), 'the exact words first')
-        for note in ('notu kaydettim', 'son kelimeyi sildim', 'Hepsi silindi', 'Son dakika sil', 'herkesi sil',
+        # "son kelimeyi sildim" said alone is the command since 1.0.44: Whisper writes "sil" so
+        # (test_a_deleting_command_said_alone_counts_as_whisper_writes_its_verb). A passive is still a note.
+        for note in ('notu kaydettim', 'Hepsi silindi', 'Son dakika sil', 'herkesi sil',
                      'Sunuma bir resim ekle', 'Listeye görüntü ekle'):
             self.assertEqual(ses.command_of(note), (None, note), note)
 
@@ -471,6 +483,7 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(ses.download_size('islemci', ses.DEFAULTS), '0,7', 'small and the wake phrase\'s checker')
         self.assertEqual(ses.download_size('islemci', dict(ses.DEFAULTS, cpu_model='large-v3-turbo')), '1,8')
         self.assertEqual(ses.download_size('cuda', ses.DEFAULTS), '1,6')
+        self.assertEqual(ses.download_size('vulkan', ses.DEFAULTS), '1,8', 'with the wake phrase\'s checker for the processor')
 
     def test_commands_saved_as_the_old_defaults_get_the_new_words_ones_chosen_stay(self):
         ses.ses_dir(self.state).mkdir(parents=True)
@@ -1930,6 +1943,24 @@ class VulkanServerTest(unittest.TestCase):
         # as the settings say now. Taking its first guess, it wrote Turkish noticeably worse.
         self.assertEqual((asked['beam'], asked['ipucu']), (True, True))
 
+    def test_whisper_cpp_gone_is_started_again_for_the_next_sentence(self):
+        # A laptop asleep and woken: the server gone, every check and sentence failed until the listener started again.
+        import threading
+        config = dict(ses.DEFAULTS)
+        logged = []
+        self.helper.log = logged.append
+        server = self.helper.Server(self.stand_in(), self.folder / 'model.bin', config, self.folder / 'sunucu.log')
+        try:
+            server.process.kill()
+            server.process.wait(5)
+            text = self.helper.transcribe(server, b'\x10\x00\xf0\xff' * 8000, config, threading.Lock())
+        finally:
+            self.helper.release(server)
+        self.assertEqual(text, 'Merhaba dünya')
+        self.assertEqual(sum(1 for one in self.seen() if 'argv' in one), 2, 'started again, once')
+        self.assertTrue(any('yeniden başlatılıyor' in line for line in logged), logged)
+        self.assertFalse(self.helper.keep_speed() and os.name != 'nt', 'power throttling is Windows\' only')
+
     def test_a_card_that_fails_is_said_and_whisper_cpp_writes_on_the_processor(self):
         from contextlib import redirect_stderr
         stand_in = self.stand_in('kart-yok')
@@ -2079,20 +2110,29 @@ class FakeRecorder:
     def start(self, on_chunk=None, held=False):
         self.stream, self.said, self.held_since = 'open', [], None
         self.starts += 1
+        self.seeded = self.voiced = False
         self._sentence()
 
     def go_on(self, before=None):
-        # The sound before the stream opened (the wake listener's last moment) comes first.
+        # The sound before the stream opened (the wake listener's last moment) comes first; it is
+        # the phrase's end, and speech.
         if before is not None and before.name:
             self.said.insert(0, before.name)
+            self.seeded = True
+            self.spoke, self.last_voice = True, self.clock.t
 
     def speak(self, name):
         self.said.append(name)
+        self.voiced = True
         self.spoke, self.last_voice = True, self.clock.t
+
+    def phrase_only(self):
+        return self.seeded and not self.voiced
 
     def cut(self):
         sound = Sound('+'.join(self.said))
         self.said = []
+        self.seeded = False
         self._sentence()
         return sound
 
@@ -2521,7 +2561,9 @@ class ServeTest(unittest.TestCase):
         helper._open = lambda name, device, compute, _report=None: 'denetci'
         self.assertEqual(helper.checker_for(dict(ses.DEFAULTS), 'small (işlemci)'), 'denetci')
         self.assertEqual(helper.checker_for(dict(ses.DEFAULTS, cpu_model='large-v3-turbo'), 'large-v3-turbo (işlemci)'), 'denetci')
-        self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS), 'large-v3-turbo (ekran kartı, CUDA)'), 'a card is quick enough')
+        self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS), 'large-v3-turbo (ekran kartı, CUDA)'), 'a CUDA card is quick enough')
+        # A laptop's AMD graphics took as long to check the phrase as to write a sentence (1 November).
+        self.assertEqual(helper.checker_for(dict(ses.DEFAULTS), 'ggml-large-v3-turbo-q8_0.bin (ekran kartı, Vulkan)'), 'denetci')
         self.assertEqual(helper.checker_for(dict(ses.DEFAULTS), 'large-v3-turbo (işlemci, whisper.cpp)'), 'denetci',
                          'whisper.cpp writing on the processor is as slow there: checked by the small model where it can be had')
         self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS, cpu_model='base'), 'base (işlemci)'), 'it checks itself')
@@ -2659,6 +2701,23 @@ class ServeTest(unittest.TestCase):
         self.pause()
         self.assertEqual(self.until('metin')['metin'], 'yarın saat üçte dişçi.')
         self.assertEqual(self.asked[1], 'sonu+al+saat', 'the wake listener\'s last moment is the dictation\'s start')
+
+    def test_the_phrase_alone_is_not_written_as_a_sentence_while_the_window_is_waited_for(self):
+        # "Hey Pyn", then a pause for the window: the phrase's own end was cut at once as a sentence and
+        # written ahead of the first one said, a whole pass on a laptop's card, and "Pin." could be the note.
+        self.helper.split_clip = lambda clip: (Sound('once'), Sound('pyn'))
+        self.serve(uyandirma=True)
+        self.written.update({'once+pyn': 'Hey Pyn.', 'not': 'Yarın dişçi.'})
+        self.wake.verdicts = ['aday']
+        self.until_recording()
+        self.pause(ses.WAKE_AFTER_SN)
+        self.until('uyandi')
+        self.pause()  # longer than a sentence's pause
+        self.recorder.speak('not')
+        self.pause()
+        self.assertEqual(self.until('metin')['metin'], 'Yarın dişçi.')
+        self.assertEqual(self.asked, ['once+pyn', 'not'], 'the phrase checked, then only what was said after it written')
+        self.assertIn('uyandırma: sözün kendisi yazılmadı, söylenecek olan bekleniyor', self.logged)
 
     def test_with_the_microphones_changed_the_wake_listener_lets_go_before_the_dictation_opens(self):
         mics, order = ['dahili'], []
@@ -2835,6 +2894,26 @@ class RecorderTest(unittest.TestCase):
         self.assertGreater(len(sentence), 0.9 * 16000, 'its speech kept from where it began, before the stream opened')
         head, tail = self.helper.split_clip(self.np.zeros(4 * 16000, dtype='float32'))
         self.assertEqual((len(head), len(tail)), (int(3.2 * 16000), int(0.8 * 16000)))
+
+    def test_the_wake_phrase_alone_is_told_from_a_note_begun_after_it(self):
+        recorder = self.helper.Recorder(dict(ses.DEFAULTS))
+        recorder.start(held=True)
+        self.feed(0.3, False)  # quiet while the wake listener still had the microphone too
+        before = self.np.full(int(0.8 * 16000), 0.0005, dtype='float32')
+        before[int(0.4 * 16000)::2], before[int(0.4 * 16000) + 1::2] = 0.1, -0.1  # the phrase's last word
+        recorder.go_on(before)
+        self.assertTrue(recorder.spoke, 'the phrase\'s end is speech')
+        self.assertTrue(recorder.phrase_only(), 'and all of it so far')
+        self.feed(1.0, False)  # the window waited for
+        self.assertTrue(recorder.phrase_only())
+        self.feed(0.3, True)  # the note begins
+        self.assertFalse(recorder.phrase_only())
+        recorder.cut()
+        self.assertFalse(recorder.phrase_only(), 'the sentences after it have no phrase in them')
+        plain = self.helper.Recorder(dict(ses.DEFAULTS))
+        plain.start()
+        self.feed(0.3, True)
+        self.assertFalse(plain.phrase_only(), 'a recording not begun by the phrase')
         head, tail = self.helper.split_clip(self.np.zeros(100, dtype='float32'))
         self.assertEqual((len(head), len(tail)), (0, 100))
 

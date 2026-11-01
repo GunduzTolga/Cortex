@@ -39,6 +39,11 @@ export interface CliAuth {
   kept: boolean;
   /** For a model server on this machine (LM Studio, Ollama), which needs no sign-in: what it has. */
   local?: { models: number; loaded: string[]; shortContext: number | null };
+  /**
+   * For an AI tool: whether the chat offers it (settings' chatTools). One signed in only in a terminal, never set up
+   * from Cortex, is not; it is added from the AI tools window.
+   */
+  chosen?: boolean;
 }
 
 export interface ChatSummary {
@@ -131,6 +136,8 @@ export interface ChatApi {
   /** A key for a tool: kept encrypted by Cortex, or handed to the tool itself (Codex). */
   setKey(cli: CliId, key: string, baseUrl?: string): Promise<CliAuth[]>;
   forgetKey(cli: CliId): Promise<CliAuth[]>;
+  /** The tool offered in the chat, or no longer; every tool's sign-in, as `auth` says. */
+  choose(cli: CliId, offered: boolean): Promise<CliAuth[]>;
   /** A message kept for later as a card in the vault's inbox (`📥 000-Inbox/Yakala`); where the card is. */
   toInbox(text: string): Promise<{ path: string; added: 'new' | 'existing' }>;
 }
