@@ -905,6 +905,15 @@ Use Markdown source files as truth; run `python3 beyin.py sync` in the vault roo
                     continue
             text = re.sub(re.escape(START) + r".*?" + re.escape(END), lambda _: block, text, flags=re.S) if START in text else text.rstrip() + "\n\n" + block + "\n"
             add(name, text.encode())
+    # Cortex's own earlier install, its record gone: "her şeyiyle sil" took %LOCALAPPDATA%\beyin-v3 and left the
+    # vault, Cortex's stamp and engine in it. The next version's install read every file it changed as the person's
+    # and stopped ("Kasada Cortex'in yazacağı .claude/scripts/beyin_v3_ses.py dosyası zaten var ve içeriği farklı",
+    # 1 November). Those files are Cortex's: they are written over, what was there kept as their `original` in the
+    # new record. The person's own template, the merged files (above) and the pin of a vault moved elsewhere
+    # (vault_moved) are decided as before.
+    stamp = vault / ".beyin-version"
+    own_earlier = (not manifest.get("files") and (vault / "beyin.py").is_file() and stamp.is_file()
+                   and re.fullmatch(r"1\.\d+\.\d+", stamp.read_text(encoding="utf-8", errors="replace").strip()) is not None)
     for name in planned:
         item = manifest["files"].get(name)
         path = vault / name
@@ -924,7 +933,8 @@ Use Markdown source files as truth; run `python3 beyin.py sync` in the vault roo
             legacy = (digest(current) in legacy_skill_hashes.get(name, []) or stock(name, current)
                       or (name == ".beyin-runtime.json" and unreachable_pin(current))
                       or (name in MACHINE_FILES and MACHINE_FILES[name](current))
-                      or any(entry["file"] == name for entry in legacy_backups))
+                      or any(entry["file"] == name for entry in legacy_backups)
+                      or (own_earlier and name not in (".beyin-runtime.json", PERSON_TEMPLATE_PATH)))
             if not semantic and not legacy:
                 if name == ".beyin-runtime.json":
                     # The pin of an install this state has no record of: the vault was moved or
