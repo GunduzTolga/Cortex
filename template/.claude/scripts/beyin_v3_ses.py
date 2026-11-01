@@ -149,6 +149,8 @@ def download_size(engine, config):
         gb = DOWNLOAD_GB.get(model, 1.6) + (0 if model in QUICK_MODELS else DOWNLOAD_GB[CHECK_MODEL])
     else:
         gb = DOWNLOAD_GB.get(config.get('model') or DEFAULTS['model'], 1.6)
+        if engine == 'vulkan':
+            gb += DOWNLOAD_GB[CHECK_MODEL]  # the wake phrase is checked on the processor there too (checker_for)
     return ('%.1f' % gb).replace('.', ',')
 
 
@@ -1844,6 +1846,8 @@ MIN_VOICE_SN = 0.1
 # What of the wake listener's last moment begins a dictation the wake phrase opened: the words
 # said straight after the phrase, before the dictation's own stream was open, are its first.
 SEED_SN = 0.8
+# After the wake phrase's end, speech this close to it is still the phrase (its last sound).
+PHRASE_TAIL_SN = 0.4
 # How many threads Whisper writes with on the processor (ses.cpu_threads: the cores `kur` found).
 THREADS = None
 now = time.time
@@ -1874,6 +1878,33 @@ def split_clip(clip):
     start): the last SEED_SN seconds begin the dictation, and the check hears them there."""
     cut = max(0, len(clip) - int(SEED_SN * RATE))
     return clip[:cut], clip[cut:]
+
+
+def keep_speed(handle=None):
+    """Windows' power throttling (EcoQoS) off for this process, or the one whose handle is given.
+    On battery, Windows slows a process with no window of its own as background work, and the voice
+    helper and whisper.cpp's server are such processes: a laptop on battery heard and wrote late
+    (1 November, "özellikle laptoplara aşırı geç"). Nothing on other systems, or where Windows is
+    older than this setting."""
+    if os.name != 'nt':
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class Throttling(ctypes.Structure):
+            _fields_ = [('Version', wintypes.ULONG), ('ControlMask', wintypes.ULONG), ('StateMask', wintypes.ULONG)]
+
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.SetProcessInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        kernel32.SetProcessInformation.restype = wintypes.BOOL
+        # ProcessPowerThrottling (4), its execution speed (1) taken charge of and left off (0).
+        state = Throttling(1, 1, 0)
+        target = handle if handle is not None else kernel32.GetCurrentProcess()
+        return bool(kernel32.SetProcessInformation(target, 4, ctypes.byref(state), ctypes.sizeof(state)))
+    except Exception:
+        return False
 
 
 def _threads():
@@ -2027,6 +2058,10 @@ def _tie(process):
     return job  # kept by the caller: when the last handle closes, the process goes with it
 
 
+# How many times whisper.cpp's server is started again in one helper's life, once gone.
+SERVER_RESTARTS = 3
+
+
 class Server:
     """whisper.cpp's own server, the model held warm on the card, on a free port of this machine only.
 
@@ -2050,10 +2085,18 @@ class Server:
             command += ['--prompt', config['ipucu']]
         command += ['-dev', str(int(config.get('gpu') or 0))] if gpu else ['-ng']
         self.log = Path(log)
+        self.command = command
+        self.restarted = 0
+        self._start(config)
+
+    def _start(self, config):
+        import subprocess
         with open(self.log, 'wb') as sink:
-            self.process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
+            self.process = subprocess.Popen(self.command, stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
                                             creationflags=0x08000000 if os.name == 'nt' else 0)
         self.job = _tie(self.process)
+        if os.name == 'nt':
+            keep_speed(int(getattr(self.process, '_handle', 0)) or None)
         try:
             self._wait()
             self.write(bytes(2 * RATE), config)  # the first answer builds the card's pipelines: not on the user's sentence
@@ -2080,6 +2123,12 @@ class Server:
             return ''
 
     def write(self, audio, config):
+        # Gone since (a laptop asleep and woken, its card reset): started again, a few times at most,
+        # not left failing every check and sentence until the listener started again.
+        if self.process.poll() is not None and self.restarted < SERVER_RESTARTS:
+            self.restarted += 1
+            log('whisper.cpp kapanmış (%s), yeniden başlatılıyor' % self._tail()[-160:])
+            self._start(config)
         import uuid
         import wave
         from urllib.request import Request
@@ -2169,10 +2218,14 @@ def load_model(state, config, report=None):
 
 
 def checker_for(config, what, report=None):
-    """On the processor, the model that checks the wake phrase (ses.CHECK_MODEL): the dictation's
-    took 15-30 seconds a check on a laptop, and the window opened that late. None on a card, for
-    a model quick enough to check it itself, or where it cannot be had (the dictation's checks)."""
-    if '(işlemci' not in what or what.split(' ', 1)[0] in ses.QUICK_MODELS:
+    """The model that checks the wake phrase on the processor (ses.CHECK_MODEL): the dictation's
+    took 15-30 seconds a check on a laptop's processor, and the window opened that late. On a
+    Vulkan card too: large-v3-turbo there checked 4 seconds of sound in 2-3.5 seconds on a laptop's
+    AMD graphics, as long as a sentence, and "Hey Pyn" opened its window that late (1 November);
+    `base` on the processor takes a few tenths, and leaves the card to the dictation. None on a CUDA
+    card, quick enough to check it itself, for a model quick enough on the processor, or where it
+    cannot be had (the dictation's model checks)."""
+    if not ('(işlemci' in what or '(ekran kartı, Vulkan)' in what) or what.split(' ', 1)[0] in ses.QUICK_MODELS:
         return None
     try:
         return _open(ses.CHECK_MODEL, 'cpu', 'int8', report)
@@ -2391,10 +2444,11 @@ class Recorder:
         self._sentence(now())
 
     def _sentence(self, at):
-        # Positions are samples into the sentence: where its speech starts and where it last was.
+        # Positions are samples into the sentence: where its speech starts and where it last was;
+        # `seed_to`, where the sound it began with (`go_on`, the wake phrase's end) stops.
         self.chunks, self.count, self.run_from = [], 0, 0
         self.spoke, self.started, self.last_voice = False, at, at
-        self.voice_from = self.voice_to = None
+        self.voice_from = self.voice_to = self.seed_to = None
 
     def start(self, on_chunk=None, held=False):
         """The microphone open. `held`: what it records is held back until `go_on` gives the sound
@@ -2453,8 +2507,16 @@ class Recorder:
                 block = int(0.03 * RATE)
                 for at in range(0, len(before), block):
                     self._take(before[at:at + block].reshape(-1, 1).astype('float32'))
+                self.seed_to = self.count
             for data in held:
                 self._take(data)
+
+    def phrase_only(self):
+        """Whether the only speech so far is the wake phrase's own end, in the sound it began with
+        (`go_on`), and a moment after it (PHRASE_TAIL_SN): nobody has said the note yet."""
+        with self.guard:
+            return (self.seed_to is not None and self.voice_to is not None
+                    and self.voice_to <= self.seed_to + int(PHRASE_TAIL_SN * RATE))
 
     def _speech(self, chunks, start, end):
         """The sentence's sound; only its speech, a little either side, when someone spoke."""
@@ -2764,6 +2826,12 @@ def serve(state, config, lines=None):
 
     def confirmed():
         turns[turn]['checking'] = None
+        # Nothing said after the phrase yet (the window waited for): its own last word was cut as a
+        # sentence at once and written on its own, ahead of the first one said, and "Pin." could be
+        # the note (1 November). It is let go, and the sentence begins with what is said now.
+        if recorder.phrase_only():
+            recorder.cut()
+            log('uyandırma: sözün kendisi yazılmadı, söylenecek olan bekleniyor')
         out(olay='dinliyor', mikrofon=_device_name(config), tur=turn)
         out(olay='uyandi', mikrofon=_device_name(config), tur=turn)
 
@@ -3026,6 +3094,7 @@ def main(argv=None):
     parser.add_argument('--dene-uyandirma', type=float)
     parser.add_argument('--dosya')
     args = parser.parse_args(argv)
+    keep_speed()  # heard and written at full speed on a laptop's battery too
     global ses, THREADS
     sys.path.insert(0, args.scripts)
     import beyin_v3_ses as engine_ses  # standard library only
