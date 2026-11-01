@@ -248,7 +248,8 @@ test('OpenCode and Gemini CLI install from their makers’ packages on Windows, 
   try {
     for (const id of ['opencode', 'gemini'] as const) {
       const program = await installPackage(id, { dir });
-      assert.ok(fs.statSync(program).size > 100_000, `${id}: ${program}`);
+      // OpenCode's program is the whole tool; Gemini CLI's is a small entry beside the chunks it loads.
+      assert.ok(id === 'opencode' ? fs.statSync(program).size > 100_000_000 : fs.readdirSync(path.dirname(program)).some((one) => one.startsWith('chunk-')), `${id}: ${program}`);
       const own = ownProgram(id, dir);
       assert.ok(own && (own.command === program || own.args[0] === program), id);
     }
