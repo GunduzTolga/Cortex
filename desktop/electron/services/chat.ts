@@ -12,7 +12,7 @@ import { hermesBackend } from './hermesChat';
 import { localBackend } from './localChat';
 import { LOCAL_IDS, isServer, launchFor, listClis, protocolOf, refreshPath } from './clis';
 import { findLocal } from './localModels';
-import { readSettings } from './settings';
+import { CHAT_TOOLS, readSettings } from './settings';
 import { vaultSettled } from './setup';
 
 export { ChatRefusal } from './chatKit';
@@ -351,7 +351,16 @@ async function run(chat: Live, message: string): Promise<void> {
 export async function listChatClis(): Promise<CliInfo[]> {
   // A tool installed since the app started is found without opening it again.
   await Promise.all([refreshPath(), ...LOCAL_IDS.map((one) => findLocal(one))]);
-  return listClis();
+  return offered(listClis(), readSettings().chatTools);
+}
+
+/**
+ * The tools the person chose (settings.ts, chooseChatTool) offered, the others listed as not: a chat begun with one goes
+ * on, and it is a sign-in away in the AI tools window. A model server, Hermes and the stand-ins are offered as before.
+ */
+export function offered(clis: CliInfo[], chosen: readonly CliId[] | null): CliInfo[] {
+  if (!chosen) return clis;
+  return clis.map((one) => (CHAT_TOOLS.includes(one.id) && !chosen.includes(one.id) ? { ...one, available: false } : one));
 }
 
 export function listChats(): ChatSummary[] {

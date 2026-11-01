@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
+import type { AppUpdate } from '@shared/api';
+import { appLanguage } from '@shared/language';
 import { engineAction } from '@shared/setup';
 import { BookOpen, Building2, FolderOpen, MessageCircle, Network, Settings } from 'lucide-react';
 import logo from '../../tema/ananas/marka/pyn-logo-512.png';
 import smallLogo from '../../tema/ananas/marka/pyn-logo-96.png';
-import type { Key } from './i18n';
+import { translate, type Key } from './i18n';
 import { useT } from './i18n/useT';
 import { AuthDialog } from './chat/AuthDialog';
 import { ChatView } from './chat/ChatView';
@@ -78,6 +80,32 @@ export function App() {
   useEffect(() => window.cortex.on.askWake(() => void useSetup.getState().voice({ wake: true })), []);
   // The window going for good: the note open saves what it holds first, or keeps it aside (src/notes/openNotes.ts).
   useEffect(() => window.cortex.on.flush(() => leaveOpenNotes()), []);
+  // A newer Cortex downloaded (electron/services/updater.ts): said once, until it is closed or installed; one that came
+  // before this window was there is asked for.
+  useEffect(() => {
+    let told = '';
+    const tell = (update: AppUpdate | null) => {
+      if (!update || update.version === told) return;
+      told = update.version;
+      // Read at the time it is said, in the language chosen then: this runs outside a render.
+      const tr = (key: Key, values?: Record<string, string>) => translate(appLanguage(useApp.getState().settings.language), key, values);
+      void useApp.getState().toast({
+        tone: 'info',
+        title: tr('app.update.title', { version: update.version }),
+        detail: tr('app.update.detail'),
+        sticky: true,
+        action: {
+          label: tr('app.update.restart'),
+          run: () =>
+            void window.cortex.update.install().then((answer) => {
+              if (answer.reason === 'busy') void useApp.getState().toast({ tone: 'info', title: 'Cortex', detail: tr('app.update.busy') });
+            }),
+        },
+      });
+    };
+    void window.cortex.update.ready().then(tell, () => undefined);
+    return window.cortex.on.update(tell);
+  }, []);
   // A word from work done in the background (yakala moved to the vault chosen): a failure stays until it is closed.
   useEffect(() => window.cortex.on.notice((word) => void useApp.getState().toast({ ...word, sticky: word.tone === 'error' })), []);
 
@@ -170,15 +198,29 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
       const action = engineAction(engine);
       if (!engine?.installed || !engine.bundled || !action || action === 'install') return;
       const values = { installed: engine.installed, bundled: engine.bundled };
+      // The vault's engine behind the app's own (a new version installed): brought up to it by itself, as the app was.
+      // Asked, it read as a second update of what had just been installed (1 November: "zaten 42 kurdum"). Said only
+      // if it fails, with the button to try again; a predecessor's engine is still asked about, as moving it is a choice.
+      if (action === 'update' || action === 'refresh') {
+        if (useSetup.getState().status?.job) return;
+        await useSetup.getState().run('engine');
+        const failed = useSetup.getState().error;
+        if (failed?.job !== 'engine') return;
+        useApp.getState().toast({
+          tone: 'error',
+          title: t('setup.update.autoFailed', values),
+          detail: failed.text,
+          sticky: true,
+          action: { label: t('setup.update.action'), run: () => void useSetup.getState().run('engine') },
+        });
+        return;
+      }
       useApp.getState().toast({
         tone: 'info',
-        title: t(action === 'refresh' ? 'setup.update.refreshTitle' : action === 'migrate' ? 'setup.update.migrateTitle' : 'setup.update.title', values),
-        detail: t(action === 'refresh' ? 'setup.update.refreshDetail' : action === 'migrate' ? 'setup.update.migrateDetail' : 'setup.update.detail', values),
+        title: t('setup.update.migrateTitle', values),
+        detail: t('setup.update.migrateDetail', values),
         sticky: true,
-        action: {
-          label: t(action === 'refresh' ? 'setup.update.refreshAction' : action === 'migrate' ? 'setup.update.migrateAction' : 'setup.update.action'),
-          run: () => void useSetup.getState().run('engine'),
-        },
+        action: { label: t('setup.update.migrateAction'), run: () => void useSetup.getState().run('engine') },
       });
     })();
     // Once per vault opened: chosen again counts, the same folder name or not.

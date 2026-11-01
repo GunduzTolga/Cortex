@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
+import type { CliId } from '../../shared/chat';
 import { HERMES_PROFILE, hermesAddress } from '../../shared/hermes';
 import type { AppLanguage } from '../../shared/language';
 import { renameRetrying } from './fileWrite';
@@ -52,7 +53,16 @@ export interface Settings {
   hermesProfile: string | null;
   /** The vault kept in step with its git remote (services/vaultSync.ts, Settings › Sunucu); off by default. */
   vaultSync: boolean;
+  /**
+   * The AI tools offered in the chat: those the person signed in to, installed or gave a key to from Cortex
+   * (chooseChatTool). Null: every one installed, as before the list was kept (an install from before it, or a first run
+   * through which none was set up).
+   */
+  chatTools: CliId[] | null;
 }
+
+/** The tools the person chooses among; a model server, Hermes and the tests' stand-ins are offered as before. */
+export const CHAT_TOOLS: readonly CliId[] = ['claude', 'codex', 'opencode', 'gemini', 'qwen'];
 
 /** The longest name kept: a way of addressing somebody, not a paragraph. */
 export const NAME_LIMIT = 40;
@@ -64,7 +74,7 @@ export function tidyName(value: unknown): string | null {
   return name || null;
 }
 
-const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false };
+const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null };
 
 let cache: Settings | null = null;
 let keepOff = false;
@@ -88,6 +98,7 @@ function hydrate(raw: Record<string, unknown>): Settings {
     hermesUrl: typeof raw.hermesUrl === 'string' ? hermesAddress(raw.hermesUrl) : null,
     hermesProfile: typeof raw.hermesProfile === 'string' && HERMES_PROFILE.test(raw.hermesProfile) ? raw.hermesProfile : null,
     vaultSync: raw.vaultSync === true,
+    chatTools: Array.isArray(raw.chatTools) ? [...new Set(raw.chatTools as unknown[])].filter((id): id is CliId => CHAT_TOOLS.includes(id as CliId)) : null,
   };
 }
 
@@ -152,4 +163,20 @@ export function forgetSettings(): void {
   cache = null;
   keepOff = false;
   unreadable = null;
+}
+
+/**
+ * A tool the person signed in to, installed or gave a key to from Cortex: one they use, offered in the chat. 1 November:
+ * on a first run only OpenCode was signed in to, and the chat offered Claude Code too, signed in on that computer
+ * long before ("girişte sadece opencode ile açtım… chat ekranında claude code falan da açık"). So on a first run the
+ * list begins with the first tool set up there, and only what is set up from Cortex joins it; after a first run
+ * through which nothing was set up, or for an install from before the list, every installed tool stays offered.
+ */
+export function chooseChatTool(id: CliId): void {
+  if (!CHAT_TOOLS.includes(id)) return;
+  const now = readSettings();
+  if (now.chatTools ? now.chatTools.includes(id) : now.onboarded) return;
+  updateSettings((settings) => {
+    settings.chatTools = [...(settings.chatTools ?? []), id];
+  });
 }

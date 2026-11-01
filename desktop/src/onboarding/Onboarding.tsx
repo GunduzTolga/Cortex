@@ -4,12 +4,13 @@ import pineapple from '../../../tema/ananas/marka/pyn-ananas-512.png';
 import logo from '../../../tema/ananas/marka/pyn-logo-96.png';
 import sitting from '../../../tema/ananas/marka/pyn-oturan-512.png';
 import type { CliAuth, CliId } from '@shared/chat';
+import { messageOf } from '@shared/ipcError';
 import { engineAction, type SetupStatus, wakePhraseLabel } from '@shared/setup';
 import { AuthDialog, TOOL_NAMES } from '../chat/AuthDialog';
 import { useChat } from '../chat/chatStore';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
-import { useApp } from '../store/app';
+import { refusal, useApp } from '../store/app';
 import { useSetup } from '../store/setup';
 import { LanguageSwitch } from '../ui/LanguageSwitch';
 import { HotkeyBusy, Progress, VoiceHelperBar, engineButtonText, pythonWantingText } from '../ui/SetupSections';
@@ -27,7 +28,8 @@ import { Button, Spinner, Switch, inputClass } from '../ui/ui';
 
 type StepId = 'name' | 'vault' | 'python' | 'engine' | 'tools' | 'voice' | 'done';
 /** A tool being installed from here (`failed`: its installer ended without it). */
-type Installing = { id: CliId; failed: boolean } | null;
+/** A tool being installed; `why`, where the main process refused before any window opened. */
+type Installing = { id: CliId; failed: boolean; why?: string } | null;
 
 const TITLE: Record<StepId, Key> = {
   name: 'onboarding.step.name',
@@ -139,9 +141,9 @@ export function Onboarding() {
   const install = (id: CliId) => {
     trying.current.add(id);
     setInstalling({ id, failed: false });
-    void window.cortex.chat.install(id).catch(() => {
+    void window.cortex.chat.install(id).catch((err: unknown) => {
       trying.current.delete(id);
-      setInstalling({ id, failed: true });
+      setInstalling({ id, failed: true, why: refusal(messageOf(err)) });
     });
   };
 
@@ -399,9 +401,14 @@ function VaultStep({ name, missing }: { name: string | null; missing: string | n
   // choosing a folder was hard for a first run). Tried once; where it fails, the dialog is what is left.
   const made = useRef(false);
   const [making, setMaking] = useState(false);
+  // A vault remembered from an earlier install and gone since (its folder deleted) is no reason to leave the person
+  // with nothing: one is made in Documents all the same, and the one not found is named (1 November).
+  const [replaced, setReplaced] = useState<string | null>(null);
   useEffect(() => {
-    if (name || missing || made.current) return;
+    if (name && !missing) return;
+    if (made.current) return;
     made.current = true;
+    if (missing) setReplaced(missing);
     setMaking(true);
     void useApp
       .getState()
@@ -414,9 +421,13 @@ function VaultStep({ name, missing }: { name: string | null; missing: string | n
         <p>{t('onboarding.vault.body')}</p>
         <p className="text-[12.5px] text-zinc-500">{t('onboarding.vault.required')}</p>
       </Heading>
-      {missing ? (
+      {missing && !making ? (
         <p className="mt-5 rounded-lg bg-red-50 px-3 py-2 text-[12.5px] text-red-700" data-onboarding-vault-missing>
           {t('app.vault.missing', { name: missing })}
+        </p>
+      ) : replaced && name && !missing ? (
+        <p className="mt-5 rounded-lg bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800" data-onboarding-vault-replaced>
+          {t('onboarding.vault.replaced', { name: replaced })}
         </p>
       ) : null}
       {name ? (
@@ -566,7 +577,7 @@ function ToolsStep({
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                     <span className="min-w-[7rem] flex-1 text-[13px] font-semibold text-darkDelegation">
                       {TOOL_NAMES[tool.id] ?? tool.id}
-                      <span className="mt-0.5 block text-[11.5px] font-normal text-zinc-500">{t(tool.id === 'claude' ? 'onboarding.tools.install.claudeNote' : 'onboarding.tools.install.npmNote')}</span>
+                      <span className="mt-0.5 block text-[11.5px] font-normal text-zinc-500">{t(tool.id === 'claude' ? 'onboarding.tools.install.claudeNote' : 'onboarding.tools.install.packageNote')}</span>
                     </span>
                     <Button
                       tone={tool.id === installable[0].id ? 'primary' : 'ghost'}
@@ -582,7 +593,7 @@ function ToolsStep({
                   {mine && !mine.failed ? <p className="mt-1.5 text-[12px] text-zinc-500" data-onboarding-installing>{t('onboarding.tools.installing')}</p> : null}
                   {mine?.failed ? (
                     <p className="mt-1.5 text-[12px] font-semibold text-bad" data-onboarding-install-failed>
-                      {t('onboarding.tools.installFailed', { name: TOOL_NAMES[tool.id] ?? tool.id })}
+                      {mine.why || t('onboarding.tools.installFailed', { name: TOOL_NAMES[tool.id] ?? tool.id })}
                     </p>
                   ) : null}
                 </li>

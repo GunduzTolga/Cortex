@@ -52,7 +52,9 @@ function useVault(): { vault: string; log: string } {
   process.env.FAKE_AGENT_LOG = log;
   return { vault, log };
 }
-const sent = (log: string) => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { method: string; params: Record<string, unknown>; cwd: string; pid: number }) : []);
+// Whole lines only: the fake program's log is read while it appends, and Windows shows the file before its first line
+// is in, or a line before its end ("Unexpected end of JSON input", 1 November CI).
+const sent = (log: string) => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').slice(0, -1).filter(Boolean).map((line) => JSON.parse(line) as { method: string; params: Record<string, unknown>; cwd: string; pid: number }) : []);
 const turnsStarted = (log: string) => sent(log).filter((one) => one.method === 'turn/start');
 /** What a turn that will not stop was answered when it asked leave after its interrupt, as the stand-in wrote it down. */
 const answered = (log: string) => sent(log).filter((one) => one.method === 'answered').map((one) => one.params as { turnId: string; decision: string | null });

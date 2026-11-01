@@ -6,6 +6,7 @@ import type { CliId, CliInfo } from '../../shared/chat';
 import { hermesConfigured, hermesName } from './hermesChat';
 import { keyEnv } from './keys';
 import { LOCAL, type LocalId, lastSeen } from './localModels';
+import { ownProgram, toolsDir } from './toolPackages';
 
 /**
  * The person's own AI command lines, found where they installed them, and
@@ -248,11 +249,18 @@ export function readShim(shim: string, env: NodeJS.ProcessEnv = process.env): La
   return { command: process.execPath, args: [target], env: { ELECTRON_RUN_AS_NODE: '1' } };
 }
 
-/** How one CLI is started on this machine, or null when it is not installed. */
-/** The CLI itself, as it is started for any of its commands - its sign-in, its status - without what makes it talk to the chat. */
+/**
+ * The CLI itself, as it is started for any of its commands - its sign-in, its status - without what makes it talk to
+ * the chat; null when it is not installed. The person's own, found on the PATH, before the one Cortex installed
+ * (toolPackages.ts), kept in a folder of Cortex's and on no PATH.
+ */
 export function programOf(id: CliId, env: NodeJS.ProcessEnv = process.env): Launch | null {
   const known = KNOWN.find((one) => one.id === id);
   if (!known) return null;
+  return onPathProgram(known, env) ?? ownProgram(id, toolsDir(env));
+}
+
+function onPathProgram(known: Known, env: NodeJS.ProcessEnv): Launch | null {
   if (WINDOWS) {
     // As Windows finds a command: the PATH's folders in their order, a program before a shim within one folder.
     // Every folder searched for the .exe first, a Claude Code left in ~/.local/bin (added at the PATH's end) won over

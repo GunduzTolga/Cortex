@@ -66,7 +66,9 @@ function useVault(): { vault: string; log: string } {
   process.env.FAKE_AGENT_LOG = log;
   return { vault, log };
 }
-const methodsIn = (log: string) => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { method: string; params: Record<string, unknown>; cwd: string }) : []);
+// Whole lines only: the fake program's log is read while it appends, and Windows shows the file before its first line
+// is in, or a line before its end ("Unexpected end of JSON input", 1 November CI).
+const methodsIn = (log: string) => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').slice(0, -1).filter(Boolean).map((line) => JSON.parse(line) as { method: string; params: Record<string, unknown>; cwd: string }) : []);
 
 test.after(() => shutdownChats());
 

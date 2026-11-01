@@ -2,7 +2,9 @@ import { strict as assert } from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { forgetSettings, readSettings, settingsPath, settingsUnreadable, tidyName, updateSettings } from '../electron/services/settings';
+import { offered } from '../electron/services/chat';
+import { chooseChatTool, forgetSettings, readSettings, settingsPath, settingsUnreadable, tidyName, updateSettings } from '../electron/services/settings';
+import type { CliInfo } from '../shared/chat';
 
 /**
  * The app's own settings file (electron/services/settings.ts), held to
@@ -20,12 +22,12 @@ const fresh = () => {
 
 test('a missing file is a first run, and what is changed is written at once, through a temporary', () => {
   fresh();
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false });
+  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
   assert.equal(settingsUnreadable(), null);
   updateSettings((settings) => {
     settings.language = 'en';
   });
-  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')), { vault: null, language: 'en', allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false });
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')), { vault: null, language: 'en', allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
   assert.deepEqual(fs.readdirSync(dir()).filter((name) => name.endsWith('.tmp')), [], 'no temporary left');
   forgetSettings();
   assert.equal(readSettings().language, 'en', 'read back from disk');
@@ -34,7 +36,7 @@ test('a missing file is a first run, and what is changed is written at once, thr
 test('a file that will not parse is copied aside before an empty one is saved', () => {
   fresh();
   fs.writeFileSync(settingsPath(), '{"vault": "C:\\\\Notlar", "lang');
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false });
+  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
   assert.equal(settingsUnreadable(), 'copied');
   const copies = fs.readdirSync(dir()).filter((name) => name.startsWith('settings.json.corrupt-'));
   assert.equal(copies.length, 1);
@@ -49,7 +51,7 @@ test('a file the disk will not hand over is left as it is, and nothing is writte
   fresh();
   // A folder where the file should be: read fails without the text ever arriving, as a locked file's does.
   fs.mkdirSync(settingsPath());
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false });
+  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
   assert.equal(settingsUnreadable(), 'left');
   updateSettings((settings) => {
     settings.language = 'en';
@@ -61,10 +63,10 @@ test('a file the disk will not hand over is left as it is, and nothing is writte
 test('what is not a known value is read as none', () => {
   fresh();
   fs.writeFileSync(settingsPath(), JSON.stringify({ vault: 42, language: 'de', other: true, allFiles: 'yes', nameIcons: 1, userName: 7, onboarded: 'yes' }));
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false });
+  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
   fs.writeFileSync(settingsPath(), JSON.stringify(['not', 'an', 'object']));
   forgetSettings();
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false });
+  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
   assert.equal(settingsUnreadable(), 'copied');
 });
 
@@ -84,4 +86,39 @@ test('a file saved with a BOM in front (Notepad, PowerShell 5.1) is read as it i
   assert.deepEqual([read.language, read.userName, read.onboarded], ['en', 'Deniz', true]);
   assert.equal(settingsUnreadable(), null);
   assert.deepEqual(fs.readdirSync(dir()).filter((name) => name.includes('corrupt')), []);
+});
+
+test('the chat offers the tools set up on the first run: the first one begins the list, a tool set up later joins it', () => {
+  fresh();
+  // On a first run, nothing chosen yet: every installed tool, until one is set up.
+  assert.equal(readSettings().chatTools, null);
+  chooseChatTool('opencode');
+  assert.deepEqual(readSettings().chatTools, ['opencode'], 'OpenCode signed in to on the first run: the list begins');
+  chooseChatTool('opencode');
+  chooseChatTool('lmstudio');
+  assert.deepEqual(readSettings().chatTools, ['opencode'], 'once each; a model server is not one of them');
+  updateSettings((settings) => {
+    settings.onboarded = true;
+  });
+  chooseChatTool('claude');
+  assert.deepEqual(readSettings().chatTools, ['opencode', 'claude'], 'signed in to later, from the AI tools window');
+  forgetSettings();
+  assert.deepEqual(readSettings().chatTools, ['opencode', 'claude'], 'kept');
+  // An install from before the list, or a first run through which nothing was set up: every tool, and so it stays.
+  fs.writeFileSync(settingsPath(), JSON.stringify({ onboarded: true, chatTools: 'all' }));
+  forgetSettings();
+  assert.equal(readSettings().chatTools, null);
+  chooseChatTool('codex');
+  assert.equal(readSettings().chatTools, null);
+  fs.writeFileSync(settingsPath(), JSON.stringify({ onboarded: true, chatTools: ['qwen', 'nope', 'hermes', 'opencode'] }));
+  forgetSettings();
+  assert.deepEqual(readSettings().chatTools, ['qwen', 'opencode'], 'only the tools, whatever was written');
+});
+
+test('a tool not chosen is listed as not offered; a model server, Hermes and the stand-ins are offered as before', () => {
+  const clis: CliInfo[] = (['claude', 'codex', 'opencode', 'lmstudio', 'hermes', 'test-claude'] as const).map((id) => ({ id, name: id, available: true }));
+  const chosen = offered(clis, ['opencode']);
+  assert.deepEqual(chosen.filter((one) => one.available).map((one) => one.id), ['opencode', 'lmstudio', 'hermes', 'test-claude']);
+  assert.deepEqual(chosen.map((one) => one.id), clis.map((one) => one.id), 'still listed: a chat begun with one goes on');
+  assert.equal(offered(clis, null), clis, 'no list: every one');
 });

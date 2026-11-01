@@ -238,9 +238,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # One name without spaces: GitHub turns a space in an asset name into a dot.
-          cp "desktop/release/Cortex Setup $VERSION.exe" "Cortex-Setup-$VERSION.exe"
-          gh release upload "v$VERSION" "Cortex-Setup-$VERSION.exe" --clobber
+          # Named without spaces by the build (package.json, nsis.artifactName): GitHub turns a space in an
+          # asset name into a dot, and latest.yml names the installer as the build wrote it. latest.yml and the
+          # blockmap are what the installed app's updater reads (desktop/electron/services/updater.ts).
+          cd desktop/release
+          test -s "Cortex-Setup-$VERSION.exe"
+          grep -Fq "path: Cortex-Setup-$VERSION.exe" latest.yml
+          gh release upload "v$VERSION" "Cortex-Setup-$VERSION.exe" "Cortex-Setup-$VERSION.exe.blockmap" latest.yml --clobber
 
   publish:
     needs: [build, installer]
@@ -267,7 +271,7 @@ jobs:
         run: |
           set -euo pipefail
           assets=$(gh release view "v$VERSION" --json assets --jq '.assets[].name')
-          for name in "beyin-v3-$VERSION.zip" "beyin-v3-$VERSION.zip.sha256" "Cortex-Setup-$VERSION.exe"; do
+          for name in "beyin-v3-$VERSION.zip" "beyin-v3-$VERSION.zip.sha256" "Cortex-Setup-$VERSION.exe" "Cortex-Setup-$VERSION.exe.blockmap" latest.yml; do
             if ! printf '%s\n' "$assets" | grep -Fxq "$name"; then
               echo "The draft has no $name; not publishing." >&2
               exit 1

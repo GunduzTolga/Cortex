@@ -5,7 +5,8 @@ import { childEnv } from './acp';
 import { LOCAL_IDS, onPathAny, powerShellExe, programOf, refreshPath } from './clis';
 import { LOCAL, type LocalId, findLocal, localModel, shortContext } from './localModels';
 import { KEY_ENV, KeyRefusal, forgetKey, hasKey, keptHere, keptReadable, saveKey } from './keys';
-import { readSettings } from './settings';
+import { chooseChatTool, readSettings } from './settings';
+import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts } from './toolPackages';
 
 /**
  * Signing in to the person's AI tools, from the chat: each one asked, with
@@ -58,22 +59,12 @@ const LOGIN_POLL = 4_000;
 const LOGIN_WATCH = 10 * 60_000;
 
 /**
- * The tools installed from here, each by its maker's own installer run by Windows' PowerShell, and where it puts the
- * program. Claude Code has an installer of its own; the others are npm packages (their makers' Windows instructions),
- * installed where Node.js is there and, where it is not, the console says to install Node.js first (1 November: a fresh
- * install offered only Claude Code, and OpenCode could not be had from the app).
+ * Claude Code, installed by Anthropic's own installer run by Windows' PowerShell in a console window, and where it
+ * puts the program. OpenCode, Codex, Gemini CLI and Qwen Code are installed by Cortex itself, with no window, no npm
+ * and no Node.js (toolPackages.ts).
  */
-const npm = (pkg: string, bin: string) => ({
-  run: `if (Get-Command npm -ErrorAction SilentlyContinue) { npm install -g ${pkg} } else { Write-Host $nodeFirst -ForegroundColor Yellow }`,
-  puts: `(Join-Path $env:APPDATA 'npm\\${bin}.cmd')`,
-  from: `npm: ${pkg}`,
-});
 const INSTALLERS: Partial<Record<CliId, { run: string; puts: string; from: string }>> = {
   claude: { run: 'irm https://claude.ai/install.ps1 | iex', puts: "(Join-Path $env:USERPROFILE '.local\\bin\\claude.exe')", from: 'Anthropic: claude.ai/install.ps1' },
-  opencode: npm('opencode-ai', 'opencode'),
-  codex: npm('@openai/codex', 'codex'),
-  gemini: npm('@google/gemini-cli', 'gemini'),
-  qwen: npm('@qwen-code/qwen-code', 'qwen'),
 };
 const TOOL_NAMES: Record<CliId, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini CLI', qwen: 'Qwen Code' } as Record<CliId, string>;
 
@@ -138,7 +129,7 @@ async function statusOf(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
     signedIn: null,
     detail: null,
     canLogin: installed && tool.login !== null && process.platform === 'win32',
-    canInstall: !installed && Boolean(INSTALLERS[tool.id]) && process.platform === 'win32',
+    canInstall: !installed && Boolean(INSTALLERS[tool.id] || PACKAGES[tool.id]) && process.platform === 'win32',
     key: installed ? tool.key : null,
     baseUrl: Boolean(KEY_ENV[tool.id]?.baseUrl),
     hasKey: hasKey(tool.id),
@@ -203,6 +194,7 @@ export function startLogin(id: unknown): void {
   const program = programOf(tool.id);
   if (!tool.login || !program) throw new KeyRefusal('This tool is not signed in to from here.');
   if (process.platform !== 'win32') throw new KeyRefusal('Signing in from Cortex opens a console window, which only Windows does here.');
+  chooseChatTool(tool.id);
   const child = spawn(program.command, [...program.args, ...tool.login], { cwd: os.homedir(), env: childEnv(program.env), detached: true, stdio: 'ignore', windowsHide: !SHOW_CONSOLE, shell: false });
   let open = true;
   child.on('error', () => {
@@ -244,22 +236,43 @@ export function installScript(id: CliId, turkish: boolean): string {
   const installer = INSTALLERS[id];
   if (!installer) throw new KeyRefusal('Cortex does not install this tool.');
   const name = TOOL_NAMES[id] ?? id;
-  const [going, failed, node] = turkish
-    ? [`${name} kuruluyor (${installer.from})...`, `${name} kurulamadı. Yukarıda ne yazdığına bak; kapatmak için Enter`, `${name} Node.js ile kurulur. Önce nodejs.org adresinden Node.js LTS kur, sonra Cortex içinden yeniden dene.`]
-    : [`Installing ${name} (${installer.from})...`, `${name} was not installed. See what is written above; press Enter to close`, `${name} is installed with Node.js. Install Node.js LTS from nodejs.org first, then try again in Cortex.`];
-  return `$nodeFirst = '${node}'; Write-Host '${going}'; try { ${installer.run} } catch { Write-Host $_ -ForegroundColor Red }; if (-not (Test-Path ${installer.puts})) { Read-Host '${failed}' }`;
+  const [going, failed] = turkish
+    ? [`${name} kuruluyor (${installer.from})...`, `${name} kurulamadı. Yukarıda ne yazdığına bak; kapatmak için Enter`]
+    : [`Installing ${name} (${installer.from})...`, `${name} was not installed. See what is written above; press Enter to close`];
+  return `Write-Host '${going}'; try { ${installer.run} } catch { Write-Host $_ -ForegroundColor Red }; if (-not (Test-Path ${installer.puts})) { Read-Host '${failed}' }`;
 }
 
+/** The tools being installed by Cortex itself: a second click while one is downloading is not a second download. */
+const installing = new Set<CliId>();
+
 /**
- * A tool installed by its maker's own installer, in a console window of its own: Claude Code
- * by Anthropic's, the others by npm. When it ends, the PATH is read again, the window told, and the tool's
- * sign-in opened where it is not signed in yet.
+ * A tool installed: Claude Code by Anthropic's own installer, in a console window of its own; the others by Cortex,
+ * their makers' packages downloaded and checked here (toolPackages.ts), the promise ending when they are in place or
+ * with what went wrong. Either way, at the end the window is told and the tool's sign-in opened where it has one and
+ * is not signed in yet.
  */
-export function installTool(id: unknown): void {
+export async function installTool(id: unknown): Promise<void> {
   const tool = toolOf(id);
-  if (!INSTALLERS[tool.id]) throw new KeyRefusal('Cortex does not install this tool.');
+  if (!INSTALLERS[tool.id] && !PACKAGES[tool.id]) throw new KeyRefusal('Cortex does not install this tool.');
   if (process.platform !== 'win32') throw new KeyRefusal('Installing from Cortex opens a console window, which only Windows does here.');
   if (programOf(tool.id)) throw new KeyRefusal('This tool is installed already.');
+  chooseChatTool(tool.id);
+  if (PACKAGES[tool.id]) {
+    if (installing.has(tool.id)) throw new KeyRefusal('This tool is being installed already.');
+    installing.add(tool.id);
+    try {
+      await installPackage(tool.id);
+      // A program built for a newer processor ends at once on an older one: its maker's build for those instead.
+      const own = ownProgram(tool.id);
+      if (own && PACKAGES[tool.id]?.older?.(archOf()) && !(await starts(own))) await installPackage(tool.id, { older: true });
+    } catch (err) {
+      throw err instanceof PackageRefusal ? new KeyRefusal(err.message) : err;
+    } finally {
+      installing.delete(tool.id);
+    }
+    await afterInstall(tool);
+    return;
+  }
   const script = installScript(tool.id, readSettings().language !== 'en');
   const child = spawn(powerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { cwd: os.homedir(), env: childEnv(), detached: true, stdio: 'ignore', windowsHide: !SHOW_CONSOLE, shell: false });
   let ended = false;
@@ -290,6 +303,7 @@ export async function setToolKey(id: unknown, key: unknown, baseUrl: unknown): P
   const tool = toolOf(id);
   if (tool.key === 'cortex') {
     saveKey(tool.id, key, baseUrl);
+    chooseChatTool(tool.id);
     return;
   }
   if (tool.key !== 'cli') throw new KeyRefusal('This tool keeps its keys in its own sign-in.');
@@ -308,6 +322,7 @@ export async function setToolKey(id: unknown, key: unknown, baseUrl: unknown): P
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new KeyRefusal(stderr.trim().split('\n').pop() || 'Codex did not take the key.'))));
     child.stdin.end(`${key.trim()}\n`);
   });
+  chooseChatTool(tool.id);
 }
 
 export function forgetToolKey(id: unknown): void {

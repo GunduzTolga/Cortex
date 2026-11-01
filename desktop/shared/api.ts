@@ -39,6 +39,17 @@ export interface AppNotice {
   detail?: string;
 }
 
+/** A newer Cortex downloaded from the releases and checked, waiting to be installed (electron/services/updater.ts). */
+export interface AppUpdate {
+  version: string;
+}
+
+/** What asking to install it now came to: installed (the app quits), or not now because a setup runs, or none waiting. */
+export interface UpdateInstall {
+  installed: boolean;
+  reason?: 'busy' | 'none';
+}
+
 /** The vault by its folder's name, and whether that folder is still there; never its path. */
 export interface VaultStatus {
   vault: { name: string } | null;
@@ -110,6 +121,13 @@ export interface CortexApi {
   vaultSync: VaultSyncApi;
   /** A Hermes Agent on another machine as a chat engine: its address, profile and key (shared/hermes.ts). */
   hermes: HermesApi;
+  /** The app's own update from the releases (electron/services/updater.ts). */
+  update: {
+    /** The one downloaded and waiting, if any: a window opened after it was told asks. */
+    ready(): Promise<AppUpdate | null>;
+    /** Installed now: the app quits and opens again on the new version. */
+    install(): Promise<UpdateInstall>;
+  };
   on: {
     /** The vault changed on disk, or another vault was chosen: read the index again. */
     notesChanged(handler: () => void): () => void;
@@ -125,6 +143,8 @@ export interface CortexApi {
     voiceStatus(handler: (voice: VoiceStatus | null) => void): () => void;
     /** The listener's word changed - its voice helper fetching a model (how far), loading, ready, failed; the wake phrase heard or not; its key - or it was found not running. */
     voiceHelper(handler: (seen: ListenerSeen) => void): () => void;
+    /** A newer Cortex is downloaded and waiting to be installed. */
+    update(handler: (update: AppUpdate) => void): () => void;
     /** Something done in the background, said once (shared/api.ts, AppNotice). */
     notice(handler: (word: AppNotice) => void): () => void;
     /** The notification-area icon's "Ayarlar": open the settings. */

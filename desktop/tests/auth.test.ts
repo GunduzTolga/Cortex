@@ -1,11 +1,12 @@
 import { strict as assert } from 'node:assert';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
 import { authStatuses, claudeStatus, codexStatus, installScript, installTool, opencodeStatus, setToolKey, startLogin } from '../electron/services/auth';
-import { READ_PATH, pathOutput, withDirs } from '../electron/services/clis';
+import { READ_PATH, pathOutput, powerShellExe, withDirs } from '../electron/services/clis';
 import { forgetKey, hasKey, keyEnv, saveKey } from '../electron/services/keys';
 
 /**
@@ -91,9 +92,9 @@ test('with no tool installed, each is said to be missing and nothing is offered;
     // (1 November: a fresh install offered only Claude Code; OpenCode could not be had from the app).
     assert.deepEqual(tools.filter((one) => one.canInstall).map((one) => one.id), process.platform === 'win32' ? ['claude', 'codex', 'opencode', 'gemini', 'qwen'] : []);
     assert.ok(servers.every((one) => !one.canInstall));
-    if (process.platform !== 'win32') assert.throws(() => installTool('claude'), /only Windows/);
-    if (process.platform !== 'win32') assert.throws(() => installTool('opencode'), /only Windows/);
-    assert.throws(() => installTool('nope'), /Not a tool/);
+    if (process.platform !== 'win32') await assert.rejects(installTool('claude'), /only Windows/);
+    if (process.platform !== 'win32') await assert.rejects(installTool('opencode'), /only Windows/);
+    await assert.rejects(installTool('nope'), /Not a tool/);
     assert.ok(servers.every((one) => !one.installed && !one.canLogin && one.key === null && one.signedIn === false && one.local?.models === 0), 'a model server off and not installed: nothing to sign in to');
     assert.throws(() => startLogin('claude'), /not signed in to from here/);
     assert.throws(() => startLogin('nope'), /Not a tool/);
@@ -123,20 +124,18 @@ test('Claude Code is installed by Anthropic’s own installer, its window kept o
   assert.throws(() => installScript('nope' as never, true), /does not install/);
 });
 
-test('OpenCode, Codex, Gemini CLI and Qwen Code are installed by npm, and where Node.js is missing the console says so', () => {
-  const expected = { opencode: 'opencode-ai', codex: '@openai/codex', gemini: '@google/gemini-cli', qwen: '@qwen-code/qwen-code' } as const;
-  for (const [id, pkg] of Object.entries(expected)) {
-    for (const turkish of [true, false]) {
-      const script = installScript(id as keyof typeof expected, turkish);
-      assert.ok(script.includes(`npm install -g ${pkg}`), `${id}: its npm package`);
-      assert.ok(script.includes('Get-Command npm'), `${id}: npm looked for first`);
-      assert.ok(script.includes(`'npm\\${id}.cmd'`), `${id}: checked where npm puts it`);
-      assert.ok(!script.includes('"'), 'no double quote');
-      for (const said of script.match(/'[^']*'/g) ?? []) assert.ok(!said.slice(1, -1).includes("'"), said);
-    }
+test('only Claude Code has a console installer: OpenCode, Codex, Gemini CLI and Qwen Code are Cortex’s to install, with no npm and no Node.js', () => {
+  for (const id of ['opencode', 'codex', 'gemini', 'qwen'] as const) assert.throws(() => installScript(id, true), /does not install/);
+  const source = fs.readFileSync('electron/services/auth.ts', 'utf8');
+  assert.ok(!/npm install|nodejs\.org|Node\.js is needed/.test(source), 'no npm and no Node.js anywhere in the installers');
+});
+
+test('Claude Code’s console script is PowerShell without a fault (Windows)', { skip: process.platform !== 'win32' }, () => {
+  for (const turkish of [true, false]) {
+    const parse = '$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($env:CORTEX_SCRIPT, [ref]$null, [ref]$errors); $errors | ForEach-Object { $_.Message }';
+    const said = execFileSync(powerShellExe(), ['-NoProfile', '-NonInteractive', '-Command', parse], { encoding: 'utf8', env: { ...process.env, CORTEX_SCRIPT: installScript('claude', turkish) }, windowsHide: true });
+    assert.equal(said.trim(), '', turkish ? 'tr' : 'en');
   }
-  assert.ok(installScript('opencode', true).includes('OpenCode kuruluyor'), 'named in the window’s language');
-  assert.ok(installScript('opencode', true).includes('Node.js LTS'), 'says to install Node.js first where npm is missing');
 });
 
 test('the PATH is read again for a tool installed while the app was open: what it lacks is added after it, once, whatever its case', () => {

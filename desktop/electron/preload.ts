@@ -125,6 +125,10 @@ const api: CortexApi = {
     restartListener: () => invoke('setup:restartListener'),
     hotkey: (spec) => invoke('setup:hotkey', spec),
   },
+  update: {
+    ready: () => invoke('update:ready'),
+    install: () => invoke('update:install'),
+  },
   on: {
     notesChanged: (handler) => subscribe('notes:changed', handler),
     vaultSync: (handler) => listen<SyncStatus>('vaultSync:status', handler),
@@ -133,6 +137,7 @@ const api: CortexApi = {
     setup: (handler) => listen('setup:event', handler),
     voiceStatus: (handler) => listen('setup:voice', handler),
     voiceHelper: (handler) => listen('setup:helper', handler),
+    update: (handler) => listen('app:update', handler),
     notice: (handler) => listen('app:notice', handler),
     openSettings: (handler) => {
       settingsHeard.add(handler);
