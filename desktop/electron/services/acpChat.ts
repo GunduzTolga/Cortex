@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { app } from 'electron';
 import type { CliId, ConfigOption, PermissionKind, ToolStatus } from '../../shared/chat';
 import { AcpConnection, AcpError } from './acp';
@@ -343,8 +346,75 @@ function providerRefusal(failure: TurnFailure, options: ConfigOption[] | undefin
   return provider ? new TurnFailure(`The chosen model's provider (${provider}) is not signed in.`, 'provider-auth') : failure;
 }
 
+/** Where OpenCode writes its log (XDG data, as it keeps its sign-ins): ~/.local/share/opencode/log, on Windows too. */
+export const opencodeLogDir = (env: NodeJS.ProcessEnv = process.env): string =>
+  path.join(env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'opencode', 'log');
+
+/** The end of a log read: enough for the minutes a turn takes, little of a log grown over months. */
+const LOG_TAIL = 512 * 1024;
+
+/**
+ * What OpenCode wrote in its own log of the refusal of a turn begun at `since`: the provider's own sentence, as "This API
+ * key has expired. Create a new API key in OpenCode Console…". Its ACP says only "provider authentication required";
+ * 2 November, the sentence was in its log since the morning, through thirty sign-ins that could not help. Null where
+ * it wrote none: no log, none since the turn began, or none of a provider's refusal.
+ */
+export function opencodeSaid(since: number, dir: string = opencodeLogDir()): string | null {
+  let files: Array<{ file: string; at: number }>;
+  try {
+    files = fs
+      .readdirSync(dir)
+      .filter((name) => name.endsWith('.log'))
+      .map((name) => ({ file: path.join(dir, name), at: fs.statSync(path.join(dir, name)).mtimeMs }))
+      .filter((one) => one.at >= since - 5_000)
+      .sort((a, b) => b.at - a.at)
+      .slice(0, 3);
+  } catch {
+    return null;
+  }
+  for (const { file } of files) {
+    let text: string;
+    try {
+      const fd = fs.openSync(file, 'r');
+      try {
+        const size = fs.fstatSync(fd).size;
+        const length = Math.min(size, LOG_TAIL);
+        const buffer = Buffer.alloc(length);
+        fs.readSync(fd, buffer, 0, length, size - length);
+        text = buffer.toString('utf8');
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      continue;
+    }
+    const lines = text.split(/\r?\n/).reverse();
+    for (const line of lines) {
+      if (!/\bERROR\b/.test(line)) continue;
+      // 2.x: `timestamp=2026-11-02T18:18:13.984Z level=ERROR`; 1.x: `ERROR 2026-08-01T22:21:22 +993ms` (local time).
+      const stamp = /timestamp=(\S+Z)\b/.exec(line)?.[1] ?? /^ERROR\s+(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)/.exec(line)?.[1];
+      const at = stamp ? Date.parse(stamp) : NaN;
+      if (Number.isNaN(at)) continue;
+      if (at < since - 2_000) break;
+      const said = /(?:AI\.Error|AI_APICallError|AI_LoadAPIKeyError|LoadAPIKeyError|ProviderAuthError|AuthenticationError):\s*(.+?)(?:\\n|\\"|"|$)/.exec(line)?.[1]?.trim();
+      if (said) return said.slice(0, 300);
+    }
+  }
+  return null;
+}
+
+/** OpenCode's own sentence for a refusal of its sign-in, where its log has one: said instead of the protocol's. */
+async function withOpencodeCause(cli: CliId, failure: TurnFailure, since: number): Promise<TurnFailure> {
+  if (cli !== 'opencode' || (failure.kind !== 'auth' && failure.kind !== 'provider-auth')) return failure;
+  // Written as it refused: given a moment to reach the file.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const said = opencodeSaid(since);
+  return said ? new TurnFailure(`OpenCode: ${said}`, 'provider-key') : failure;
+}
+
 export const acpBackend: Backend = {
   async run(original, message) {
+    const began = Date.now();
     let sessionId: string | null = null;
     let entry: Running | null = null;
     const turn: Turn = {
@@ -367,7 +437,7 @@ export const acpBackend: Backend = {
     } catch (err) {
       // After Stop, however the program ended the turn - its answer, an error, the program ended - the turn was stopped.
       if (err instanceof Stopped || turn.signal.aborted) return 'cancelled';
-      throw providerRefusal(failureOf(err), shown.get(turn.chatId));
+      throw await withOpencodeCause(turn.cli, providerRefusal(failureOf(err), shown.get(turn.chatId)), began);
     } finally {
       if (sessionId && entry && running.get(sessionId) === entry) running.delete(sessionId);
       const timer = stopping.get(turn.chatId);

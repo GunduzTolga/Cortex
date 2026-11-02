@@ -19,6 +19,9 @@ import { useApp } from '../src/store/app';
 
 test('a sentence with a path, a name or a folder keeps them as they were', () => {
   assert.equal(turkishOf('Not a note: Notes/x.md'), 'Not değil: Notes/x.md');
+  // OpenCode's own sentence from its log: the expired key said in Turkish with what to do; another left as it wrote it.
+  assert.match(turkishOf('OpenCode: This API key has expired. Create a new API key in OpenCode Console and replace it in your client or secret store.'), /^OpenCode: bu API anahtarının süresi dolmuş\./);
+  assert.equal(turkishOf('OpenCode: Rate limit exceeded'), 'OpenCode diyor ki: Rate limit exceeded');
   assert.equal(turkishOf('Not a folder: Projeler/2026'), 'Klasör değil: Projeler/2026');
   assert.equal(turkishOf('A note named Plan is already in Projeler/2026.'), 'Projeler/2026 klasöründe Plan adında bir not zaten var.');
   assert.equal(turkishOf('Something named Taslak.md is already in Gelen.'), 'Gelen klasöründe Taslak.md adında bir şey zaten var.');

@@ -399,6 +399,7 @@ export const en = {
   'chat.waiting.go': 'Go to Pyn',
   'chat.waiting.badge': 'Pyn is waiting for your permission for a step',
   'chat.error.quota': 'This model\'s quota or balance has run out. Choose another model.',
+  'chat.error.providerKey': 'OpenCode could not reach the chosen model\'s provider; OpenCode\'s own words are below. If the key has expired or is not valid, create a new API key on the provider\'s site (opencode.ai for OpenCode Go), then enter it with Sign in. Signing in again with the old key does not help.',
   'chat.error.providerAuth': 'The chosen model\'s provider is not signed in, or its key cannot be read. Pick a model of a provider you signed in to from the model list below (for OpenCode Go, those starting opencode-go/), or connect this provider again with Sign in. If it goes on while signed in: AI tools → OpenCode → Remove, then Add.',
   'chat.error.auth': 'This AI tool is not signed in. Sign in with “Sign in” below or add its key, then write again.',
   'chat.error.model': 'This model cannot be used with this account. Choose another model.',

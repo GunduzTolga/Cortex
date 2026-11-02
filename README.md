@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.46" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.46-E8B23A">
+  <img alt="Sürüm 1.0.47" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.47-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -186,6 +186,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.47](docs/v3/releases/1.0.47.md) | OpenCode bir mesajı reddedince asıl sebebi (örneğin "API anahtarının süresi dolmuş") kendi günlüğünden okunup sohbette gösteriliyor. Aynı araç için giriş penceresi açıkken ikincisi açılmıyor. |
 | [1.0.46](docs/v3/releases/1.0.46.md) | Yapay zeka araçları penceresinde **Ekle** ve **Sil**: Sil aracın girişini bu bilgisayardan siler, sohbetten kaldırır ve Cortex'in indirdiği programı siler; Ekle sıfırdan kurar ve girişi açar. Yeni sohbette model ve mod ilk mesajdan önce seçiliyor. OpenCode 1.19'un giriş listesi okunuyor. |
 | [1.0.45](docs/v3/releases/1.0.45.md) | OpenCode sohbeti giriş yaptığın sağlayıcının modeliyle başlıyor: OpenCode Go'ya giriş yapılmışken sohbet OpenCode Zen'in modeliyle açılıyor, her mesaj "provider authentication required" ile reddediliyordu. Böyle bir hata artık hangi sağlayıcıya giriş gerektiğini söylüyor. |
 | [1.0.44](docs/v3/releases/1.0.44.md) | "Hey Pyn" AMD ekran kartlı dizüstülerde birkaç saniye daha erken duyuluyor: söz işlemcideki küçük modelle denetleniyor, sözün kendisi ayrıca yazıya çevrilmiyor; pilde Windows sesi yavaşlatmıyor; whisper.cpp kapanırsa yeniden başlıyor. Yapay zeka araçları penceresinde sohbetteki araç yeşil "Giriş yapıldı", sohbette olmayan "Cortex'te kullanılmıyor" diyor. "Her şeyiyle sil"den sonra hafıza yeni sürüme güncellenebiliyor. "Hepsini sil" Whisper "Hepsini sildim" yazsa da çalışıyor. |

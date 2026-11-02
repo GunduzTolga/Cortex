@@ -114,6 +114,14 @@ const RULES: Rule[] = [
     say: () => 'Aracın girişi silindi ve sohbetten kaldırıldı, ama dosyaları şu an kullanımda. Cortex’i kapatıp yeniden aç, sonra bir kez daha Sil’e bas.',
   },
   // electron/services/acpChat.ts: OpenCode signed in, the chosen model's provider not
+  // OpenCode's own sentence from its log (acpChat.ts, opencodeSaid): the ones that say what to do, in Turkish; the rest as it wrote them.
+  {
+    pattern: /^OpenCode: (?:This|Your) API key has expired\b/,
+    say: () => 'OpenCode: bu API anahtarının süresi dolmuş. opencode.ai\'de (OpenCode Console) yeni bir API anahtarı oluştur ve onu gir; yeniden giriş yapmak eski anahtarı yenilemez.',
+  },
+  { pattern: /^OpenCode: (?:Verify your API key is correct|Invalid API key)\b/i, say: () => 'OpenCode: API anahtarı geçersiz. Sağlayıcının sitesindeki anahtarı yeniden kopyalayıp gir.' },
+  { pattern: /^OpenCode: Insufficient balance\b/, say: () => 'OpenCode: hesapta yeterli bakiye yok. Sağlayıcının sitesinde bakiye ya da aboneliği kontrol et.' },
+  { pattern: /^OpenCode: (.+)$/, say: ([said]) => `OpenCode diyor ki: ${said}` },
   { pattern: /^The chosen model's provider \((.+)\) is not signed in\.$/, say: ([provider]) => `Seçili modelin sağlayıcısına (${provider}) giriş yapılmamış.` },
   // electron/services/toolPackages.ts: OpenCode, Codex, Gemini CLI and Qwen Code installed by Cortex
   { pattern: /^The download did not start: check the internet connection and try again\.$/, say: () => 'İndirme başlamadı: internet bağlantını denetleyip yeniden dene.' },

@@ -393,6 +393,7 @@ export const tr: Record<keyof typeof en, string> = {
   'chat.waiting.go': 'Pyn’e git',
   'chat.waiting.badge': 'Pyn bir adım için izin bekliyor',
   'chat.error.quota': 'Bu modelin kotası ya da bakiyesi bitmiş. Başka bir model seç.',
+  'chat.error.providerKey': 'OpenCode, seçili modelin sağlayıcısına bağlanamadı; OpenCode\'un kendi açıklaması aşağıda. Anahtarın süresi dolduysa ya da geçersizse sağlayıcının sitesinde yeni bir API anahtarı oluştur (OpenCode Go için opencode.ai), sonra Giriş yap ile onu gir. Eski anahtarla yeniden giriş yapmak işe yaramaz.',
   'chat.error.providerAuth': 'Seçili modelin sağlayıcısına giriş yapılmamış ya da anahtarı okunamıyor. Aşağıdaki model listesinden giriş yaptığın sağlayıcının bir modelini seç (OpenCode Go için opencode-go/ ile başlayanlar), ya da Giriş yap ile bu sağlayıcıya yeniden bağlan. Giriş yapılmış göründüğü halde sürüyorsa: Yapay zeka araçları → OpenCode → Sil, sonra Ekle.',
   'chat.error.auth': 'Bu yapay zeka aracına giriş yapılmamış. Aşağıdaki “Giriş yap” ile giriş yap ya da anahtarını ekle, sonra tekrar yaz.',
   'chat.error.model': 'Bu model bu hesapla kullanılamıyor. Başka bir model seç.',
