@@ -140,7 +140,8 @@ Her faz başlarken kendi tasarım belgesini alır.
   çağırır. Desteklenmeyen bir ortamda (Python 3.11 yok, systemd yok) neyin eksik olduğunu tek cümleyle söyleyip durur.
   Zamanlayıcının oturum kapalıyken çalışması için `loginctl enable-linger` gerekir; sudo isterse bunu açıkça yazar.
 - Eşleşince günlük işler uygulamadan yapılır: sunucu durumu (son eşitleme, motor sürümü, ajanlar), "motoru güncelle",
-  "onar" (`beyin.py doctor`). Bunlar Faz 5'teki kapıdan geçer.
+  "onar" (`beyin.py doctor`). Kapı (Faz 5) gelene kadar bunlar kasa üzerinden yürür: sunucu durumunu kasadaki küçük
+  bir durum dosyasına yazar, uygulama istekleri yine kasaya bırakır; eşitleme taşır. Üçüncü köprü kurulmaz.
 - Neden SSH otomasyonu değil: kurulum bir kez yapılır; her dağıtımın farkı ayrı destek işi olur; uygulamanın sunucuya
   anahtarla girmesi herkese açık bir üründe büyük bir güvenlik yüzeyidir.
 - Bitti: boş bir Linux makinesine tek komut yapıştırılıyor, uygulama sunucuyu görüyor ve güncelleyebiliyor.
