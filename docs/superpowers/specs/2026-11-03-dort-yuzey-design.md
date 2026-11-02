@@ -17,7 +17,7 @@ tasarım belgesini (`docs/superpowers/specs/`) ve planını alır.
 - Sunucu: kasa kopyası + motor + ajanlar + kapı.
 - Telefon: kopya tutmaz, kapıdan bakar.
 
-Aşağıdaki kurallar bu resmi korumak için var. Geliştiricinin kendi sistemi için yapılacak tek iş Faz 0'dır; Faz 1–5,
+Aşağıdaki kurallar bu resmi korumak için var. Geliştiricinin kendi sistemi için yapılacak tek iş Faz 0'dır; Faz 1–6,
 aynı düzeni başkalarının terminale dokunmadan kurabilmesi için ürün işidir.
 
 ## Amaç
@@ -86,16 +86,26 @@ Bugün masaüstü uygulaması eşitlenmeyen ayrı bir kasada; asıl kasanın klo
   `beyin-yakala` beceri klasörleri eklendi (3 Kasım; yoksa eşitleme onları commit'lerdi).
 - Uygulamada: Ayarlar › Kasa → klon; Ayarlar › Sunucu → Eşitle açık; sunucudaki Pyn anahtarı.
 - Bitti: telefonda yazılan not birkaç dakikada masaüstünde, masaüstündeki sunucuda.
-- Kazanç: 1.0.40 eşitlemesi ilk kez gerçek kullanımda sınanır; Faz 1 bu temelin üstüne kurulacak.
+- Kazanç: 1.0.40 eşitlemesi ilk kez gerçek kullanımda sınanır; Faz 2 bu temelin üstüne kurulacak.
 
-## Ürün için (Faz 1–5)
+## Ürün için (Faz 1–6)
 
 Her faz başlarken kendi tasarım belgesini alır.
 
-### Faz 1 — GitHub ile yedek ve eşitleme
+### Faz 1 — Her AI aracına hafıza: `beyin.py mcp` (küçük, önce gelir)
+- Araç sözleşmesi motorda (kural 7): `beyin.py mcp` (stdio MCP, yalnız standart kütüphane) Cortex Browser ADR-0006'daki
+  araçları sunar: `search`, `context`, `capture`, `note_create`; gerisi reddedilir.
+- `private` notların bu yoldan hiç dönmediği testle sabitlenir; araç şemaları sürümlenir ("MCP sözleşmesi değişti"
+  satırı sürüm notunda zorunlu); `capture` hazır metin alır, URL çekmez.
+- Uygulama, kurulu MCP istemcilerine (Claude Code, Claude Desktop, Codex, Cursor…) "Cortex'i ekle" düğmesiyle tanıtır.
+- Neden önce: küçük ve standart bir iş; çıktığı gün her AI aracı aynı hafızayı kullanır ve gösterilebilir bir sonuç
+  verir. Faz 5'teki kapı ve Faz 6'daki Browser aynı araçları kullanır.
+- Bitti: Claude Desktop'tan "hafızamda X'i ara" kasadan cevap veriyor; gizli not hiç görünmüyor.
+
+### Faz 2 — GitHub ile yedek ve eşitleme
 - **İlk adım: eşitleme motora taşınır** (`beyin.py esitle`). Commit, `pull --rebase`, push, sır taraması, çakışmada geri
   çekilme ve ilk gönderim/birleşme kuralları bir kez Python'da yazılır; `vaultSync.ts` yalnız zamanlamayı, ekranı ve
-  kimlik bilgisini vermeyi tutar. Böylece fazın yeni davranışları TypeScript'te yazılıp Faz 2'de yeniden yazılmaz.
+  kimlik bilgisini vermeyi tutar. Böylece fazın yeni davranışları TypeScript'te yazılıp Faz 3'te yeniden yazılmaz.
   Geliştiricinin sunucusundaki betik de bu komuta geçer.
 - **Giriş:** "GitHub ile bağlan" → tarayıcıda cihaz kodu onayı (OAuth cihaz akışı). MCP değil: eşitleme modelsiz,
   arka planda çalışır. Anahtar diğer araçlarınki gibi şifreli saklanır (`keys.ts`), git'e yalnız ortam değişkeniyle
@@ -113,15 +123,15 @@ Her faz başlarken kendi tasarım belgesini alır.
   GitHub App; fazın tasarımında kesinleşir.
 - Bitti: temiz bir Windows'ta, terminale dokunmadan, iki bilgisayar arasında not gidip geliyor.
 
-### Faz 2 — Sunucu ekle
+### Faz 3 — Sunucu ekle
 - Ayarlar › Sunucu › "Sunucu ekle": adres ve kullanıcı adı, şifre bir kez. Uygulama SSH anahtarı üretip yükler; sonra
   şifre bir daha sorulmaz.
-- Uygulama sunucuya motoru kurar, kasayı GitHub'dan klonlar, eşitleme zamanlayıcısını kurar: Faz 1'deki
+- Uygulama sunucuya motoru kurar, kasayı GitHub'dan klonlar, eşitleme zamanlayıcısını kurar: Faz 2'deki
   `beyin.py esitle`'yi `systemd --user` zamanlayıcısıyla çağırır (sudo'suz). Zamanlayıcının oturum kapalıyken de
   çalışması için `loginctl enable-linger` gerekir; bu sudo isteyebilir, ekranda açıkça söylenir.
 - Bitti: boş bir Linux makinesi uygulamadan kuruluyor ve eşitleniyor.
 
-### Faz 3 — Beceriler ve öğrenme masaüstünde
+### Faz 4 — Beceriler ve öğrenme masaüstünde
 - **Beceriler kasanın içinde** (`plugins/` + `.claude-plugin/marketplace.json`). Eşitleme onları da her cihaza taşır;
   ayrı bir dağıtım yok.
 - Uygulama kasayı Claude Code'a beceri kaynağı olarak kendisi tanıtır (bugün terminal betiğinin yaptığı iş), otomatik
@@ -132,31 +142,28 @@ Her faz başlarken kendi tasarım belgesini alır.
 - Genel contribute becerisi Cortex'le gelir; geliştiricinin kişisel becerileri onun özel kasasında kalır.
 - Açık karar (fazın tasarımında): onay GitHub varken PR mı, her durumda yerel mi; tek yol seçilecek.
 
-### Faz 4 — Telefon ve tek sunucu kapısı (en büyük faz, kendi tasarım oturumu)
-- **İlk adım: araç sözleşmesi motorda** (kural 7). `beyin.py mcp` (stdio, yalnız standart kütüphane) ADR-0006'daki
-  araçları sunar; `private` filtresinin bu yolda testi, araç şemalarının sürümlenmesi ("MCP sözleşmesi değişti" satırı
-  sürüm notunda zorunlu), URL çekmeyen `capture` girişi. Bu parça kapıdan önce biter; Claude Code, Codex ve Faz 5
-  için tek başına yeter.
+### Faz 5 — Telefon ve tek sunucu kapısı (en büyük faz, kendi tasarım oturumu)
 - Panelin herkese yarayan kısmı motorla gelen **Cortex sunucu kapısına** dönüşür: tek adres, tek anahtar; aynı araçları
   HTTP'den sunar. Motorun bugünkü `ingest-server`'ı (yakala ucu) bu kapının çekirdeği olabilir.
 - Hermes API'si dışarı açılmaz, kapının arkasında kalır; masaüstündeki sunucudaki Pyn de aynı kapıdan konuşur
   (`hermesChat.ts` için yalnız adres değişir).
 - Telefon uygulaması bu repoya girer, genel olur. Geliştiriciye özel akışlar atölye eklentisi olarak kalır.
 
-### Faz 5 — Cortex Browser
+### Faz 6 — Cortex Browser
 - Kendi kasası ve eşitlemesi yok. Cortex Browser ADR-0006'ya göre aynı bilgisayardaki kasanın motorunu
   (`<python> <kasa>\beyin.py mcp`) alt süreç olarak başlatır, stdio üzerinden MCP konuşur: port açılmaz, masaüstü
   uygulamasının açık olması gerekmez.
 - İlk işler: sayfayı kasaya at (yakala), yan panelde Pyn ile sayfa hakkında konuşmak. Ayrıntı kendi tasarımında,
-  Faz 1–3 oturduktan sonra.
+  Faz 1–4 oturduktan sonra.
 
 ## Sıra
 
-0 hemen değer verir ve temeli sınar. 1 her şeyin altıdır. 2 ve 3 yalnız 1'e dayanır, birbirinden bağımsızdır.
-4, 2'nin kurduğu sunucuyu ister. 5 en son; 4'ün ilk adımını (`beyin.py mcp`) ister, kapıyı istemez.
+0 hemen değer verir ve temeli sınar. 1 küçük, kimseye dayanmaz ve hemen gösterilebilir. 2 eşitlemenin altıdır.
+3 ve 4 yalnız 2'ye dayanır, birbirinden bağımsızdır. 5, 3'ün kurduğu sunucuyu ve 1'in araçlarını ister. 6 en son;
+1'i ister, kapıyı istemez.
 
 ## Kapsam dışı
 
 - Telefona kasa kopyası (Android'de git): telefon pencere kalır.
-- GitHub dışında bir merkez (ör. sunucunun kendisi). İhtiyaç çıkarsa Faz 2'den sonra.
+- GitHub dışında bir merkez (ör. sunucunun kendisi). İhtiyaç çıkarsa Faz 3'ten sonra.
 - Geliştiricinin kişisel zamanlanmış işlerinin ürüne taşınması.
