@@ -36,17 +36,22 @@ Sorunlar:
    - *Sunucu kapısı:* canlı işler için tek adres, tek anahtar (sohbet, görev, yakala, onay, bildirim).
    Üçüncü köprü kurulmaz.
 3. **Tek motor, tek eşitleme kuralı.** Kopya tutan her cihazda aynı motor (`beyin.py`); eşitleme de motorda bir kez yazılır.
-4. **Pencereler ince.** Telefon ve tarayıcı kopya tutmaz, iş yapmaz; bir kapıya bağlanır.
+4. **Pencereler ince.** Telefon ve tarayıcı kopya tutmaz, iş yapmaz. Telefon sunucu kapısına, tarayıcı aynı
+   bilgisayardaki motora bağlanır.
 5. **Ürün ve atölye ayrı.** Bu repoya yalnız herkese yarayan girer. Geliştiriciye özel zamanlanmış işler, akışlar ve
    beceriler onun özel kasasında ya da sunucusunda kalır.
 6. **Uygulamadan kurulur.** GitHub girişi, sunucu ekleme, beceriler: hepsi düğmeyle.
+7. **Tek araç sözleşmesi, iki taşıma.** Kasaya dışarıdan erişen her yüz aynı araçları kullanır (Cortex Browser
+   ADR-0006: `search`, `context`, `capture`, `note_create`; gerisi reddedilir; `private` notlar hiç dönmez; web'den
+   gelen içerik güvenilmez işaretlenir). Aynı bilgisayarda stdio MCP (`beyin.py mcp`), uzaktan sunucu kapısı (HTTP +
+   anahtar). Kurallar motorda bir kez yazılır; iki ayrı API olmaz.
 
 ## Hedef
 
 ```mermaid
 flowchart TB
   T["Telefon Cortex<br/>pencere"] -->|sunucu kapısı| S["Sunucu<br/>kasa kopyası + motor + ajanlar + kapı"]
-  B["Cortex Browser<br/>pencere"] -->|yerel kapı| M["Masaüstü Cortex<br/>kasa kopyası + motor + ajanlar"]
+  B["Cortex Browser<br/>pencere"] -->|stdio MCP: beyin.py mcp| M["Masaüstü Cortex<br/>kasa kopyası + motor + ajanlar"]
   M -->|sunucu kapısı: canlı sohbet| S
   S <-->|git eşitlemesi| G[("GitHub özel repo<br/>merkez ve yedek")]
   M <-->|git eşitlemesi| G
@@ -60,31 +65,39 @@ flowchart TB
 
 ### Faz 0 — Geliştiricinin bilgisayarını tek beyne bağla (kod yok, ~1 saat)
 Bugün masaüstü uygulaması eşitlenmeyen ayrı bir kasada; asıl kasanın klonu günlerdir geride.
-- Klonu güncelle; bu arada ayrı kasada yazılan notları klona taşı; kasa `.gitignore`'una motorun yeni
-  `beyin-yakala` beceri klasörlerini ekle (yoksa eşitleme onları commit'ler).
+- Klonu güncelle; bu arada ayrı kasada yazılan notları klona taşı. Kasa `.gitignore`'una motorun yeni
+  `beyin-yakala` beceri klasörleri eklendi (3 Kasım; yoksa eşitleme onları commit'lerdi).
 - Uygulamada: Ayarlar › Kasa → klon; Ayarlar › Sunucu → Eşitle açık; sunucudaki Pyn anahtarı.
 - Bitti: telefonda yazılan not birkaç dakikada masaüstünde, masaüstündeki sunucuda.
 - Kazanç: 1.0.40 eşitlemesi ilk kez gerçek kullanımda sınanır; Faz 1 bu temelin üstüne kurulacak.
 
 ### Faz 1 — GitHub ile yedek ve eşitleme (ürün)
+- **İlk adım: eşitleme motora taşınır** (`beyin.py esitle`). Commit, `pull --rebase`, push, sır taraması, çakışmada geri
+  çekilme ve ilk gönderim/birleşme kuralları bir kez Python'da yazılır; `vaultSync.ts` yalnız zamanlamayı, ekranı ve
+  kimlik bilgisini vermeyi tutar. Böylece fazın yeni davranışları TypeScript'te yazılıp Faz 2'de yeniden yazılmaz.
+  Geliştiricinin sunucusundaki betik de bu komuta geçer.
 - **Giriş:** "GitHub ile bağlan" → tarayıcıda cihaz kodu onayı (OAuth cihaz akışı). MCP değil: eşitleme modelsiz,
   arka planda çalışır. Anahtar diğer araçlarınki gibi şifreli saklanır (`keys.ts`), git'e yalnız ortam değişkeniyle
   verilir, diske ya da komut satırına yazılmaz.
 - **Repo:** "Yeni yedek oluştur" (özel repo açar, kasayı ilk kez gönderir) ya da "Var olan kasama bağlan" (repoyu seçtirir,
   yereldeki notları içeri alır; aynı adlı not iki tarafta farklıysa ikisi de kalır, hiçbir şey silinmez).
 - **Git:** bilgisayarda yoksa uygulama taşınabilir git'i indirir (`%LOCALAPPDATA%\Cortex\tools`, OpenCode gibi).
-- **`.gitignore`:** motorun önerdiği liste (`docs/v3/MULTI-MACHINE.md`) uygulama tarafından yazılır.
+- **`.gitignore`:** motorun önerdiği liste (`docs/v3/MULTI-MACHINE.md`) uygulama tarafından yazılır. Listeye ve şablon
+  `.gitignore`'a `beyin-yakala` beceri klasörleri de eklenir (bugün ikisinde de yok).
 - **Bildirim:** sorunsuz eşitleme sessiz; pencere açılınca tek satır "Gelenler: 5 not, 2 görev". Uyarı yalnız çakışma ve
   sırda (bugünkü gibi).
-- Geliştiricinin tek seferlik işi: GitHub'da Cortex için bir OAuth App kaydı (istemci kimliği açık repoda durabilir).
+- Geliştiricinin tek seferlik işi: GitHub'da Cortex için bir uygulama kaydı (istemci kimliği açık repoda durabilir).
+  Klasik OAuth App'in `repo` izni kullanıcının bütün özel repolarına erişim verir; GitHub App yalnız seçilen kasa
+  reposuna izin alır (Contents: okuma/yazma), token süreli ve yenilenebilir olur; cihaz kodu akışı onda da var. Tercih
+  GitHub App; fazın tasarımında kesinleşir.
 - Bitti: temiz bir Windows'ta, terminale dokunmadan, iki bilgisayar arasında not gidip geliyor.
 
 ### Faz 2 — Sunucu ekle (ürün)
 - Ayarlar › Sunucu › "Sunucu ekle": adres ve kullanıcı adı, şifre bir kez. Uygulama SSH anahtarı üretip yükler; sonra
   şifre bir daha sorulmaz.
-- Uygulama sunucuya motoru kurar, kasayı GitHub'dan klonlar, eşitleme zamanlayıcısını kurar.
-- **Eşitleme motora taşınır** (`beyin.py esitle`): masaüstü de sunucu da aynı kodu çağırır; `vaultSync.ts` yalnız
-  zamanlamayı ve ekranı tutar. Sır taraması da tek kopya olur. Geliştiricinin sunucusundaki betik bu komuta geçer.
+- Uygulama sunucuya motoru kurar, kasayı GitHub'dan klonlar, eşitleme zamanlayıcısını kurar: Faz 1'deki
+  `beyin.py esitle`'yi `systemd --user` zamanlayıcısıyla çağırır (sudo'suz). Zamanlayıcının oturum kapalıyken de
+  çalışması için `loginctl enable-linger` gerekir; bu sudo isteyebilir, ekranda açıkça söylenir.
 - Bitti: boş bir Linux makinesi uygulamadan kuruluyor ve eşitleniyor.
 
 ### Faz 3 — Beceriler ve öğrenme masaüstünde (ürün)
@@ -99,21 +112,27 @@ Bugün masaüstü uygulaması eşitlenmeyen ayrı bir kasada; asıl kasanın klo
 - Açık karar (fazın tasarımında): onay GitHub varken PR mı, her durumda yerel mi; tek yol seçilecek.
 
 ### Faz 4 — Telefon ve tek sunucu kapısı (ürün; en büyük faz, kendi tasarım oturumu)
-- Panelin herkese yarayan kısmı motorla gelen **Cortex sunucu kapısına** dönüşür: tek adres, tek anahtar. Motorun
-  bugünkü `ingest-server`'ı (yakala ucu) bu kapının çekirdeği olabilir.
+- **İlk adım: araç sözleşmesi motorda** (kural 7). `beyin.py mcp` (stdio, yalnız standart kütüphane) ADR-0006'daki
+  araçları sunar; `private` filtresinin bu yolda testi, araç şemalarının sürümlenmesi ("MCP sözleşmesi değişti" satırı
+  sürüm notunda zorunlu), URL çekmeyen `capture` girişi. Bu parça kapıdan önce biter; Claude Code, Codex ve Faz 5
+  için tek başına yeter.
+- Panelin herkese yarayan kısmı motorla gelen **Cortex sunucu kapısına** dönüşür: tek adres, tek anahtar; aynı araçları
+  HTTP'den sunar. Motorun bugünkü `ingest-server`'ı (yakala ucu) bu kapının çekirdeği olabilir.
 - Hermes API'si dışarı açılmaz, kapının arkasında kalır; masaüstündeki sunucudaki Pyn de aynı kapıdan konuşur
   (`hermesChat.ts` için yalnız adres değişir).
 - Telefon uygulaması bu repoya girer, genel olur. Geliştiriciye özel akışlar atölye eklentisi olarak kalır.
 
 ### Faz 5 — Cortex Browser
-- Kendi kasası, motoru, eşitlemesi yok. Aynı bilgisayardaki masaüstü Cortex'e yerel kapıdan bağlanır.
+- Kendi kasası ve eşitlemesi yok. Cortex Browser ADR-0006'ya göre aynı bilgisayardaki kasanın motorunu
+  (`<python> <kasa>\beyin.py mcp`) alt süreç olarak başlatır, stdio üzerinden MCP konuşur: port açılmaz, masaüstü
+  uygulamasının açık olması gerekmez.
 - İlk işler: sayfayı kasaya at (yakala), yan panelde Pyn ile sayfa hakkında konuşmak. Ayrıntı kendi tasarımında,
   Faz 1–3 oturduktan sonra.
 
 ## Sıra
 
 0 hemen değer verir ve temeli sınar. 1 her şeyin altıdır. 2 ve 3 yalnız 1'e dayanır, birbirinden bağımsızdır.
-4, 2'nin kurduğu sunucuyu ister. 5 en son.
+4, 2'nin kurduğu sunucuyu ister. 5 en son; 4'ün ilk adımını (`beyin.py mcp`) ister, kapıyı istemez.
 
 ## Kapsam dışı
 
