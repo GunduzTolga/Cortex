@@ -22,6 +22,7 @@ import {
   shownPath,
   shutdownChats,
 } from '../electron/services/chat';
+import { signedInChoice } from '../electron/services/acpChat';
 import { STOP_GRACE, cardTextFor } from '../electron/services/chatKit';
 import { renameRetrying, writeWhole } from '../electron/services/fileWrite';
 import { pythonOf } from '../electron/services/localChat';
@@ -414,6 +415,32 @@ test('an agent that says only the protocol’s “authentication required” is 
   const { id } = sendChat(null, 'test', 'yetkisiz');
   const failed = await doneOf(id);
   assert.ok(failed.type === 'error' && failed.kind === 'auth', JSON.stringify(failed));
+});
+
+test('a model whose provider is not signed in is said so, the provider named; the tool itself is not called signed out', async () => {
+  useVault();
+  const { id } = sendChat(null, 'test', 'sağlayıcı');
+  const failed = await doneOf(id);
+  assert.ok(failed.type === 'error' && failed.kind === 'provider-auth', JSON.stringify(failed));
+  assert.equal(failed.type === 'error' ? failed.message : '', "The chosen model's provider (opencode) is not signed in.");
+});
+
+test('OpenCode begins on a model of a provider signed in to, not on its own default of one that is not', () => {
+  const option = {
+    id: 'model',
+    name: 'Model',
+    category: 'model',
+    current: 'opencode/deepseek/deepseek-v4.1-flash',
+    choices: ['opencode/deepseek/deepseek-v4.1-flash', 'opencode-go/kimi-k2.6', 'opencode-go/glm-5', 'zai-coding-plan/glm-5', 'lmstudio/qwen3'].map((value) => ({ value, name: value })),
+  };
+  // 2 November: signed in to OpenCode Go, the chat began on OpenCode Zen's model and every message was refused.
+  const signedIn = ['OpenCode Go', 'LMStudio', 'OpenCode Console', 'Z.AI Coding Plan'];
+  assert.equal(signedInChoice(option, signedIn), 'opencode-go/kimi-k2.6', 'the first provider listed, its first model');
+  assert.equal(signedInChoice(option, ['Z.AI Coding Plan']), 'zai-coding-plan/glm-5');
+  assert.equal(signedInChoice({ ...option, current: 'opencode-go/glm-5' }, signedIn), null, 'one signed in to is kept');
+  assert.equal(signedInChoice(option, ['OpenCode Zen']), null, 'OpenCode Zen is the "opencode" provider: its default stands');
+  assert.equal(signedInChoice(option, []), null, 'nothing known: its default stands');
+  assert.equal(signedInChoice(option, ['Anthropic']), null, 'no model of it offered: its default stands');
 });
 
 test('a file written whole is tried again while Windows holds it, and its temporary is never left', () => {

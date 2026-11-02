@@ -45,6 +45,11 @@ async function prompt(id, params) {
     send({ jsonrpc: '2.0', id, error: { code: -32000, message: 'Authentication required: Use Qwen Code CLI to authenticate first.', data: { authMethods: [{ id: 'openai', name: 'Use OpenAI API key' }] } } });
     return;
   }
+  if (text.includes('sağlayıcı')) {
+    // As OpenCode refuses a model whose provider is not signed in (its ACP authRequired, the provider named).
+    send({ jsonrpc: '2.0', id, error: { code: -32000, message: 'Authentication required: provider authentication required', data: { providerId: 'opencode' } } });
+    return;
+  }
   if (text.includes('yetkisiz')) {
     send({ jsonrpc: '2.0', id, error: { code: -32000, message: 'Authentication required' } });
     return;

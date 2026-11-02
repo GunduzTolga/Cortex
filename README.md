@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.44" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.44-E8B23A">
+  <img alt="Sürüm 1.0.45" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.45-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -186,6 +186,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.45](docs/v3/releases/1.0.45.md) | OpenCode sohbeti giriş yaptığın sağlayıcının modeliyle başlıyor: OpenCode Go'ya giriş yapılmışken sohbet OpenCode Zen'in modeliyle açılıyor, her mesaj "provider authentication required" ile reddediliyordu. Böyle bir hata artık hangi sağlayıcıya giriş gerektiğini söylüyor. |
 | [1.0.44](docs/v3/releases/1.0.44.md) | "Hey Pyn" AMD ekran kartlı dizüstülerde birkaç saniye daha erken duyuluyor: söz işlemcideki küçük modelle denetleniyor, sözün kendisi ayrıca yazıya çevrilmiyor; pilde Windows sesi yavaşlatmıyor; whisper.cpp kapanırsa yeniden başlıyor. Yapay zeka araçları penceresinde sohbetteki araç yeşil "Giriş yapıldı", sohbette olmayan "Cortex'te kullanılmıyor" diyor. "Her şeyiyle sil"den sonra hafıza yeni sürüme güncellenebiliyor. "Hepsini sil" Whisper "Hepsini sildim" yazsa da çalışıyor. |
 | [1.0.43](docs/v3/releases/1.0.43.md) | Uygulama kendini güncelliyor: yeni sürüm yayımlanınca arka planda iniyor, "Yeniden başlat"la ya da Cortex kapanırken kuruluyor; kasadaki motor da kendiliğinden güncelleniyor. Silinip yeniden açılan kasada hafıza kuruluyor; OpenCode, Codex, Gemini CLI ve Qwen Code'u Cortex kendisi kuruyor, Node.js gerekmiyor; sohbette yalnız seçtiğin araçlar görünüyor; kaldırırken "her şeyiyle sil" seçeneği var. |
 | [1.0.42](docs/v3/releases/1.0.42.md) | İlk açılış kolaylaştı: kasa Belgeler'de kendiliğinden açılıyor; OpenCode, Codex, Gemini CLI ve Qwen Code da uygulamadan kuruluyor; sesle yazma arka planda kuruluyor; kurulum sürerken yanlış "kurulamadı" uyarısı çıkmıyor. Sesli asistanda "Hey Pyn" varsayılan, cümle sonundaki "hepsini sil" çalışıyor, kapatılan kaydın yazısı sonraki pencereye düşmüyor. |

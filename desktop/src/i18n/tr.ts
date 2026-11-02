@@ -393,6 +393,7 @@ export const tr: Record<keyof typeof en, string> = {
   'chat.waiting.go': 'Pyn’e git',
   'chat.waiting.badge': 'Pyn bir adım için izin bekliyor',
   'chat.error.quota': 'Bu modelin kotası ya da bakiyesi bitmiş. Başka bir model seç.',
+  'chat.error.providerAuth': 'Seçili modelin sağlayıcısına giriş yapılmamış. Aşağıdaki model listesinden giriş yaptığın sağlayıcının bir modelini seç (OpenCode Go için opencode-go/ ile başlayanlar), ya da Giriş yap ile bu sağlayıcıya bağlan.',
   'chat.error.auth': 'Bu yapay zeka aracına giriş yapılmamış. Aşağıdaki “Giriş yap” ile giriş yap ya da anahtarını ekle, sonra tekrar yaz.',
   'chat.error.model': 'Bu model bu hesapla kullanılamıyor. Başka bir model seç.',
   'chat.error.stopped': 'Yapay zeka aracı durdu.',

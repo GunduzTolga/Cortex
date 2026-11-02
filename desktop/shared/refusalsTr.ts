@@ -109,6 +109,8 @@ const RULES: Rule[] = [
   { pattern: /^This tool is installed already\.$/, say: () => 'Bu araç zaten kurulu.' },
   { pattern: /^This tool is not installed on this computer\.$/, say: () => 'Bu araç bu bilgisayarda kurulu değil.' },
   { pattern: /^This tool is being installed already\.$/, say: () => 'Bu araç zaten kuruluyor.' },
+  // electron/services/acpChat.ts: OpenCode signed in, the chosen model's provider not
+  { pattern: /^The chosen model's provider \((.+)\) is not signed in\.$/, say: ([provider]) => `Seçili modelin sağlayıcısına (${provider}) giriş yapılmamış.` },
   // electron/services/toolPackages.ts: OpenCode, Codex, Gemini CLI and Qwen Code installed by Cortex
   { pattern: /^The download did not start: check the internet connection and try again\.$/, say: () => 'İndirme başlamadı: internet bağlantını denetleyip yeniden dene.' },
   { pattern: /^The download did not finish: check the internet connection and try again\.$/, say: () => 'İndirme bitmedi: internet bağlantını denetleyip yeniden dene.' },
