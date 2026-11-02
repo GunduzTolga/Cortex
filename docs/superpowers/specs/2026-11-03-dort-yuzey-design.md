@@ -1,6 +1,6 @@
 # Telefon, masaüstü, sunucu, tarayıcı: tek Cortex — yol haritası
 
-Tarih: 3 Kasım 2026 · Durum: taslak, geliştiriciyle konuşulacak · Bu belge yol haritasıdır; her faz başlarken kendi
+Tarih: 3 Kasım 2026 · Durum: kararlar 3 Kasım tartışmasında verildi; açık: Cortex Browser güvenlik güncelleme ritmi · Bu belge yol haritasıdır; her faz başlarken kendi
 tasarım belgesini (`docs/superpowers/specs/`) ve planını alır.
 
 ## Kısaca
@@ -62,7 +62,7 @@ Sorunlar:
 2. **Cihazlar arasında yalnız iki yol:**
    - *Kasa eşitlemesi:* git, merkez GitHub özel reposu. Kopya tutan her cihaz kendi kopyasına yazar, sonra eşitler.
      Kimse başka bir cihazın kasasına doğrudan yazmaz.
-   - *Sunucu kapısı:* canlı işler için tek adres, tek anahtar (sohbet, görev, yakala, onay, bildirim).
+   - *Sunucu kapısı:* canlı işler için tek adres, her cihaza ayrı anahtar (sohbet, görev, yakala, onay, bildirim).
    Üçüncü köprü kurulmaz.
 3. **Tek motor, tek eşitleme kuralı.** Kopya tutan her cihazda aynı motor (`beyin.py`); eşitleme de motorda bir kez yazılır.
 4. **Pencereler ince.** Telefon ve tarayıcı kopya tutmaz, iş yapmaz. Telefon sunucu kapısına, tarayıcı aynı
@@ -176,11 +176,14 @@ Her faz başlarken kendi tasarım belgesini alır.
     becerisinin işidir. Böylece her ajan öğrenmeye katkı verir, beceriyi tek bir hat yazar.
 
 ### Faz 5 — Telefon ve tek sunucu kapısı (en büyük faz, kendi tasarım oturumu)
-- Panelin herkese yarayan kısmı motorla gelen **Cortex sunucu kapısına** dönüşür: tek adres, tek anahtar; aynı araçları
+- Panelin herkese yarayan kısmı motorla gelen **Cortex sunucu kapısına** dönüşür: tek adres, her cihaza ayrı anahtar; aynı araçları
   HTTP'den sunar. Motorun bugünkü `ingest-server`'ı (yakala ucu) bu kapının çekirdeği olabilir.
 - Hermes API'si dışarı açılmaz, kapının arkasında kalır; masaüstündeki sunucudaki Pyn de aynı kapıdan konuşur
   (`hermesChat.ts` için yalnız adres değişir).
 - Telefon uygulaması bu repoya girer, genel olur. Geliştiriciye özel akışlar atölye eklentisi olarak kalır.
+- **Cihaz anahtarları:** her cihaz kapıya eşleşirken kendi anahtarını alır (Faz 3'teki eşleştirme koduyla aynı akış).
+  Uygulamada cihaz listesi durur: son görülme, "iptal et". Kaybolan telefonun anahtarı iptal edilince öbür cihazlar
+  etkilenmez. Anahtarlar sunucuda yalnız özetleri (hash) olarak saklanır.
 - **Dışarıdan erişim:** kapı internete açılmaz. Telefon sunucuya Tailscale (ya da benzeri bir özel ağ) üzerinden ulaşır;
   kurulum ekranı bunu önerir ve kapı yalnız yerel ağı ve özel ağ arayüzünü dinler. Port yönlendirme ve herkese açık
   adres desteklenmez.
