@@ -78,21 +78,21 @@ test.after(() => shutdownChats());
 test('a CLI is found without a shell: an npm shim read for the program or the script it starts', () => {
   const bin = temp('clis-');
   fs.mkdirSync(path.join(bin, 'node_modules', 'x', 'bin'), { recursive: true });
-  fs.writeFileSync(path.join(bin, 'node_modules', 'x', 'bin', 'opencode.exe'), '');
+  fs.writeFileSync(path.join(bin, 'node_modules', 'x', 'bin', 'codex.exe'), '');
   fs.writeFileSync(path.join(bin, 'node_modules', 'x', 'cli.js'), '');
   fs.writeFileSync(path.join(bin, 'node.exe'), '');
-  fs.writeFileSync(path.join(bin, 'opencode.cmd'), '@ECHO off\r\n"%dp0%\\node_modules\\x\\bin\\opencode.exe"   %*\r\n');
+  fs.writeFileSync(path.join(bin, 'codex.cmd'), '@ECHO off\r\n"%dp0%\\node_modules\\x\\bin\\codex.exe"   %*\r\n');
   // As npm writes a script's shim: it looks for a node beside itself first.
   fs.writeFileSync(
     path.join(bin, 'gemini.cmd'),
     '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST "%dp0%\\node.exe" (\r\n  SET "_prog=%dp0%\\node.exe"\r\n) ELSE (\r\n  SET "_prog=node"\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\x\\cli.js" %*\r\n',
   );
-  assert.deepEqual(readShim(path.join(bin, 'opencode.cmd'), {}), { command: path.join(bin, 'node_modules', 'x', 'bin', 'opencode.exe'), args: [] });
+  assert.deepEqual(readShim(path.join(bin, 'codex.cmd'), {}), { command: path.join(bin, 'node_modules', 'x', 'bin', 'codex.exe'), args: [] });
   assert.deepEqual(readShim(path.join(bin, 'gemini.cmd'), {}), { command: path.join(bin, 'node.exe'), args: [path.join(bin, 'node_modules', 'x', 'cli.js')] }, 'a script, by the node beside the shim');
   fs.writeFileSync(path.join(bin, 'broken.cmd'), 'echo nothing here');
   assert.equal(readShim(path.join(bin, 'broken.cmd'), {}), null);
   if (process.platform === 'win32') {
-    assert.deepEqual(launchOf('opencode', { PATH: bin }), { command: path.join(bin, 'node_modules', 'x', 'bin', 'opencode.exe'), args: ['acp'], env: undefined });
+    assert.deepEqual(launchOf('codex', { PATH: bin }), { command: path.join(bin, 'node_modules', 'x', 'bin', 'codex.exe'), args: ['app-server'], env: undefined });
     assert.deepEqual(launchOf('gemini', { PATH: bin })?.args, [path.join(bin, 'node_modules', 'x', 'cli.js'), '--acp']);
     assert.equal(launchOf('qwen', { PATH: bin }), null, 'not installed');
   }
@@ -114,18 +114,18 @@ test('a CLI is found as Windows finds a command: the PATH in its order, a progra
   const npm = temp('clis-npm-');
   const late = temp('clis-late-');
   fs.mkdirSync(path.join(npm, 'node_modules', 'x', 'bin'), { recursive: true });
-  fs.writeFileSync(path.join(npm, 'node_modules', 'x', 'bin', 'opencode.exe'), '');
-  fs.writeFileSync(path.join(npm, 'opencode.cmd'), '@ECHO off\r\n"%dp0%\\node_modules\\x\\bin\\opencode.exe"   %*\r\n');
-  fs.writeFileSync(path.join(late, 'opencode.exe'), '');
+  fs.writeFileSync(path.join(npm, 'node_modules', 'x', 'bin', 'codex.exe'), '');
+  fs.writeFileSync(path.join(npm, 'codex.cmd'), '@ECHO off\r\n"%dp0%\\node_modules\\x\\bin\\codex.exe"   %*\r\n');
+  fs.writeFileSync(path.join(late, 'codex.exe'), '');
   const PATH = `${npm};${late}`;
-  assert.equal(launchOf('opencode', { PATH })?.command, path.join(npm, 'node_modules', 'x', 'bin', 'opencode.exe'), 'the shim named first wins');
-  assert.equal(launchOf('opencode', { PATH: `${late};${npm}` })?.command, path.join(late, 'opencode.exe'), 'and the program, where it comes first');
+  assert.equal(launchOf('codex', { PATH })?.command, path.join(npm, 'node_modules', 'x', 'bin', 'codex.exe'), 'the shim named first wins');
+  assert.equal(launchOf('codex', { PATH: `${late};${npm}` })?.command, path.join(late, 'codex.exe'), 'and the program, where it comes first');
   // In one folder, the program before the shim; a shim that names nothing there leaves the program further on.
-  fs.writeFileSync(path.join(npm, 'opencode.exe'), '');
-  assert.equal(launchOf('opencode', { PATH })?.command, path.join(npm, 'opencode.exe'));
+  fs.writeFileSync(path.join(npm, 'codex.exe'), '');
+  assert.equal(launchOf('codex', { PATH })?.command, path.join(npm, 'codex.exe'));
   const broken = temp('clis-broken-');
-  fs.writeFileSync(path.join(broken, 'opencode.cmd'), 'echo nothing here');
-  assert.equal(launchOf('opencode', { PATH: `${broken};${late}` })?.command, path.join(late, 'opencode.exe'));
+  fs.writeFileSync(path.join(broken, 'codex.cmd'), 'echo nothing here');
+  assert.equal(launchOf('codex', { PATH: `${broken};${late}` })?.command, path.join(late, 'codex.exe'));
 });
 
 test('what a CLI says is made safe to show: the vault taken off every path, home said as ~, a path outside cut to its name', () => {

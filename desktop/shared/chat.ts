@@ -140,7 +140,6 @@ export interface ChatApi {
   install(cli: CliId): Promise<void>;
   /** A key for a tool: kept encrypted by Cortex, or handed to the tool itself (Codex). */
   setKey(cli: CliId, key: string, baseUrl?: string): Promise<CliAuth[]>;
-  forgetKey(cli: CliId): Promise<CliAuth[]>;
   /** "Ekle": the tool installed where it is not, offered in the chat, its sign-in opened where it is not signed in; every tool's sign-in, as `auth` says. */
   addTool(cli: CliId): Promise<CliAuth[]>;
   /** "Sil": the tool signed out with its own command (or its key forgotten), taken from the chat, and the program Cortex downloaded for it deleted. */

@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
 import type { CliId } from '../shared/chat';
-import { addTool, authStatuses, claudeStatus, codexStatus, commandLineArg, installScript, installTool, onAuthChanged, opencodeStatus, removeTool, setToolKey, startLogin } from '../electron/services/auth';
+import { addTool, authStatuses, claudeStatus, codexStatus, commandLineArg, installScript, installTool, LOGIN_SCRIPT, onAuthChanged, removeTool, setToolKey, startLogin } from '../electron/services/auth';
 import { READ_PATH, pathOutput, powerShellExe, withDirs } from '../electron/services/clis';
 import { forgetKey, hasKey, keyEnv, saveKey } from '../electron/services/keys';
 import { readSettings, updateSettings } from '../electron/services/settings';
@@ -19,27 +19,13 @@ import { toolsDir } from '../electron/services/toolPackages';
  * on 14 October.
  */
 
-test('each tool’s own word on its sign-in is read: Claude Code’s JSON, Codex’s sentence, OpenCode’s list of connections', () => {
+test('each tool’s own word on its sign-in is read: Claude Code’s JSON, Codex’s sentence', () => {
   assert.deepEqual(claudeStatus('{"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty", "email": "kisi@example.com"}'), { signedIn: true, detail: 'Claude · kisi@example.com' });
   assert.deepEqual(claudeStatus('{"loggedIn": false}'), { signedIn: false, detail: null });
   assert.deepEqual(claudeStatus('error: something'), { signedIn: null, detail: null }, 'what cannot be read is not known');
   assert.deepEqual(codexStatus('Logged in using ChatGPT'), { signedIn: true, detail: 'ChatGPT' });
   assert.deepEqual(codexStatus('Logged in using an API key - sk-***'), { signedIn: true, detail: 'API key' });
   assert.deepEqual(codexStatus('Not logged in'), { signedIn: false, detail: null });
-  const listed = opencodeStatus('OpenCode Go       API key                     stored\nLMStudio          API key                     stored\n\n');
-  assert.deepEqual(listed, { signedIn: true, detail: 'OpenCode Go, LMStudio', names: ['OpenCode Go', 'LMStudio'] });
-  assert.equal(opencodeStatus('').signedIn, false);
-});
-
-test('OpenCode 1.19’s list of connections is read: its marks, colours and plain stand-ins are not names, its environment keys not connections', () => {
-  // As 1.19.5 writes it (2 November): read as the old table, no connection was found at all.
-  const listed = opencodeStatus(
-    '┌  Credentials \x1b[2m~/.local/share/opencode/auth.json\n│\n●  OpenCode Go \x1b[2mapi\n│\n●  Anthropic \x1b[2moauth\n│\n└  2 credentials\n\n┌  Environment\n│\n●  OpenAI \x1b[2mOPENAI_API_KEY\n│\n└  1 environment variable\n',
-  );
-  assert.deepEqual(listed, { signedIn: true, detail: 'OpenCode Go, Anthropic', names: ['OpenCode Go', 'Anthropic'] });
-  // A Windows console without Unicode marks: its menus' plain stand-ins.
-  assert.deepEqual(opencodeStatus('T  Credentials ~\\.local\\share\\opencode\\auth.json\r\n|\r\n•  Together AI api\r\n|\r\n—  1 credentials\r\n').names, ['Together AI']);
-  assert.deepEqual(opencodeStatus('┌  Credentials ~/.local/share/opencode/auth.json\n│\n└  0 credentials\n'), { signedIn: false, detail: null, names: [] });
 });
 
 /** A stand-in for a tool Cortex downloaded: a script its record names, run by Electron's node, writing down how it was asked. */
@@ -54,12 +40,16 @@ function standIn(id: 'opencode' | 'codex' | 'gemini', home: string, connections:
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
 const names = JSON.parse(fs.readFileSync(${JSON.stringify(state)}, 'utf8'));
-if (args[0] === 'auth' && args[1] === 'list') {
-  process.stdout.write('┌  Credentials \\x1b[2m~/.local/share/opencode/auth.json\\n│\\n' + names.map((name) => '●  ' + name + ' \\x1b[2mapi\\n│\\n').join('') + '└  ' + names.length + ' credentials\\n');
-} else if (args[0] === 'auth' && args[1] === 'logout') {
-  fs.writeFileSync(${JSON.stringify(state)}, JSON.stringify(names.filter((name) => name.toLowerCase() !== String(args[2]).toLowerCase())));
-} else if (args[0] === 'auth' && args[1] === 'login') {
+if (args[0] === 'login' && args.length === 1) {
+  // Its sign-in, as a browser's goes: whether it has a terminal written down, signed in a moment later, still running a
+  // while after that, as a tool can be.
   fs.writeFileSync(${JSON.stringify(path.join(home, `${id}-login.json`))}, JSON.stringify({ stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) }));
+  fs.appendFileSync(${JSON.stringify(path.join(home, `${id}-login-pids`))}, process.pid + '\\n');
+  setTimeout(() => fs.writeFileSync(${JSON.stringify(state)}, JSON.stringify(['ChatGPT'])), Number(process.env.STANDIN_SIGN_IN_AFTER || 1500));
+  setTimeout(() => {
+    fs.writeFileSync(${JSON.stringify(path.join(home, `${id}-login-closed`))}, '');
+    process.exit(0);
+  }, Number(process.env.STANDIN_CLOSE_AFTER || 20000));
 } else if (args[0] === 'logout' || (args[0] === 'login' && args[1] === 'status')) {
   if (args[0] === 'logout') fs.writeFileSync(${JSON.stringify(state)}, '[]');
   process.stdout.write(names.length && args[0] !== 'logout' ? 'Logged in using ChatGPT\\n' : 'Not logged in\\n');
@@ -87,18 +77,13 @@ test('"Sil" signs the tool out with its own command, takes it from the chat and 
     updateSettings((settings) => {
       settings.chatTools = ['claude', 'opencode', 'codex', 'gemini'];
     });
-    // 2 November: OpenCode said "Giriş yapıldı", the chat said it had no key for OpenCode Go, and the window offered no
-    // way to sign in from scratch. Each connection is signed out by its own name, one argument however many words.
-    const opencode = standIn('opencode', home, ['OpenCode Go', 'LM Studio']);
+    // OpenCode's key is its one way in: forgotten, and the program Cortex downloaded deleted; none of its own sign-ins
+    // read or signed out (2 November: OpenCode 2 kept them through "Sil" anyway).
+    saveKey('opencode', 'sk-opencode', undefined);
+    const opencode = standIn('opencode', home, []);
     await removeTool('opencode');
-    assert.deepEqual(opencode.kept(), [], 'no connection left');
-    assert.deepEqual(
-      opencode.asked().filter((args) => args[1] === 'logout'),
-      [
-        ['auth', 'logout', 'OpenCode Go'],
-        ['auth', 'logout', 'LM Studio'],
-      ],
-    );
+    assert.equal(hasKey('opencode', {}), false, 'its key forgotten');
+    assert.deepEqual(opencode.asked(), [], 'nothing of its own run');
     assert.equal(fs.existsSync(opencode.folder), false, 'the program Cortex downloaded is gone');
     assert.deepEqual(readSettings().chatTools, ['claude', 'codex', 'gemini']);
 
@@ -115,13 +100,13 @@ test('"Sil" signs the tool out with its own command, takes it from the chat and 
     assert.equal(fs.existsSync(gemini.folder), false);
     assert.deepEqual(readSettings().chatTools, ['claude']);
 
-    // "Ekle" for one installed (the person's own, or Cortex's): offered in the chat again. Its sign-in, opened in a
-    // console, is Windows'; elsewhere it is added and left to its sign-in button.
-    standIn('opencode', home, []);
-    if (process.platform !== 'win32') {
-      await addTool('opencode');
-      assert.deepEqual(readSettings().chatTools, ['claude', 'opencode']);
-    }
+    // "Ekle" for one installed (the person's own, or Cortex's): offered in the chat again. OpenCode opens no sign-in of
+    // its own: its key is given in the window.
+    const again = standIn('opencode', home, []);
+    await addTool('opencode');
+    assert.deepEqual(readSettings().chatTools, ['claude', 'opencode']);
+    assert.ok(!again.asked().some((args) => args[1] === 'login'), 'no sign-in of its own opened');
+    assert.throws(() => startLogin('opencode'), /not signed in to from here/);
     await assert.rejects(removeTool('nope'), /Not a tool/);
     await assert.rejects(addTool('lmstudio'), /Not a tool/);
   } finally {
@@ -133,6 +118,7 @@ test('"Sil" signs the tool out with its own command, takes it from the chat and 
       settings.chatTools = before;
     });
     forgetKey('gemini');
+    forgetKey('opencode');
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
@@ -150,9 +136,10 @@ test('a sign-in’s arguments reach its program as they were, as Windows’ comm
   assert.deepEqual(JSON.parse(read), args);
 });
 
-test('a sign-in opens in a console of its own, with a terminal for its menu', { skip: process.platform !== 'win32' }, async () => {
+test('"Sil", then "Ekle": the tool from scratch, its sign-in in a console with a terminal; signed in there, the window is told while the console is open', { skip: process.platform !== 'win32' }, async () => {
   // 2 November: started with Windows' NUL device for its input and output, OpenCode 2's menu ended in 0.1 s ("Pass an
-  // integration ID or name when running without an interactive terminal"), and its button was pressed 23 times.
+  // integration ID or name when running without an interactive terminal"), and its button was pressed 23 times. And:
+  // "sil diye çıkılıyorsa her şey sıfırdan başlar ... yetkilendirme yapıldığında uygulamada kendi içinde güncellenir".
   const kept = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, CORTEX_HIDDEN: process.env.CORTEX_HIDDEN };
   const before = readSettings().chatTools;
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-login-'));
@@ -160,16 +147,86 @@ test('a sign-in opens in a console of its own, with a terminal for its menu', { 
   process.env.LOCALAPPDATA = home;
   // Its console hidden: not put in front of the person at the machine.
   process.env.CORTEX_HIDDEN = '1';
-  const told: Array<CliId | null> = [];
-  onAuthChanged((cli) => told.push(cli));
+  const closed = path.join(home, 'codex-login-closed');
+  const told: Array<{ cli: CliId | null; signedIn: boolean; consoleOpen: boolean }> = [];
+  let state: { kept: () => string[] } = { kept: () => [] };
+  onAuthChanged((cli) => told.push({ cli, signedIn: state.kept().length > 0, consoleOpen: !fs.existsSync(closed) }));
+  const until = async (done: () => boolean) => {
+    for (let waited = 0; !done() && waited < 30_000; waited += 200) await new Promise((resolve) => setTimeout(resolve, 200));
+  };
   try {
-    standIn('opencode', home, []);
-    startLogin('opencode');
-    for (let waited = 0; !told.includes('opencode') && waited < 30_000; waited += 200) await new Promise((resolve) => setTimeout(resolve, 200));
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, 'opencode-login.json'), 'utf8')), { stdin: true, stdout: true }, 'its input and output a console, not NUL');
-    assert.ok(told.includes('opencode'), 'its console closed, the window told');
+    updateSettings((settings) => {
+      settings.chatTools = ['codex'];
+    });
+    const signedIn = standIn('codex', home, ['ChatGPT']);
+    await removeTool('codex');
+    assert.deepEqual(signedIn.kept(), [], 'signed out with its own command');
+    assert.deepEqual(readSettings().chatTools, [], 'taken from the chat');
+    // The person's own program stays where they installed it: put back, signed out.
+    state = standIn('codex', home, []);
+    await addTool('codex');
+    assert.deepEqual(readSettings().chatTools, ['codex'], 'in the chat again');
+    await until(() => told.some((one) => one.cli === 'codex' && one.signedIn));
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, 'codex-login.json'), 'utf8')), { stdin: true, stdout: true }, 'its input and output a console, not NUL');
+    const signed = told.find((one) => one.cli === 'codex' && one.signedIn);
+    assert.ok(signed, 'signed in, the window told');
+    assert.ok(signed.consoleOpen, 'told while it was still running, not only when it ended');
+    // Removed, added, signed in, ended: by Cortex, its console hidden, long before it would have ended by itself.
+    await until(() => told.filter((one) => one.cli === 'codex').length >= 4);
+    assert.equal(told.filter((one) => one.cli === 'codex').length, 4);
+    assert.ok(!fs.existsSync(closed), 'ended by Cortex once signed in, not left running hidden');
   } finally {
     onAuthChanged(() => undefined);
+    for (const [name, value] of Object.entries(kept)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    updateSettings((settings) => {
+      settings.chatTools = before;
+    });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  }
+});
+
+test('a sign-in’s console is hidden: the browser is where it is done', () => {
+  // 2 November: Claude Code's sign-in opened the browser and a terminal beside it ("browser açılması yeterli").
+  assert.match(LOGIN_SCRIPT, /WindowStyle = 'Hidden'/);
+  assert.ok(!LOGIN_SCRIPT.includes('"'), 'single quotes only: a double quote does not survive Windows’ command line');
+});
+
+test('pressed again while a sign-in goes on: the one before is ended, a new one begun', { skip: process.platform !== 'win32' }, async () => {
+  // Its console hidden, nothing else ends the one before; a second press used to do nothing for ten minutes.
+  const kept = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, STANDIN_SIGN_IN_AFTER: process.env.STANDIN_SIGN_IN_AFTER, STANDIN_CLOSE_AFTER: process.env.STANDIN_CLOSE_AFTER };
+  const before = readSettings().chatTools;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-again-'));
+  process.env.PATH = '';
+  process.env.LOCALAPPDATA = home;
+  // Not signed in while this runs; each ends by itself a while after.
+  process.env.STANDIN_SIGN_IN_AFTER = '60000';
+  process.env.STANDIN_CLOSE_AFTER = '8000';
+  const pids = () => (fs.existsSync(path.join(home, 'codex-login-pids')) ? fs.readFileSync(path.join(home, 'codex-login-pids'), 'utf8').split('\n').filter(Boolean).map(Number) : []);
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const until = async (done: () => boolean) => {
+    for (let waited = 0; !done() && waited < 20_000; waited += 200) await new Promise((resolve) => setTimeout(resolve, 200));
+  };
+  try {
+    standIn('codex', home, []);
+    startLogin('codex');
+    await until(() => pids().length === 1);
+    startLogin('codex');
+    await until(() => pids().length === 2 && !alive(pids()[0]));
+    const [first, second] = pids();
+    assert.ok(first && !alive(first), 'the one before ended');
+    assert.ok(second && alive(second), 'a new one begun');
+    await until(() => !alive(second));
+  } finally {
     for (const [name, value] of Object.entries(kept)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
@@ -230,17 +287,20 @@ test('a keys file Windows says is busy is not written over: a new key never take
 });
 
 test('with no tool installed, each is said to be missing and nothing is offered; a sign-in or a key for one is refused', async () => {
-  const kept = { PATH: process.env.PATH, USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME, SystemRoot: process.env.SystemRoot };
+  const kept = { PATH: process.env.PATH, USERPROFILE: process.env.USERPROFILE, HOME: process.env.HOME, SystemRoot: process.env.SystemRoot, APPDATA: process.env.APPDATA, LOCALAPPDATA: process.env.LOCALAPPDATA };
   process.env.PATH = '';
   /*
     On Windows the PATH is read again from the machine's and the person's (clis.ts refreshPath), with
-    Claude Code's installer's folder beside it: a machine with the tools installed saw them all here
-    (29 October, the owner's PC). Its PowerShell not found and a home with nothing in it, nothing is added.
+    Claude Code's installer's folder and npm's beside it: a machine with the tools installed saw them all here
+    (29 October, the owner's PC). Its PowerShell not found and a home with nothing in it, nothing is added. Nor are
+    the tools Cortex installed found (toolPackages.ts, under LOCALAPPDATA): 2 November, the owner's OpenCode was.
   */
   const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-auth-home-'));
   process.env.USERPROFILE = emptyHome;
   process.env.HOME = emptyHome;
   process.env.SystemRoot = emptyHome;
+  process.env.APPDATA = emptyHome;
+  process.env.LOCALAPPDATA = emptyHome;
   // The model servers asked where nothing answers.
   process.env.CORTEX_TEST_LMSTUDIO = 'http://127.0.0.1:9';
   process.env.CORTEX_TEST_OLLAMA = 'http://127.0.0.1:9';

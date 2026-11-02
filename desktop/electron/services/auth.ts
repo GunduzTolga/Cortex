@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,17 +24,15 @@ import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts, t
  * - Codex: `codex login status` ("Logged in using ChatGPT"), `codex login`,
  *   and `codex login --with-api-key`, which reads the key on its input and
  *   keeps it itself.
- * - OpenCode: a key for OpenCode Go and Zen kept here, before its own sign-in
- *   (keys.ts, 2 November: its own kept an expired key, and signing in again
- *   did not replace it).
- * - OpenCode: `opencode auth list` (one line a connection, "stored"),
- *   `opencode auth login` (its menu of providers). From 1.19 (2 November) the
- *   list is its menus' log: "●  OpenCode Go api" under "Credentials"; and
- *   `opencode auth logout <provider>` takes a connection away, by its name.
+ * - OpenCode: its key for OpenCode Go (and Zen) kept here is the one way in,
+ *   given to the OpenCode Cortex installed (clis.ts, programOf). Its own
+ *   sign-ins are not read, opened or signed out of: with a key kept here what
+ *   its menu saved went unused, for OpenCode Go the menu only asks for the same
+ *   key, and OpenCode 2 kept its old, expired connections through "Sil"
+ *   (2 November, "normal giriş çalışmadı ... onu kaldıralım").
  *
  * Taken away with the tool (2 November, "Sil"): `claude auth logout`
- * (code.claude.com/docs/en/cli-reference), `codex logout`, and each OpenCode
- * connection by `opencode auth logout <name>`.
+ * (code.claude.com/docs/en/cli-reference), `codex logout`, a key kept here.
  * - Gemini CLI: the personal Google sign-in is refused now; a key
  *   (GEMINI_API_KEY) is the way in.
  * - Qwen Code: its own sign-in was removed; an OpenAI-compatible key, with its
@@ -57,15 +55,15 @@ import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts, t
 const TOOLS: Array<{ id: CliId; login: string[] | null; key: CliAuth['key'] }> = [
   { id: 'claude', login: ['auth', 'login'], key: 'cortex' },
   { id: 'codex', login: ['login'], key: 'cli' },
-  { id: 'opencode', login: ['auth', 'login'], key: 'cortex' },
+  { id: 'opencode', login: null, key: 'cortex' },
   { id: 'gemini', login: null, key: 'cortex' },
   { id: 'qwen', login: null, key: 'cortex' },
 ];
 
 const STATUS_TIMEOUT = 20_000;
-/** The e2e run (CORTEX_HIDDEN=1, electron/main.ts) signs in to stand-ins: their console is not put in front of the person at the machine. Read when a console opens, so a test can set it. */
+/** The e2e run (CORTEX_HIDDEN=1, electron/main.ts) installs stand-ins: their installer's console is not put in front of the person at the machine. Read when one opens, so a test can set it. */
 const showConsole = (): boolean => process.env.CORTEX_HIDDEN !== '1';
-/** While a sign-in window is open: asked this often whether it is done, for at most this long. */
+/** While a sign-in is going on: asked this often whether it is done, for at most this long. */
 const LOGIN_POLL = 4_000;
 const LOGIN_WATCH = 10 * 60_000;
 
@@ -109,44 +107,6 @@ export function codexStatus(text: string): { signedIn: boolean | null; detail: s
   return { signedIn: null, detail: null };
 }
 
-/**
- * What `opencode auth list` says: the connections it keeps, by name. Before 1.19 a table, one connection a line ending
- * "stored"; from 1.19 its menus' log: "●  OpenCode Go api" between "Credentials ~/.local/share/opencode/auth.json" and
- * "1 credentials" (2 November: read as the old table, it was no connection at all). Its colours and its marks, or their
- * plain stand-ins on a console without them, are not part of a name; the keys of the environment, listed after, are not
- * connections it keeps.
- */
-export function opencodeStatus(text: string): { signedIn: boolean | null; detail: string | null; names: string[] } {
-  const lines = text.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/);
-  let names = lines
-    .filter((line) => /\bstored\b/i.test(line))
-    .map((line) => line.split(/\s{2,}/)[0]?.trim());
-  if (!names.length) {
-    let listing = false;
-    names = [];
-    for (const line of lines) {
-      const bare = line.replace(/^[\s│|┌└◇◆●•○◒*—–-]+/u, '').trim();
-      if (/^T?\s*Credentials\b/i.test(bare)) listing = true;
-      else if (/^\d+\s+credentials?\b/i.test(bare) || /^T?\s*Environment\b/i.test(bare)) listing = false;
-      else if (listing) {
-        const found = /^(.+?)\s+(api|oauth|wellknown)$/i.exec(bare);
-        if (found) names.push(found[1].trim());
-      }
-    }
-  }
-  const kept = names.filter((name): name is string => Boolean(name)).slice(0, 20);
-  return { signedIn: kept.length > 0, detail: kept.length ? kept.join(', ') : null, names: kept };
-}
-
-/** The providers OpenCode is signed in to (`opencode auth list`), as it names them; asked again after a minute. */
-let opencodeNames: { at: number; names: string[] } | null = null;
-export async function opencodeSignedIn(): Promise<string[]> {
-  if (opencodeNames && Date.now() - opencodeNames.at < 60_000) return opencodeNames.names;
-  const { names } = opencodeStatus((await ask('opencode', ['auth', 'list'])) ?? '');
-  opencodeNames = { at: Date.now(), names };
-  return names;
-}
-
 /** One of the tool's own commands, its output, or null when it would not answer in time. */
 function ask(id: CliId, args: string[]): Promise<string | null> {
   const program = programOf(id);
@@ -184,11 +144,6 @@ async function statusOf(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
   if (tool.key === 'cortex' && keptHere(tool.id) && keptReadable(tool.id)) return { ...base, signedIn: true, detail: 'API key' };
   if (tool.id === 'claude') return { ...base, ...claudeStatus((await ask('claude', ['auth', 'status', '--json'])) ?? '') };
   if (tool.id === 'codex') return { ...base, ...codexStatus((await ask('codex', ['login', 'status'])) ?? '') };
-  if (tool.id === 'opencode') {
-    const { signedIn, detail, names } = opencodeStatus((await ask('opencode', ['auth', 'list'])) ?? '');
-    opencodeNames = { at: Date.now(), names };
-    return { ...base, signedIn, detail };
-  }
   return { ...base, signedIn: keyUsable, detail: keyUsable ? 'API key' : null };
 }
 
@@ -251,11 +206,11 @@ function run(id: CliId, args: string[]): Promise<void> {
 
 /**
  * "Sil" in the AI tools window (2 November: "sil dersin siler"; before, "Sohbetten çıkar" took it from the chat and
- * left it signed in, and the window then offered no sign-in again). The tool signed out with its own command - Claude
- * Code, Codex, each of OpenCode's connections - or its key kept here forgotten; taken from the chat; and the program
- * Cortex downloaded for it (toolPackages.ts) deleted. One the person installed themselves, and Claude Code, which its
- * maker's installer put on the PATH for the terminal too, stay installed. The chats' programs are ended first (ipc.ts),
- * so none of its files is held open.
+ * left it signed in, and the window then offered no sign-in again). Everything of it goes, so "Ekle" starts it from
+ * scratch, its sign-in opened again: its key kept here forgotten, Claude Code and Codex signed out with their own
+ * command; taken from the chat; and the program Cortex downloaded for it (toolPackages.ts) deleted. One the person
+ * installed themselves, and Claude Code, which its maker's installer put on the PATH for the terminal too, stay
+ * installed. The chats' programs are ended first (ipc.ts), so none of its files is held open.
  */
 export async function removeTool(id: unknown): Promise<void> {
   const tool = toolOf(id);
@@ -263,10 +218,6 @@ export async function removeTool(id: unknown): Promise<void> {
   if (programOf(tool.id)) {
     if (tool.id === 'claude') await run('claude', ['auth', 'logout']);
     else if (tool.id === 'codex') await run('codex', ['logout']);
-    else if (tool.id === 'opencode') {
-      for (const name of opencodeStatus((await ask('opencode', ['auth', 'list'])) ?? '').names) await run('opencode', ['auth', 'logout', name]);
-      opencodeNames = null;
-    }
   }
   setChatTool(tool.id, false, installedTools());
   const folder = PACKAGES[tool.id] ? path.join(toolsDir(), tool.id) : null;
@@ -296,19 +247,37 @@ export function commandLineArg(arg: string): string {
 }
 
 /**
- * What opens a sign-in's console: Windows' own launcher (Start-Process), which gives the tool a console of its own with
- * the keyboard and the screen in it, as a double-click would, and is waited on, so the console closed is the sign-in
- * over. 2 November: the tool was started straight from here, and its input and output were Windows' NUL device, not
- * the console it opened. OpenCode 2's menu ends at once there ("Pass an integration ID or name when running without
- * an interactive terminal", after 0.1 s): its button was pressed 23 times in three seconds while nothing showed. The
- * program and its arguments come in the environment, so no path is written into the command to survive its quoting.
+ * What starts a sign-in: Windows' own launcher (Start-Process), which gives the tool a console of its own with the
+ * keyboard and the screen in it, as a double-click would, hidden: the tool opens the browser, where the sign-in is
+ * done, and its console is not shown (2 November, "browser açılması yeterli"). It is waited on, so its end is the
+ * sign-in's. 2 November: the tool was started straight from here, its input and output Windows' NUL device, not a
+ * console; OpenCode 2's menu ended at once there ("Pass an integration ID or name when running without an interactive
+ * terminal", after 0.1 s), and a browser sign-in went with it. The program and its arguments come in the environment,
+ * so no path is written into the command to survive its quoting.
  */
 export const LOGIN_SCRIPT =
-  '$o = @{ FilePath = $env:CORTEX_LOGIN_PROGRAM; WindowStyle = $env:CORTEX_LOGIN_WINDOW; PassThru = $true }; if ($env:CORTEX_LOGIN_ARGS) { $o.ArgumentList = $env:CORTEX_LOGIN_ARGS }; (Start-Process @o).WaitForExit()';
+  "$o = @{ FilePath = $env:CORTEX_LOGIN_PROGRAM; WindowStyle = 'Hidden'; PassThru = $true }; if ($env:CORTEX_LOGIN_ARGS) { $o.ArgumentList = $env:CORTEX_LOGIN_ARGS }; (Start-Process @o).WaitForExit()";
+
+/** The sign-ins going on, by tool: the PowerShell waiting on each. */
+const logins = new Map<CliId, ChildProcess>();
 
 /**
- * The tool's own sign-in, in a console window of its own (LOGIN_SCRIPT), where a browser sign-in or a menu runs as it
- * would in a terminal. When the window is closed, the window is told, and asks every status again.
+ * A sign-in's hidden console ended, with the tool it started (Start-Process's program is its PowerShell's child): its
+ * console is not there to be closed by the person.
+ */
+function endLogin(id: CliId): void {
+  const child = logins.get(id);
+  if (!child) return;
+  logins.delete(id);
+  if (child.pid !== undefined && child.exitCode === null) {
+    execFile(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => undefined);
+  }
+}
+
+/**
+ * The tool's own sign-in (LOGIN_SCRIPT): its browser opened, its console hidden. When it ends, the window is told, and
+ * asks every status again. Pressed again while one is going on, the one before is ended and the browser opened again:
+ * its console hidden, nothing else ends it (before, a second press within ten minutes did nothing).
  */
 export function startLogin(id: unknown): void {
   const tool = toolOf(id);
@@ -316,50 +285,41 @@ export function startLogin(id: unknown): void {
   if (!tool.login || !program) throw new KeyRefusal('This tool is not signed in to from here.');
   if (process.platform !== 'win32') throw new KeyRefusal('Signing in from Cortex opens a console window, which only Windows does here.');
   chooseChatTool(tool.id);
-  // Its sign-in window already open: that one is the one to finish. 2 November: 21 of OpenCode's opened in five
-  // seconds, the button pressed again and again while nothing seemed to happen.
-  const opened = loginsOpen.get(tool.id);
-  if (opened !== undefined && Date.now() - opened < LOGIN_WATCH) return;
-  loginsOpen.set(tool.id, Date.now());
-  const env = {
-    ...childEnv(program.env),
-    CORTEX_LOGIN_PROGRAM: program.command,
-    CORTEX_LOGIN_ARGS: [...program.args, ...tool.login].map(commandLineArg).join(' '),
-    CORTEX_LOGIN_WINDOW: showConsole() ? 'Normal' : 'Hidden',
-  };
+  endLogin(tool.id);
+  const env = { ...childEnv(program.env), CORTEX_LOGIN_PROGRAM: program.command, CORTEX_LOGIN_ARGS: [...program.args, ...tool.login].map(commandLineArg).join(' ') };
   // Not detached: a PowerShell started detached ran the script and opened nothing, with no word of why (2 November).
   const child = spawn(powerShellExe(), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', LOGIN_SCRIPT], { cwd: os.homedir(), env, stdio: 'ignore', windowsHide: true, shell: false });
-  let open = true;
-  const closed = () => {
-    open = false;
-    loginsOpen.delete(tool.id);
+  logins.set(tool.id, child);
+  const ended = () => {
+    if (logins.get(tool.id) === child) logins.delete(tool.id);
     changed(tool.id);
   };
-  child.on('error', closed);
-  child.on('exit', closed);
+  child.on('error', ended);
+  child.on('exit', ended);
   child.unref();
-  void watchLogin(tool, () => open);
+  void watchLogin(tool, () => logins.get(tool.id) === child);
 }
 
-/** The tools whose sign-in window is open, since when. */
-const loginsOpen = new Map<CliId, number>();
-
 /**
- * A sign-in going on, asked after until it is done: the browser's sign-in can end with its
- * console still open, or the person back in the app before closing it - and the window said
- * nothing changed until the app was opened again (21 October). Watched only from signed out.
+ * A sign-in going on, asked after until it is done: the browser's sign-in ends with the tool still running, and the
+ * window said nothing changed until the app was opened again (21 October). Signed in, the window is told and the tool
+ * given a moment to end by itself before its hidden console is ended; left unfinished for ten minutes, it is ended.
+ * One begun signed in (signing in again) is told by its end.
  */
 async function watchLogin(tool: (typeof TOOLS)[number], open: () => boolean): Promise<void> {
-  if ((await statusOf(tool)).signedIn === true) return;
+  const before = (await statusOf(tool)).signedIn === true;
   const until = Date.now() + LOGIN_WATCH;
   while (open() && Date.now() < until) {
     await new Promise((resolve) => setTimeout(resolve, LOGIN_POLL));
     if (!open()) return;
-    if ((await statusOf(tool)).signedIn === true) {
+    if (!before && (await statusOf(tool)).signedIn === true) {
       changed(tool.id);
+      await new Promise((resolve) => setTimeout(resolve, LOGIN_POLL));
+      if (open()) endLogin(tool.id);
       return;
     }
   }
+  if (open()) endLogin(tool.id);
 }
 
 /**
@@ -439,17 +399,6 @@ export async function setToolKey(id: unknown, key: unknown, baseUrl: unknown): P
   if (tool.key === 'cortex') {
     saveKey(tool.id, key, baseUrl);
     chooseChatTool(tool.id);
-    // OpenCode's key is honoured ahead of its own sign-in by the OpenCode Cortex installs (clis.ts, programOf): installed
-    // now where only another one is here.
-    if (tool.id === 'opencode' && process.platform === 'win32' && !ownProgram('opencode')) {
-      try {
-        await installPackage('opencode');
-        const own = ownProgram('opencode');
-        if (own && PACKAGES.opencode?.older?.(archOf()) && !(await starts(own))) await installPackage('opencode', { older: true });
-      } catch (err) {
-        throw err instanceof PackageRefusal ? new KeyRefusal(err.message) : err;
-      }
-    }
     return;
   }
   if (tool.key !== 'cli') throw new KeyRefusal('This tool keeps its keys in its own sign-in.');
@@ -469,9 +418,4 @@ export async function setToolKey(id: unknown, key: unknown, baseUrl: unknown): P
     child.stdin.end(`${key.trim()}\n`);
   });
   chooseChatTool(tool.id);
-}
-
-export function forgetToolKey(id: unknown): void {
-  const tool = toolOf(id);
-  if (tool.key === 'cortex') forgetKey(tool.id);
 }

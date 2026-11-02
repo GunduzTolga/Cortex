@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { CliId, CliInfo } from '../../shared/chat';
 import { hermesConfigured, hermesName } from './hermesChat';
-import { keptReadable, keyEnv } from './keys';
+import { keyEnv } from './keys';
 import { LOCAL, type LocalId, lastSeen } from './localModels';
 import { ownProgram, toolsDir } from './toolPackages';
 
@@ -253,17 +253,15 @@ export function readShim(shim: string, env: NodeJS.ProcessEnv = process.env): La
  * The CLI itself, as it is started for any of its commands - its sign-in, its status - without what makes it talk to
  * the chat; null when it is not installed. The person's own, found on the PATH, before the one Cortex installed
  * (toolPackages.ts), kept in a folder of Cortex's and on no PATH.
+ *
+ * OpenCode is only ever the one Cortex installed, started with the key given in Cortex (keys.ts), whose settings' key
+ * comes before a sign-in it keeps (1.x: "apiKey === undefined && key"). 2 November: OpenCode 2.0.27 on the PATH went on
+ * with its own sign-in's expired key, the key given in Cortex unused ("opencode go api ile girilecek o kadar").
  */
 export function programOf(id: CliId, env: NodeJS.ProcessEnv = process.env): Launch | null {
   const known = KNOWN.find((one) => one.id === id);
   if (!known) return null;
-  // OpenCode with a key kept in Cortex: the one Cortex installed, whose settings' key comes before a sign-in it keeps
-  // (1.x: "apiKey === undefined && key"). 2 November: OpenCode 2.0.27 on the PATH went on with its own sign-in's
-  // expired key, the key given in Cortex unused.
-  if (id === 'opencode' && keptReadable('opencode')) {
-    const own = ownProgram(id, toolsDir(env));
-    if (own) return own;
-  }
+  if (id === 'opencode') return ownProgram(id, toolsDir(env));
   return onPathProgram(known, env) ?? ownProgram(id, toolsDir(env));
 }
 

@@ -252,11 +252,6 @@ export function registerIpc(): void {
     chat.restartIdleChats();
     return auth.authStatuses();
   });
-  handle('chat:forgetKey', (cli) => {
-    auth.forgetToolKey(cli);
-    chat.restartIdleChats();
-    return auth.authStatuses();
-  });
   // "Ekle": installed where it is not, added to the chat, its sign-in opened where it is not signed in.
   handle('chat:addTool', async (cli) => {
     await auth.addTool(cli);

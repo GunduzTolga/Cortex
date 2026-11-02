@@ -71,7 +71,7 @@ function Status({ tool, refused }: { tool: CliAuth; refused: boolean }) {
 /** What "Ekle" does for this tool, said before it is pressed. */
 function addNote(tool: CliAuth): Key {
   if (tool.installed && tool.signedIn) return 'auth.add.note.signedIn';
-  const keyOnly = tool.id === 'gemini' || tool.id === 'qwen';
+  const keyOnly = tool.id === 'opencode' || tool.id === 'gemini' || tool.id === 'qwen';
   if (!tool.installed) return keyOnly ? 'auth.add.note.installKey' : 'auth.add.note.install';
   return keyOnly ? 'auth.add.note.key' : 'auth.add.note.login';
 }
@@ -80,7 +80,8 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
   const t = useT();
   const name = toolName(tool.id, t) ?? tool.id;
   const toast = useApp((s) => s.toast);
-  const [keying, setKeying] = useState(false);
+  // Opened for this tool (a chat's "Giriş yap", the first-run screen) where a key is its only way in: its field is open.
+  const [keying, setKeying] = useState(focused && !tool.canLogin && tool.key === 'cortex');
   const [key, setKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [busy, setBusy] = useState(false);
@@ -163,13 +164,6 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
     }
     setBusy(false);
   };
-  const forget = async () => {
-    try {
-      useChat.setState({ auth: await window.cortex.chat.forgetKey(tool.id) });
-    } catch (err) {
-      failed(err);
-    }
-  };
   const added = addedOf(tool);
   const busyInstalling = Boolean(installing && !installing.failed);
 
@@ -214,12 +208,6 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
             <Button tone={tool.signedIn || tool.canLogin ? 'ghost' : 'primary'} onClick={() => setKeying(!keying)} data-auth-key>
               <KeyRound size={13} />
               {t('auth.key')}
-            </Button>
-          ) : null}
-          {/* A key beside a sign-in (Claude Code's API key): forgotten alone, back to the sign-in. "Sil" forgets it too. */}
-          {tool.key === 'cortex' && tool.kept && tool.canLogin ? (
-            <Button tone="ghost" onClick={() => void forget()} data-auth-forget>
-              {t('auth.key.forget')}
             </Button>
           ) : null}
           {!tool.local ? (
@@ -268,7 +256,6 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
           <input type="password" autoComplete="off" spellCheck={false} value={key} onChange={(event) => setKey(event.target.value)} placeholder={t('auth.key.placeholder')} aria-label={t('auth.key')} className={inputClass} data-auth-key-input autoFocus />
           {tool.baseUrl ? <input type="url" autoComplete="off" spellCheck={false} value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://…/v1" aria-label={t('auth.key.baseUrl')} className={inputClass} /> : null}
           <p className="text-[11px] leading-relaxed text-zinc-400">{t(tool.key === 'cli' ? 'auth.key.cli' : 'auth.key.cortex')}</p>
-          {busy && tool.id === 'opencode' ? <p className="text-[11px] leading-relaxed text-zinc-500">{t('auth.key.downloading')}</p> : null}
           <div className="flex gap-1.5">
             <Button tone="primary" type="submit" disabled={busy || !key.trim()} data-auth-key-save>
               {busy ? <Spinner size={12} /> : null}

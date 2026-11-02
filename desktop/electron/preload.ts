@@ -90,7 +90,6 @@ const api: CortexApi = {
     login: (cli) => invoke('chat:login', cli),
     install: (cli) => invoke('chat:install', cli),
     setKey: (cli, key, baseUrl) => invoke('chat:setKey', cli, key, baseUrl),
-    forgetKey: (cli) => invoke('chat:forgetKey', cli),
     addTool: (cli) => invoke('chat:addTool', cli),
     removeTool: (cli) => invoke('chat:removeTool', cli),
     toInbox: (text) => invoke('chat:toInbox', text),
