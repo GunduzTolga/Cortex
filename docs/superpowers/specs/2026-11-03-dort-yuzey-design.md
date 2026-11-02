@@ -85,7 +85,8 @@ flowchart TB
 ```
 
 - GitHub'sız kullanıcı: yalnız masaüstü, her şey yerelde.
-- Sunucusuz kullanıcı: masaüstü + GitHub; telefon şimdilik yok (telefonun kopyası olmadığı için bir kapıya ihtiyacı var).
+- Sunucusuz kullanıcı: masaüstü + GitHub; telefon yok. Telefon yalnız sunucu kapısıyla çalışır (karar, 3 Kasım: iki ayrı
+  telefon yolu kafa karıştırır).
 - İkinci bilgisayar: aynı GitHub reposuna "var olan kasama bağlan".
 
 ## Geliştiricinin sistemi
@@ -163,6 +164,9 @@ Her faz başlarken kendi tasarım belgesini alır.
 - Hermes API'si dışarı açılmaz, kapının arkasında kalır; masaüstündeki sunucudaki Pyn de aynı kapıdan konuşur
   (`hermesChat.ts` için yalnız adres değişir).
 - Telefon uygulaması bu repoya girer, genel olur. Geliştiriciye özel akışlar atölye eklentisi olarak kalır.
+- **Dışarıdan erişim:** kapı internete açılmaz. Telefon sunucuya Tailscale (ya da benzeri bir özel ağ) üzerinden ulaşır;
+  kurulum ekranı bunu önerir ve kapı yalnız yerel ağı ve özel ağ arayüzünü dinler. Port yönlendirme ve herkese açık
+  adres desteklenmez.
 
 ### Faz 6 — Cortex Browser
 - Kendi kasası ve eşitlemesi yok. Cortex Browser ADR-0006'ya göre aynı bilgisayardaki kasanın motorunu
