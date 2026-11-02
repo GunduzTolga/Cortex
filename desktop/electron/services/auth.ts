@@ -414,6 +414,17 @@ export async function setToolKey(id: unknown, key: unknown, baseUrl: unknown): P
   if (tool.key === 'cortex') {
     saveKey(tool.id, key, baseUrl);
     chooseChatTool(tool.id);
+    // OpenCode's key is honoured ahead of its own sign-in by the OpenCode Cortex installs (clis.ts, programOf): installed
+    // now where only another one is here.
+    if (tool.id === 'opencode' && process.platform === 'win32' && !ownProgram('opencode')) {
+      try {
+        await installPackage('opencode');
+        const own = ownProgram('opencode');
+        if (own && PACKAGES.opencode?.older?.(archOf()) && !(await starts(own))) await installPackage('opencode', { older: true });
+      } catch (err) {
+        throw err instanceof PackageRefusal ? new KeyRefusal(err.message) : err;
+      }
+    }
     return;
   }
   if (tool.key !== 'cli') throw new KeyRefusal('This tool keeps its keys in its own sign-in.');

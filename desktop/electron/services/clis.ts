@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { CliId, CliInfo } from '../../shared/chat';
 import { hermesConfigured, hermesName } from './hermesChat';
-import { keyEnv } from './keys';
+import { keptReadable, keyEnv } from './keys';
 import { LOCAL, type LocalId, lastSeen } from './localModels';
 import { ownProgram, toolsDir } from './toolPackages';
 
@@ -257,6 +257,13 @@ export function readShim(shim: string, env: NodeJS.ProcessEnv = process.env): La
 export function programOf(id: CliId, env: NodeJS.ProcessEnv = process.env): Launch | null {
   const known = KNOWN.find((one) => one.id === id);
   if (!known) return null;
+  // OpenCode with a key kept in Cortex: the one Cortex installed, whose settings' key comes before a sign-in it keeps
+  // (1.x: "apiKey === undefined && key"). 2 November: OpenCode 2.0.27 on the PATH went on with its own sign-in's
+  // expired key, the key given in Cortex unused.
+  if (id === 'opencode' && keptReadable('opencode')) {
+    const own = ownProgram(id, toolsDir(env));
+    if (own) return own;
+  }
   return onPathProgram(known, env) ?? ownProgram(id, toolsDir(env));
 }
 
