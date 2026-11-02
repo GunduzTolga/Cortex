@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -61,9 +61,9 @@ const TOOLS: Array<{ id: CliId; login: string[] | null; key: CliAuth['key'] }> =
 ];
 
 const STATUS_TIMEOUT = 20_000;
-/** The e2e run (CORTEX_HIDDEN=1, electron/main.ts) signs in to stand-ins: their console is not put in front of the person at the machine. Read when a console opens, so a test can set it. */
+/** The e2e run (CORTEX_HIDDEN=1, electron/main.ts) installs stand-ins: their installer's console is not put in front of the person at the machine. Read when one opens, so a test can set it. */
 const showConsole = (): boolean => process.env.CORTEX_HIDDEN !== '1';
-/** While a sign-in window is open: asked this often whether it is done, for at most this long. */
+/** While a sign-in is going on: asked this often whether it is done, for at most this long. */
 const LOGIN_POLL = 4_000;
 const LOGIN_WATCH = 10 * 60_000;
 
@@ -247,19 +247,37 @@ export function commandLineArg(arg: string): string {
 }
 
 /**
- * What opens a sign-in's console: Windows' own launcher (Start-Process), which gives the tool a console of its own with
- * the keyboard and the screen in it, as a double-click would, and is waited on, so the console closed is the sign-in
- * over. 2 November: the tool was started straight from here, and its input and output were Windows' NUL device, not
- * the console it opened. OpenCode 2's menu ends at once there ("Pass an integration ID or name when running without
- * an interactive terminal", after 0.1 s): its button was pressed 23 times in three seconds while nothing showed. The
- * program and its arguments come in the environment, so no path is written into the command to survive its quoting.
+ * What starts a sign-in: Windows' own launcher (Start-Process), which gives the tool a console of its own with the
+ * keyboard and the screen in it, as a double-click would, hidden: the tool opens the browser, where the sign-in is
+ * done, and its console is not shown (2 November, "browser açılması yeterli"). It is waited on, so its end is the
+ * sign-in's. 2 November: the tool was started straight from here, its input and output Windows' NUL device, not a
+ * console; OpenCode 2's menu ended at once there ("Pass an integration ID or name when running without an interactive
+ * terminal", after 0.1 s), and a browser sign-in went with it. The program and its arguments come in the environment,
+ * so no path is written into the command to survive its quoting.
  */
 export const LOGIN_SCRIPT =
-  '$o = @{ FilePath = $env:CORTEX_LOGIN_PROGRAM; WindowStyle = $env:CORTEX_LOGIN_WINDOW; PassThru = $true }; if ($env:CORTEX_LOGIN_ARGS) { $o.ArgumentList = $env:CORTEX_LOGIN_ARGS }; (Start-Process @o).WaitForExit()';
+  "$o = @{ FilePath = $env:CORTEX_LOGIN_PROGRAM; WindowStyle = 'Hidden'; PassThru = $true }; if ($env:CORTEX_LOGIN_ARGS) { $o.ArgumentList = $env:CORTEX_LOGIN_ARGS }; (Start-Process @o).WaitForExit()";
+
+/** The sign-ins going on, by tool: the PowerShell waiting on each. */
+const logins = new Map<CliId, ChildProcess>();
 
 /**
- * The tool's own sign-in, in a console window of its own (LOGIN_SCRIPT), where a browser sign-in or a menu runs as it
- * would in a terminal. When the window is closed, the window is told, and asks every status again.
+ * A sign-in's hidden console ended, with the tool it started (Start-Process's program is its PowerShell's child): its
+ * console is not there to be closed by the person.
+ */
+function endLogin(id: CliId): void {
+  const child = logins.get(id);
+  if (!child) return;
+  logins.delete(id);
+  if (child.pid !== undefined && child.exitCode === null) {
+    execFile(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => undefined);
+  }
+}
+
+/**
+ * The tool's own sign-in (LOGIN_SCRIPT): its browser opened, its console hidden. When it ends, the window is told, and
+ * asks every status again. Pressed again while one is going on, the one before is ended and the browser opened again:
+ * its console hidden, nothing else ends it (before, a second press within ten minutes did nothing).
  */
 export function startLogin(id: unknown): void {
   const tool = toolOf(id);
@@ -267,50 +285,41 @@ export function startLogin(id: unknown): void {
   if (!tool.login || !program) throw new KeyRefusal('This tool is not signed in to from here.');
   if (process.platform !== 'win32') throw new KeyRefusal('Signing in from Cortex opens a console window, which only Windows does here.');
   chooseChatTool(tool.id);
-  // Its sign-in window already open: that one is the one to finish. 2 November: 21 of OpenCode's opened in five
-  // seconds, the button pressed again and again while nothing seemed to happen.
-  const opened = loginsOpen.get(tool.id);
-  if (opened !== undefined && Date.now() - opened < LOGIN_WATCH) return;
-  loginsOpen.set(tool.id, Date.now());
-  const env = {
-    ...childEnv(program.env),
-    CORTEX_LOGIN_PROGRAM: program.command,
-    CORTEX_LOGIN_ARGS: [...program.args, ...tool.login].map(commandLineArg).join(' '),
-    CORTEX_LOGIN_WINDOW: showConsole() ? 'Normal' : 'Hidden',
-  };
+  endLogin(tool.id);
+  const env = { ...childEnv(program.env), CORTEX_LOGIN_PROGRAM: program.command, CORTEX_LOGIN_ARGS: [...program.args, ...tool.login].map(commandLineArg).join(' ') };
   // Not detached: a PowerShell started detached ran the script and opened nothing, with no word of why (2 November).
   const child = spawn(powerShellExe(), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', LOGIN_SCRIPT], { cwd: os.homedir(), env, stdio: 'ignore', windowsHide: true, shell: false });
-  let open = true;
-  const closed = () => {
-    open = false;
-    loginsOpen.delete(tool.id);
+  logins.set(tool.id, child);
+  const ended = () => {
+    if (logins.get(tool.id) === child) logins.delete(tool.id);
     changed(tool.id);
   };
-  child.on('error', closed);
-  child.on('exit', closed);
+  child.on('error', ended);
+  child.on('exit', ended);
   child.unref();
-  void watchLogin(tool, () => open);
+  void watchLogin(tool, () => logins.get(tool.id) === child);
 }
 
-/** The tools whose sign-in window is open, since when. */
-const loginsOpen = new Map<CliId, number>();
-
 /**
- * A sign-in going on, asked after until it is done: the browser's sign-in can end with its
- * console still open, or the person back in the app before closing it - and the window said
- * nothing changed until the app was opened again (21 October). Watched only from signed out.
+ * A sign-in going on, asked after until it is done: the browser's sign-in ends with the tool still running, and the
+ * window said nothing changed until the app was opened again (21 October). Signed in, the window is told and the tool
+ * given a moment to end by itself before its hidden console is ended; left unfinished for ten minutes, it is ended.
+ * One begun signed in (signing in again) is told by its end.
  */
 async function watchLogin(tool: (typeof TOOLS)[number], open: () => boolean): Promise<void> {
-  if ((await statusOf(tool)).signedIn === true) return;
+  const before = (await statusOf(tool)).signedIn === true;
   const until = Date.now() + LOGIN_WATCH;
   while (open() && Date.now() < until) {
     await new Promise((resolve) => setTimeout(resolve, LOGIN_POLL));
     if (!open()) return;
-    if ((await statusOf(tool)).signedIn === true) {
+    if (!before && (await statusOf(tool)).signedIn === true) {
       changed(tool.id);
+      await new Promise((resolve) => setTimeout(resolve, LOGIN_POLL));
+      if (open()) endLogin(tool.id);
       return;
     }
   }
+  if (open()) endLogin(tool.id);
 }
 
 /**

@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
 import type { CliId } from '../shared/chat';
-import { addTool, authStatuses, claudeStatus, codexStatus, commandLineArg, installScript, installTool, onAuthChanged, removeTool, setToolKey, startLogin } from '../electron/services/auth';
+import { addTool, authStatuses, claudeStatus, codexStatus, commandLineArg, installScript, installTool, LOGIN_SCRIPT, onAuthChanged, removeTool, setToolKey, startLogin } from '../electron/services/auth';
 import { READ_PATH, pathOutput, powerShellExe, withDirs } from '../electron/services/clis';
 import { forgetKey, hasKey, keyEnv, saveKey } from '../electron/services/keys';
 import { readSettings, updateSettings } from '../electron/services/settings';
@@ -41,11 +41,15 @@ const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
 const names = JSON.parse(fs.readFileSync(${JSON.stringify(state)}, 'utf8'));
 if (args[0] === 'login' && args.length === 1) {
-  // Its sign-in, as a browser's goes: whether it has a terminal written down, signed in a moment later, its console
-  // open a while after that.
+  // Its sign-in, as a browser's goes: whether it has a terminal written down, signed in a moment later, still running a
+  // while after that, as a tool can be.
   fs.writeFileSync(${JSON.stringify(path.join(home, `${id}-login.json`))}, JSON.stringify({ stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) }));
-  setTimeout(() => fs.writeFileSync(${JSON.stringify(state)}, JSON.stringify(['ChatGPT'])), 1500);
-  setTimeout(() => fs.writeFileSync(${JSON.stringify(path.join(home, `${id}-login-closed`))}, ''), 9000);
+  fs.appendFileSync(${JSON.stringify(path.join(home, `${id}-login-pids`))}, process.pid + '\\n');
+  setTimeout(() => fs.writeFileSync(${JSON.stringify(state)}, JSON.stringify(['ChatGPT'])), Number(process.env.STANDIN_SIGN_IN_AFTER || 1500));
+  setTimeout(() => {
+    fs.writeFileSync(${JSON.stringify(path.join(home, `${id}-login-closed`))}, '');
+    process.exit(0);
+  }, Number(process.env.STANDIN_CLOSE_AFTER || 20000));
 } else if (args[0] === 'logout' || (args[0] === 'login' && args[1] === 'status')) {
   if (args[0] === 'logout') fs.writeFileSync(${JSON.stringify(state)}, '[]');
   process.stdout.write(names.length && args[0] !== 'logout' ? 'Logged in using ChatGPT\\n' : 'Not logged in\\n');
@@ -166,11 +170,63 @@ test('"Sil", then "Ekle": the tool from scratch, its sign-in in a console with a
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, 'codex-login.json'), 'utf8')), { stdin: true, stdout: true }, 'its input and output a console, not NUL');
     const signed = told.find((one) => one.cli === 'codex' && one.signedIn);
     assert.ok(signed, 'signed in, the window told');
-    assert.ok(signed.consoleOpen, 'told while its console was still open, not only when it closed');
-    // Removed, added, signed in, its console closed.
-    await until(() => fs.existsSync(closed) && told.filter((one) => one.cli === 'codex').length >= 4);
+    assert.ok(signed.consoleOpen, 'told while it was still running, not only when it ended');
+    // Removed, added, signed in, ended: by Cortex, its console hidden, long before it would have ended by itself.
+    await until(() => told.filter((one) => one.cli === 'codex').length >= 4);
+    assert.equal(told.filter((one) => one.cli === 'codex').length, 4);
+    assert.ok(!fs.existsSync(closed), 'ended by Cortex once signed in, not left running hidden');
   } finally {
     onAuthChanged(() => undefined);
+    for (const [name, value] of Object.entries(kept)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    updateSettings((settings) => {
+      settings.chatTools = before;
+    });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  }
+});
+
+test('a sign-in’s console is hidden: the browser is where it is done', () => {
+  // 2 November: Claude Code's sign-in opened the browser and a terminal beside it ("browser açılması yeterli").
+  assert.match(LOGIN_SCRIPT, /WindowStyle = 'Hidden'/);
+  assert.ok(!LOGIN_SCRIPT.includes('"'), 'single quotes only: a double quote does not survive Windows’ command line');
+});
+
+test('pressed again while a sign-in goes on: the one before is ended, a new one begun', { skip: process.platform !== 'win32' }, async () => {
+  // Its console hidden, nothing else ends the one before; a second press used to do nothing for ten minutes.
+  const kept = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, STANDIN_SIGN_IN_AFTER: process.env.STANDIN_SIGN_IN_AFTER, STANDIN_CLOSE_AFTER: process.env.STANDIN_CLOSE_AFTER };
+  const before = readSettings().chatTools;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-again-'));
+  process.env.PATH = '';
+  process.env.LOCALAPPDATA = home;
+  // Not signed in while this runs; each ends by itself a while after.
+  process.env.STANDIN_SIGN_IN_AFTER = '60000';
+  process.env.STANDIN_CLOSE_AFTER = '8000';
+  const pids = () => (fs.existsSync(path.join(home, 'codex-login-pids')) ? fs.readFileSync(path.join(home, 'codex-login-pids'), 'utf8').split('\n').filter(Boolean).map(Number) : []);
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const until = async (done: () => boolean) => {
+    for (let waited = 0; !done() && waited < 20_000; waited += 200) await new Promise((resolve) => setTimeout(resolve, 200));
+  };
+  try {
+    standIn('codex', home, []);
+    startLogin('codex');
+    await until(() => pids().length === 1);
+    startLogin('codex');
+    await until(() => pids().length === 2 && !alive(pids()[0]));
+    const [first, second] = pids();
+    assert.ok(first && !alive(first), 'the one before ended');
+    assert.ok(second && alive(second), 'a new one begun');
+    await until(() => !alive(second));
+  } finally {
     for (const [name, value] of Object.entries(kept)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
