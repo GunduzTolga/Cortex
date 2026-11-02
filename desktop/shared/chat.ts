@@ -44,6 +44,8 @@ export interface CliAuth {
    * from Cortex, is not; it is added from the AI tools window.
    */
   chosen?: boolean;
+  /** Whether Cortex downloaded its program (toolPackages.ts): deleted with it when it is removed. */
+  own?: boolean;
 }
 
 export interface ChatSummary {
@@ -136,8 +138,10 @@ export interface ChatApi {
   /** A key for a tool: kept encrypted by Cortex, or handed to the tool itself (Codex). */
   setKey(cli: CliId, key: string, baseUrl?: string): Promise<CliAuth[]>;
   forgetKey(cli: CliId): Promise<CliAuth[]>;
-  /** The tool offered in the chat, or no longer; every tool's sign-in, as `auth` says. */
-  choose(cli: CliId, offered: boolean): Promise<CliAuth[]>;
+  /** "Ekle": the tool installed where it is not, offered in the chat, its sign-in opened where it is not signed in; every tool's sign-in, as `auth` says. */
+  addTool(cli: CliId): Promise<CliAuth[]>;
+  /** "Sil": the tool signed out with its own command (or its key forgotten), taken from the chat, and the program Cortex downloaded for it deleted. */
+  removeTool(cli: CliId): Promise<CliAuth[]>;
   /** A message kept for later as a card in the vault's inbox (`📥 000-Inbox/Yakala`); where the card is. */
   toInbox(text: string): Promise<{ path: string; added: 'new' | 'existing' }>;
 }

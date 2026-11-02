@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, Download, KeyRound, LogIn, MessageSquarePlus, RefreshCw, Trash2, X } from 'lucide-react';
+import { Check, KeyRound, LogIn, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import type { CliAuth, CliId } from '@shared/chat';
 import { messageOf } from '@shared/ipcError';
 import type { Key } from '../i18n';
@@ -31,21 +31,28 @@ const NOTES: Record<string, Key> = {
 };
 
 /**
- * What the tool says of its own saved sign-in, for a tool the chat offers; one a chat was just refused for is said to be
- * refused, whatever the tool says. A tool the chat does not offer is said to be unused in Cortex, whatever sign-in it
- * keeps: Codex, signed in only in a terminal, said "Giriş kayıtlı" and was not in the chat (1 November).
+ * An AI tool added to Cortex: installed and offered in the chat. One that is not - not installed, or signed in only in a
+ * terminal and never added here (Codex, 1 November), or removed - has only "Ekle" (2 November).
+ */
+const addedOf = (tool: CliAuth): boolean => tool.installed && (Boolean(tool.local) || tool.chosen !== false);
+
+/**
+ * What the tool says of its own saved sign-in, for a tool added to Cortex; one a chat was just refused for is said to be
+ * refused, whatever the tool says. One not added is said to be so, whatever sign-in it keeps.
  */
 function Status({ tool, refused }: { tool: CliAuth; refused: boolean }) {
   const t = useT();
-  const [words, colours]: [Key, string] = !tool.installed
-    ? ['auth.status.missing', 'bg-zinc-100 text-zinc-400']
-    : tool.local
-      ? tool.signedIn
+  const [words, colours]: [Key, string] = tool.local
+    ? !tool.installed
+      ? ['auth.status.missing', 'bg-zinc-100 text-zinc-400']
+      : tool.signedIn
         ? ['auth.status.running', 'bg-good/15 text-good']
         : ['auth.status.off', 'bg-bad/10 text-bad']
-      : tool.chosen === false
-        ? ['auth.status.unused', 'bg-zinc-100 text-zinc-500']
-        : refused && tool.signedIn !== false
+    : !addedOf(tool)
+      ? tool.installed || tool.canInstall
+        ? ['auth.status.notAdded', 'bg-zinc-100 text-zinc-500']
+        : ['auth.status.missing', 'bg-zinc-100 text-zinc-400']
+      : refused && tool.signedIn !== false
           ? ['auth.status.refused', 'bg-bad/10 text-bad']
           : tool.signedIn === true
             ? ['auth.status.in', 'bg-good text-white']
@@ -61,6 +68,14 @@ function Status({ tool, refused }: { tool: CliAuth; refused: boolean }) {
   );
 }
 
+/** What "Ekle" does for this tool, said before it is pressed. */
+function addNote(tool: CliAuth): Key {
+  if (tool.installed && tool.signedIn) return 'auth.add.note.signedIn';
+  const keyOnly = tool.id === 'gemini' || tool.id === 'qwen';
+  if (!tool.installed) return keyOnly ? 'auth.add.note.installKey' : 'auth.add.note.install';
+  return keyOnly ? 'auth.add.note.key' : 'auth.add.note.login';
+}
+
 function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; refused: boolean }) {
   const t = useT();
   const name = toolName(tool.id, t) ?? tool.id;
@@ -69,6 +84,9 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
   const [key, setKey] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [busy, setBusy] = useState(false);
+  // "Sil" asked for: what goes with it said, and asked once more.
+  const [removing, setRemoving] = useState<'ask' | 'running' | null>(null);
+  const [adding, setAdding] = useState(false);
   // Its sign-in's window open. Its installer's is the window's (chatStore.ts), so the empty chat and this row say the same.
   const [signingIn, setSigningIn] = useState(false);
   const installing = useChat((state) => (state.installing?.id === tool.id ? state.installing : null));
@@ -94,12 +112,41 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
       failed(err);
     }
   };
-  const install = async () => {
+  // "Ekle": installed where it is not (the window's own install, so the empty chat says the same), added to the chat,
+  // its sign-in opened where it is not signed in; a tool that only takes a key has its key asked here after.
+  const add = async () => {
+    setAdding(true);
     try {
-      await useChat.getState().install(tool.id);
+      let auth: CliAuth[];
+      // Not installed: its install chooses it and opens its sign-in once it is in place (Claude Code's installer runs
+      // in a console of its own and is not waited on); asked once, not twice.
+      if (!tool.installed) {
+        await useChat.getState().install(tool.id);
+        auth = await window.cortex.chat.auth();
+      } else auth = await window.cortex.chat.addTool(tool.id);
+      useChat.setState({ auth });
+      void useChat.getState().refreshClis();
+      const now = auth.find((one) => one.id === tool.id);
+      if (now?.key === 'cortex' && !now.canLogin && !now.signedIn) setKeying(true);
+      else if (now?.canLogin && !now.signedIn) setSigningIn(true);
     } catch (err) {
       failed(err);
     }
+    setAdding(false);
+  };
+  const remove = async () => {
+    setRemoving('running');
+    try {
+      useChat.setState({ auth: await window.cortex.chat.removeTool(tool.id) });
+      void useChat.getState().refreshClis();
+      setKeying(false);
+      setSigningIn(false);
+      toast({ tone: 'success', title: t('auth.removed', { name }) });
+    } catch (err) {
+      failed(err);
+      void useChat.getState().loadAuth();
+    }
+    setRemoving(null);
   };
   const save = async () => {
     if (!key.trim()) return;
@@ -123,16 +170,8 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
       failed(err);
     }
   };
-  // Added to the chat with the sign-in it keeps, or taken from it; the chat's tool chip follows.
-  const choose = async (offered: boolean) => {
-    try {
-      useChat.setState({ auth: await window.cortex.chat.choose(tool.id, offered) });
-      void useChat.getState().refreshClis();
-    } catch (err) {
-      failed(err);
-    }
-  };
-  const unused = tool.installed && !tool.local && tool.chosen === false;
+  const added = addedOf(tool);
+  const busyInstalling = Boolean(installing && !installing.failed);
 
   return (
     <li className={`rounded-xl border px-4 py-3 ${focused ? 'border-darkDelegation/40 bg-paper-2' : 'border-zinc-100'}`} data-auth-tool={tool.id}>
@@ -147,54 +186,68 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
         </p>
       ) : null}
       {tool.local?.shortContext ? <p className="mt-1 text-[11.5px] font-semibold text-bad" data-auth-short>{t('auth.local.short', { tokens: tool.local.shortContext })}</p> : null}
-      {refused && tool.signedIn && !unused ? <p className="mt-1 text-[11.5px] font-semibold text-bad" data-auth-expired>{t('auth.expired')}</p> : null}
-      {unused ? (
-        <p className="mt-1 text-[11.5px] text-zinc-600" data-auth-unused>
-          {t(tool.signedIn ? 'auth.unused.signedIn' : 'auth.unused.note')}
+      {refused && tool.signedIn && added ? <p className="mt-1 text-[11.5px] font-semibold text-bad" data-auth-expired>{t('auth.expired')}</p> : null}
+      {!tool.local && !added && (tool.installed || tool.canInstall) ? (
+        <p className="mt-1 text-[11.5px] text-zinc-600" data-auth-not-added>
+          {t(addNote(tool))}
         </p>
       ) : null}
       <p className="mt-1.5 text-[11.5px] leading-relaxed text-zinc-400">{t(NOTES[tool.id])}</p>
-      {!tool.installed && tool.canInstall ? (
+      {!tool.local && !added && (tool.installed || tool.canInstall) ? (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          <Button tone="primary" onClick={() => void install()} disabled={Boolean(installing && !installing.failed)} data-auth-install>
-            <Download size={13} />
-            {t('auth.install')}
+          <Button tone="primary" onClick={() => void add()} disabled={adding || busyInstalling} data-auth-add>
+            {adding ? <Spinner size={12} /> : <Plus size={13} />}
+            {t('auth.add')}
           </Button>
         </div>
       ) : null}
-      {tool.installed ? (
+      {added ? (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          {unused ? (
-            <Button tone={tool.signedIn || !tool.canLogin ? 'primary' : 'ghost'} onClick={() => void choose(true)} data-auth-choose>
-              <MessageSquarePlus size={13} />
-              {t('auth.choose')}
-            </Button>
-          ) : null}
-          {tool.canLogin && !(unused && tool.signedIn) ? (
+          {/* Always there for a tool added: signed in or not, its sign-in is opened again from scratch (2 November). */}
+          {tool.canLogin ? (
             <Button tone={tool.signedIn ? 'ghost' : 'primary'} onClick={() => void login()} data-auth-login>
               <LogIn size={13} />
               {t(tool.signedIn ? 'auth.login.again' : 'auth.login')}
             </Button>
           ) : null}
           {tool.key ? (
-            <Button tone="ghost" onClick={() => setKeying(!keying)} data-auth-key>
+            <Button tone={tool.signedIn || tool.canLogin ? 'ghost' : 'primary'} onClick={() => setKeying(!keying)} data-auth-key>
               <KeyRound size={13} />
               {t('auth.key')}
             </Button>
           ) : null}
-          {/* One kept here, readable or not (kept on another computer, it is not signed in with): forgotten here (30 October). */}
-          {tool.key === 'cortex' && tool.kept ? (
-            <Button tone="danger" onClick={() => void forget()} data-auth-forget>
-              <Trash2 size={13} />
+          {/* A key beside a sign-in (Claude Code's API key): forgotten alone, back to the sign-in. "Sil" forgets it too. */}
+          {tool.key === 'cortex' && tool.kept && tool.canLogin ? (
+            <Button tone="ghost" onClick={() => void forget()} data-auth-forget>
               {t('auth.key.forget')}
             </Button>
           ) : null}
-          {!tool.local && tool.chosen === true ? (
-            <Button tone="quiet" onClick={() => void choose(false)} data-auth-unchoose>
-              <X size={13} />
-              {t('auth.unchoose')}
+          {!tool.local ? (
+            <Button tone="quiet" className="text-bad" onClick={() => setRemoving('ask')} disabled={removing !== null} data-auth-remove>
+              <Trash2 size={13} />
+              {t('auth.remove')}
             </Button>
           ) : null}
+        </div>
+      ) : null}
+      {removing ? (
+        <div className="mt-2.5 rounded-lg border border-bad/30 bg-bad/5 px-3 py-2.5" data-auth-remove-ask>
+          <p className="text-[12px] font-semibold text-darkDelegation">{t('auth.remove.ask', { name })}</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[11.5px] leading-relaxed text-zinc-600">
+            <li>{t(tool.canLogin ? 'auth.remove.signOut' : 'auth.remove.key')}</li>
+            <li>{t('auth.remove.chat')}</li>
+            <li>{t(tool.own ? 'auth.remove.files' : 'auth.remove.stays')}</li>
+          </ul>
+          <p className="mt-1 text-[11.5px] text-zinc-500">{t('auth.remove.after')}</p>
+          <div className="mt-2 flex gap-1.5">
+            <Button tone="danger" onClick={() => void remove()} disabled={removing === 'running'} data-auth-remove-confirm>
+              {removing === 'running' ? <Spinner size={12} /> : <Trash2 size={13} />}
+              {t('auth.remove')}
+            </Button>
+            <Button tone="quiet" onClick={() => setRemoving(null)} disabled={removing === 'running'}>
+              {t('auth.cancel')}
+            </Button>
+          </div>
         </div>
       ) : null}
       {installing && !tool.installed ? (

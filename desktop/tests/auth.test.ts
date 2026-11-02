@@ -5,9 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
-import { authStatuses, claudeStatus, codexStatus, installScript, installTool, opencodeStatus, setToolKey, startLogin } from '../electron/services/auth';
+import { addTool, authStatuses, claudeStatus, codexStatus, installScript, installTool, opencodeStatus, removeTool, setToolKey, startLogin } from '../electron/services/auth';
 import { READ_PATH, pathOutput, powerShellExe, withDirs } from '../electron/services/clis';
 import { forgetKey, hasKey, keyEnv, saveKey } from '../electron/services/keys';
+import { readSettings, updateSettings } from '../electron/services/settings';
+import { toolsDir } from '../electron/services/toolPackages';
 
 /**
  * Signing in to the AI tools from the chat (electron/services/auth.ts) and
@@ -26,6 +28,110 @@ test('each tool’s own word on its sign-in is read: Claude Code’s JSON, Codex
   const listed = opencodeStatus('OpenCode Go       API key                     stored\nLMStudio          API key                     stored\n\n');
   assert.deepEqual(listed, { signedIn: true, detail: 'OpenCode Go, LMStudio', names: ['OpenCode Go', 'LMStudio'] });
   assert.equal(opencodeStatus('').signedIn, false);
+});
+
+test('OpenCode 1.19’s list of connections is read: its marks, colours and plain stand-ins are not names, its environment keys not connections', () => {
+  // As 1.19.5 writes it (2 November): read as the old table, no connection was found at all.
+  const listed = opencodeStatus(
+    '┌  Credentials \x1b[2m~/.local/share/opencode/auth.json\n│\n●  OpenCode Go \x1b[2mapi\n│\n●  Anthropic \x1b[2moauth\n│\n└  2 credentials\n\n┌  Environment\n│\n●  OpenAI \x1b[2mOPENAI_API_KEY\n│\n└  1 environment variable\n',
+  );
+  assert.deepEqual(listed, { signedIn: true, detail: 'OpenCode Go, Anthropic', names: ['OpenCode Go', 'Anthropic'] });
+  // A Windows console without Unicode marks: its menus' plain stand-ins.
+  assert.deepEqual(opencodeStatus('T  Credentials ~\\.local\\share\\opencode\\auth.json\r\n|\r\n•  Together AI api\r\n|\r\n—  1 credentials\r\n').names, ['Together AI']);
+  assert.deepEqual(opencodeStatus('┌  Credentials ~/.local/share/opencode/auth.json\n│\n└  0 credentials\n'), { signedIn: false, detail: null, names: [] });
+});
+
+/** A stand-in for a tool Cortex downloaded: a script its record names, run by Electron's node, writing down how it was asked. */
+function standIn(id: 'opencode' | 'codex' | 'gemini', home: string, connections: string[]): { folder: string; asked: () => string[][]; kept: () => string[] } {
+  const folder = path.join(toolsDir(), id);
+  const [log, state] = [path.join(home, `${id}-asked.log`), path.join(home, `${id}-auth.json`)];
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(state, JSON.stringify(connections));
+  fs.writeFileSync(
+    path.join(folder, 'tool.js'),
+    `const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
+const names = JSON.parse(fs.readFileSync(${JSON.stringify(state)}, 'utf8'));
+if (args[0] === 'auth' && args[1] === 'list') {
+  process.stdout.write('┌  Credentials \\x1b[2m~/.local/share/opencode/auth.json\\n│\\n' + names.map((name) => '●  ' + name + ' \\x1b[2mapi\\n│\\n').join('') + '└  ' + names.length + ' credentials\\n');
+} else if (args[0] === 'auth' && args[1] === 'logout') {
+  fs.writeFileSync(${JSON.stringify(state)}, JSON.stringify(names.filter((name) => name.toLowerCase() !== String(args[2]).toLowerCase())));
+} else if (args[0] === 'logout' || (args[0] === 'login' && args[1] === 'status')) {
+  if (args[0] === 'logout') fs.writeFileSync(${JSON.stringify(state)}, '[]');
+  process.stdout.write(names.length && args[0] !== 'logout' ? 'Logged in using ChatGPT\\n' : 'Not logged in\\n');
+}
+`,
+  );
+  fs.writeFileSync(path.join(folder, 'cortex-tool.json'), JSON.stringify({ program: 'tool.js' }));
+  const read = (file: string) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
+  return {
+    folder,
+    asked: () => read(log).split('\n').filter(Boolean).map((line) => JSON.parse(line) as string[]),
+    kept: () => JSON.parse(read(state) || '[]') as string[],
+  };
+}
+
+test('"Sil" signs the tool out with its own command, takes it from the chat and deletes the program Cortex downloaded; "Ekle" puts it back', async () => {
+  const kept = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
+  const before = readSettings().chatTools;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-remove-'));
+  // Only the stand-ins: no tool of the machine's on the PATH.
+  process.env.PATH = '';
+  process.env.LOCALAPPDATA = home;
+  delete process.env.GEMINI_API_KEY;
+  try {
+    updateSettings((settings) => {
+      settings.chatTools = ['claude', 'opencode', 'codex', 'gemini'];
+    });
+    // 2 November: OpenCode said "Giriş yapıldı", the chat said it had no key for OpenCode Go, and the window offered no
+    // way to sign in from scratch. Each connection is signed out by its own name, one argument however many words.
+    const opencode = standIn('opencode', home, ['OpenCode Go', 'LM Studio']);
+    await removeTool('opencode');
+    assert.deepEqual(opencode.kept(), [], 'no connection left');
+    assert.deepEqual(
+      opencode.asked().filter((args) => args[1] === 'logout'),
+      [
+        ['auth', 'logout', 'OpenCode Go'],
+        ['auth', 'logout', 'LM Studio'],
+      ],
+    );
+    assert.equal(fs.existsSync(opencode.folder), false, 'the program Cortex downloaded is gone');
+    assert.deepEqual(readSettings().chatTools, ['claude', 'codex', 'gemini']);
+
+    const codex = standIn('codex', home, ['ChatGPT']);
+    await removeTool('codex');
+    assert.ok(codex.asked().some((args) => args.join(' ') === 'logout'), 'Codex’s own logout');
+    assert.equal(fs.existsSync(codex.folder), false);
+
+    // A tool that only takes a key: the key Cortex kept for it is forgotten.
+    saveKey('gemini', 'AIza-kept', undefined);
+    const gemini = standIn('gemini', home, []);
+    await removeTool('gemini');
+    assert.equal(hasKey('gemini', {}), false, 'its key forgotten');
+    assert.equal(fs.existsSync(gemini.folder), false);
+    assert.deepEqual(readSettings().chatTools, ['claude']);
+
+    // "Ekle" for one installed (the person's own, or Cortex's): offered in the chat again. Its sign-in, opened in a
+    // console, is Windows'; elsewhere it is added and left to its sign-in button.
+    standIn('opencode', home, []);
+    if (process.platform !== 'win32') {
+      await addTool('opencode');
+      assert.deepEqual(readSettings().chatTools, ['claude', 'opencode']);
+    }
+    await assert.rejects(removeTool('nope'), /Not a tool/);
+    await assert.rejects(addTool('lmstudio'), /Not a tool/);
+  } finally {
+    for (const [name, value] of Object.entries(kept)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    updateSettings((settings) => {
+      settings.chatTools = before;
+    });
+    forgetKey('gemini');
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('a key is kept encrypted, never as written; it becomes its tool’s environment, with its address; a key that is not one is refused', () => {
