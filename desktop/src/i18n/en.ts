@@ -471,7 +471,7 @@ export const en = {
   'auth.manage': 'Manage sign-ins…',
   'auth.note.claude': 'Sign in with your Claude subscription in the browser. If you give an API key instead, chats use it in place of the subscription.',
   'auth.note.codex': 'Sign in with your ChatGPT account in the browser, or give an OpenAI API key.',
-  'auth.note.opencode': 'Pick a provider in the window that opens and connect: OpenCode Go, OpenCode Zen, z.ai, LM Studio and others.',
+  'auth.note.opencode': 'Pick a provider in the window that opens and connect: OpenCode Go, OpenCode Zen, z.ai, LM Studio and others. For OpenCode Go or Zen you can also enter the API key from opencode.ai here with the API key button: Cortex puts it ahead of OpenCode\'s own saved sign-in. If OpenCode says the key has expired, enter the new key here.',
   'auth.note.gemini': 'Google no longer accepts personal-account sign-in here. Get a Gemini API key at aistudio.google.com and give it here.',
   'auth.note.qwen': 'Qwen Code\'s own sign-in was removed. It needs an OpenAI-compatible API key and its address (Alibaba Cloud DashScope, for one).',
   'auth.status.running': 'Running',

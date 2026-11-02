@@ -31,6 +31,9 @@ export const KEY_ENV: Partial<Record<CliId, { variable: string; baseUrl?: string
   claude: { variable: 'ANTHROPIC_API_KEY' },
   gemini: { variable: 'GEMINI_API_KEY' },
   qwen: { variable: 'OPENAI_API_KEY', baseUrl: 'OPENAI_BASE_URL' },
+  // OpenCode Go's and Zen's key (opencode.ai). Given as their settings too (keyEnv): a sign-in OpenCode keeps itself,
+  // with a key since expired, was the one it used (2 November, "giriş yapıldı diyor, api key giremiyorum").
+  opencode: { variable: 'OPENCODE_API_KEY' },
   // No program started here: Hermes's key goes to its API server as a Bearer token (hermesChat.ts); the name is only how keyEnv hands it over.
   hermes: { variable: 'HERMES_API_KEY' },
 };
@@ -111,7 +114,13 @@ export function keyEnv(id: CliId): Record<string, string> {
   if (!where || !kept?.key) return {};
   try {
     const key = safeStorage.decryptString(Buffer.from(kept.key, 'base64'));
-    return { [where.variable]: key, ...(where.baseUrl && kept.baseUrl ? { [where.baseUrl]: kept.baseUrl } : {}) };
+    return {
+      [where.variable]: key,
+      ...(where.baseUrl && kept.baseUrl ? { [where.baseUrl]: kept.baseUrl } : {}),
+      // OpenCode takes a key from its environment only where it keeps none of its own; a provider's key in its settings
+      // comes before both (OPENCODE_CONFIG_CONTENT, read by 1.x and 2.x alike).
+      ...(id === 'opencode' ? { OPENCODE_CONFIG_CONTENT: JSON.stringify({ provider: { 'opencode-go': { options: { apiKey: key } }, opencode: { options: { apiKey: key } } } }) } : {}),
+    };
   } catch {
     return {};
   }

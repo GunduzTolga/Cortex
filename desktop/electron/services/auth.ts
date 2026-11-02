@@ -24,6 +24,9 @@ import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts, t
  * - Codex: `codex login status` ("Logged in using ChatGPT"), `codex login`,
  *   and `codex login --with-api-key`, which reads the key on its input and
  *   keeps it itself.
+ * - OpenCode: a key for OpenCode Go and Zen kept here, before its own sign-in
+ *   (keys.ts, 2 November: its own kept an expired key, and signing in again
+ *   did not replace it).
  * - OpenCode: `opencode auth list` (one line a connection, "stored"),
  *   `opencode auth login` (its menu of providers). From 1.19 (2 November) the
  *   list is its menus' log: "●  OpenCode Go api" under "Credentials"; and
@@ -54,7 +57,7 @@ import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts, t
 const TOOLS: Array<{ id: CliId; login: string[] | null; key: CliAuth['key'] }> = [
   { id: 'claude', login: ['auth', 'login'], key: 'cortex' },
   { id: 'codex', login: ['login'], key: 'cli' },
-  { id: 'opencode', login: ['auth', 'login'], key: null },
+  { id: 'opencode', login: ['auth', 'login'], key: 'cortex' },
   { id: 'gemini', login: null, key: 'cortex' },
   { id: 'qwen', login: null, key: 'cortex' },
 ];

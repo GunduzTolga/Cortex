@@ -465,7 +465,7 @@ export const tr: Record<keyof typeof en, string> = {
   'auth.manage': 'Girişleri yönet…',
   'auth.note.claude': 'Claude aboneliğinle tarayıcıda giriş yapılır. Bir API anahtarı girersen sohbetler aboneliğin yerine onu kullanır.',
   'auth.note.codex': 'ChatGPT hesabınla tarayıcıda giriş yapılır ya da bir OpenAI API anahtarı girersin.',
-  'auth.note.opencode': 'Açılan pencerede bir sağlayıcı seçip bağlanırsın: OpenCode Go, OpenCode Zen, z.ai, LM Studio ve diğerleri.',
+  'auth.note.opencode': 'Açılan pencerede bir sağlayıcı seçip bağlanırsın: OpenCode Go, OpenCode Zen, z.ai, LM Studio ve diğerleri. OpenCode Go ya da Zen için opencode.ai\'den aldığın API anahtarını API anahtarı düğmesiyle buraya da girebilirsin: Cortex onu OpenCode\'un kendi kayıtlı girişinin önüne koyar. OpenCode "anahtarın süresi dolmuş" derse yeni anahtarı burada gir.',
   'auth.note.gemini': 'Google kişisel hesapla girişi artık kabul etmiyor. aistudio.google.com adresinden bir Gemini API anahtarı alıp buraya gir.',
   'auth.note.qwen': 'Qwen Code’un kendi girişi kaldırıldı. OpenAI uyumlu bir API anahtarı ve adresi gerekir (örneğin Alibaba Cloud DashScope).',
   'auth.status.running': 'Çalışıyor',
