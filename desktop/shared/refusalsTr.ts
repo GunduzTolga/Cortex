@@ -120,6 +120,11 @@ const RULES: Rule[] = [
     say: () => 'OpenCode: bu API anahtarının süresi dolmuş. opencode.ai\'de (OpenCode Console) yeni bir API anahtarı oluştur ve onu gir; yeniden giriş yapmak eski anahtarı yenilemez.',
   },
   { pattern: /^OpenCode: (?:Verify your API key is correct|Invalid API key)\b/i, say: () => 'OpenCode: API anahtarı geçersiz. Sağlayıcının sitesindeki anahtarı yeniden kopyalayıp gir.' },
+  // opencode.ai's answer to a key it does not know: a made-up key gets the same one (2 November).
+  {
+    pattern: /^OpenCode: (?:Upstream request failed: )?Invalid credential\b/i,
+    say: () => 'OpenCode: opencode.ai bu anahtarı tanımadı. opencode.ai\'de OpenCode Go aboneliğinin olduğu çalışma alanında yeni bir API anahtarı oluştur, tamamını kopyalayıp Yapay zeka araçları › OpenCode › API anahtarı\'na yapıştır.',
+  },
   { pattern: /^OpenCode: Insufficient balance\b/, say: () => 'OpenCode: hesapta yeterli bakiye yok. Sağlayıcının sitesinde bakiye ya da aboneliği kontrol et.' },
   { pattern: /^OpenCode: (.+)$/, say: ([said]) => `OpenCode diyor ki: ${said}` },
   { pattern: /^The chosen model's provider \((.+)\) is not signed in\.$/, say: ([provider]) => `Seçili modelin sağlayıcısına (${provider}) giriş yapılmamış.` },

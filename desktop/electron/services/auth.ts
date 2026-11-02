@@ -63,8 +63,8 @@ const TOOLS: Array<{ id: CliId; login: string[] | null; key: CliAuth['key'] }> =
 ];
 
 const STATUS_TIMEOUT = 20_000;
-/** The e2e run (CORTEX_HIDDEN=1, electron/main.ts) signs in to stand-ins: their console is not put in front of the person at the machine. */
-const SHOW_CONSOLE = process.env.CORTEX_HIDDEN !== '1';
+/** The e2e run (CORTEX_HIDDEN=1, electron/main.ts) signs in to stand-ins: their console is not put in front of the person at the machine. Read when a console opens, so a test can set it. */
+const showConsole = (): boolean => process.env.CORTEX_HIDDEN !== '1';
 /** While a sign-in window is open: asked this often whether it is done, for at most this long. */
 const LOGIN_POLL = 4_000;
 const LOGIN_WATCH = 10 * 60_000;
@@ -287,10 +287,28 @@ const toolOf = (id: unknown) => {
 };
 
 /**
- * The tool's own sign-in, in a console window of its own: a program started
- * detached on Windows gets one, where a browser sign-in or a menu runs as it
- * would in a terminal. When the window is closed, the window is told, and
- * asks every status again.
+ * One argument as Windows' command line reads it back (CommandLineToArgvW): quoted where it has a space or a quote,
+ * a quote escaped, the backslashes before one, or before the closing quote, doubled.
+ */
+export function commandLineArg(arg: string): string {
+  if (arg && !/[\s"]/.test(arg)) return arg;
+  return `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
+}
+
+/**
+ * What opens a sign-in's console: Windows' own launcher (Start-Process), which gives the tool a console of its own with
+ * the keyboard and the screen in it, as a double-click would, and is waited on, so the console closed is the sign-in
+ * over. 2 November: the tool was started straight from here, and its input and output were Windows' NUL device, not
+ * the console it opened. OpenCode 2's menu ends at once there ("Pass an integration ID or name when running without
+ * an interactive terminal", after 0.1 s): its button was pressed 23 times in three seconds while nothing showed. The
+ * program and its arguments come in the environment, so no path is written into the command to survive its quoting.
+ */
+export const LOGIN_SCRIPT =
+  '$o = @{ FilePath = $env:CORTEX_LOGIN_PROGRAM; WindowStyle = $env:CORTEX_LOGIN_WINDOW; PassThru = $true }; if ($env:CORTEX_LOGIN_ARGS) { $o.ArgumentList = $env:CORTEX_LOGIN_ARGS }; (Start-Process @o).WaitForExit()';
+
+/**
+ * The tool's own sign-in, in a console window of its own (LOGIN_SCRIPT), where a browser sign-in or a menu runs as it
+ * would in a terminal. When the window is closed, the window is told, and asks every status again.
  */
 export function startLogin(id: unknown): void {
   const tool = toolOf(id);
@@ -303,7 +321,14 @@ export function startLogin(id: unknown): void {
   const opened = loginsOpen.get(tool.id);
   if (opened !== undefined && Date.now() - opened < LOGIN_WATCH) return;
   loginsOpen.set(tool.id, Date.now());
-  const child = spawn(program.command, [...program.args, ...tool.login], { cwd: os.homedir(), env: childEnv(program.env), detached: true, stdio: 'ignore', windowsHide: !SHOW_CONSOLE, shell: false });
+  const env = {
+    ...childEnv(program.env),
+    CORTEX_LOGIN_PROGRAM: program.command,
+    CORTEX_LOGIN_ARGS: [...program.args, ...tool.login].map(commandLineArg).join(' '),
+    CORTEX_LOGIN_WINDOW: showConsole() ? 'Normal' : 'Hidden',
+  };
+  // Not detached: a PowerShell started detached ran the script and opened nothing, with no word of why (2 November).
+  const child = spawn(powerShellExe(), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', LOGIN_SCRIPT], { cwd: os.homedir(), env, stdio: 'ignore', windowsHide: true, shell: false });
   let open = true;
   const closed = () => {
     open = false;
@@ -384,7 +409,7 @@ export async function installTool(id: unknown): Promise<void> {
     return;
   }
   const script = installScript(tool.id, readSettings().language !== 'en');
-  const child = spawn(powerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { cwd: os.homedir(), env: childEnv(), detached: true, stdio: 'ignore', windowsHide: !SHOW_CONSOLE, shell: false });
+  const child = spawn(powerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { cwd: os.homedir(), env: childEnv(), detached: true, stdio: 'ignore', windowsHide: !showConsole(), shell: false });
   let ended = false;
   const after = () => {
     if (ended) return;
