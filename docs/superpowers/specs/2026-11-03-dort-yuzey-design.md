@@ -133,13 +133,17 @@ Her faz başlarken kendi tasarım belgesini alır.
   GitHub App; fazın tasarımında kesinleşir.
 - Bitti: temiz bir Windows'ta, terminale dokunmadan, iki bilgisayar arasında not gidip geliyor.
 
-### Faz 3 — Sunucu ekle
-- Ayarlar › Sunucu › "Sunucu ekle": adres ve kullanıcı adı, şifre bir kez. Uygulama SSH anahtarı üretip yükler; sonra
-  şifre bir daha sorulmaz.
-- Uygulama sunucuya motoru kurar, kasayı GitHub'dan klonlar, eşitleme zamanlayıcısını kurar: Faz 2'deki
-  `beyin.py esitle`'yi `systemd --user` zamanlayıcısıyla çağırır (sudo'suz). Zamanlayıcının oturum kapalıyken de
-  çalışması için `loginctl enable-linger` gerekir; bu sudo isteyebilir, ekranda açıkça söylenir.
-- Bitti: boş bir Linux makinesi uygulamadan kuruluyor ve eşitleniyor.
+### Faz 3 — Sunucu ekle (ara yol: tek komut + uygulamadan yönetim)
+- Ayarlar › Sunucu › "Sunucu ekle": uygulama tek satırlık bir kurulum komutu hazırlar (içinde tek kullanımlık eşleştirme
+  kodu); kullanıcı onu sunucuda bir kez yapıştırır. Uygulama SSH ile sunucuya girmez, anahtar tutmaz.
+- Betik motoru kurar, kasayı GitHub'dan klonlar, Faz 2'deki `beyin.py esitle`'yi `systemd --user` zamanlayıcısıyla
+  çağırır. Desteklenmeyen bir ortamda (Python 3.11 yok, systemd yok) neyin eksik olduğunu tek cümleyle söyleyip durur.
+  Zamanlayıcının oturum kapalıyken çalışması için `loginctl enable-linger` gerekir; sudo isterse bunu açıkça yazar.
+- Eşleşince günlük işler uygulamadan yapılır: sunucu durumu (son eşitleme, motor sürümü, ajanlar), "motoru güncelle",
+  "onar" (`beyin.py doctor`). Bunlar Faz 5'teki kapıdan geçer.
+- Neden SSH otomasyonu değil: kurulum bir kez yapılır; her dağıtımın farkı ayrı destek işi olur; uygulamanın sunucuya
+  anahtarla girmesi herkese açık bir üründe büyük bir güvenlik yüzeyidir.
+- Bitti: boş bir Linux makinesine tek komut yapıştırılıyor, uygulama sunucuyu görüyor ve güncelleyebiliyor.
 
 ### Faz 4 — Beceriler ve öğrenme masaüstünde
 - **Beceriler kasanın içinde** (`plugins/` + `.claude-plugin/marketplace.json`). Eşitleme onları da her cihaza taşır;
