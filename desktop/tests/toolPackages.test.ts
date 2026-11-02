@@ -12,7 +12,6 @@ import test from 'node:test';
 import { gzipSync } from 'node:zlib';
 import { programOf } from '../electron/services/clis';
 import { PACKAGES, PackageRefusal, installPackage, ownProgram, toolsDir, untar } from '../electron/services/toolPackages';
-import { forgetKey, saveKey } from '../electron/services/keys';
 
 /**
  * OpenCode, Codex, Gemini CLI and Qwen Code installed by Cortex itself (electron/services/toolPackages.ts): their
@@ -223,29 +222,34 @@ test('each tool’s package is its maker’s own for Windows; a script is run by
   }
 });
 
-test('a tool on the PATH is the person’s and comes first; without one, the one Cortex installed is found', () => {
+test('a tool on the PATH is the person’s and comes first; without one, the one Cortex installed is found; OpenCode is only ever Cortex’s', () => {
   const local = temp();
   try {
-    const own = path.join(toolsDir({ LOCALAPPDATA: local }), 'opencode');
-    fs.mkdirSync(path.join(own, 'bin'), { recursive: true });
-    fs.writeFileSync(path.join(own, 'bin', 'opencode.exe'), '');
-    fs.writeFileSync(path.join(own, 'cortex-tool.json'), JSON.stringify({ program: 'bin/opencode.exe' }));
-    assert.deepEqual(programOf('opencode', { PATH: '', LOCALAPPDATA: local }), { command: path.join(own, 'bin', 'opencode.exe'), args: [] });
+    const ownOf = (id: 'codex' | 'opencode') => {
+      const own = path.join(toolsDir({ LOCALAPPDATA: local }), id);
+      fs.mkdirSync(path.join(own, 'bin'), { recursive: true });
+      fs.writeFileSync(path.join(own, 'bin', `${id}.exe`), '');
+      fs.writeFileSync(path.join(own, 'cortex-tool.json'), JSON.stringify({ program: `bin/${id}.exe` }));
+      return path.join(own, 'bin', `${id}.exe`);
+    };
     const onPath = path.join(local, 'yol');
     fs.mkdirSync(onPath);
-    const theirs = path.join(onPath, process.platform === 'win32' ? 'opencode.exe' : 'opencode');
-    fs.writeFileSync(theirs, '');
-    fs.chmodSync(theirs, 0o755);
-    assert.deepEqual(programOf('opencode', { PATH: onPath, LOCALAPPDATA: local }), { command: theirs, args: [] });
-    // With a key kept in Cortex, OpenCode is the one Cortex installed: the key in its settings comes before a sign-in
-    // it keeps (2 November: OpenCode 2.0.27 on the PATH used its own expired one).
-    saveKey('opencode', 'sk-opencode', undefined);
-    try {
-      assert.deepEqual(programOf('opencode', { PATH: onPath, LOCALAPPDATA: local }), { command: path.join(own, 'bin', 'opencode.exe'), args: [] });
-    } finally {
-      forgetKey('opencode');
-    }
-    assert.deepEqual(programOf('opencode', { PATH: onPath, LOCALAPPDATA: local }), { command: theirs, args: [] }, 'the person’s again, the key forgotten');
+    const theirs = (id: string) => {
+      const file = path.join(onPath, process.platform === 'win32' ? `${id}.exe` : id);
+      fs.writeFileSync(file, '');
+      fs.chmodSync(file, 0o755);
+      return file;
+    };
+    const codex = ownOf('codex');
+    assert.deepEqual(programOf('codex', { PATH: '', LOCALAPPDATA: local }), { command: codex, args: [] });
+    const theirCodex = theirs('codex');
+    assert.deepEqual(programOf('codex', { PATH: onPath, LOCALAPPDATA: local }), { command: theirCodex, args: [] });
+    // OpenCode: only the one Cortex installed, which the key given in Cortex reaches (2 November: OpenCode 2.0.27 on the
+    // PATH went on with its own sign-in's expired key).
+    theirs('opencode');
+    assert.equal(programOf('opencode', { PATH: onPath, LOCALAPPDATA: local }), null, 'the person’s is not used');
+    const opencode = ownOf('opencode');
+    assert.deepEqual(programOf('opencode', { PATH: onPath, LOCALAPPDATA: local }), { command: opencode, args: [] });
   } finally {
     fs.rmSync(local, { recursive: true, force: true });
   }

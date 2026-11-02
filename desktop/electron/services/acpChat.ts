@@ -5,7 +5,6 @@ import { app } from 'electron';
 import type { CliId, ConfigOption, PermissionKind, ToolStatus } from '../../shared/chat';
 import { AcpConnection, AcpError } from './acp';
 import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
-import { opencodeSignedIn } from './auth';
 import { launchFor } from './clis';
 import { keptReadable } from './keys';
 import { readSettings } from './settings';
@@ -79,9 +78,9 @@ export function optionsOf(configOptions: unknown): ConfigOption[] | null {
 /**
  * OpenCode names a model by its provider first ("opencode-go/…"), and its own default can be one of a provider nobody
  * signed in to here: signed in to OpenCode Go, a chat began on "opencode/DeepSeek V4.1 Flash" (OpenCode Zen) and every
- * message was refused, "provider authentication required", signing in again changing nothing (2 November). The
- * provider as `opencode auth list` names it ("OpenCode Go", "Z.AI Coding Plan", "LMStudio") is its id with the
- * spaces and marks taken out ("opencode-go", "zai-coding-plan", "lmstudio"); OpenCode Zen's id is "opencode".
+ * message was refused, "provider authentication required", signing in again changing nothing (2 November). A
+ * provider by its name ("OpenCode Go") is its id with the spaces and marks taken out ("opencode-go"); OpenCode Zen's
+ * id is "opencode".
  */
 const providerKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
 const PROVIDER_NAMES: Record<string, string[]> = { opencode: ['opencode', 'opencodezen'] };
@@ -223,13 +222,14 @@ async function sessionFor(turn: Turn, conn: Conn): Promise<string> {
 }
 
 /**
- * No model chosen for OpenCode yet, and its default one of a provider not signed in to: one that is (signedInChoice).
+ * No model chosen for OpenCode yet, and its default one of a provider not signed in to: one of OpenCode Go, where its key
+ * is given in Cortex, the one way in (auth.ts) (signedInChoice).
  * The settings as they are after; the same ones where nothing was changed.
  */
 async function signedInModel(conn: Conn, sessionId: string, options: ConfigOption[], prefs: Readonly<Record<string, string>>): Promise<ConfigOption[]> {
   const model = conn.cli === 'opencode' ? options.find((one) => one.category === 'model' || one.id === 'model') : undefined;
   if (!model || prefs[model.id] !== undefined) return options;
-  const value = signedInChoice(model, await opencodeSignedIn().catch(() => []));
+  const value = signedInChoice(model, keptReadable('opencode') ? ['OpenCode Go'] : []);
   if (!value) return options;
   try {
     const set = (await conn.acp.request('session/set_config_option', { sessionId, configId: model.id, value })) as { configOptions?: unknown } | null;

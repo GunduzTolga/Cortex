@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.49" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.49-E8B23A">
+  <img alt="Sürüm 1.0.50" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.50-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -186,6 +186,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.50](docs/v3/releases/1.0.50.md) | OpenCode'a yalnız OpenCode Go API anahtarıyla bağlanılıyor; ilk açılışta anahtar soruluyor. Her araçta tek "Sil" aracı sıfırlıyor, "Ekle" yetkilendirmeyi yeniden açıyor ve giriş bitince pencere kendiliğinden "Giriş yapıldı" oluyor. |
 | [1.0.49](docs/v3/releases/1.0.49.md) | OpenCode'un "Giriş yap" penceresi açık kalıyor: gerçek bir terminalde açılıyor, menüsü 0,1 saniyede kapanmıyor. opencode.ai'nin tanımadığı anahtar "bir şeyler ters gitti" yerine anahtarın reddi olarak, ne yapılacağıyla söyleniyor. |
 | [1.0.48](docs/v3/releases/1.0.48.md) | Cortex'te OpenCode anahtarı kayıtlıyken sohbet Cortex'in kendi OpenCode'uyla çalışıyor: OpenCode 2'nin kendi kayıtlı girişi (süresi dolmuş anahtarıyla) girilen anahtarın önüne geçiyordu. OpenCode'un asıl ret sebebi iki saniyeye kadar bekleniyor. |
 | [1.0.47](docs/v3/releases/1.0.47.md) | OpenCode'a API anahtarı Cortex'ten giriliyor ve OpenCode'un kendi kayıtlı girişinin önüne geçiyor. OpenCode bir mesajı reddedince asıl sebebi (örneğin "API anahtarının süresi dolmuş") kendi günlüğünden okunup sohbette gösteriliyor. Aynı araç için giriş penceresi açıkken ikincisi açılmıyor. |

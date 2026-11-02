@@ -141,10 +141,17 @@ export function Onboarding() {
   const install = (id: CliId) => {
     trying.current.add(id);
     setInstalling({ id, failed: false });
-    void window.cortex.chat.install(id).catch((err: unknown) => {
-      trying.current.delete(id);
-      setInstalling({ id, failed: true, why: refusal(messageOf(err)) });
-    });
+    void window.cortex.chat
+      .install(id)
+      .then(async () => {
+        // A tool whose only way in is its key (OpenCode): its field opened as soon as it is installed.
+        const now = (await window.cortex.chat.auth().catch((): CliAuth[] => [])).find((one) => one.id === id);
+        if (now?.installed && !now.canLogin && now.key === 'cortex' && !now.signedIn) useChat.getState().openAuth(id);
+      })
+      .catch((err: unknown) => {
+        trying.current.delete(id);
+        setInstalling({ id, failed: true, why: refusal(messageOf(err)) });
+      });
   };
 
   useEffect(() => {
@@ -635,6 +642,13 @@ function ToolsStep({
                 <Button tone={tool.signedIn === true ? 'ghost' : 'primary'} className="h-8 shrink-0" onClick={() => onLogin(tool.id)} data-onboarding-tool-login={tool.id}>
                   <LogIn size={12} />
                   {t(tool.signedIn === true ? 'onboarding.tools.again' : 'onboarding.tools.signIn')}
+                </Button>
+              ) : null}
+              {/* A tool whose only way in is its key (OpenCode, Gemini CLI, Qwen Code): its field, a click away. */}
+              {!tool.canLogin && tool.key === 'cortex' && tool.signedIn !== true ? (
+                <Button tone="primary" className="h-8 shrink-0" onClick={() => useChat.getState().openAuth(tool.id)} data-onboarding-tool-key={tool.id}>
+                  <KeyRound size={12} />
+                  {t('auth.key')}
                 </Button>
               ) : null}
             </li>
