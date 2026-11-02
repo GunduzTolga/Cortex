@@ -90,6 +90,7 @@ const ERRORS: Record<string, Key> = {
   'provider.quota': 'chat.error.quota',
   auth: 'chat.error.auth',
   'provider-auth': 'chat.error.providerAuth',
+  'provider-key': 'chat.error.providerKey',
   model: 'chat.error.model',
   stopped: 'chat.error.stopped',
   unsupported: 'chat.error.unsupported',
@@ -171,7 +172,7 @@ function Answer({ turn, live, onSignIn, onRetry }: { turn: Turn; live: boolean; 
             </p>
             {/* What the main process said, in English; a CLI's own words are left as they came. */}
             <p className="mt-0.5 break-words font-mono text-[11px] text-zinc-500">{language === 'en' ? turn.end.message : turkishOf(turn.end.message)}</p>
-            {(turn.end.error === 'auth' || turn.end.error === 'provider-auth') && onSignIn ? (
+            {(turn.end.error === 'auth' || turn.end.error === 'provider-auth' || turn.end.error === 'provider-key') && onSignIn ? (
               <button type="button" onClick={onSignIn} className="mt-2 rounded-lg border-[1.5px] border-darkDelegation bg-gold px-2.5 py-1 text-[11.5px] font-semibold text-darkDelegation hover:bg-signal" data-chat-sign-in>
                 {t('chat.signIn')}
               </button>

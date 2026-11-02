@@ -146,6 +146,14 @@ test('a key is kept encrypted, never as written; it becomes its tool’s environ
   assert.throws(() => saveKey('gemini', 'two\nlines', undefined), /not a key/);
   assert.throws(() => saveKey('gemini', '   ', undefined), /not a key/);
   assert.throws(() => saveKey('codex', 'sk', undefined), /does not take a key here/, 'Codex keeps its own');
+  // OpenCode's key: in its environment, and as OpenCode Go's and Zen's settings, which come before a sign-in it keeps itself.
+  saveKey('opencode', 'sk-opencode-new', undefined);
+  const given = keyEnv('opencode');
+  assert.equal(given.OPENCODE_API_KEY, 'sk-opencode-new');
+  assert.deepEqual(JSON.parse(given.OPENCODE_CONFIG_CONTENT ?? '{}'), { provider: { 'opencode-go': { options: { apiKey: 'sk-opencode-new' } }, opencode: { options: { apiKey: 'sk-opencode-new' } } } });
+  assert.ok(!fs.readFileSync(file, 'utf8').includes('sk-opencode-new'), 'not on disk as written');
+  forgetKey('opencode');
+  assert.deepEqual(keyEnv('opencode'), {});
   forgetKey('gemini');
   assert.deepEqual(keyEnv('gemini'), {});
   assert.equal(hasKey('gemini', {}), false);

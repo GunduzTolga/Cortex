@@ -24,7 +24,7 @@ import {
   shownPath,
   shutdownChats,
 } from '../electron/services/chat';
-import { acpBackend, signedInChoice } from '../electron/services/acpChat';
+import { acpBackend, opencodeLogDir, opencodeSaid, signedInChoice } from '../electron/services/acpChat';
 import { STOP_GRACE, cardTextFor } from '../electron/services/chatKit';
 import { renameRetrying, writeWhole } from '../electron/services/fileWrite';
 import { pythonOf } from '../electron/services/localChat';
@@ -536,4 +536,38 @@ test('a new chat shows its model and mode before its first message; one chosen t
     methods.some((one) => one.method === 'session/set_config_option' && one.params.value === 'fake/b' && one.params.sessionId === prompt.params.sessionId),
     'given to that session before its first message',
   );
+});
+
+test('OpenCode’s own reason for refusing a turn is read from its log: only what it wrote since the turn began', () => {
+  // 2 November: its ACP said "provider authentication required"; its log said the key had expired, all day.
+  const dir = temp('opencode-log-');
+  const began = Date.now();
+  const at = (ms: number) => new Date(ms).toISOString();
+  const expired =
+    'AI.Error: This API key has expired. Create a new API key in OpenCode Console and replace it in your client or secret store. Signing in again will not renew this key.';
+  fs.writeFileSync(
+    path.join(dir, 'opencode.log'),
+    [
+      `timestamp=${at(began - 60_000)} level=ERROR run=old message="stream error" error.error="AI_APICallError: Insufficient balance. Manage your billing here: https://opencode.ai/x"`,
+      `timestamp=${at(began + 500)} level=WARN run=5e41438d message="failed to load OpenCode provider config" cause="HttpClientError: 401"`,
+      `timestamp=${at(began + 900)} level=ERROR run=5e41438d message="Failed to drain Session" cause="${expired}\\n    at Tz (B:/~BUN/root/chunk.js:6:3619)"`,
+      `timestamp=${at(began + 950)} level=INFO run=5e41438d message=event`,
+      '',
+    ].join('\n'),
+  );
+  assert.equal(
+    opencodeSaid(began, dir),
+    'This API key has expired. Create a new API key in OpenCode Console and replace it in your client or secret store. Signing in again will not renew this key.',
+  );
+  assert.equal(opencodeSaid(began + 5_000, dir), null, 'nothing written since a later turn began');
+  // OpenCode 1.x writes its own lines, in local time.
+  const local = (ms: number) => {
+    const d = new Date(ms);
+    const two = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+  };
+  fs.writeFileSync(path.join(dir, 'opencode.log'), `ERROR ${local(began + 1_000)} +12ms service=session.prompt error=AI_LoadAPIKeyError: OpenCode API key is missing. Pass it using the 'apiKey' parameter\n`);
+  assert.equal(opencodeSaid(began, dir), "OpenCode API key is missing. Pass it using the 'apiKey' parameter");
+  assert.equal(opencodeSaid(began, path.join(dir, 'none')), null, 'no log, nothing said');
+  assert.ok(opencodeLogDir({ XDG_DATA_HOME: 'X' }).endsWith(path.join('X', 'opencode', 'log')));
 });

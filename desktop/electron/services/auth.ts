@@ -24,6 +24,9 @@ import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts, t
  * - Codex: `codex login status` ("Logged in using ChatGPT"), `codex login`,
  *   and `codex login --with-api-key`, which reads the key on its input and
  *   keeps it itself.
+ * - OpenCode: a key for OpenCode Go and Zen kept here, before its own sign-in
+ *   (keys.ts, 2 November: its own kept an expired key, and signing in again
+ *   did not replace it).
  * - OpenCode: `opencode auth list` (one line a connection, "stored"),
  *   `opencode auth login` (its menu of providers). From 1.19 (2 November) the
  *   list is its menus' log: "●  OpenCode Go api" under "Credentials"; and
@@ -54,7 +57,7 @@ import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts, t
 const TOOLS: Array<{ id: CliId; login: string[] | null; key: CliAuth['key'] }> = [
   { id: 'claude', login: ['auth', 'login'], key: 'cortex' },
   { id: 'codex', login: ['login'], key: 'cli' },
-  { id: 'opencode', login: ['auth', 'login'], key: null },
+  { id: 'opencode', login: ['auth', 'login'], key: 'cortex' },
   { id: 'gemini', login: null, key: 'cortex' },
   { id: 'qwen', login: null, key: 'cortex' },
 ];
@@ -295,19 +298,26 @@ export function startLogin(id: unknown): void {
   if (!tool.login || !program) throw new KeyRefusal('This tool is not signed in to from here.');
   if (process.platform !== 'win32') throw new KeyRefusal('Signing in from Cortex opens a console window, which only Windows does here.');
   chooseChatTool(tool.id);
+  // Its sign-in window already open: that one is the one to finish. 2 November: 21 of OpenCode's opened in five
+  // seconds, the button pressed again and again while nothing seemed to happen.
+  const opened = loginsOpen.get(tool.id);
+  if (opened !== undefined && Date.now() - opened < LOGIN_WATCH) return;
+  loginsOpen.set(tool.id, Date.now());
   const child = spawn(program.command, [...program.args, ...tool.login], { cwd: os.homedir(), env: childEnv(program.env), detached: true, stdio: 'ignore', windowsHide: !SHOW_CONSOLE, shell: false });
   let open = true;
-  child.on('error', () => {
+  const closed = () => {
     open = false;
+    loginsOpen.delete(tool.id);
     changed(tool.id);
-  });
-  child.on('exit', () => {
-    open = false;
-    changed(tool.id);
-  });
+  };
+  child.on('error', closed);
+  child.on('exit', closed);
   child.unref();
   void watchLogin(tool, () => open);
 }
+
+/** The tools whose sign-in window is open, since when. */
+const loginsOpen = new Map<CliId, number>();
 
 /**
  * A sign-in going on, asked after until it is done: the browser's sign-in can end with its
