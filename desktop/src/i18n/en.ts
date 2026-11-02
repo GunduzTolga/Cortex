@@ -461,6 +461,7 @@ export const en = {
   'auth.key.baseUrl': 'Address (OpenAI-compatible)',
   'auth.key.save': 'Save',
   'auth.key.forget': 'Forget the key',
+  'auth.key.downloading': 'Saving. If Cortex is downloading its own copy of OpenCode for the first time, this can take a minute or two.',
   'auth.key.saved': 'Key saved for {name}',
   'auth.tool.hermes': 'Pyn on the server',
   'auth.key.cortex': 'The key is kept in this computer\'s encrypted store (Windows DPAPI) and given only to this tool when it starts. Cortex never shows it again.',

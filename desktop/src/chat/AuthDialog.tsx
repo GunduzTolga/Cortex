@@ -268,6 +268,7 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
           <input type="password" autoComplete="off" spellCheck={false} value={key} onChange={(event) => setKey(event.target.value)} placeholder={t('auth.key.placeholder')} aria-label={t('auth.key')} className={inputClass} data-auth-key-input autoFocus />
           {tool.baseUrl ? <input type="url" autoComplete="off" spellCheck={false} value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://…/v1" aria-label={t('auth.key.baseUrl')} className={inputClass} /> : null}
           <p className="text-[11px] leading-relaxed text-zinc-400">{t(tool.key === 'cli' ? 'auth.key.cli' : 'auth.key.cortex')}</p>
+          {busy && tool.id === 'opencode' ? <p className="text-[11px] leading-relaxed text-zinc-500">{t('auth.key.downloading')}</p> : null}
           <div className="flex gap-1.5">
             <Button tone="primary" type="submit" disabled={busy || !key.trim()} data-auth-key-save>
               {busy ? <Spinner size={12} /> : null}

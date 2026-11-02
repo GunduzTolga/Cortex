@@ -12,6 +12,7 @@ import test from 'node:test';
 import { gzipSync } from 'node:zlib';
 import { programOf } from '../electron/services/clis';
 import { PACKAGES, PackageRefusal, installPackage, ownProgram, toolsDir, untar } from '../electron/services/toolPackages';
+import { forgetKey, saveKey } from '../electron/services/keys';
 
 /**
  * OpenCode, Codex, Gemini CLI and Qwen Code installed by Cortex itself (electron/services/toolPackages.ts): their
@@ -236,6 +237,15 @@ test('a tool on the PATH is the person’s and comes first; without one, the one
     fs.writeFileSync(theirs, '');
     fs.chmodSync(theirs, 0o755);
     assert.deepEqual(programOf('opencode', { PATH: onPath, LOCALAPPDATA: local }), { command: theirs, args: [] });
+    // With a key kept in Cortex, OpenCode is the one Cortex installed: the key in its settings comes before a sign-in
+    // it keeps (2 November: OpenCode 2.0.27 on the PATH used its own expired one).
+    saveKey('opencode', 'sk-opencode', undefined);
+    try {
+      assert.deepEqual(programOf('opencode', { PATH: onPath, LOCALAPPDATA: local }), { command: path.join(own, 'bin', 'opencode.exe'), args: [] });
+    } finally {
+      forgetKey('opencode');
+    }
+    assert.deepEqual(programOf('opencode', { PATH: onPath, LOCALAPPDATA: local }), { command: theirs, args: [] }, 'the person’s again, the key forgotten');
   } finally {
     fs.rmSync(local, { recursive: true, force: true });
   }

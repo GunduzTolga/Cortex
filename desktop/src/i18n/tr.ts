@@ -455,6 +455,7 @@ export const tr: Record<keyof typeof en, string> = {
   'auth.key.baseUrl': 'Adres (OpenAI uyumlu)',
   'auth.key.save': 'Kaydet',
   'auth.key.forget': 'Anahtarı sil',
+  'auth.key.downloading': 'Kaydediliyor. Cortex OpenCode\'un kendi kopyasını ilk kez indiriyorsa bir iki dakika sürebilir.',
   'auth.key.saved': '{name} anahtarı kaydedildi',
   'auth.tool.hermes': 'Sunucudaki Pyn',
   'auth.key.cortex': 'Anahtar bu bilgisayarın şifreli deposunda (Windows DPAPI) saklanır ve yalnız bu araç başlarken ona verilir. Cortex onu bir daha göstermez.',

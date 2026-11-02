@@ -406,10 +406,13 @@ export function opencodeSaid(since: number, dir: string = opencodeLogDir()): str
 /** OpenCode's own sentence for a refusal of its sign-in, where its log has one: said instead of the protocol's. */
 async function withOpencodeCause(cli: CliId, failure: TurnFailure, since: number): Promise<TurnFailure> {
   if (cli !== 'opencode' || (failure.kind !== 'auth' && failure.kind !== 'provider-auth')) return failure;
-  // Written as it refused: given a moment to reach the file.
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  const said = opencodeSaid(since);
-  return said ? new TurnFailure(`OpenCode: ${said}`, 'provider-key') : failure;
+  // Written as it refused, by its server process: looked for again for a couple of seconds, until it reaches the file.
+  for (let tries = 0; tries < 6; tries += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const said = opencodeSaid(since);
+    if (said) return new TurnFailure(`OpenCode: ${said}`, 'provider-key');
+  }
+  return failure;
 }
 
 export const acpBackend: Backend = {
