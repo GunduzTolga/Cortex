@@ -27,6 +27,15 @@ interface Conn {
 const conns = new Map<CliId, Conn>();
 /** Each chat's session, in the program it lives in. */
 const sessions = new Map<string, { conn: Conn; sessionId: string }>();
+/**
+ * A session begun to show a new chat's model and mode before its first message (probe), taken by the next new chat of
+ * its CLI rather than left unused: one at most for each CLI, so opening new chats leaves no trail of empty sessions.
+ */
+const spares = new Map<CliId, { conn: Conn; sessionId: string; options: ConfigOption[] }>();
+/** A probe going on, for each CLI. */
+const probing = new Map<CliId, Promise<ConfigOption[]>>();
+/** Each chat's settings as its program last gave them: the model a refusal was for. */
+const shown = new Map<string, ConfigOption[]>();
 
 interface Running {
   turn: Turn;
@@ -128,6 +137,7 @@ function connectionFor(cli: CliId, vault: string): Promise<Conn> {
     exited: () => {
       if (conns.get(cli) === conn) conns.delete(cli);
       for (const [chatId, held] of sessions) if (held.conn === conn) sessions.delete(chatId);
+      if (spares.get(cli)?.conn === conn) spares.delete(cli);
     },
   });
   conn.ready = conn.acp
@@ -172,16 +182,26 @@ async function sessionFor(turn: Turn, conn: Conn): Promise<string> {
       /* A session the program no longer has: a new one. */
     }
   }
-  const made = (await conn.acp.request('session/new', { cwd: conn.vault, mcpServers: [] })) as { sessionId?: unknown; configOptions?: unknown } | null;
-  // Stopped meanwhile: the session is left unrecorded rather than written over a later turn's.
-  if (turn.signal.aborted) throw new Stopped();
-  if (typeof made?.sessionId !== 'string') throw new TurnFailure('The program did not start a session.', null);
-  const sessionId = made.sessionId;
+  let sessionId: string;
+  let options: ConfigOption[];
+  // The session begun to show the new chat's settings, taken; else a new one.
+  const spare = spares.get(conn.cli);
+  if (spare && spare.conn === conn) {
+    spares.delete(conn.cli);
+    sessionId = spare.sessionId;
+    options = spare.options;
+  } else {
+    const made = (await conn.acp.request('session/new', { cwd: conn.vault, mcpServers: [] })) as { sessionId?: unknown; configOptions?: unknown } | null;
+    // Stopped meanwhile: the session is left unrecorded rather than written over a later turn's.
+    if (turn.signal.aborted) throw new Stopped();
+    if (typeof made?.sessionId !== 'string') throw new TurnFailure('The program did not start a session.', null);
+    sessionId = made.sessionId;
+    options = optionsOf(made.configOptions) ?? [];
+  }
   sessions.set(turn.chatId, { conn, sessionId });
   turn.setSession(sessionId);
   // The chat had a conversation this program could not continue: the person is told it begins anew, rather than find it forgotten.
   if (known) turn.emit({ type: 'notice', notice: 'new-session' });
-  let options = optionsOf(made.configOptions) ?? [];
   turn.setOptions(options);
   for (const [configId, value] of Object.entries(turn.prefs)) {
     const option = options.find((one) => one.id === configId);
@@ -194,21 +214,27 @@ async function sessionFor(turn: Turn, conn: Conn): Promise<string> {
       /* The program's own default stands. */
     }
   }
-  // No model chosen for OpenCode yet, and its default one of a provider not signed in to: one that is (signedInChoice).
-  const model = conn.cli === 'opencode' ? options.find((one) => one.category === 'model' || one.id === 'model') : undefined;
-  if (model && turn.prefs[model.id] === undefined) {
-    const value = signedInChoice(model, await opencodeSignedIn().catch(() => []));
-    if (value) {
-      try {
-        const set = (await conn.acp.request('session/set_config_option', { sessionId, configId: model.id, value })) as { configOptions?: unknown } | null;
-        options = optionsOf(set?.configOptions) ?? options.map((one) => (one.id === model.id ? { ...one, current: value } : one));
-        turn.setOptions(options);
-      } catch {
-        /* The program's own default stands. */
-      }
-    }
-  }
+  const signed = await signedInModel(conn, sessionId, options, turn.prefs);
+  if (signed !== options) turn.setOptions(signed);
   return sessionId;
+}
+
+/**
+ * No model chosen for OpenCode yet, and its default one of a provider not signed in to: one that is (signedInChoice).
+ * The settings as they are after; the same ones where nothing was changed.
+ */
+async function signedInModel(conn: Conn, sessionId: string, options: ConfigOption[], prefs: Readonly<Record<string, string>>): Promise<ConfigOption[]> {
+  const model = conn.cli === 'opencode' ? options.find((one) => one.category === 'model' || one.id === 'model') : undefined;
+  if (!model || prefs[model.id] !== undefined) return options;
+  const value = signedInChoice(model, await opencodeSignedIn().catch(() => []));
+  if (!value) return options;
+  try {
+    const set = (await conn.acp.request('session/set_config_option', { sessionId, configId: model.id, value })) as { configOptions?: unknown } | null;
+    return optionsOf(set?.configOptions) ?? options.map((one) => (one.id === model.id ? { ...one, current: value } : one));
+  } catch {
+    /* The program's own default stands. */
+    return options;
+  }
 }
 
 /** A notification from a program: what one of its sessions did, told to the turn it runs. */
@@ -305,10 +331,29 @@ function failureOf(err: unknown): TurnFailure {
   return new TurnFailure(err instanceof Error ? err.message : String(err), null);
 }
 
+/**
+ * OpenCode refused the turn for want of a key for the chosen model's provider, without naming it (its LoadAPIKeyError,
+ * 2 November: "provider authentication required" with OpenCode Go signed in): named from the chat's model, so the
+ * window says whose sign-in is missing rather than that OpenCode's own is.
+ */
+function providerRefusal(failure: TurnFailure, options: ConfigOption[] | undefined): TurnFailure {
+  if (failure.kind !== 'auth' || !/provider authentication required/i.test(failure.message)) return failure;
+  const model = options?.find((one) => one.category === 'model' || one.id === 'model')?.current;
+  const provider = model ? providerOf(model).slice(0, 60) : '';
+  return provider ? new TurnFailure(`The chosen model's provider (${provider}) is not signed in.`, 'provider-auth') : failure;
+}
+
 export const acpBackend: Backend = {
-  async run(turn, message) {
+  async run(original, message) {
     let sessionId: string | null = null;
     let entry: Running | null = null;
+    const turn: Turn = {
+      ...original,
+      setOptions: (options) => {
+        shown.set(original.chatId, options);
+        original.setOptions(options);
+      },
+    };
     try {
       const conn = await unlessStopped(turn.signal, connectionFor(turn.cli, turn.vault));
       sessionId = await unlessStopped(turn.signal, sessionFor(turn, conn));
@@ -322,7 +367,7 @@ export const acpBackend: Backend = {
     } catch (err) {
       // After Stop, however the program ended the turn - its answer, an error, the program ended - the turn was stopped.
       if (err instanceof Stopped || turn.signal.aborted) return 'cancelled';
-      throw failureOf(err);
+      throw providerRefusal(failureOf(err), shown.get(turn.chatId));
     } finally {
       if (sessionId && entry && running.get(sessionId) === entry) running.delete(sessionId);
       const timer = stopping.get(turn.chatId);
@@ -352,20 +397,53 @@ export const acpBackend: Backend = {
     );
   },
 
+  probe(cli, vault, prefs) {
+    // Asked twice at once (the tool chosen, then the list of tools read again): one session begun, not two.
+    const going = probing.get(cli);
+    if (going) return going;
+    const asked = (async () => {
+      const conn = await connectionFor(cli, vault);
+      const had = spares.get(cli);
+      if (had && had.conn === conn) return had.options;
+      const made = (await conn.acp.request('session/new', { cwd: conn.vault, mcpServers: [] })) as { sessionId?: unknown; configOptions?: unknown } | null;
+      if (typeof made?.sessionId !== 'string') return [];
+      const spare = { conn, sessionId: made.sessionId, options: optionsOf(made.configOptions) ?? [] };
+      spares.set(cli, spare);
+      // Shown as it will run: OpenCode's model of a provider signed in to, where none was chosen.
+      spare.options = await signedInModel(conn, spare.sessionId, spare.options, prefs);
+      return spare.options;
+    })().finally(() => probing.delete(cli));
+    probing.set(cli, asked);
+    return asked;
+  },
+
+  async prefer(cli, options, option, value) {
+    // Given to the session begun for the new chat, where there is one: another model offers its own efforts.
+    const spare = spares.get(cli);
+    if (!spare || !spare.conn.acp.alive) return options;
+    const set = (await spare.conn.acp.request('session/set_config_option', { sessionId: spare.sessionId, configId: option, value })) as { configOptions?: unknown } | null;
+    spare.options = optionsOf(set?.configOptions) ?? options;
+    return spare.options;
+  },
+
   async setOption(chatId, options, option, value) {
     const held = sessions.get(chatId);
     if (!held || !held.conn.acp.alive) throw new ChatRefusal('The chat is not connected; write to it first.');
     const set = (await held.conn.acp.request('session/set_config_option', { sessionId: held.sessionId, configId: option, value })) as { configOptions?: unknown } | null;
-    return optionsOf(set?.configOptions) ?? options.map((one) => (one.id === option ? { ...one, current: value } : one));
+    const next = optionsOf(set?.configOptions) ?? options.map((one) => (one.id === option ? { ...one, current: value } : one));
+    shown.set(chatId, next);
+    return next;
   },
 
   forget(chatId) {
     sessions.delete(chatId);
+    shown.delete(chatId);
   },
 
   shutdown() {
     for (const conn of conns.values()) conn.acp.close();
     conns.clear();
     sessions.clear();
+    spares.clear();
   },
 };

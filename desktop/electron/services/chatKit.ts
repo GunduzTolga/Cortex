@@ -78,6 +78,14 @@ export interface Backend {
    * one); given the session the chat continues, or null.
    */
   offer?(sessionId: string | null): Promise<ConfigOption[]>;
+  /**
+   * The settings a new chat with this CLI starts with - its model, its mode - asked of the CLI before its first message,
+   * for a CLI no chat has run with yet (2 November: only the tool could be chosen before it; the model and the mode
+   * came after). Given the person's last choices for it.
+   */
+  probe?(cli: CliId, vault: string, prefs: Readonly<Record<string, string>>): Promise<ConfigOption[]>;
+  /** A setting chosen in a new chat, before its first message: the settings as they are after it (another model offers other efforts). */
+  prefer?(cli: CliId, options: ConfigOption[], option: string, value: string): Promise<ConfigOption[]>;
   /** The chat forgotten: anything kept running for it ended. */
   forget(chatId: string): void;
   /** Every CLI this backend started, ended. */

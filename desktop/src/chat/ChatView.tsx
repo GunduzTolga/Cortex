@@ -164,7 +164,8 @@ export function ChatView({ visible }: { visible: boolean }) {
     if (!useNotes.getState().index) void useNotes.getState().refresh();
   }, []);
 
-  // A new chat in front, or another tool chosen for it: what that tool offers before the first message (Hermes: its sessions to continue).
+  // A new chat in front, or another tool chosen for it: what that tool offers before the first message (Hermes: its
+  // sessions to continue; the others: the model and the mode it starts with).
   useEffect(() => {
     if (!active && clis) void useChat.getState().loadOffer();
   }, [active, cli, clis]);
@@ -261,7 +262,7 @@ export function ChatView({ visible }: { visible: boolean }) {
       cli={summary?.cli ?? cli}
       onCli={(id) => state.setCli(id)}
       cliFixed={Boolean(summary)}
-      options={chat?.options ?? (summary ? [] : state.offered)}
+      options={chat?.options ?? (summary || state.offeredCli !== cli ? [] : state.offered)}
       onOption={(option, value) => void state.setOption(option, value)}
       usage={usage}
       asked={asked}

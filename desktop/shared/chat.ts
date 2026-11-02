@@ -125,8 +125,11 @@ export interface ChatApi {
   setOption(id: string, option: string, value: string): Promise<ConfigOption[]>;
   /** The settings a new chat with that CLI has before its first message (Hermes: its sessions to continue); none for most. */
   offer(cli: CliId): Promise<ConfigOption[]>;
-  /** A new chat begun on one of those settings chosen (a Hermes session continued, its last messages shown); its id. */
-  begin(cli: CliId, option: string, value: string): Promise<{ id: string }>;
+  /**
+   * One of those settings chosen in a new chat. Hermes: the chat begun on it (a session continued, its last messages
+   * shown); its id. The others: kept for the chat its first message begins; no id, and the settings as they are now.
+   */
+  begin(cli: CliId, option: string, value: string): Promise<{ id: string | null; options?: ConfigOption[] }>;
   rename(id: string, title: string): Promise<ChatSummary>;
   remove(id: string): Promise<void>;
   /** Every AI tool, and whether it is signed in. */

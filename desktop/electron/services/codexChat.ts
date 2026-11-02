@@ -471,6 +471,18 @@ export const codexBackend: Backend = {
     );
   },
 
+  // Before a new chat's first message: the server's models, asked of it started without a thread.
+  async probe(cli, vault, prefs) {
+    const conn = await connectionFor(cli, vault);
+    return codexOptions(conn.models, prefs);
+  },
+
+  async prefer(_cli, options, option) {
+    // Another model offers its own efforts, as in a chat (setOption).
+    const conn = [...conns.values()][0];
+    return option === 'model' && conn?.models.length ? codexOptions(conn.models, Object.fromEntries(options.map((one) => [one.id, one.current]))) : options;
+  },
+
   async setOption(chatId, options, option, value) {
     let next = options.map((one) => (one.id === option ? { ...one, current: value } : one));
     // Another model offers its own efforts: the list follows it, and an effort it does not have goes back to the default.

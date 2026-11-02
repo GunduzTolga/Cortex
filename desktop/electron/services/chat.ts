@@ -390,22 +390,70 @@ function offerTo(chat: Live): void {
   );
 }
 
-/** The settings a new chat with that CLI has before its first message (Hermes: its sessions); none for the rest, or where they cannot be asked now. */
+/** The settings shown in a new chat with each CLI before its first message, as chosen there: its first turn starts with them. */
+const shownNew = new Map<CliId, ConfigOption[]>();
+
+/** The settings with the person's last choices for the CLI as their current ones, where each is still one of its choices. */
+const withPrefs = (options: ConfigOption[], prefs: Readonly<Record<string, string>>): ConfigOption[] =>
+  options.map((one) => (prefs[one.id] !== undefined && one.choices.some((choice) => choice.value === prefs[one.id]) ? { ...one, current: prefs[one.id] } : one));
+
+/**
+ * The settings a new chat with that CLI has before its first message. Hermes: its sessions, to continue one. Claude
+ * Code, Codex and the ACP tools: the model and the mode it will start with (2 November: "ilk mesaj kısmında sadece
+ * opencode seçebiliyorum.. mesaj attıktan sonra model seçme vs geliyor"): those its last chat was offered, else asked of
+ * the CLI itself (Backend.probe), the person's last choices current. None for the rest, or where they cannot be asked.
+ */
 export async function offerChat(cli: unknown): Promise<ConfigOption[]> {
   if (!CLI_IDS.includes(cli as CliId)) throw new ChatRefusal('Not a CLI the chat knows.');
-  const backend = backendOf(cli as CliId);
-  return backend.offer ? backend.offer(null).catch(() => []) : [];
+  const id = cli as CliId;
+  const backend = backendOf(id);
+  if (backend.offer) return backend.offer(null).catch(() => []);
+  if (!backend.probe) return [];
+  const prefs = readIndex().prefs[id] ?? {};
+  const last = readIndex()
+    .chats.filter((one) => one.cli === id && Array.isArray(one.options) && one.options.length)
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0]?.options;
+  let options = last ?? [];
+  if (!options.length) {
+    try {
+      options = await backend.probe(id, currentVault(), prefs);
+    } catch {
+      options = [];
+    }
+  }
+  const shown = withPrefs(options, prefs);
+  shownNew.set(id, shown);
+  return shown;
+}
+
+/**
+ * A setting chosen in a new chat before its first message. Hermes: the chat begun on it (a session continued). The
+ * others: kept as the person's choice for the CLI, the chat begun by its first message with it; no chat yet (id null),
+ * the settings as they are now.
+ */
+async function preferChat(id: CliId, option: string, value: string): Promise<{ id: null; options: ConfigOption[] }> {
+  const backend = backendOf(id);
+  const options = shownNew.get(id) ?? (await offerChat(id));
+  if (!options.find((one) => one.id === option)?.choices.some((one) => one.value === value)) throw new ChatRefusal('Not a choice this chat offers.');
+  const prefs = readIndex().prefs;
+  prefs[id] = { ...(prefs[id] ?? {}), [option]: value };
+  saveIndex();
+  const chosen = options.map((one) => (one.id === option ? { ...one, current: value } : one));
+  const next = backend.prefer ? await backend.prefer(id, chosen, option, value).catch(() => chosen) : chosen;
+  shownNew.set(id, next);
+  return { id: null, options: next };
 }
 
 /**
  * A new chat begun on a setting chosen before its first message - Hermes: a session begun
  * elsewhere, continued here, its last messages shown - and named after the choice; its id.
  */
-export async function beginChat(cli: unknown, option: unknown, value: unknown): Promise<{ id: string }> {
+export async function beginChat(cli: unknown, option: unknown, value: unknown): Promise<{ id: string | null; options?: ConfigOption[] }> {
   const vault = currentVault();
   if (!CLI_IDS.includes(cli as CliId)) throw new ChatRefusal('Not a CLI the chat knows.');
   if (typeof option !== 'string' || typeof value !== 'string') throw new ChatRefusal('Not a setting.');
   const backend = backendOf(cli as CliId);
+  if (!backend.offer) return preferChat(cli as CliId, option, value);
   const options = backend.offer ? await backend.offer(null) : [];
   const choice = options.find((one) => one.id === option)?.choices.find((one) => one.value === value);
   if (!choice) throw new ChatRefusal('Not a choice this chat offers.');
@@ -442,6 +490,13 @@ export function sendChat(id: unknown, cli: unknown, message: unknown): { id: str
     const stored: Stored = { id: randomUUID(), title: '', cli: cli as CliId, createdAt: now, updatedAt: now, vault, sessionId: null };
     readIndex().chats.push(stored);
     chat = fresh(stored, []);
+    // What the new chat showed before its first message is what its first turn starts with: run as its chips say, as a
+    // chat reopened after a restart is (turnOf).
+    const shown = shownNew.get(cli as CliId);
+    if (shown?.length) {
+      chat.options = shown;
+      chat.stale = true;
+    }
     live.set(stored.id, chat);
   } else {
     chat = liveOf(id);
@@ -562,6 +617,7 @@ export function restartIdleChats(): boolean {
 export function forgetChats(): void {
   shutdownChats();
   live.clear();
+  shownNew.clear();
   index = null;
   indexLeft = false;
   indexBroken = false;

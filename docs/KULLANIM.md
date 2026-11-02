@@ -35,7 +35,7 @@ Her adım ne yaptığını söyler; isteğe bağlı adımlar **Atla** ile geçil
 
 Üst çubukta dört sekme vardır:
 
-- **Pyn:** kasanın içinde, kendi yapay zeka aracınla sohbet. Araç kasada başladığı için hafıza tam gelir.
+- **Pyn:** kasanın içinde, kendi yapay zeka aracınla sohbet. Araç kasada başladığı için hafıza tam gelir. Yeni sohbette aracı seçince model, mod ve efor düğmeleri ilk mesajdan önce gelir; burada seçtiğin model ilk mesajda kullanılır.
   - **Araçlar:** Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code; yerel modeller için LM Studio ve Ollama; bir de başka bir bilgisayarda (örneğin evdeki sunucuda) çalışan **Sunucudaki Pyn**: telefonda başlayan bir konuşma masaüstünden sürdürülür (Ayarlar → Yapay zeka araçları). Yerel modeli kendi uygulamasında yüklersin, Cortex onunla doğrudan konuşur; "bunu kaydet" dersen yerel model de gelen kutusuna ekler (7–8 milyar parametre ve üstü modeller bunu güvenilir yapar).
   - **Gelen kutusuna at** (`Ctrl+Enter`): gönder düğmesinin yanındadır; yazdığını yapay zekaya göndermeden `📥 000-Inbox/Yakala/`'ya kaydeder.
   - Model, mod ve düşünme düzeyi çiplerle seçilir; aracın izin istediği adımlar kartla sorulur; bağlamın ne kadar dolduğunu yazma kutusundaki halka gösterir.
