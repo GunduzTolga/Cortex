@@ -210,18 +210,20 @@ test('after Stop, the next turn is not ended by the stopped one’s grace', asyn
 
 test('Stop pressed again does not put off the end of a Claude Code turn that will not stop', async () => {
   const grace = STOP_GRACE.ms;
-  STOP_GRACE.ms = 1500;
+  STOP_GRACE.ms = 2000;
   try {
     useVault();
     const { id } = sendChat(null, 'test-claude', 'inatçı ol');
     await until(() => eventsOf(id).some((one) => one.type === 'text' && one.text.startsWith('Durmayacağım')), 'the stubborn answer');
     const first = Date.now();
     cancelChat(id);
-    // Pressed again while the first press's grace runs, as one does when nothing seems to happen.
-    await new Promise((done) => setTimeout(done, 1000));
+    // Pressed again late in the first press's grace, as one does when nothing seems to happen. Ended by the first
+    // press: about 2 s, and the program's end on Windows can take more than a second (2 November CI: 1.3 s). Put off by
+    // the second: 1.9 + 2 s at least. The line between them leaves room for both.
+    await new Promise((done) => setTimeout(done, 1900));
     cancelChat(id);
     assert.deepEqual(await doneOf(id), { type: 'done', reason: 'cancelled' });
-    assert.ok(Date.now() - first < 2200, `ended by the first press's grace, not the second's: ${Date.now() - first} ms`);
+    assert.ok(Date.now() - first < 3700, `ended by the first press's grace, not the second's: ${Date.now() - first} ms`);
   } finally {
     STOP_GRACE.ms = grace;
   }
