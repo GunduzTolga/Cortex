@@ -3,6 +3,23 @@
 Tarih: 3 Kasım 2026 · Durum: taslak, geliştiriciyle konuşulacak · Bu belge yol haritasıdır; her faz başlarken kendi
 tasarım belgesini (`docs/superpowers/specs/`) ve planını alır.
 
+## Kısaca
+
+**Üç parça:**
+- **Kasa:** notlar (Markdown). Tek gerçek; merkezi GitHub'da özel bir repo.
+- **Motor:** `beyin.py`. Kasayı okuyan ve yazan tek program; kasanın her kopyasının yanında durur.
+- **Kapı:** telefonun (ve uzaktaki her pencerenin) sunucuya girdiği tek adres.
+
+**İki yol:** kasa kopyaları arasında *git*, telefondan sunucuya *kapı*. Üçüncüsü yok.
+
+**Kim ne tutar:**
+- PC ve laptop: kasa kopyası + motor + Cortex uygulaması. Cortex Browser aynı bilgisayardaki motoru kullanır.
+- Sunucu: kasa kopyası + motor + ajanlar + kapı.
+- Telefon: kopya tutmaz, kapıdan bakar.
+
+Aşağıdaki kurallar bu resmi korumak için var. Geliştiricinin kendi sistemi için yapılacak tek iş Faz 0'dır; Faz 1–5,
+aynı düzeni başkalarının terminale dokunmadan kurabilmesi için ürün işidir.
+
 ## Amaç
 
 Cortex'in dört yüzü var: masaüstü uygulaması, telefon uygulaması, sunucu ve ileride Cortex Browser. Dördü aynı beyni
@@ -61,7 +78,7 @@ flowchart TB
 - Sunucusuz kullanıcı: masaüstü + GitHub; telefon şimdilik yok (telefonun kopyası olmadığı için bir kapıya ihtiyacı var).
 - İkinci bilgisayar: aynı GitHub reposuna "var olan kasama bağlan".
 
-## Fazlar
+## Geliştiricinin sistemi
 
 ### Faz 0 — Geliştiricinin bilgisayarını tek beyne bağla (kod yok, ~1 saat)
 Bugün masaüstü uygulaması eşitlenmeyen ayrı bir kasada; asıl kasanın klonu günlerdir geride.
@@ -71,7 +88,11 @@ Bugün masaüstü uygulaması eşitlenmeyen ayrı bir kasada; asıl kasanın klo
 - Bitti: telefonda yazılan not birkaç dakikada masaüstünde, masaüstündeki sunucuda.
 - Kazanç: 1.0.40 eşitlemesi ilk kez gerçek kullanımda sınanır; Faz 1 bu temelin üstüne kurulacak.
 
-### Faz 1 — GitHub ile yedek ve eşitleme (ürün)
+## Ürün için (Faz 1–5)
+
+Her faz başlarken kendi tasarım belgesini alır.
+
+### Faz 1 — GitHub ile yedek ve eşitleme
 - **İlk adım: eşitleme motora taşınır** (`beyin.py esitle`). Commit, `pull --rebase`, push, sır taraması, çakışmada geri
   çekilme ve ilk gönderim/birleşme kuralları bir kez Python'da yazılır; `vaultSync.ts` yalnız zamanlamayı, ekranı ve
   kimlik bilgisini vermeyi tutar. Böylece fazın yeni davranışları TypeScript'te yazılıp Faz 2'de yeniden yazılmaz.
@@ -92,7 +113,7 @@ Bugün masaüstü uygulaması eşitlenmeyen ayrı bir kasada; asıl kasanın klo
   GitHub App; fazın tasarımında kesinleşir.
 - Bitti: temiz bir Windows'ta, terminale dokunmadan, iki bilgisayar arasında not gidip geliyor.
 
-### Faz 2 — Sunucu ekle (ürün)
+### Faz 2 — Sunucu ekle
 - Ayarlar › Sunucu › "Sunucu ekle": adres ve kullanıcı adı, şifre bir kez. Uygulama SSH anahtarı üretip yükler; sonra
   şifre bir daha sorulmaz.
 - Uygulama sunucuya motoru kurar, kasayı GitHub'dan klonlar, eşitleme zamanlayıcısını kurar: Faz 1'deki
@@ -100,7 +121,7 @@ Bugün masaüstü uygulaması eşitlenmeyen ayrı bir kasada; asıl kasanın klo
   çalışması için `loginctl enable-linger` gerekir; bu sudo isteyebilir, ekranda açıkça söylenir.
 - Bitti: boş bir Linux makinesi uygulamadan kuruluyor ve eşitleniyor.
 
-### Faz 3 — Beceriler ve öğrenme masaüstünde (ürün)
+### Faz 3 — Beceriler ve öğrenme masaüstünde
 - **Beceriler kasanın içinde** (`plugins/` + `.claude-plugin/marketplace.json`). Eşitleme onları da her cihaza taşır;
   ayrı bir dağıtım yok.
 - Uygulama kasayı Claude Code'a beceri kaynağı olarak kendisi tanıtır (bugün terminal betiğinin yaptığı iş), otomatik
@@ -111,7 +132,7 @@ Bugün masaüstü uygulaması eşitlenmeyen ayrı bir kasada; asıl kasanın klo
 - Genel contribute becerisi Cortex'le gelir; geliştiricinin kişisel becerileri onun özel kasasında kalır.
 - Açık karar (fazın tasarımında): onay GitHub varken PR mı, her durumda yerel mi; tek yol seçilecek.
 
-### Faz 4 — Telefon ve tek sunucu kapısı (ürün; en büyük faz, kendi tasarım oturumu)
+### Faz 4 — Telefon ve tek sunucu kapısı (en büyük faz, kendi tasarım oturumu)
 - **İlk adım: araç sözleşmesi motorda** (kural 7). `beyin.py mcp` (stdio, yalnız standart kütüphane) ADR-0006'daki
   araçları sunar; `private` filtresinin bu yolda testi, araç şemalarının sürümlenmesi ("MCP sözleşmesi değişti" satırı
   sürüm notunda zorunlu), URL çekmeyen `capture` girişi. Bu parça kapıdan önce biter; Claude Code, Codex ve Faz 5
