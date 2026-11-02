@@ -24,9 +24,10 @@ aynı düzeni başkalarının terminale dokunmadan kurabilmesi için ürün işi
 
 İlk kullanıcı Claude Code, Codex gibi araçları kullanan geliştiricidir: git ve GitHub hesabı zaten vardır, bu yüzden
 merkez GitHub'dır. Teknik olmayan kullanıcı sonra gelir. Bu sıranın iki sonucu her fazda geçerlidir:
-- **Kasada yalnız metin eşitlenir.** Ses kaydı, PDF, resim gibi büyük ekler git'e girmez (`.gitignore`'da kalır ya da
-  ayrı bir yerde durur); yoksa geçmişi hiç küçülmeyen repo kısa sürede şişer. Eklerin cihazlar arasında nasıl taşınacağı
-  Faz 2'nin tasarımında karar verilir.
+- **Kasada yalnız metin eşitlenir; ekler yakalandığı cihazda kalır** (karar, 3 Kasım). Ses kaydı, PDF, resim git'e girmez;
+  kasaya onların metni girer: PDF'in özeti, sesin dökümü, resmin açıklaması ve dosyanın hangi cihazda durduğu. Cortex bir
+  dosya aktarma platformu değildir; geçmişi hiç küçülmeyen repo da şişmez. Asıl dosya gerekirse sunucudakiler kapıdan
+  (Faz 5) istenir; ayrı bir dosya eşitlemesi kurulmaz.
 - **GitHub değiştirilebilir bir parçadır.** Eşitleme motorda (`beyin.py esitle`) tek bir arayüzün arkasında yazılır;
   ileride GitHub hesabı istemeyen bir merkez eklemek o arayüze yeni bir uygulama eklemekle olur, uygulamalar değişmez.
 
@@ -56,7 +57,8 @@ Sorunlar:
 
 ## Kurallar (her faz bunlara uyar)
 
-1. **Bilgi kasada.** Kalıcı her şey kasadaki Markdown'dır. Bir uygulamanın kendi önbelleği silinse bir şey kaybolmaz.
+1. **Bilgi kasada.** Kalıcı her bilgi kasadaki Markdown'dır (eklerin kendisi değil, metni ve özeti). Bir uygulamanın kendi
+   önbelleği silinse bir şey kaybolmaz.
 2. **Cihazlar arasında yalnız iki yol:**
    - *Kasa eşitlemesi:* git, merkez GitHub özel reposu. Kopya tutan her cihaz kendi kopyasına yazar, sonra eşitler.
      Kimse başka bir cihazın kasasına doğrudan yazmaz.
@@ -68,10 +70,18 @@ Sorunlar:
 5. **Ürün ve atölye ayrı.** Bu repoya yalnız herkese yarayan girer. Geliştiriciye özel zamanlanmış işler, akışlar ve
    beceriler onun özel kasasında ya da sunucusunda kalır.
 6. **Uygulamadan kurulur.** GitHub girişi, sunucu ekleme, beceriler: hepsi düğmeyle.
-7. **Tek araç sözleşmesi, iki taşıma.** Kasaya dışarıdan erişen her yüz aynı araçları kullanır (Cortex Browser
-   ADR-0006: `search`, `context`, `capture`, `note_create`; gerisi reddedilir; `private` notlar hiç dönmez; web'den
-   gelen içerik güvenilmez işaretlenir). Aynı bilgisayarda stdio MCP (`beyin.py mcp`), uzaktan sunucu kapısı (HTTP +
-   anahtar). Kurallar motorda bir kez yazılır; iki ayrı API olmaz.
+7. **Tek araç sözleşmesi, iki taşıma.** Kasaya dışarıdan erişen her yüz aynı araçları kullanır: çekirdek Cortex Browser
+   ADR-0006'daki `search`, `context`, `capture`, `note_create`; Faz 4 `skill_list`, `skill_get` ekler. Listede olmayan araç
+   reddedilir; `private` notlar hiç dönmez; web'den gelen içerik güvenilmez işaretlenir. Her istemci bu listeyi kendi
+   tarafında daraltabilir (Browser beceri araçlarını kapalı tutabilir). Aynı bilgisayarda stdio MCP (`beyin.py mcp`),
+   uzaktan sunucu kapısı (HTTP). Kapı bu araçlara ek olarak canlı işleri (sohbet, bildirim, onay) taşır; ama kasaya
+   erişim yalnız bu araçlarladır. Kurallar motorda bir kez yazılır; iki ayrı API olmaz.
+8. **Eski motor yazmaz.** Kasa, kendisine yazabilecek en düşük motor sürümünü taşır (kasada küçük bir sürüm dosyası; not
+   biçimini değiştiren sürüm onu yükseltir). Daha eski bir motor kasayı okur ama yazmayı reddeder ve "motoru güncelle"
+   der. Böylece farklı sürümdeki iki cihaz birbirinin notunu bozamaz.
+9. **Eşitleme yazma kilidine uyar.** Motorun not yazma kilidi (`.beyin-note-write/`) eşitleme için de geçerlidir:
+   `beyin.py esitle` kilidi alıp commit atar, yazan bir süreç varken beklemeye geçer. MCP üzerinden aynı anda yazan
+   ajanlar yarım bir notun commit'lenmesine yol açmaz.
 
 ## Hedef
 
