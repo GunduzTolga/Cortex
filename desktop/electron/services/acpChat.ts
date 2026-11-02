@@ -2,6 +2,7 @@ import { app } from 'electron';
 import type { CliId, ConfigOption, PermissionKind, ToolStatus } from '../../shared/chat';
 import { AcpConnection, AcpError } from './acp';
 import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
+import { opencodeSignedIn } from './auth';
 import { launchFor } from './clis';
 import { keptReadable } from './keys';
 import { readSettings } from './settings';
@@ -61,6 +62,32 @@ export function optionsOf(configOptions: unknown): ConfigOption[] | null {
     out.push({ id: one.id, name: textOf(one.name, 60) || one.id, category: typeof one.category === 'string' ? one.category : null, current: one.currentValue, choices });
   }
   return out;
+}
+
+/**
+ * OpenCode names a model by its provider first ("opencode-go/…"), and its own default can be one of a provider nobody
+ * signed in to here: signed in to OpenCode Go, a chat began on "opencode/DeepSeek V4.1 Flash" (OpenCode Zen) and every
+ * message was refused, "provider authentication required", signing in again changing nothing (2 November). The
+ * provider as `opencode auth list` names it ("OpenCode Go", "Z.AI Coding Plan", "LMStudio") is its id with the
+ * spaces and marks taken out ("opencode-go", "zai-coding-plan", "lmstudio"); OpenCode Zen's id is "opencode".
+ */
+const providerKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
+const PROVIDER_NAMES: Record<string, string[]> = { opencode: ['opencode', 'opencodezen'] };
+const providerOf = (value: string) => value.split('/')[0] ?? '';
+
+/**
+ * A model of a provider signed in to, for a model option whose current one is of a provider that is not; null where it
+ * is signed in, nothing is known to be, or none of the choices is one. The providers in the order they are listed.
+ */
+export function signedInChoice(option: ConfigOption, signedIn: string[]): string | null {
+  const keys = signedIn.map(providerKey).filter(Boolean);
+  const named = (provider: string) => PROVIDER_NAMES[provider] ?? [providerKey(provider)];
+  if (!keys.length || named(providerOf(option.current)).some((one) => keys.includes(one))) return null;
+  for (const key of keys) {
+    const hit = option.choices.find((choice) => named(providerOf(choice.value)).includes(key));
+    if (hit) return hit.value;
+  }
+  return null;
 }
 
 /** The paths a step names, each as `show` says it: shownPath for the transcript, a card's whole path for a card. */
@@ -167,6 +194,20 @@ async function sessionFor(turn: Turn, conn: Conn): Promise<string> {
       /* The program's own default stands. */
     }
   }
+  // No model chosen for OpenCode yet, and its default one of a provider not signed in to: one that is (signedInChoice).
+  const model = conn.cli === 'opencode' ? options.find((one) => one.category === 'model' || one.id === 'model') : undefined;
+  if (model && turn.prefs[model.id] === undefined) {
+    const value = signedInChoice(model, await opencodeSignedIn().catch(() => []));
+    if (value) {
+      try {
+        const set = (await conn.acp.request('session/set_config_option', { sessionId, configId: model.id, value })) as { configOptions?: unknown } | null;
+        options = optionsOf(set?.configOptions) ?? options.map((one) => (one.id === model.id ? { ...one, current: value } : one));
+        turn.setOptions(options);
+      } catch {
+        /* The program's own default stands. */
+      }
+    }
+  }
   return sessionId;
 }
 
@@ -250,8 +291,12 @@ async function asked(method: string, params: unknown): Promise<unknown> {
 function failureOf(err: unknown): TurnFailure {
   if (err instanceof TurnFailure) return err;
   if (err instanceof AcpError) {
-    const data = err.data as { errorName?: unknown; authMethods?: unknown } | null;
+    const data = err.data as { errorName?: unknown; authMethods?: unknown; providerId?: unknown } | null;
     if (data && typeof data.errorName === 'string') return new TurnFailure(err.message, data.errorName.slice(0, 60));
+    // The tool is signed in, the chosen model's provider is not (OpenCode names it): another model, or that provider's sign-in.
+    if (data && typeof data.providerId === 'string' && data.providerId) {
+      return new TurnFailure(`The chosen model's provider (${data.providerId.slice(0, 60)}) is not signed in.`, 'provider-auth');
+    }
     // Not logged in: the CLI names the ways it can be (Qwen Code, 14 October), or says so by the protocol's own code for it, `auth_required`.
     if ((data && Array.isArray(data.authMethods)) || err.code === -32000) return new TurnFailure(err.message, 'auth');
     if (err.code === -32601) return new TurnFailure(err.message, 'unsupported');

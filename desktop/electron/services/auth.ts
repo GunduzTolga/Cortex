@@ -109,6 +109,15 @@ export function opencodeStatus(text: string): { signedIn: boolean | null; detail
   return { signedIn: names.length > 0, detail: names.length ? names.join(', ') : null, names };
 }
 
+/** The providers OpenCode is signed in to (`opencode auth list`), as it names them; asked again after a minute. */
+let opencodeNames: { at: number; names: string[] } | null = null;
+export async function opencodeSignedIn(): Promise<string[]> {
+  if (opencodeNames && Date.now() - opencodeNames.at < 60_000) return opencodeNames.names;
+  const { names } = opencodeStatus((await ask('opencode', ['auth', 'list'])) ?? '');
+  opencodeNames = { at: Date.now(), names };
+  return names;
+}
+
 /** One of the tool's own commands, its output, or null when it would not answer in time. */
 function ask(id: CliId, args: string[]): Promise<string | null> {
   const program = programOf(id);
@@ -146,7 +155,8 @@ async function statusOf(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
   if (tool.id === 'claude') return { ...base, ...claudeStatus((await ask('claude', ['auth', 'status', '--json'])) ?? '') };
   if (tool.id === 'codex') return { ...base, ...codexStatus((await ask('codex', ['login', 'status'])) ?? '') };
   if (tool.id === 'opencode') {
-    const { signedIn, detail } = opencodeStatus((await ask('opencode', ['auth', 'list'])) ?? '');
+    const { signedIn, detail, names } = opencodeStatus((await ask('opencode', ['auth', 'list'])) ?? '');
+    opencodeNames = { at: Date.now(), names };
     return { ...base, signedIn, detail };
   }
   return { ...base, signedIn: keyUsable, detail: keyUsable ? 'API key' : null };
