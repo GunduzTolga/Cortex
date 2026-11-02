@@ -157,6 +157,13 @@ Her faz başlarken kendi tasarım belgesini alır.
 - Gece hasadı: sunucu varsa sunucuda (bugünkü gibi); yoksa isteğe bağlı, uygulama açıkken günde bir (model maliyeti var).
 - Genel contribute becerisi Cortex'le gelir; geliştiricinin kişisel becerileri onun özel kasasında kalır.
 - Açık karar (fazın tasarımında): onay GitHub varken PR mı, her durumda yerel mi; tek yol seçilecek.
+- **Claude Code dışındaki ajanlar (Codex, OpenCode, yerel modeller):** Claude Code'daki düzen bozulmaz, yanına iki yol eklenir.
+  - *Okuma:* `beyin.py mcp`'ye iki okuma aracı (`skill_list`, `skill_get`; observe sınıfı) gelir. Becerinin `SKILL.md`'si
+    MCP'den okunur; açıklaması ajanın bağlamına konur, gövdesi iş o beceriye uyunca yüklenir. `SKILL.md`'yi kendisi
+    okuyabilen araçlara kasadaki klasör ayrıca gösterilebilir. Cortex Browser bu araçları kendi manifestosuyla kapalı tutabilir.
+  - *Yazma:* "Öğrendiklerini kaydet" hangi ajanla konuşuluyorsa onunla çalışır ve bir **ders notu** yazar
+    (`knowledge/concepts/`, `ders` etiketi; kim, kaynak, kanıt). Ders notunu beceriye çevirmek bugünkü gibi contribute
+    becerisinin işidir. Böylece her ajan öğrenmeye katkı verir, beceriyi tek bir hat yazar.
 
 ### Faz 5 — Telefon ve tek sunucu kapısı (en büyük faz, kendi tasarım oturumu)
 - Panelin herkese yarayan kısmı motorla gelen **Cortex sunucu kapısına** dönüşür: tek adres, tek anahtar; aynı araçları
