@@ -20,6 +20,16 @@ tasarım belgesini (`docs/superpowers/specs/`) ve planını alır.
 Aşağıdaki kurallar bu resmi korumak için var. Geliştiricinin kendi sistemi için yapılacak tek iş Faz 0'dır; Faz 1–6,
 aynı düzeni başkalarının terminale dokunmadan kurabilmesi için ürün işidir.
 
+## Kullanıcı: önce geliştirici, sonra herkes
+
+İlk kullanıcı Claude Code, Codex gibi araçları kullanan geliştiricidir: git ve GitHub hesabı zaten vardır, bu yüzden
+merkez GitHub'dır. Teknik olmayan kullanıcı sonra gelir. Bu sıranın iki sonucu her fazda geçerlidir:
+- **Kasada yalnız metin eşitlenir.** Ses kaydı, PDF, resim gibi büyük ekler git'e girmez (`.gitignore`'da kalır ya da
+  ayrı bir yerde durur); yoksa geçmişi hiç küçülmeyen repo kısa sürede şişer. Eklerin cihazlar arasında nasıl taşınacağı
+  Faz 2'nin tasarımında karar verilir.
+- **GitHub değiştirilebilir bir parçadır.** Eşitleme motorda (`beyin.py esitle`) tek bir arayüzün arkasında yazılır;
+  ileride GitHub hesabı istemeyen bir merkez eklemek o arayüze yeni bir uygulama eklemekle olur, uygulamalar değişmez.
+
 ## Amaç
 
 Cortex'in dört yüzü var: masaüstü uygulaması, telefon uygulaması, sunucu ve ileride Cortex Browser. Dördü aynı beyni
