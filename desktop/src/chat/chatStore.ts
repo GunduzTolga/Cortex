@@ -74,8 +74,12 @@ interface ChatState {
   answer(permission: string, option: string | null): void;
   /** A setting chosen: the chat in front's; or, for a new chat, one it is offered before its first message, which begins it (a Hermes session continued). */
   setOption(option: string, value: string): Promise<void>;
-  /** The settings a new chat with the chosen CLI has before its first message (Hermes: its sessions); none for most. */
+  /**
+   * The settings a new chat with the chosen CLI has before its first message: Hermes's sessions; the model and the mode
+   * of the others (2 November). Only the tool they were asked of shows them (offeredCli).
+   */
   offered: ConfigOption[];
+  offeredCli: CliId | null;
   loadOffer(): Promise<void>;
   rename(id: string, title: string): Promise<void>;
   remove(id: string): Promise<void>;
@@ -157,6 +161,7 @@ export const useChat = create<ChatState>((set, get) => {
     error: null,
     side: { open: load<boolean>(SIDE_KEY, false), path: null },
     offered: [],
+    offeredCli: null,
 
     showSide(path = null) {
       set({ side: { open: true, path } });
@@ -335,7 +340,9 @@ export const useChat = create<ChatState>((set, get) => {
 
     async loadOffer() {
       const { cli } = get();
-      if (!cli) return set({ offered: [] });
+      if (!cli) return set({ offered: [], offeredCli: null });
+      // Another tool's settings are not shown while this one's are asked (OpenCode takes a few seconds to start).
+      if (get().offeredCli !== cli) set({ offered: [], offeredCli: cli });
       try {
         const offered = await window.cortex.chat.offer(cli);
         // Another tool chosen meanwhile: its own offer is the one that counts.
@@ -352,7 +359,13 @@ export const useChat = create<ChatState>((set, get) => {
         const known = offered.find((one) => one.id === option);
         if (!cli || !known || known.current === value) return;
         try {
-          const { id } = await window.cortex.chat.begin(cli, option, value);
+          const begun = await window.cortex.chat.begin(cli, option, value);
+          // A model or a mode chosen before the first message: kept for the chat that message begins.
+          if (begun.id === null) {
+            if (get().cli === cli && !get().active) set({ offered: begun.options ?? offered, error: null });
+            return;
+          }
+          const id = begun.id;
           const opened = await window.cortex.chat.open(id);
           // Listed at once: a message sent reads the chat's tool from the list, and the pushed summary waits for the next frame (an Enter there was lost, 29 October).
           set((state) => ({

@@ -3,7 +3,8 @@
 // recorded answering (14 October), and what it does is chosen by words in the
 // message: "izin" asks leave first, "yavaş" waits to be stopped, "inatçı"
 // waits and never heeds a cancel, "hata" fails as a provider out of quota
-// does, "yetkisiz" as an agent not signed in does by the protocol's code
+// does, "anahtarsız" as OpenCode without a key for the model's provider,
+// "yetkisiz" as an agent not signed in does by the protocol's code
 // alone, "çök" dies. With FAKE_ACP_HANG_INIT set it never answers
 // `initialize`, with FAKE_ACP_FAIL_INIT it refuses it. Every method it is sent
 // is written to FAKE_AGENT_LOG, when set, as one JSON line. With FAKE_AGENT_GATE
@@ -48,6 +49,11 @@ async function prompt(id, params) {
   if (text.includes('sağlayıcı')) {
     // As OpenCode refuses a model whose provider is not signed in (its ACP authRequired, the provider named).
     send({ jsonrpc: '2.0', id, error: { code: -32000, message: 'Authentication required: provider authentication required', data: { providerId: 'opencode' } } });
+    return;
+  }
+  if (text.includes('anahtarsız')) {
+    // As OpenCode refuses a model whose provider's key it cannot load (its LoadAPIKeyError): the provider not named.
+    send({ jsonrpc: '2.0', id, error: { code: -32000, message: 'Authentication required: provider authentication required', data: {} } });
     return;
   }
   if (text.includes('yetkisiz')) {

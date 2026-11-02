@@ -8,10 +8,12 @@ import type { ChatEvent, ChatPush } from '../shared/chat';
 import { launchOf, listClis, readShim } from '../electron/services/clis';
 import {
   answerChat,
+  beginChat,
   cancelChat,
   compact,
   forgetChats,
   listChats,
+  offerChat,
   onChatPush,
   openChat,
   removeChat,
@@ -22,7 +24,7 @@ import {
   shownPath,
   shutdownChats,
 } from '../electron/services/chat';
-import { signedInChoice } from '../electron/services/acpChat';
+import { acpBackend, signedInChoice } from '../electron/services/acpChat';
 import { STOP_GRACE, cardTextFor } from '../electron/services/chatKit';
 import { renameRetrying, writeWhole } from '../electron/services/fileWrite';
 import { pythonOf } from '../electron/services/localChat';
@@ -423,6 +425,13 @@ test('a model whose provider is not signed in is said so, the provider named; th
   const failed = await doneOf(id);
   assert.ok(failed.type === 'error' && failed.kind === 'provider-auth', JSON.stringify(failed));
   assert.equal(failed.type === 'error' ? failed.message : '', "The chosen model's provider (opencode) is not signed in.");
+
+  // 2 November: OpenCode Go signed in, its key not loaded, and the provider not named: named from the chat's model.
+  const unnamed = sendChat(null, 'test', 'anahtarsız').id;
+  const refused = await doneOf(unnamed);
+  assert.ok(refused.type === 'error' && refused.kind === 'provider-auth', JSON.stringify(refused));
+  const model = openChat(unnamed).options.find((one) => one.id === 'model')?.current ?? '';
+  assert.equal(refused.type === 'error' ? refused.message : '', `The chosen model's provider (${model.split('/')[0]}) is not signed in.`);
 });
 
 test('OpenCode begins on a model of a provider signed in to, not on its own default of one that is not', () => {
@@ -484,4 +493,47 @@ test('a file written whole is tried again while Windows holds it, and its tempor
     fs.renameSync = rename;
     Object.defineProperty(process, 'platform', platform);
   }
+});
+
+test('a new chat shows its model and mode before its first message; one chosen there is the one its first turn runs with, in the session begun to ask', async () => {
+  // 2 November: "ilk mesaj kısmında sadece opencode seçebiliyorum.. mesaj attıktan sonra model seçme vs geliyor".
+  shutdownChats();
+  const { vault, log } = useVault();
+  const asked = await acpBackend.probe?.('test', vault, {});
+  assert.deepEqual(
+    asked?.map((one) => [one.id, one.current]),
+    [
+      ['model', 'fake/a'],
+      ['mode', 'build'],
+    ],
+    'asked of the program before any message',
+  );
+  const begun = methodsIn(log).filter((one) => one.method === 'session/new').length;
+  assert.equal(begun, 1);
+  assert.deepEqual(await acpBackend.probe?.('test', vault, {}), asked, 'asked again: the same session, not a second one');
+
+  // Chosen before the first message: no chat yet, kept for the one that message begins.
+  const offered = await offerChat('test');
+  assert.deepEqual(
+    offered.map((one) => one.id),
+    ['model', 'mode'],
+  );
+  const chosen = await beginChat('test', 'model', 'fake/b');
+  assert.equal(chosen.id, null, 'no chat begun by a model chosen');
+  assert.equal(chosen.options?.find((one) => one.id === 'model')?.current, 'fake/b');
+  await assert.rejects(beginChat('test', 'model', 'not/offered'), /Not a choice/);
+  assert.equal(listChats().filter((one) => !one.title).length, 0, 'nothing in the list before a message');
+
+  const { id } = sendChat(null, 'test', 'merhaba');
+  assert.deepEqual(await doneOf(id), { type: 'done', reason: 'end_turn' });
+  const methods = methodsIn(log);
+  assert.equal(methods.filter((one) => one.method === 'session/new').length, begun, 'the session begun to ask is the chat’s');
+  const prompt = methods.find((one) => one.method === 'session/prompt');
+  const spare = methods.find((one) => one.method === 'session/new' && one.cwd);
+  assert.ok(prompt && spare, 'a session and a prompt');
+  assert.equal(openChat(id).options.find((one) => one.id === 'model')?.current, 'fake/b', 'run with the model chosen before it');
+  assert.ok(
+    methods.some((one) => one.method === 'session/set_config_option' && one.params.value === 'fake/b' && one.params.sessionId === prompt.params.sessionId),
+    'given to that session before its first message',
+  );
 });

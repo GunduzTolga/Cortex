@@ -257,8 +257,15 @@ export function registerIpc(): void {
     chat.restartIdleChats();
     return auth.authStatuses();
   });
-  handle('chat:choose', (cli, offered) => {
-    auth.chooseTool(cli, offered === true);
+  // "Ekle": installed where it is not, added to the chat, its sign-in opened where it is not signed in.
+  handle('chat:addTool', async (cli) => {
+    await auth.addTool(cli);
+    return auth.authStatuses();
+  });
+  // "Sil": the chats' programs ended first, so none of the tool's files is held open while it is deleted.
+  handle('chat:removeTool', async (cli) => {
+    chat.restartIdleChats();
+    await auth.removeTool(cli);
     return auth.authStatuses();
   });
 

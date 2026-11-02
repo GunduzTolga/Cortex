@@ -493,6 +493,12 @@ export const claudeBackend: Backend = {
     }, STOP_GRACE.ms);
   },
 
+  // Before a new chat's first message: the list Claude Code starts with, the person's last choices current; its own
+  // list replaces it once it has started.
+  async probe(_cli, _vault, prefs) {
+    return claudeOptions(prefs);
+  },
+
   async setOption(chatId, options, option, value) {
     const next = options.map((one) => (one.id === option ? { ...one, current: value } : one));
     settings.set(chatId, next);

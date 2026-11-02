@@ -1,12 +1,14 @@
 import { execFile, spawn } from 'node:child_process';
+import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import type { CliAuth, CliId } from '../../shared/chat';
 import { childEnv } from './acp';
 import { LOCAL_IDS, onPathAny, powerShellExe, programOf, refreshPath } from './clis';
 import { LOCAL, type LocalId, findLocal, localModel, shortContext } from './localModels';
 import { KEY_ENV, KeyRefusal, forgetKey, hasKey, keptHere, keptReadable, saveKey } from './keys';
 import { CHAT_TOOLS, chooseChatTool, readSettings, setChatTool } from './settings';
-import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts } from './toolPackages';
+import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts, toolsDir } from './toolPackages';
 
 /**
  * Signing in to the person's AI tools, from the chat: each one asked, with
@@ -23,7 +25,13 @@ import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts } 
  *   and `codex login --with-api-key`, which reads the key on its input and
  *   keeps it itself.
  * - OpenCode: `opencode auth list` (one line a connection, "stored"),
- *   `opencode auth login` (its menu of providers).
+ *   `opencode auth login` (its menu of providers). From 1.19 (2 November) the
+ *   list is its menus' log: "●  OpenCode Go api" under "Credentials"; and
+ *   `opencode auth logout <provider>` takes a connection away, by its name.
+ *
+ * Taken away with the tool (2 November, "Sil"): `claude auth logout`
+ * (code.claude.com/docs/en/cli-reference), `codex logout`, and each OpenCode
+ * connection by `opencode auth logout <name>`.
  * - Gemini CLI: the personal Google sign-in is refused now; a key
  *   (GEMINI_API_KEY) is the way in.
  * - Qwen Code: its own sign-in was removed; an OpenAI-compatible key, with its
@@ -98,15 +106,33 @@ export function codexStatus(text: string): { signedIn: boolean | null; detail: s
   return { signedIn: null, detail: null };
 }
 
-/** What `opencode auth list` says: the connections it keeps, by name. */
+/**
+ * What `opencode auth list` says: the connections it keeps, by name. Before 1.19 a table, one connection a line ending
+ * "stored"; from 1.19 its menus' log: "●  OpenCode Go api" between "Credentials ~/.local/share/opencode/auth.json" and
+ * "1 credentials" (2 November: read as the old table, it was no connection at all). Its colours and its marks, or their
+ * plain stand-ins on a console without them, are not part of a name; the keys of the environment, listed after, are not
+ * connections it keeps.
+ */
 export function opencodeStatus(text: string): { signedIn: boolean | null; detail: string | null; names: string[] } {
-  const names = text
-    .split(/\r?\n/)
+  const lines = text.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/);
+  let names = lines
     .filter((line) => /\bstored\b/i.test(line))
-    .map((line) => line.split(/\s{2,}/)[0]?.trim())
-    .filter((name): name is string => Boolean(name))
-    .slice(0, 20);
-  return { signedIn: names.length > 0, detail: names.length ? names.join(', ') : null, names };
+    .map((line) => line.split(/\s{2,}/)[0]?.trim());
+  if (!names.length) {
+    let listing = false;
+    names = [];
+    for (const line of lines) {
+      const bare = line.replace(/^[\s│|┌└◇◆●•○◒*—–-]+/u, '').trim();
+      if (/^T?\s*Credentials\b/i.test(bare)) listing = true;
+      else if (/^\d+\s+credentials?\b/i.test(bare) || /^T?\s*Environment\b/i.test(bare)) listing = false;
+      else if (listing) {
+        const found = /^(.+?)\s+(api|oauth|wellknown)$/i.exec(bare);
+        if (found) names.push(found[1].trim());
+      }
+    }
+  }
+  const kept = names.filter((name): name is string => Boolean(name)).slice(0, 20);
+  return { signedIn: kept.length > 0, detail: kept.length ? kept.join(', ') : null, names: kept };
 }
 
 /** The providers OpenCode is signed in to (`opencode auth list`), as it names them; asked again after a minute. */
@@ -144,6 +170,7 @@ async function statusOf(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
     hasKey: hasKey(tool.id),
     kept: keptHere(tool.id),
     chosen: offeredInChat(tool.id),
+    own: ownProgram(tool.id) !== null,
   };
   if (!installed) return base;
   // A key kept here that this computer cannot read back (kept on another one, or under another Windows account) is not
@@ -194,11 +221,60 @@ const offeredInChat = (id: CliId): boolean => {
   return chosen === null || chosen.includes(id);
 };
 
-/** A tool added to the chat from the AI tools window, its sign-in as it is; or taken from it. */
-export function chooseTool(id: unknown, offered: boolean): void {
+const installedTools = (): CliId[] => CHAT_TOOLS.filter((one) => programOf(one) !== null);
+
+/**
+ * "Ekle" in the AI tools window (2 November: "ekle dersin tekrardan her şeyi sıfırdan eklersin"): the tool set up for
+ * the chat from the start. Installed where it is not, its sign-in opened after (installTool); otherwise added to the
+ * chat, and its sign-in opened where it is not signed in. A tool that takes a key is given one in the window.
+ */
+export async function addTool(id: unknown): Promise<void> {
   const tool = toolOf(id);
-  if (offered && !programOf(tool.id)) throw new KeyRefusal('This tool is not installed on this computer.');
-  setChatTool(tool.id, offered, CHAT_TOOLS.filter((one) => programOf(one) !== null));
+  if (!programOf(tool.id)) {
+    await installTool(tool.id);
+    return;
+  }
+  setChatTool(tool.id, true, installedTools());
+  changed(tool.id);
+  if (!tool.login || process.platform !== 'win32') return;
+  if ((await statusOf(tool)).signedIn === true) return;
+  startLogin(tool.id);
+}
+
+/** Its own command, given its time; whatever it says. A tool that will not answer is not waited on for ever. */
+function run(id: CliId, args: string[]): Promise<void> {
+  return ask(id, args).then(() => undefined);
+}
+
+/**
+ * "Sil" in the AI tools window (2 November: "sil dersin siler"; before, "Sohbetten çıkar" took it from the chat and
+ * left it signed in, and the window then offered no sign-in again). The tool signed out with its own command - Claude
+ * Code, Codex, each of OpenCode's connections - or its key kept here forgotten; taken from the chat; and the program
+ * Cortex downloaded for it (toolPackages.ts) deleted. One the person installed themselves, and Claude Code, which its
+ * maker's installer put on the PATH for the terminal too, stay installed. The chats' programs are ended first (ipc.ts),
+ * so none of its files is held open.
+ */
+export async function removeTool(id: unknown): Promise<void> {
+  const tool = toolOf(id);
+  if (tool.key === 'cortex') forgetKey(tool.id);
+  if (programOf(tool.id)) {
+    if (tool.id === 'claude') await run('claude', ['auth', 'logout']);
+    else if (tool.id === 'codex') await run('codex', ['logout']);
+    else if (tool.id === 'opencode') {
+      for (const name of opencodeStatus((await ask('opencode', ['auth', 'list'])) ?? '').names) await run('opencode', ['auth', 'logout', name]);
+      opencodeNames = null;
+    }
+  }
+  setChatTool(tool.id, false, installedTools());
+  const folder = PACKAGES[tool.id] ? path.join(toolsDir(), tool.id) : null;
+  try {
+    // Windows lets go of a program's files a moment after it ends: tried again for a few seconds.
+    if (folder && fs.existsSync(folder)) fs.rmSync(folder, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  } catch {
+    throw new KeyRefusal('The tool was signed out and taken from the chat, but its files are in use. Close Cortex, open it again and remove it once more.');
+  } finally {
+    changed(tool.id);
+  }
 }
 
 const toolOf = (id: unknown) => {

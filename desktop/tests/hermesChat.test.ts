@@ -303,7 +303,12 @@ test('a session begun elsewhere is continued: chosen before the first message, i
       offered.choices.map((one) => one.value),
       ['new', 'api_phone'],
     );
-    assert.deepEqual(await offerChat('claude'), [], 'an engine with nothing to offer before a message offers nothing');
+    assert.deepEqual(await offerChat('lmstudio'), [], 'an engine with nothing to offer before a message offers nothing');
+    // Claude Code: the model and the mode it starts with, before its first message (2 November).
+    assert.deepEqual(
+      (await offerChat('claude')).map((one) => one.id),
+      ['model', 'mode', 'effort'],
+    );
 
     const { id } = await beginChat('hermes', 'session', 'api_phone');
     const opened = openChat(id);

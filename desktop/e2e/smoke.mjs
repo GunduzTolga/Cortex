@@ -303,6 +303,18 @@ await page.waitForLoadState('domcontentloaded');
 // Once the window is there: asked of the main process before it, an evaluation can be lost while the app starts.
 await holdBrowser();
 const shownSoon = (locator, timeout = 10_000) => locator.first().waitFor({ timeout }).then(() => true, () => false);
+/**
+ * Something set in the main process that can be set twice: asked once more when Playwright lost the answer ("Resulting
+ * promise was garbage collected", the main CI run of 2 November, on the dialog set before the vault step).
+ */
+const setInMain = async (fn, arg) => {
+  try {
+    return await app.evaluate(fn, arg);
+  } catch (err) {
+    if (!/garbage collected/i.test(String(err))) throw err;
+    return app.evaluate(fn, arg);
+  }
+};
 /** Whether `test` comes true within a while: for what the run sees outside the window (a file). */
 async function soon(test, timeout = 8_000) {
   for (const end = Date.now() + timeout; Date.now() < end; await new Promise((done) => setTimeout(done, 100))) {
@@ -379,7 +391,7 @@ console.log('\nThe vault');
 // The system's dialog answers with the vault for this run; the window names no folder.
 // Documents is a folder of this run's own: the first run makes its vault there without a dialog (services/vault.ts).
 const documentsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-belgeler-'));
-await app.evaluate(({ app: electronApp, dialog }, [dir, documents]) => {
+await setInMain(({ app: electronApp, dialog }, [dir, documents]) => {
   dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
   electronApp.setPath('documents', documents);
 }, [vaultDir, documentsDir]);

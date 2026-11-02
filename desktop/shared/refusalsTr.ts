@@ -109,6 +109,10 @@ const RULES: Rule[] = [
   { pattern: /^This tool is installed already\.$/, say: () => 'Bu araç zaten kurulu.' },
   { pattern: /^This tool is not installed on this computer\.$/, say: () => 'Bu araç bu bilgisayarda kurulu değil.' },
   { pattern: /^This tool is being installed already\.$/, say: () => 'Bu araç zaten kuruluyor.' },
+  {
+    pattern: /^The tool was signed out and taken from the chat, but its files are in use\. Close Cortex, open it again and remove it once more\.$/,
+    say: () => 'Aracın girişi silindi ve sohbetten kaldırıldı, ama dosyaları şu an kullanımda. Cortex’i kapatıp yeniden aç, sonra bir kez daha Sil’e bas.',
+  },
   // electron/services/acpChat.ts: OpenCode signed in, the chosen model's provider not
   { pattern: /^The chosen model's provider \((.+)\) is not signed in\.$/, say: ([provider]) => `Seçili modelin sağlayıcısına (${provider}) giriş yapılmamış.` },
   // electron/services/toolPackages.ts: OpenCode, Codex, Gemini CLI and Qwen Code installed by Cortex
