@@ -24,8 +24,8 @@ import {
   shownPath,
   shutdownChats,
 } from '../electron/services/chat';
-import { acpBackend, opencodeLogDir, opencodeSaid, signedInChoice } from '../electron/services/acpChat';
-import { STOP_GRACE, cardTextFor } from '../electron/services/chatKit';
+import { acpBackend, opencodeKeyRefusal, opencodeLogDir, opencodeSaid, signedInChoice } from '../electron/services/acpChat';
+import { STOP_GRACE, TurnFailure, cardTextFor } from '../electron/services/chatKit';
 import { renameRetrying, writeWhole } from '../electron/services/fileWrite';
 import { pythonOf } from '../electron/services/localChat';
 import { updateSettings } from '../electron/services/settings';
@@ -570,4 +570,15 @@ test('OpenCode’s own reason for refusing a turn is read from its log: only wha
   assert.equal(opencodeSaid(began, dir), "OpenCode API key is missing. Pass it using the 'apiKey' parameter");
   assert.equal(opencodeSaid(began, path.join(dir, 'none')), null, 'no log, nothing said');
   assert.ok(opencodeLogDir({ XDG_DATA_HOME: 'X' }).endsWith(path.join('X', 'opencode', 'log')));
+});
+
+test('a key OpenCode’s provider refuses in the protocol itself is said as the key’s refusal, in the provider’s words', () => {
+  // 2 November: the key given in Cortex was sent, and opencode.ai did not know it; the chat said only "something went wrong".
+  const refused = opencodeKeyRefusal(new TurnFailure('Internal error: Upstream request failed: Invalid credential', 'APIError'));
+  assert.equal(refused?.kind, 'provider-key');
+  assert.equal(refused?.message, 'OpenCode: Upstream request failed: Invalid credential');
+  assert.equal(opencodeKeyRefusal(new TurnFailure('Internal error: This API key has expired. Create a new API key in OpenCode Console.', 'APIError'))?.kind, 'provider-key');
+  // Not the key: left as it came, for its own card.
+  assert.equal(opencodeKeyRefusal(new TurnFailure('Internal error: Insufficient balance', 'APIError')), null);
+  assert.equal(opencodeKeyRefusal(new TurnFailure('Invalid credential', 'provider.quota')), null);
 });

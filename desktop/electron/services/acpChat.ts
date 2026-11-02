@@ -403,9 +403,22 @@ export function opencodeSaid(since: number, dir: string = opencodeLogDir()): str
   return null;
 }
 
+/**
+ * The provider refusing the key itself, as OpenCode passes it on in its protocol (an `APIError`): said as the key's
+ * refusal, in its own words. 2 November: a key given in Cortex that opencode.ai did not know came as "Internal error:
+ * Upstream request failed: Invalid credential", under "something went wrong", with no word of the key.
+ */
+export function opencodeKeyRefusal(failure: TurnFailure): TurnFailure | null {
+  if (failure.kind !== 'APIError' || !/invalid credential|invalid api key|api key has expired|unauthori[sz]ed/i.test(failure.message)) return null;
+  return new TurnFailure(`OpenCode: ${failure.message.replace(/^Internal error:\s*/i, '')}`, 'provider-key');
+}
+
 /** OpenCode's own sentence for a refusal of its sign-in, where its log has one: said instead of the protocol's. */
 async function withOpencodeCause(cli: CliId, failure: TurnFailure, since: number): Promise<TurnFailure> {
-  if (cli !== 'opencode' || (failure.kind !== 'auth' && failure.kind !== 'provider-auth')) return failure;
+  if (cli !== 'opencode') return failure;
+  const refused = opencodeKeyRefusal(failure);
+  if (refused) return refused;
+  if (failure.kind !== 'auth' && failure.kind !== 'provider-auth') return failure;
   // Written as it refused, by its server process: looked for again for a couple of seconds, until it reaches the file.
   for (let tries = 0; tries < 6; tries += 1) {
     await new Promise((resolve) => setTimeout(resolve, 350));

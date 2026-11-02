@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
-import { addTool, authStatuses, claudeStatus, codexStatus, installScript, installTool, opencodeStatus, removeTool, setToolKey, startLogin } from '../electron/services/auth';
+import type { CliId } from '../shared/chat';
+import { addTool, authStatuses, claudeStatus, codexStatus, commandLineArg, installScript, installTool, onAuthChanged, opencodeStatus, removeTool, setToolKey, startLogin } from '../electron/services/auth';
 import { READ_PATH, pathOutput, powerShellExe, withDirs } from '../electron/services/clis';
 import { forgetKey, hasKey, keyEnv, saveKey } from '../electron/services/keys';
 import { readSettings, updateSettings } from '../electron/services/settings';
@@ -57,6 +58,8 @@ if (args[0] === 'auth' && args[1] === 'list') {
   process.stdout.write('┌  Credentials \\x1b[2m~/.local/share/opencode/auth.json\\n│\\n' + names.map((name) => '●  ' + name + ' \\x1b[2mapi\\n│\\n').join('') + '└  ' + names.length + ' credentials\\n');
 } else if (args[0] === 'auth' && args[1] === 'logout') {
   fs.writeFileSync(${JSON.stringify(state)}, JSON.stringify(names.filter((name) => name.toLowerCase() !== String(args[2]).toLowerCase())));
+} else if (args[0] === 'auth' && args[1] === 'login') {
+  fs.writeFileSync(${JSON.stringify(path.join(home, `${id}-login.json`))}, JSON.stringify({ stdin: Boolean(process.stdin.isTTY), stdout: Boolean(process.stdout.isTTY) }));
 } else if (args[0] === 'logout' || (args[0] === 'login' && args[1] === 'status')) {
   if (args[0] === 'logout') fs.writeFileSync(${JSON.stringify(state)}, '[]');
   process.stdout.write(names.length && args[0] !== 'logout' ? 'Logged in using ChatGPT\\n' : 'Not logged in\\n');
@@ -131,6 +134,50 @@ test('"Sil" signs the tool out with its own command, takes it from the chat and 
     });
     forgetKey('gemini');
     fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a sign-in’s arguments reach its program as they were, as Windows’ command line reads them back', () => {
+  assert.equal(commandLineArg('auth'), 'auth');
+  assert.equal(commandLineArg('C:\\Program Files\\x\\tool.js'), '"C:\\Program Files\\x\\tool.js"');
+  assert.equal(commandLineArg('say "hi"'), '"say \\"hi\\""');
+  assert.equal(commandLineArg('C:\\with space\\'), '"C:\\with space\\\\"');
+  assert.equal(commandLineArg(''), '""');
+  if (process.platform !== 'win32') return;
+  // Read back by a program as Windows hands it the line.
+  const args = ['auth', 'login', 'C:\\Program Files\\x\\tool.js', 'say "hi"', 'C:\\with space\\', 'a\\\\"b', 'Çağrı Öz'];
+  const read = execFileSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', ...args.map(commandLineArg)], { encoding: 'utf8', windowsVerbatimArguments: true, argv0: commandLineArg(process.execPath) });
+  assert.deepEqual(JSON.parse(read), args);
+});
+
+test('a sign-in opens in a console of its own, with a terminal for its menu', { skip: process.platform !== 'win32' }, async () => {
+  // 2 November: started with Windows' NUL device for its input and output, OpenCode 2's menu ended in 0.1 s ("Pass an
+  // integration ID or name when running without an interactive terminal"), and its button was pressed 23 times.
+  const kept = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, CORTEX_HIDDEN: process.env.CORTEX_HIDDEN };
+  const before = readSettings().chatTools;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-login-'));
+  process.env.PATH = '';
+  process.env.LOCALAPPDATA = home;
+  // Its console hidden: not put in front of the person at the machine.
+  process.env.CORTEX_HIDDEN = '1';
+  const told: Array<CliId | null> = [];
+  onAuthChanged((cli) => told.push(cli));
+  try {
+    standIn('opencode', home, []);
+    startLogin('opencode');
+    for (let waited = 0; !told.includes('opencode') && waited < 30_000; waited += 200) await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, 'opencode-login.json'), 'utf8')), { stdin: true, stdout: true }, 'its input and output a console, not NUL');
+    assert.ok(told.includes('opencode'), 'its console closed, the window told');
+  } finally {
+    onAuthChanged(() => undefined);
+    for (const [name, value] of Object.entries(kept)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    updateSettings((settings) => {
+      settings.chatTools = before;
+    });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
   }
 });
 
