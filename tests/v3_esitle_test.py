@@ -152,6 +152,7 @@ class EsitleTest(unittest.TestCase):
         self.assertEqual((alone.returncode, json.loads(alone.stdout)['state']), (0, 'synced'), alone.stderr)
         import io
         from contextlib import redirect_stdout
+        (self.a / 'k2.md').write_text('k2\n', encoding='utf-8')
         buffer = io.StringIO()
         with redirect_stdout(buffer):
             code = esitle.main(['--json'], vault=self.a, state=self.state)
