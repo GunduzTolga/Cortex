@@ -146,6 +146,10 @@ class EsitleTest(unittest.TestCase):
         (self.a / 'k.md').write_text('k\n', encoding='utf-8')
         out = subprocess.run([sys.executable, str(SCRIPTS / 'beyin_v3_esitle.py'), '--json'], capture_output=True, text=True)
         self.assertNotEqual(out.returncode, 2)  # no vault given: a message, not argparse's 2
+        # On its own with --vault (the desktop app's tests run it so): one JSON line, exit 0.
+        alone = subprocess.run([sys.executable, str(SCRIPTS / 'beyin_v3_esitle.py'), '--vault', str(self.a),
+                                '--state', str(self.state), '--json'], capture_output=True, text=True, env=ENV)
+        self.assertEqual((alone.returncode, json.loads(alone.stdout)['state']), (0, 'synced'), alone.stderr)
         import io
         from contextlib import redirect_stdout
         buffer = io.StringIO()

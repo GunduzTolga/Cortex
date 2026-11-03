@@ -312,7 +312,12 @@ SENTENCE = {
 def main(argv=None, vault=None, state=None) -> int:
     parser = argparse.ArgumentParser(prog='beyin.py esitle', description='Kasayı git uzak deposuyla eşitler.')
     parser.add_argument('--json', action='store_true', help='Sonucu tek satır JSON yaz')
+    # Run on its own (the desktop app's tests, a folder with no engine installed): the vault and state said here.
+    parser.add_argument('--vault', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--state', type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args(list(sys.argv[1:] if argv is None else argv))
+    vault = vault if vault is not None else args.vault
+    state = state if state is not None else args.state
     if vault is None:
         raise SystemExit('Kasa bilinmiyor; beyin.py esitle ile çalıştırın.')
     result = sync(Path(vault), Path(state) if state else None)
