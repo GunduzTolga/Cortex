@@ -695,6 +695,10 @@ def main(argv=None):
             # Optional capture from the person's own Telegram bot into yakala's inbox; its own small CLI.
             import beyin_v3_telegram as telegram
             return telegram.main(argv[1:] + ([] if human else ['--json']), vault=vault, state=state)
+        if argv and argv[0] == 'esitle':
+            # Keep the vault in step with its git remote (the desktop app's and a server's timer call this); its own CLI.
+            import beyin_v3_esitle as esitle
+            return esitle.main(argv[1:] + (['--json'] if force_json and '--json' not in argv else []), vault=vault, state=state)
         if argv and argv[0] == 'pyn':
             # Open Pyn in a chosen AI client inside this vault; its own small CLI.
             import beyin_v3_pyn as pyn
