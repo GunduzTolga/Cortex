@@ -14,6 +14,7 @@ import * as telegram from './services/telegram';
 import * as vaultSync from './services/vaultSync';
 import * as vaultNotes from './services/vaultNotes';
 import { installUpdate, pendingUpdate, startUpdates, updatesWanted } from './services/updater';
+import { isMicWindow } from './services/micWindow';
 
 /**
  * What the window can ask, and nothing else (shared/api.ts, electron/preload.ts).
@@ -161,7 +162,8 @@ export function registerIpc(): void {
   };
   // The system's dialog, in the main process: the window names no folder, and learns the chosen one's name only.
   handle('vault:choose', async () => {
-    const win = BrowserWindow.getAllWindows()[0];
+    // The app's window, not the hidden one that records (services/micWindow.ts).
+    const win = BrowserWindow.getAllWindows().find((one) => !isMicWindow(one));
     const options: Electron.OpenDialogOptions = { title: 'Cortex', properties: ['openDirectory', 'createDirectory'] };
     const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
     const dir = result.canceled ? null : (result.filePaths[0] ?? null);

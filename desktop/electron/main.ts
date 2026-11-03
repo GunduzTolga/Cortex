@@ -8,6 +8,7 @@ import { settleVault, setupBusy, whenSetupIdle } from './services/setup';
 import { startTelegram } from './services/telegram';
 import { startVaultSync, syncBeforeQuit } from './services/vaultSync';
 import { startMicrophoneWord, stopMicrophoneWord } from './services/microphone';
+import { startMicCapture, stopMicCapture } from './services/micWindow';
 import { keepStartWithWindows, listeningNow, startTray, trayNotice } from './services/tray';
 import { WINDOW_MIN, keepWindowState, readWindowState } from './services/windowState';
 
@@ -332,6 +333,8 @@ function createWindow(showNow = true): void {
   const made = window;
   made.on('closed', () => {
     if (window === made) window = null;
+    // Closed for good (Windows signing out): the hidden recording window must not keep the app from quitting.
+    if (quitting) stopMicCapture();
   });
 }
 
@@ -441,6 +444,8 @@ if (!app.requestSingleInstanceLock()) {
     if (!HIDDEN) {
       // The microphone listens all the time only while Cortex runs: said from now until it quits.
       startMicrophoneWord();
+      // While it runs, Cortex records for the voice helper: Windows names Cortex on the microphone, not Python.
+      startMicCapture();
       startTray({
         open: showWindow,
         settings: showSettings,
@@ -486,5 +491,6 @@ app.on('before-quit', (event) => {
   }
   quitting = true;
   stopMicrophoneWord();
+  stopMicCapture();
   stopWatching();
 });

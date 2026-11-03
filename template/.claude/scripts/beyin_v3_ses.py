@@ -2431,6 +2431,8 @@ def _device(config):
 
 def _device_name(config):
     """The microphone listened to, by the name the system gives it; empty when it cannot say."""
+    if FEED is not None and FEED.usable() and FEED.device:
+        return ses.mic_label(FEED.device, [FEED.device])
     try:
         import sounddevice as sd
         index = _device(config)
@@ -2439,6 +2441,273 @@ def _device_name(config):
         return ses.mic_label(str(name), [str(device['name']) for device in devices])
     except Exception:
         return ''
+
+
+# The desktop app's microphone. Windows names the program that holds the microphone in its
+# indicator, and the helper is Python: the person saw "Python" listen and did not know it. While
+# Cortex runs it records and sends the sound here over 127.0.0.1; without it, or when it cannot
+# record, the helper opens the microphone itself (sounddevice) as before. The app finds the port
+# and the key in FEED_FILE beside its own word (beyin_v3_ses.desktop_file), as the helper wrote it.
+FEED = None
+FEED_FILE = 'akis.json'
+# How long the app has to say who it is once connected, and the most one of its messages may hold.
+FEED_HELLO_SN, FEED_MOST = 2.0, 1 << 20
+# Asked for sound and none came in this long: the app cannot record now (Windows' privacy setting,
+# no microphone, a renderer that died); the helper's own microphone for FEED_REST_SN.
+FEED_START_SN, FEED_REST_SN = 3.0, 60.0
+
+
+class FeedStream:
+    """The app's sound as one stream of the Recorder's: started, stopped, closed as sounddevice's is."""
+
+    def __init__(self, feed, callback, microphone):
+        self.feed, self.callback, self.microphone = feed, callback, microphone
+
+    def start(self):
+        self.feed.add(self.callback, self.microphone)
+
+    def stop(self):
+        self.feed.remove(self.callback)
+
+    def close(self):
+        pass
+
+
+class AppFeed:
+    """Sound the desktop app records, over a local connection only it may make.
+
+    The app connects to 127.0.0.1, says the key (`{"anahtar": ..., "hz": 16000}` on the first line)
+    and is answered `{"tamam": true}`. From then on the helper says, a JSON line each, when it wants
+    sound (`{"ac": true, "mikrofon": <the setting's name, or null>}`) and when not (`{"ac": false}`):
+    the microphone is open only while a recording or the wake listener needs it. The app sends
+    messages of a kind byte and a length (uint32, little-endian): `a`, float32 samples at 16 kHz;
+    `j`, a JSON object (`{"aygit": name}` for the microphone it opened, `{"hata": why}` when it
+    could not record). One app at a time: a newer one takes the place of the one before.
+    """
+
+    def __init__(self, key=None, port=0):
+        import secrets
+        import socket
+        self.key = key or secrets.token_hex(16)
+        self.server = socket.create_server(('127.0.0.1', port))
+        self.port = self.server.getsockname()[1]
+        self.guard, self.sending = threading.Lock(), threading.Lock()
+        self.conn, self.listeners, self.microphone = None, [], None
+        self.device, self.asked, self.resting_until = '', None, 0.0
+        self.closed = False
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def usable(self):
+        """Whether a recording begun now takes the app's sound: it is connected and has not failed lately."""
+        with self.guard:
+            return self.conn is not None and now() >= self.resting_until
+
+    def stream(self, callback, microphone=None):
+        return FeedStream(self, callback, microphone)
+
+    def add(self, callback, microphone=None):
+        with self.guard:
+            self.listeners.append(callback)
+            first = len(self.listeners) == 1
+            if first:
+                self.asked, self.microphone = now(), microphone
+        if first:
+            self._say(ac=True, mikrofon=microphone)
+
+    def remove(self, callback):
+        with self.guard:
+            if callback in self.listeners:
+                self.listeners.remove(callback)
+            if self.listeners:
+                return
+            if self.asked is not None and now() - self.asked > FEED_START_SN:
+                # Asked, and nothing came: the next recording opens the microphone itself.
+                self.resting_until = now() + FEED_REST_SN
+                log('uygulamanın mikrofonundan ses gelmedi; %d sn yardımcının kendi mikrofonu' % FEED_REST_SN)
+            self.asked = None
+        self._say(ac=False)
+
+    def close(self):
+        self.closed = True
+        with self.guard:
+            conn, self.conn = self.conn, None
+        self._drop(conn)
+        self._drop(self.server)
+
+    @staticmethod
+    def _drop(conn):
+        """Shut down, then closed: a close alone wakes neither the thread waiting on it nor the other end."""
+        if conn is None:
+            return
+        import socket
+        try:
+            conn.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            conn.close()
+        except OSError:
+            pass
+
+    def _say(self, **word):
+        with self.guard:
+            conn = self.conn
+        if conn is None:
+            return
+        try:
+            with self.sending:
+                conn.sendall((json.dumps(word, ensure_ascii=False) + '\n').encode('utf-8'))
+        except OSError:
+            self._lost(conn)
+
+    def _lost(self, conn):
+        with self.guard:
+            if self.conn is conn:
+                self.conn, self.device = None, ''
+        self._drop(conn)
+
+    def _accept(self):
+        while not self.closed:
+            try:
+                conn, _where = self.server.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+
+    @staticmethod
+    def _exactly(conn, size):
+        data = b''
+        while len(data) < size:
+            part = conn.recv(size - len(data))
+            if not part:
+                return None
+            data += part
+        return data
+
+    def _hello(self, conn):
+        """The first line, the key and the rate; False for anything else, and the connection goes."""
+        import hmac
+        conn.settimeout(FEED_HELLO_SN)
+        line = b''
+        while not line.endswith(b'\n'):
+            part = conn.recv(1)
+            if not part or len(line) > 1024:
+                return False
+            line += part
+        try:
+            hello = json.loads(line.decode('utf-8'))
+        except ValueError:
+            return False
+        if not isinstance(hello, dict) or hello.get('hz') != RATE:
+            return False
+        return hmac.compare_digest(str(hello.get('anahtar') or '').encode('utf-8'), self.key.encode('utf-8'))
+
+    def _serve(self, conn):
+        try:
+            if not self._hello(conn):
+                self._drop(conn)
+                return
+            conn.settimeout(None)
+        except OSError:
+            self._drop(conn)
+            return
+        with self.guard:
+            old, self.conn, self.device = self.conn, conn, ''
+            wanted, microphone = bool(self.listeners), self.microphone
+            if wanted:
+                self.asked = now()
+        self._drop(old)
+        self._say(tamam=True)
+        if wanted:
+            self._say(ac=True, mikrofon=microphone)
+        import struct
+        try:
+            while True:
+                head = self._exactly(conn, 5)
+                if head is None:
+                    break
+                kind, size = head[:1], struct.unpack('<I', head[1:])[0]
+                if size > FEED_MOST:
+                    break
+                body = self._exactly(conn, size)
+                if body is None:
+                    break
+                if kind == b'a' and size and size % 4 == 0:
+                    self._sound(conn, body)
+                elif kind == b'j':
+                    self._word(body)
+        except OSError:
+            pass
+        self._lost(conn)
+
+    def _sound(self, conn, body):
+        import numpy as np
+        block = np.frombuffer(body, dtype='<f4').astype('float32').reshape(-1, 1)
+        with self.guard:
+            if self.conn is not conn:
+                return
+            self.asked = None
+            listeners = list(self.listeners)
+        for take in listeners:
+            take(block, len(block), None, None)
+
+    def _word(self, body):
+        try:
+            word = json.loads(body.decode('utf-8'))
+        except ValueError:
+            return
+        if not isinstance(word, dict):
+            return
+        if isinstance(word.get('aygit'), str):
+            with self.guard:
+                self.device = word['aygit'][:120]
+        if word.get('hata'):
+            with self.guard:
+                self.resting_until = now() + FEED_REST_SN
+            log('uygulama kaydedemedi (%s); %d sn yardımcının kendi mikrofonu' % (str(word['hata'])[:120], FEED_REST_SN))
+
+
+def feed_file():
+    return ses.desktop_file().with_name(FEED_FILE)
+
+
+def open_feed(path=None):
+    """The app's way in, its port and key written for the app to read (FEED_FILE); None where it
+    cannot be opened, and the helper records itself."""
+    global FEED
+    try:
+        feed = AppFeed()
+    except OSError as exc:
+        log('uygulama ses bağlantısı açılamadı: %s' % str(exc)[:200])
+        return None
+    path = Path(path) if path is not None else feed_file()
+    word = {'surum': 1, 'pid': os.getpid(), 'port': feed.port, 'anahtar': feed.key}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_name(path.name + '.%d.tmp' % os.getpid())
+        temp.write_text(json.dumps(word) + '\n', encoding='utf-8')
+        os.replace(temp, path)
+    except OSError as exc:
+        log('uygulama ses bağlantısı yazılamadı: %s' % str(exc)[:200])
+        feed.close()
+        return None
+    FEED = feed
+    return feed
+
+
+def close_feed(path=None):
+    """The helper ends: its way in closed and its file gone, if it is still this helper's."""
+    global FEED
+    feed, FEED = FEED, None
+    if feed is None:
+        return
+    feed.close()
+    path = Path(path) if path is not None else feed_file()
+    try:
+        if json.loads(path.read_text(encoding='utf-8')).get('pid') == os.getpid():
+            path.unlink()
+    except (OSError, ValueError, AttributeError):
+        pass
 
 
 class Recorder:
@@ -2467,8 +2736,11 @@ class Recorder:
     def start(self, on_chunk=None, held=False):
         """The microphone open. `held`: what it records is held back until `go_on` gives the sound
         that comes before it (the wake listener's last moment), so the two are one in order;
-        `held_since` is when its first sound came, where the sound before it ends."""
-        import sounddevice as sd
+        `held_since` is when its first sound came, where the sound before it ends. While the
+        desktop app is connected (FEED) the sound is the app's, and sounddevice is not opened."""
+        use_feed = FEED is not None and FEED.usable()
+        if not use_feed:
+            import sounddevice as sd
         self.level, self.floor, self.loud = 0.0, 1.0, 0
         self._sentence(now())
         self.on_chunk = on_chunk
@@ -2487,7 +2759,11 @@ class Recorder:
                 else:
                     self._take(data.copy())
 
-        self.stream = sd.InputStream(samplerate=RATE, channels=1, dtype='float32', device=_device(self.config), callback=take)
+        if use_feed:
+            # The desktop app records (Windows names Cortex on the microphone) and sends it here.
+            self.stream = FEED.stream(take, self.config.get('mikrofon'))
+        else:
+            self.stream = sd.InputStream(samplerate=RATE, channels=1, dtype='float32', device=_device(self.config), callback=take)
         self.stream.start()
 
     def _take(self, data):
@@ -2723,6 +2999,8 @@ def serve(state, config, lines=None):
         commands.put({'komut': 'kapat'})
 
     threading.Thread(target=read, daemon=True).start()
+    if os.name == 'nt' and lines is None:
+        open_feed()
     out(olay='yukleniyor')
     loaded, lock = {}, threading.Lock()
     jobs, written = queue.Queue(), queue.Queue()
@@ -2940,6 +3218,7 @@ def serve(state, config, lines=None):
                     wake.stop()
                 jobs.put(None)
                 release(loaded.get('model'))
+                close_feed()
                 return 0
             if name == 'dinle' and mode in ('bos', 'ceviri'):
                 begin(continuous=bool(command.get('surekli')))

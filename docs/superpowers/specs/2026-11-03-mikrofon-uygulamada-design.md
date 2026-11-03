@@ -23,25 +23,26 @@ yazsın. Ses yine makineden çıkmaz; yazıya çevirme (Whisper) ve uyandırma s
   "Python" görünür. Sürekli dinleme zaten yalnız uygulama açıkken olduğundan, sürekli açık mikrofon her zaman "Cortex" olur.
 
 ## Kararlar (kullanıcıyla)
-- (açık) Yol: yukarıdaki önerilen yol mu, yoksa sesin tamamen uygulamaya taşınması mı (not penceresi de uygulamada)?
+- Yol: önerilen yol (2026-11-03). Cortex açıkken uygulama kaydeder; kapalıyken not penceresi yardımcının kendi
+  mikrofonuyla kaydeder. Sesin tamamının (not penceresi dahil) uygulamaya taşınması seçilmedi.
 ## Kapsam dışı
 - Not penceresinin (tkinter) uygulamaya taşınması; macOS ve Linux (dinleyici yalnız Windows'ta).
 
 ## Bileşenler
 | Dosya / modül | Sorumluluk | Bağımlılık |
 |---|---|---|
-| `desktop/electron/services/micCapture.ts` (yeni) | Gizli kayıt penceresi, yaşam döngüsü (izin + uygulama açık), akışı yardımcıya iletme | Electron |
-| `desktop/electron/capture/` (yeni, gizli pencere) | `getUserMedia` + AudioWorklet, 16 kHz'e indirme, seviye | Chromium |
-| `desktop/electron/main.ts` | İzin işleyicisi: yalnız kayıt penceresinin kendi kökenine, yalnız `media`/ses | — |
-| `beyin_v3_ses.py` (WORKER_SOURCE) | Yerel dinleme ucu, `Recorder` için dış kaynak, kaynak yoksa `sounddevice`'a dönüş | stdlib |
-| `masaustu.json`, `dinleyici.json` | Uygulamanın sözüne `akis: true`; yardımcının sözüne `akis_port` ve `akis_anahtar` eklenir | — |
+| `desktop/electron/services/micCapture.ts` (yeni) | Bağlantı (Electron'suz): `akis.json`'ı okur, anahtarı söyler, `ac` sözlerine göre kaydı açar/kapar, sesi iletir; izin kararları | Node |
+| `desktop/electron/services/micWindow.ts` (yeni) | Gizli kayıt penceresi (ayrı oturum `cortex-mikrofon`, yalnız ses izni), son istekten 60 sn sonra kapanır | Electron |
+| `desktop/mic/preload.ts`, `desktop/mic/mic.html` (yeni) | `getUserMedia` (yankı/gürültü/kazanç kapalı) + AudioWorklet (olmazsa ScriptProcessor), 16 kHz, 480 örneklik parçalar | Chromium |
+| `desktop/electron/main.ts`, `ipc.ts` | Başlat/durdur; kapanışta gizli pencere uygulamayı tutmaz; klasör seçici gizli pencereyi atlar | — |
+| `beyin_v3_ses.py` (WORKER_SOURCE) | `AppFeed` (127.0.0.1 ucu, anahtar), `FeedStream`, `Recorder`'ın kaynak seçimi, `akis.json` yazma/silme | stdlib + numpy (ses ortamı) |
 
 ## Süreçler arası sözleşme
 | Mesaj / kanal | Yön | Alanlar | Ne zaman |
 |---|---|---|---|
-| `dinleyici.json` | yardımcı → uygulama | `akis_port` (127.0.0.1), `akis_anahtar` | Yardımcı hazır olunca |
-| TCP 127.0.0.1 | uygulama → yardımcı | İlk satır `{"anahtar": "...", "hz": 16000}`, sonra ham float32 bloklar | Sürekli dinleme izinliyken ya da yardımcı kayıt isteyince |
-| `masaustu.json` | uygulama → dinleyici | `akis: true` (uygulama kaydedebiliyor) | Her 5 sn'lik sözde |
+| `akis.json` (`%LOCALAPPDATA%\beyin-v3`) | yardımcı → uygulama | `surum`, `pid`, `port`, `anahtar` | Yardımcı açılınca (Windows); kapanınca silinir |
+| TCP 127.0.0.1, uygulama → yardımcı | | İlk satır `{"anahtar", "hz": 16000}`; sonra mesajlar: tür baytı + uzunluk (uint32 LE) + gövde. `a`: float32 16 kHz; `j`: `{"aygit"}` ya da `{"hata"}` | Bağlanınca; ses yalnız `ac` açıkken |
+| TCP 127.0.0.1, yardımcı → uygulama | | JSON satırları: `{"tamam": true}`, `{"ac": true, "mikrofon": ad\|null}`, `{"ac": false}` | İlk kayıt akışı açılınca / sonuncusu kapanınca |
 
 Anahtarı yardımcı her açılışta yeniden üretir; anahtar yalnız kullanıcının okuyabildiği `beyin-v3` klasöründeki dosyada durur; anahtarsız
 bağlantı ilk satırda kapatılır (aynı makinedeki başka bir sürecin ses sokmasına karşı).
@@ -49,7 +50,9 @@ bağlantı ilk satırda kapatılır (aynı makinedeki başka bir sürecin ses so
 ## Hata ve uç durumlar
 - Uygulama izin vermedi ya da Windows mikrofon erişimini kapattı → yardımcı `sounddevice`'a döner, durum satırı bugünkü
   "mikrofon" sorununu söyler ("Windows Cortex'in mikrofonu kullanmasına izin vermiyor: Ayarlar › Gizlilik › Mikrofon.").
-- Akış koptu (uygulama çöktü, yeniden yüklendi) → yardımcı 2 sn içinde `sounddevice`'a döner; uygulama gelince geri geçer.
+- Ses istendi ama 3 sn'de gelmedi, ya da uygulama `hata` dedi → yardımcı 60 sn kendi mikrofonunu kullanır (`FEED_START_SN`,
+  `FEED_REST_SN`); uyandırma dinleyicisinin bugünkü takılma algısı (5 sn sessizlik) onu yeniden açtırır.
+- Bağlantı koptu (uygulama çıktı, çöktü) → sonraki kayıt `sounddevice` ile; uygulama 3 sn'de bir yeniden bağlanmayı dener.
 - Seçili mikrofon: ayardaki ad Chromium'un aygıt adlarıyla eşleştirilir; bulunamazsa varsayılan, durum satırında yazar.
 - Chromium'un yankı/gürültü/kazanç işlemleri kapalı (`echoCancellation`, `noiseSuppression`, `autoGainControl` false):
   Whisper bugünkü ham sesi duymaya alışkın.
@@ -69,4 +72,5 @@ bağlantı ilk satırda kapatılır (aynı makinedeki başka bir sürecin ses so
 ## Açık sorular
 | Soru | Kim karar verir | Durum |
 |---|---|---|
-| Önerilen yol mu, sesin tamamı uygulamaya mı? | Kullanıcı | açık |
+| Önerilen yol mu, sesin tamamı uygulamaya mı? | Kullanıcı | karar: önerilen yol (2026-11-03) |
+| Windows'ta göstergede gerçekten "Cortex" görünüyor mu, dikte kalitesi aynı mı? | Kullanıcıyla elle deneme | açık |

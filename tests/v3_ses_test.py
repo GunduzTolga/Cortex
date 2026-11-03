@@ -2964,6 +2964,173 @@ class RecorderTest(unittest.TestCase):
         self.assertEqual([int(round(value * 1e4)) for value in heard], list(range(1, 131)), 'each moment once, in order')
 
 
+class AppFeedTest(unittest.TestCase):
+    """The desktop app's microphone (Windows names Cortex, not Python): its sound over 127.0.0.1, only with the key,
+    and the helper's own microphone again whenever the app cannot record."""
+
+    def setUp(self):
+        self.np = require_numpy(self)
+        self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-akis-')
+        self.addCleanup(self.tmp.cleanup)
+        spec = importlib.util.spec_from_file_location('isci_akis_testi', ses.write_worker(Path(self.tmp.name) / 'state'))
+        self.helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.helper)
+        self.helper.ses = ses
+        self.clock = types.SimpleNamespace(t=1000.0)
+        self.helper.now = lambda: self.clock.t
+        self.helper.log = lambda _text: None
+        self.streams = []
+        test = self
+
+        class Stream:
+            def __init__(self, callback=None, **_settings):
+                self.callback, self.open = callback, False
+                test.streams.append(self)
+
+            def start(self):
+                self.open = True
+
+            def stop(self):
+                self.open = False
+
+            def close(self):
+                pass
+
+        fake = types.SimpleNamespace(InputStream=Stream, query_devices=lambda *_a: [], default=types.SimpleNamespace(device=[0]))
+        patcher = mock.patch.dict(sys.modules, {'sounddevice': fake})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.feed = self.helper.AppFeed(key='dogru-anahtar')
+        self.addCleanup(self.feed.close)
+        self.helper.FEED = self.feed
+
+    def wait_for(self, condition, what):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if condition():
+                return
+            time.sleep(0.01)
+        self.fail('never: ' + what)
+
+    def connect(self, key='dogru-anahtar', hz=16000):
+        import socket
+        app = socket.create_connection(('127.0.0.1', self.feed.port), timeout=5)
+        self.addCleanup(app.close)
+        app.sendall((json.dumps({'anahtar': key, 'hz': hz}) + '\n').encode('utf-8'))
+        reader = app.makefile('rb')
+        self.addCleanup(reader.close)
+        return app, reader
+
+    @staticmethod
+    def said(reader):
+        return json.loads(reader.readline().decode('utf-8'))
+
+    def send(self, app, kind, body):
+        import struct
+        app.sendall(kind + struct.pack('<I', len(body)) + body)
+
+    def sound(self, app, seconds, loud):
+        for _ in range(int(round(seconds * 100))):
+            block = self.np.full(160, 0.1 if loud else 0.0005, dtype='<f4')
+            if loud:
+                block[::2] *= -1
+            self.send(app, b'a', block.tobytes())
+
+    def test_without_the_key_nothing_connects_and_the_helper_records_itself(self):
+        for key, hz in (('yanlis', 16000), ('dogru-anahtar', 48000)):
+            app, reader = self.connect(key, hz)
+            self.assertEqual(reader.readline(), b'', 'the connection is closed at its first line')
+        self.assertFalse(self.feed.usable())
+        recorder = self.helper.Recorder(dict(ses.DEFAULTS))
+        recorder.start()
+        self.assertEqual(len(self.streams), 1, 'sounddevice opened, as before')
+
+    def test_a_recording_takes_the_apps_sound_and_asks_for_it_only_while_it_records(self):
+        app, reader = self.connect()
+        self.assertEqual(self.said(reader), {'tamam': True})
+        self.wait_for(self.feed.usable, 'the app connected')
+        self.send(app, b'j', json.dumps({'aygit': 'Mikrofon (USB Kulaklık)'}).encode('utf-8'))
+        self.wait_for(lambda: self.feed.device, 'the device said')
+        config = dict(ses.DEFAULTS, mikrofon='USB')
+        recorder = self.helper.Recorder(config)
+        recorder.start()
+        self.assertEqual(self.streams, [], 'sounddevice not opened: Windows names Cortex on the microphone')
+        self.assertEqual(self.said(reader), {'ac': True, 'mikrofon': 'USB'})
+        self.sound(app, 0.5, False)
+        self.sound(app, 1.0, True)
+        self.wait_for(lambda: recorder.spoke and recorder.count >= 1.5 * 16000, 'the sound recorded')
+        self.assertIn('USB', self.helper._device_name(config))
+        recorder.stop()
+        self.assertEqual(self.said(reader), {'ac': False})
+        self.assertTrue(self.feed.usable(), 'sound came: the app stays the microphone')
+
+    def test_two_streams_at_once_hear_the_same_sound_and_the_microphone_closes_after_the_last(self):
+        app, reader = self.connect()
+        self.said(reader)
+        self.wait_for(self.feed.usable, 'the app connected')
+        wake, dictation = self.helper.Recorder(dict(ses.DEFAULTS)), self.helper.Recorder(dict(ses.DEFAULTS))
+        heard = []
+        wake.start(on_chunk=heard.append)
+        self.assertEqual(self.said(reader)['ac'], True)
+        dictation.start(held=True)
+        self.sound(app, 0.3, True)
+        self.wait_for(lambda: len(heard) == 30 and len(dictation.held) == 30, 'both streams heard each block')
+        wake.stop()
+        dictation.go_on()
+        dictation.stop()
+        self.assertEqual(self.said(reader), {'ac': False}, 'asked to close once, after the last stream')
+
+    def test_an_app_that_sends_nothing_rests_and_the_next_recording_opens_the_microphone_itself(self):
+        app, reader = self.connect()
+        self.said(reader)
+        self.wait_for(self.feed.usable, 'the app connected')
+        recorder = self.helper.Recorder(dict(ses.DEFAULTS))
+        recorder.start()
+        self.clock.t += self.helper.FEED_START_SN + 2  # the wake listener's stall: nothing came
+        recorder.stop()
+        self.assertFalse(self.feed.usable())
+        recorder.start()
+        self.assertEqual(len(self.streams), 1, 'sounddevice opened instead')
+        recorder.stop()
+        self.clock.t += self.helper.FEED_REST_SN
+        self.assertTrue(self.feed.usable(), 'tried again after the rest')
+
+    def test_an_app_that_cannot_record_says_so_and_the_helper_records_itself(self):
+        app, reader = self.connect()
+        self.said(reader)
+        self.wait_for(self.feed.usable, 'the app connected')
+        self.send(app, b'j', json.dumps({'hata': 'NotAllowedError'}).encode('utf-8'))
+        self.wait_for(lambda: not self.feed.usable(), 'the app rests')
+
+    def test_an_app_that_goes_away_leaves_the_microphone_to_the_helper_and_a_newer_one_takes_its_place(self):
+        import socket
+        first, first_reader = self.connect()
+        self.said(first_reader)
+        self.wait_for(self.feed.usable, 'the app connected')
+        recorder = self.helper.Recorder(dict(ses.DEFAULTS))
+        recorder.start(on_chunk=lambda _chunk: None)
+        self.said(first_reader)
+        second, second_reader = self.connect()
+        self.assertEqual(self.said(second_reader), {'tamam': True})
+        self.assertEqual(self.said(second_reader), {'ac': True, 'mikrofon': None}, 'the newer app is asked at once')
+        self.assertEqual(first_reader.readline(), b'', 'the older one is let go')
+        second.shutdown(socket.SHUT_RDWR)  # the app quit
+        self.wait_for(lambda: not self.feed.usable(), 'gone')
+
+    def test_its_port_and_key_are_written_for_the_app_and_removed_when_the_helper_ends(self):
+        self.feed.close()
+        self.helper.FEED = None
+        path = Path(self.tmp.name) / 'akis.json'
+        feed = self.helper.open_feed(path)
+        self.assertIs(self.helper.FEED, feed)
+        word = json.loads(path.read_text(encoding='utf-8'))
+        self.assertEqual((word['port'], word['anahtar'], word['pid']), (feed.port, feed.key, os.getpid()))
+        self.assertGreaterEqual(len(feed.key), 32)
+        self.helper.close_feed(path)
+        self.assertFalse(path.exists())
+        self.assertIsNone(self.helper.FEED)
+
+
 class HelperModuleTest(unittest.TestCase):
     def test_the_helper_is_written_into_the_voice_folder_and_loads_its_packages_only_when_it_runs(self):
         with tempfile.TemporaryDirectory(prefix='v3-ses-kaynak-') as tmp:
