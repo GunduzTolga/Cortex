@@ -2,13 +2,15 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { type SyncState, type SyncStatus, remoteLabel, secretsAdded } from '../../shared/vaultSync';
+import { type SyncState, type SyncStatus, remoteLabel } from '../../shared/vaultSync';
 import { onPathFile } from './clis';
 import { readSettings, updateSettings } from './settings';
+import { installedVersion, runPython } from './setup';
 
 /**
- * The vault kept in step with the git remote its branch follows, by the rules a server's own sync script keeps
- * (shared/vaultSync.ts): everything added, the new lines scanned for a secret, commit, pull with rebase, push.
+ * The vault kept in step with the git remote its branch follows. The rules are the engine's (`beyin.py esitle`,
+ * template/.claude/scripts/beyin_v3_esitle.py, 3 November): everything added, the new lines scanned for a secret,
+ * commit, pull with rebase, push; this file keeps only when it runs, what the window is told, and the switch.
  * When: the app's start and a vault opened, every few minutes, a little after a file in the vault changes (a note
  * saved here, or written by an agent), and once more as the app quits. One at a time.
  *
@@ -22,8 +24,8 @@ const EVERY_MS = 5 * 60_000;
 const AFTER_CHANGE_MS = 30_000;
 const QUIT_WAIT_MS = 12_000;
 const GIT_TIMEOUT_MS = 120_000;
-/** A remote that could not be reached (no network, the host down, the credentials refused) rather than a conflict. */
-const UNREACHABLE = /could not resolve host|unable to access|failed to connect|connection (?:timed out|refused|reset)|network is unreachable|could not read from remote repository|authentication failed|timed out/i;
+/** A whole sync by the engine: its git steps have two minutes each, and a pull and a push may both be slow. */
+const ENGINE_TIMEOUT_MS = 6 * 60_000;
 
 interface GitResult {
   code: number;
@@ -84,6 +86,18 @@ export function setVaultSyncGit(stand: Git | null): void {
   git = stand ?? realGit;
 }
 
+/**
+ * The engine's sync command for a vault: its own `beyin.py esitle --json`. The tests, whose folders have no engine
+ * installed, run the source module with the vault said (`--vault`).
+ */
+let engineCommand: (vault: string) => string[] | null = (vault) =>
+  installedVersion(vault) ? [path.join(vault, 'beyin.py'), 'esitle', '--json'] : null;
+export function setVaultSyncEngine(module: string | null): void {
+  engineCommand = module
+    ? (vault) => [module, '--vault', vault, '--state', path.join(os.tmpdir(), 'cortex-esitle-test'), '--json']
+    : (vault) => (installedVersion(vault) ? [path.join(vault, 'beyin.py'), 'esitle', '--json'] : null);
+}
+
 let state: SyncState = 'idle';
 let detail: string[] = [];
 let lastSyncedAt: number | null = null;
@@ -106,7 +120,6 @@ export function onVaultSyncTrouble(listener: (state: SyncState, detail: string[]
   trouble = listener;
 }
 
-const lastLine = (text: string) => text.trim().split('\n').filter(Boolean).slice(-1)[0]?.slice(0, 300) ?? '';
 const sameFolder = (a: string, b: string) => {
   const key = (one: string) => {
     let full = path.resolve(one);
@@ -154,43 +167,26 @@ async function say(next: SyncState, said: string[] = []): Promise<void> {
   tell(await vaultSyncStatus());
 }
 
-const stamp = (when: Date) => {
-  const two = (n: number) => String(n).padStart(2, '0');
-  return `${two(when.getDate())}.${two(when.getMonth() + 1)}.${when.getFullYear()} ${two(when.getHours())}:${two(when.getMinutes())}`;
-};
+const SAID: Record<string, SyncState> = { synced: 'synced', nothing: 'synced', conflict: 'conflict', secret: 'secret', offline: 'offline', error: 'error', missing: 'error' };
 
 async function syncOnce(vault: string): Promise<void> {
   await say('syncing', detail);
-  const run = (args: string[]) => git(args, vault);
-  // A rebase left standing (a conflict being solved by hand) is the person's: nothing is done over it.
-  if (fs.existsSync(path.join(vault, '.git', 'rebase-merge')) || fs.existsSync(path.join(vault, '.git', 'rebase-apply'))) {
-    return say('conflict', ['git: rebase']);
+  const command = engineCommand(vault);
+  if (!command) return say('error', [readSettings().language === 'en' ? 'Set Cortex up in the vault first (Settings → Cortex).' : "Önce Cortex'i kasaya kur (Ayarlar → Cortex)."]);
+  let result: Record<string, unknown>;
+  try {
+    result = await runPython(command, { cwd: vault, timeout: ENGINE_TIMEOUT_MS });
+  } catch (err) {
+    // An engine older than the command says it does not know it: the vault's engine wants the app's update.
+    return say('error', [String((err as Error)?.message ?? err).slice(0, 300)]);
   }
-  let step = await run(['add', '-A']);
-  if (step.code) return say('error', [lastLine(step.err)]);
-  // Only what is new is read, as the server's scan reads it; found, nothing is committed, the files stay as they are.
-  const added = await run(['diff', '--cached', '-U0', '--no-color', '--no-ext-diff']);
-  const secrets = secretsAdded(added.out);
-  if (secrets.length) {
-    await run(['reset', '-q']);
-    return say('secret', secrets.slice(0, 10).map((one) => `${one.file}:${one.line} ${one.kind}`));
-  }
-  const staged = await run(['diff', '--cached', '--quiet']);
-  if (staged.code === 1) {
-    step = await run(['commit', '-q', '--no-verify', '-m', `senkron: ${os.hostname()} ${stamp(new Date())}`]);
-    if (step.code) return say('error', [lastLine(step.err || step.out)]);
-  }
-  step = await run(['pull', '-q', '--rebase']);
-  if (step.code) {
-    const conflicted = (await run(['diff', '--name-only', '--diff-filter=U'])).out.split('\n').filter(Boolean);
-    await run(['rebase', '--abort']);
-    if (!conflicted.length && UNREACHABLE.test(step.err)) return say('offline', [lastLine(step.err)]);
-    return say('conflict', conflicted.length ? conflicted.slice(0, 10) : [lastLine(step.err)]);
-  }
-  step = await run(['push', '-q']);
-  if (step.code) return say(UNREACHABLE.test(step.err) ? 'offline' : 'error', [lastLine(step.err)]);
-  lastSyncedAt = Date.now();
-  return say('synced');
+  const state = String(result.state ?? 'error');
+  const said = Array.isArray(result.detail) ? result.detail.map(String).slice(0, 10) : [];
+  // Another sync of the same vault was running (the server's timer, a second window): this round is skipped.
+  if (state === 'busy') return say(lastSyncedAt ? 'synced' : 'idle', detail);
+  if (state === 'missing') return say('error', [String(result.missing ?? 'missing')]);
+  if (state === 'synced' || state === 'nothing') lastSyncedAt = Date.now();
+  return say(SAID[state] ?? 'error', said);
 }
 
 /** One sync, after the one going on if one is; asked while it runs, it runs once more after. */
