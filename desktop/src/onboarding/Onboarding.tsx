@@ -165,9 +165,11 @@ export function Onboarding() {
   const order = useMemo<StepId[]>(() => {
     const list: StepId[] = ['name', 'vault'];
     if (neededPython || (status && !status.python)) list.push('python');
-    list.push('engine', 'tools');
+    // Voice before the tools (3 November, from Hex's setup order): its model downloads in the background once begun, and
+    // signing in to the tools is the longest step, so the download is done by the end instead of starting there.
+    list.push('engine');
     if (status?.voiceSupported) list.push('voice');
-    list.push('done');
+    list.push('tools', 'done');
     return list;
   }, [neededPython, status]);
 
