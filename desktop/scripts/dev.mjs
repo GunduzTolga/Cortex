@@ -50,7 +50,7 @@ const restartPlugin = {
 };
 
 const mainCtx = await context({ ...mainOptions, plugins: [restartPlugin], logLevel: 'warning' });
-const preloadCtx = await context({ ...preloadOptions, plugins: [restartPlugin], logLevel: 'warning' });
+const preloadCtx = await context({ ...preloadOptions, plugins: [...preloadOptions.plugins, restartPlugin], logLevel: 'warning' });
 await Promise.all([mainCtx.watch(), preloadCtx.watch()]);
 
 startElectron(url);
