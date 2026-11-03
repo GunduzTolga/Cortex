@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.52" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.52-E8B23A">
+  <img alt="Sürüm 1.0.53" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.53-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -186,7 +186,8 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
-| [1.0.52](docs/v3/releases/1.0.52.md) | Kasa eşitlemesi motorda: `beyin.py esitle` gönderme, çekme, sır taraması ve çakışmada geri çekilme kurallarını tek yerde topluyor; masaüstü ve sunucu aynı kuralları kullanacak. |
+| [1.0.53](docs/v3/releases/1.0.53.md) | Kasa eşitlemesi motorda: `beyin.py esitle` gönderme, çekme, sır taraması ve çakışmada geri çekilme kurallarını tek yerde topluyor; masaüstü ve sunucu aynı kuralları kullanacak. |
+| [1.0.52](docs/v3/releases/1.0.52.md) | Mikrofonu Cortex tutuyor: Windows'un mikrofon göstergesinde "Python" yerine Cortex görünüyor; uyandırma sözü ve yazıya çevirme değişmedi. |
 | [1.0.51](docs/v3/releases/1.0.51.md) | Giriş yalnız tarayıcıda: Claude Code ve Codex'in girişi terminal penceresi göstermeden açılıyor, giriş bitince Cortex onu kendisi kapatıyor. Giriş yap'a yeniden basmak tarayıcıyı yeniden açıyor. |
 | [1.0.50](docs/v3/releases/1.0.50.md) | OpenCode'a yalnız OpenCode Go API anahtarıyla bağlanılıyor; ilk açılışta anahtar soruluyor. Her araçta tek "Sil" aracı sıfırlıyor, "Ekle" yetkilendirmeyi yeniden açıyor ve giriş bitince pencere kendiliğinden "Giriş yapıldı" oluyor. |
 | [1.0.49](docs/v3/releases/1.0.49.md) | OpenCode'un "Giriş yap" penceresi açık kalıyor: gerçek bir terminalde açılıyor, menüsü 0,1 saniyede kapanmıyor. opencode.ai'nin tanımadığı anahtar "bir şeyler ters gitti" yerine anahtarın reddi olarak, ne yapılacağıyla söyleniyor. |

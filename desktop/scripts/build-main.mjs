@@ -1,4 +1,5 @@
 import { build } from 'esbuild';
+import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 /**
@@ -21,9 +22,24 @@ export const mainOptions = {
   logLevel: 'info',
 };
 
+/**
+ * The hidden recording window (electron/services/micWindow.ts) is built beside the app's: its preload, and its page,
+ * which has no script and is copied as it is.
+ */
+const micPage = {
+  name: 'mic-page',
+  setup(build) {
+    build.onEnd(() => {
+      fs.mkdirSync('dist-electron', { recursive: true });
+      fs.copyFileSync('mic/mic.html', 'dist-electron/mic.html');
+    });
+  },
+};
+
 export const preloadOptions = {
   ...mainOptions,
-  entryPoints: { preload: 'electron/preload.ts' },
+  entryPoints: { preload: 'electron/preload.ts', 'mic-preload': 'mic/preload.ts' },
+  plugins: [micPage],
 };
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
