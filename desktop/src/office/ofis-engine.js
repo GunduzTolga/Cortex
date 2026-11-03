@@ -20,8 +20,8 @@ export function loopFrame(t, fps, frames, offset = 0) {
   return Number.isFinite(n) ? ((n % frames) + frames) % frames : 0;
 }
 
-const TOOL_NAME = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini', qwen: 'Qwen' };
-export const TOOL_STATUS = { claude: 'ok', codex: 'ok', opencode: 'wait', gemini: 'ok', qwen: 'off' };
+const TOOL_NAME = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini', sunucu: 'Sunucu' };
+export const TOOL_STATUS = { claude: 'ok', codex: 'ok', opencode: 'wait', gemini: 'ok', sunucu: 'off' };
 export const TOOL_LABEL = { ok: 'giriş yapıldı', wait: 'giriş bekliyor', off: 'kurulu değil' };
 
 /** "Tolga Bey" → "Tolga Bey'in", "Ayşe" → "Ayşe'nin", "Pyn" → "Pyn'in"; English: "Tolga's". */

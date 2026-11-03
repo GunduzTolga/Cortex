@@ -54,7 +54,7 @@ test('the cast: Pyn, the manager, Tolga, twelve agents and Tekir, each at home, 
   assert.equal(art.CHARACTERS.tolga.role, 'Yazılımcı', 'the developer who wrote Cortex, at his own desk');
   assert.deepEqual(
     cast.filter(([, one]) => one.tool).map(([id, one]) => `${id}:${one.tool}`).sort(),
-    ['asya:qwen', 'baran:codex', 'defne:claude', 'ilgin:opencode', 'toprak:gemini'],
+    ['baran:codex', 'defne:claude', 'ilgin:opencode', 'toprak:gemini'],
   );
   const seats = new Set(art.MAP.seats.map((one) => one.id));
   for (const [id, one] of cast) if (one.home) assert.ok(seats.has(one.home), `${id} has a seat`);
@@ -91,7 +91,8 @@ test('every character is drawn in its own cell, in whole pixels, with rectangles
 });
 
 test('the server racks’ lights are their own layer, coloured from the tools’ real state', () => {
-  for (const tool of ['claude', 'codex', 'opencode', 'gemini', 'qwen']) {
+  // The fifth rack is the link to Pyn on a server (3 November, replacing Qwen's), lit by the same LED states.
+  for (const tool of ['claude', 'codex', 'opencode', 'gemini', 'sunucu']) {
     const led = art.SPRITES[`rack_led_${tool}`];
     assert.ok(led, tool);
     const { ctx } = recorder();

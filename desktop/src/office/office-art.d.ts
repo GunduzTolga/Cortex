@@ -5,7 +5,7 @@
  * delivered so a new delivery can replace it whole.
  */
 
-export type ToolId = 'claude' | 'codex' | 'opencode' | 'gemini' | 'qwen';
+export type ToolId = 'claude' | 'codex' | 'opencode' | 'gemini' | 'sunucu';
 
 export interface Sprite {
   w: number;

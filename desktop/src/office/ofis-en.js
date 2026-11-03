@@ -216,7 +216,7 @@ export const EN = {
   'ARŞİV': 'ARCHIVE',
   'MÜDÜR ODASI': 'MANAGER\'S OFFICE',
   'YAZI İŞLERİ': 'NEWSROOM',
-  'MUTFAK': 'KITCHEN',
+  'ÇAY OCAĞI': 'TEA ROOM',
   'TOPLANTI': 'MEETING ROOM',
   'SUNUCU ODASI': 'SERVER ROOM',
   'DİNLENME': 'LOUNGE',
