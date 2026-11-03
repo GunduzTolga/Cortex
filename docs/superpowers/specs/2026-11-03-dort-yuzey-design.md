@@ -104,7 +104,10 @@ Bugün masaüstü uygulaması eşitlenmeyen ayrı bir kasada; asıl kasanın klo
 - **Beceriler kasanın içinde** (`plugins/` + `.claude-plugin/marketplace.json`). Eşitleme onları da her cihaza taşır;
   ayrı bir dağıtım yok.
 - Uygulama kasayı Claude Code'a beceri kaynağı olarak kendisi tanıtır (bugün terminal betiğinin yaptığı iş), otomatik
-  güncelleme açık.
+  güncelleme açık. Yolu Claude Code'un kendi ayarıdır, betik gerekmez: kasanın `.claude/settings.json`'unda
+  `extraKnownMarketplaces` (kaynak türü `directory`, kasa klasörü) ve `enabledPlugins`. Kasada açılan Claude Code
+  becerileri kurmayı kendisi önerir; kasa dışındaki projeler için uygulama aynı iki girdiyi kullanıcı ayarına yazar.
+  `directory` kaynağında yeni sürümün eşitlemeyle gelip gelmediği fazın tasarımında denenir.
 - Sohbette **"Öğrendiklerini kaydet"** düğmesi: genel contribute becerisini o sohbette çalıştırır.
 - **Onay kartı:** önerilen beceri değişikliği, Onayla / Reddet. Telefondaki öğrenme onayının masaüstü karşılığı.
 - Gece hasadı: sunucu varsa sunucuda (bugünkü gibi); yoksa isteğe bağlı, uygulama açıkken günde bir (model maliyeti var).
