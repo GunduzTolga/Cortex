@@ -153,6 +153,15 @@ class EsitleTest(unittest.TestCase):
             code = esitle.main(['--json'], vault=self.a, state=self.state)
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(buffer.getvalue())['state'], 'synced')
+        # A state that is no success is said in the JSON, and the line still exits 0 (the app's runner needs that);
+        # said as a sentence, it exits 1.
+        (self.a / 's.md').write_text(TOKEN_LINE + '\n', encoding='utf-8')
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            self.assertEqual(esitle.main(['--json'], vault=self.a, state=self.state), 0)
+        self.assertEqual(json.loads(buffer.getvalue())['state'], 'secret')
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(esitle.main([], vault=self.a, state=self.state), 1)
 
 
 if __name__ == '__main__':

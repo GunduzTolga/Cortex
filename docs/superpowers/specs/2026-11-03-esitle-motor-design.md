@@ -46,7 +46,7 @@ eşitleme ikinci kez yazılmaz.
 | `remote` | `github.com/sahip/repo` (ad/parola/token asla) · null |
 | `detail` | çakışmada dosyalar, sırda `dosya:satır tür`, hatada git'in son satırı (≤10 öğe, ≤300 karakter) |
 | `pulled`, `pushed` | gelen ve giden commit sayısı (pencerenin "Gelenler: 5 not" satırı için) |
-Çıkış kodu: `synced`/`nothing`/`busy` → 0; `missing` → 3; diğerleri 1 (2 kullanılmaz: kanca çağıranlar onu "engelle" okur).
+Çıkış kodu: `--json` ile satır yazıldıysa her zaman 0, durum JSON'da (masaüstünün `runPython`'u sonucu yalnız 0 çıkışta alır). `--json` olmadan: `synced`/`nothing`/`busy` → 0; `missing` → 3; diğerleri 1. 2 hiç kullanılmaz (kanca çağıranlar onu "engelle" okur).
 
 ## Hata ve uç durumlar
 - Yarım rebase duruyor (kişi elle çözüyor) → hiçbir şey yapma, `conflict` ["git: rebase"]. Görünen: "Eşitleme durdu: …".

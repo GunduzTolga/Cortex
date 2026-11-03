@@ -8,7 +8,9 @@ here and go the next time. Git is the person's own, found on the PATH and never 
 never to prompt, runs no hook of the repository's and no file-system monitor.
 
 Standard library only. The result is one line: JSON with --json (the desktop app reads it), else a sentence.
-Exit code: 0 synced / nothing to do / busy, 3 missing (git, a repository, a remote branch), 1 otherwise; never 2.
+Exit code: with --json always 0 once the line is written (the state is in it: the desktop app's runner takes a JSON
+result only from an exit 0); without it 0 synced / nothing to do / busy, 3 missing (git, a repository, a remote
+branch), 1 otherwise. Never 2.
 """
 from __future__ import annotations
 
@@ -316,8 +318,8 @@ def main(argv=None, vault=None, state=None) -> int:
     result = sync(Path(vault), Path(state) if state else None)
     if args.json:
         print(json.dumps(result, ensure_ascii=False), flush=True)
-    else:
-        print(SENTENCE[result['state']](result), flush=True)
+        return 0
+    print(SENTENCE[result['state']](result), flush=True)
     return 0 if result['state'] in ('synced', 'nothing', 'busy') else 3 if result['state'] == 'missing' else 1
 
 
