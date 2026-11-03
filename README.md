@@ -239,7 +239,7 @@ The documentation is in Turkish; the desktop app also has an English interface. 
 
 Kod açık kaynaktır: [MIT lisansı](LICENSE). Kullanabilir, değiştirebilir ve dağıtabilirsin. **Cortex** ve **Pyn** adları, Pyn'in mührü ve logo dosyaları lisansın dışındadır: değiştirilmiş bir sürümü kendi adınla ve kendi görsellerinle yayınla. Ayrıntılar: [MARKA.md](MARKA.md).
 
-Hafıza motoru, Avenox'un MIT lisanslı [AvenoxBeyin](https://github.com/avenoxai/avenoxbeyin) projesinden yola çıkılarak geliştirildi; özgün telif bildirimi [LICENSE](LICENSE) dosyasında. Teşekkürler.
+Hafıza motoru, Avenox'un MIT lisanslı [AvenoxBeyin](https://github.com/avenoxai/avenoxbeyin) projesinden yola çıkılarak geliştirildi. Teşekkürler.
 
 Bilgi derleme fikri için [Karpathy'nin bilgi tabanı desenine](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) teşekkürler.
 
