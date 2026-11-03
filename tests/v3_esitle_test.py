@@ -26,7 +26,8 @@ TOKEN_LINE = 'anahtar ghp_' + 'A1b2C3d4E5' * 4  # a GitHub token's shape, made u
 
 
 def git(cwd, *args):
-    return subprocess.run([GIT, *args], cwd=cwd, env=ENV, capture_output=True, text=True, check=True).stdout
+    # UTF-8 açıkça: Windows'ta text=True yerel kod sayfasıyla okur ve 'tarafı' 'tarafÄ±' olur (CI, 2026-11-03).
+    return subprocess.run([GIT, *args], cwd=cwd, env=ENV, capture_output=True, encoding='utf-8', errors='replace', check=True).stdout
 
 
 @unittest.skipUnless(GIT, 'git yok')
