@@ -24,14 +24,16 @@ import { useEscapeLayer } from '../ui/useEscapeLayer';
  * panel in office.css). Click a character for its card, a room for what goes
  * on in it; the wheel zooms, a drag looks around.
  *
- * What is real already: the server room's lights are the tools' own sign-ins,
+ * What is real already: the server room's lights are the tools' own sign-ins and the link to Pyn on a server,
  * the rooms count the vault's notes, links and receipts, the light follows
  * the clock. What the agents do is still the prototype's script.
  */
 
-const TOOLS: ToolId[] = ['claude', 'codex', 'opencode', 'gemini', 'qwen'];
-const TOOL_NAME: Record<string, string> = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini', qwen: 'Qwen', lmstudio: 'LM Studio', ollama: 'Ollama' };
+/** The racks: four tools' sign-ins and, in the fifth, this computer's link to Pyn on a server (Settings › Server). */
+const TOOLS: ToolId[] = ['claude', 'codex', 'opencode', 'gemini', 'sunucu'];
+const TOOL_NAME: Record<string, string> = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', gemini: 'Gemini', sunucu: 'Sunucu', lmstudio: 'LM Studio', ollama: 'Ollama' };
 const LED_COLOR: Record<Led, string> = { ok: '#5BD77A', wait: '#F2C14E', off: '#8A93A3' };
+const SERVER_WORD: Record<Led, Key> = { ok: 'office.server.ok', wait: 'office.server.wait', off: 'office.server.off' };
 const TALK_STATE_WORD: Record<TalkToolState, Key> = { ready: 'office.talk.ready', off: 'office.talk.off', signedOut: 'office.talk.signedOut' };
 const PREFS_KEY = 'cortex.office.v1';
 
@@ -240,14 +242,39 @@ export function OfficeView({ visible }: { visible: boolean }) {
   useEffect(() => {
     if (auth === null) void useChat.getState().loadAuth();
   }, [auth]);
+  // The server rack (3 November, replacing Qwen's): lit when this computer reaches Pyn on a server, amber when one is set
+  // up but does not answer or lacks its key, dark when none is. Asked when the office is shown, never while it is hidden.
+  const [server, setServer] = useState<Led>('off');
+  useEffect(() => {
+    if (!visible) return;
+    let live = true;
+    void (async () => {
+      try {
+        const status = await window.cortex.hermes.status();
+        if (!status.url) return live && setServer('off');
+        if (!status.key) return live && setServer('wait');
+        await window.cortex.hermes.test();
+        if (live) setServer('ok');
+      } catch {
+        if (live) setServer('wait');
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [visible]);
   const leds = useMemo(() => {
     const out = {} as Record<ToolId, Led>;
     for (const id of TOOLS) {
+      if (id === 'sunucu') {
+        out[id] = server;
+        continue;
+      }
       const tool = auth?.find((one) => one.id === id);
       out[id] = !tool ? 'wait' : !tool.installed ? 'off' : tool.signedIn ? 'ok' : 'wait';
     }
     return out;
-  }, [auth]);
+  }, [auth, server]);
   useEffect(() => engineRef.current?.setLeds(leds), [leds]);
   // Addressed as the person asked, from the first-run screen or the settings.
   const userName = useApp((s) => s.settings.userName);
@@ -322,8 +349,9 @@ export function OfficeView({ visible }: { visible: boolean }) {
   const roomStatus = (id: string, people: number): string => {
     // A big vault takes a while to read: until it is, its rooms say so, not "0 notes" (29 October).
     if (index === null && ['harita', 'arsiv', 'pyn', 'mudur'].includes(id)) return t('office.room.counting');
-    const ok = Object.values(leds).filter((one) => one === 'ok').length;
-    const wait = Object.values(leds).filter((one) => one === 'wait').length;
+    const tools = TOOLS.filter((id) => id !== 'sunucu').map((id) => leds[id]);
+    const ok = tools.filter((one) => one === 'ok').length;
+    const wait = tools.filter((one) => one === 'wait').length;
     switch (id) {
       case 'harita':
         return t('office.room.harita', { notes: stats.notes, links: stats.links });
@@ -341,7 +369,7 @@ export function OfficeView({ visible }: { visible: boolean }) {
       case 'toplanti':
         return people >= 2 ? t('office.room.toplanti', { count: people }) : t('office.room.toplanti.none');
       case 'sunucu':
-        return t('office.room.sunucu', { ok, wait });
+        return t('office.room.sunucu', { ok, wait, server: t(SERVER_WORD[leds.sunucu]) });
       case 'dinlenme':
         return t('office.room.dinlenme');
       default:

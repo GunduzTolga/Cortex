@@ -934,7 +934,8 @@ def('credenza', 48, 24, { solid: [0, 8, 48, 14] }, (b) => {
 });
 
 // ═════════════ SUNUCU ODASI ═════════════
-export const TOOL_COLORS = { claude: '#c97b5a', codex: '#9aa4b4', opencode: '#5fbfa8', gemini: '#6f8fe0', qwen: '#9b7be0' };
+// sunucu: araç değil, masaüstünün sunucudaki Pyn'e bağlantısı (Ayarlar › Sunucu); 3 Kasım'da Qwen rafının yerine geldi.
+export const TOOL_COLORS = { claude: '#c97b5a', codex: '#9aa4b4', opencode: '#5fbfa8', gemini: '#6f8fe0', sunucu: '#e3b341' };
 /** LED durum renkleri: pal.led olarak verilir. */
 export const LED = { ok: '#6fe08a', wait: '#f2c85a', off: '#39353f' };
 for (const [tool, col] of Object.entries(TOOL_COLORS)) {
@@ -1125,7 +1126,7 @@ export const CHARACTERS = {
   toprak: { name: 'Toprak', role: 'Araştırmacı', roleEn: 'Researcher', tool: 'gemini', color: '#6FA8DC', home: 'toprak',
     bio: 'Meraklıdır, aynı anda kırk sekme açar. Bir cevabı kesinleştirmeden önce "bir kaynağa daha bakayım" der.',
     look: { skin: 'sk5', hair: 'toprak', hc: [K[0], W[0], W[1]], top: { kind: 'vest', c: [B[3], B[4], K[7]], vest: [B[0], B[1], B[2]] }, bottom: { kind: 'pants', c: [W[4], W[5], W[6]] }, shoes: { kind: 'shoe', c: [W[0], W[1], W[2]] }, hold: 'book' } },
-  asya: { name: 'Asya', role: 'Çevirmen', roleEn: 'Translator', tool: 'qwen', color: '#A98BE0', home: 'asya',
+  asya: { name: 'Asya', role: 'Çevirmen', roleEn: 'Translator', tool: null, color: '#A98BE0', home: 'asya',
     bio: 'Cümlenin ortasında dil değiştirir. Atasözlerini harfi harfine çevirir, sonra herkesin yüzüne bakıp bekler.',
     look: { skin: 'sk1', hair: 'asya', hc: [K[0], K[1], B[1]], acc: [P[3], P[1], P[3]], top: { kind: 'blazer', c: [P[1], P[2], P[3]], inner: [K[6], K[7], K[7]] }, bottom: { kind: 'pants', c: [K[0], K[1], K[2]] }, shoes: { kind: 'shoe', c: [K[0], K[1], K[2]] }, blush: true } },
   berk: { name: 'Berk', role: 'Stajyer', roleEn: 'Intern', tool: null, color: '#D46FB0', home: 'berk',
@@ -1506,7 +1507,7 @@ const ROOM_DEFS = [
   { id: 'arsiv', tr: 'ARŞİV', en: 'ARCHIVE', x: 31, y: 4, w: 14, h: 9, floor: 'h', face: 'library', faceY: 1 },
   { id: 'mudur', tr: 'MÜDÜR ODASI', en: "MANAGER'S OFFICE", x: 46, y: 4, w: 14, h: 9, floor: 'w', face: 'plaster', faceY: 1 },
   { id: 'salon', tr: 'YAZI İŞLERİ', en: 'NEWSROOM', x: 1, y: 17, w: 59, h: 11, floor: 't', face: 'salon', faceY: 14 },
-  { id: 'mutfak', tr: 'MUTFAK', en: 'KITCHEN', x: 1, y: 32, w: 14, h: 9, floor: 'k', face: 'tile', faceY: 29 },
+  { id: 'mutfak', tr: 'ÇAY OCAĞI', en: 'TEA ROOM', x: 1, y: 32, w: 14, h: 9, floor: 'k', face: 'tile', faceY: 29 },
   { id: 'toplanti', tr: 'TOPLANTI', en: 'MEETING ROOM', x: 16, y: 32, w: 14, h: 9, floor: 'b', face: 'meeting', faceY: 29 },
   { id: 'sunucu', tr: 'SUNUCU ODASI', en: 'SERVER ROOM', x: 31, y: 32, w: 14, h: 9, floor: 'p', face: 'server', faceY: 29 },
   { id: 'dinlenme', tr: 'DİNLENME', en: 'LOUNGE', x: 46, y: 32, w: 14, h: 9, floor: 's', face: 'lounge', faceY: 29 },
@@ -1630,7 +1631,7 @@ put('chair_navy_side', 416, 552, { z: -14, flip: true }); seat('meet_8', 424, 57
 put('plant_tall', 262, 518); put('plant_tall', 458, 518); put('plant_bush', 458, 620); put('credenza', 392, 500); put('trash_bin', 436, 632); put('plant_small', 262, 628);
 
 // ── SUNUCU ODASI
-[['claude', 498], ['codex', 524], ['opencode', 550], ['gemini', 626], ['qwen', 654]].forEach(([t, x]) => { put(`rack_${t}`, x, 476, { id: `rack_${t}`, tool: t }); put(`rack_led_${t}`, x, 476, { id: `rack_led_${t}`, z: 1, tool: t }); });
+[['claude', 498], ['codex', 524], ['opencode', 550], ['gemini', 626], ['sunucu', 654]].forEach(([t, x]) => { put(`rack_${t}`, x, 476, { id: `rack_${t}`, tool: t }); put(`rack_led_${t}`, x, 476, { id: `rack_led_${t}`, z: 1, tool: t }); });
 put('warning_sign', 578, 480); put('cooling_unit', 684, 478);
 put('cable_tray', 500, 530); put('cable_tray', 548, 530); put('cable_tray', 628, 530);
 deskSet('melis', 'desk_terminal', 'chair_black_up', 656, 38, 'up');
@@ -1654,7 +1655,7 @@ spot('printer', 49, 19, 'up', 'salon'); spot('cooler_salon', 56, 19, 'up', 'salo
 spot('talk_a', 23, 24, 'side', 'salon'); spot('talk_b', 25, 24, 'left', 'salon'); spot('standing', 35, 23, 'up', 'salon');
 spot('tea', 5, 33, 'up', 'mutfak'); spot('fridge', 9, 33, 'up', 'mutfak'); spot('vending', 11, 33, 'up', 'mutfak'); spot('cooler_kitchen', 13, 33, 'up', 'mutfak');
 spot('meeting_screen', 19, 33, 'up', 'toplanti');
-spot('rack_claude', 31, 33, 'up', 'sunucu'); spot('rack_codex', 33, 33, 'up', 'sunucu'); spot('rack_opencode', 35, 33, 'up', 'sunucu'); spot('rack_gemini', 39, 33, 'up', 'sunucu'); spot('rack_qwen', 41, 33, 'up', 'sunucu');
+spot('rack_claude', 31, 33, 'up', 'sunucu'); spot('rack_codex', 33, 33, 'up', 'sunucu'); spot('rack_opencode', 35, 33, 'up', 'sunucu'); spot('rack_gemini', 39, 33, 'up', 'sunucu'); spot('rack_sunucu', 41, 33, 'up', 'sunucu');
 spot('record_player', 55, 33, 'up', 'dinlenme'); spot('catbed', 56, 38, 'down', 'dinlenme');
 
 const ROOM_STYLE = {}; for (const r of ROOM_DEFS) ROOM_STYLE[r.id] = r.face;
