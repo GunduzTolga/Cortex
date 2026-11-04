@@ -12,7 +12,7 @@ deposuysa ve bir uzak depo izliyorsa açılabiliyor (Ayarlar › Sunucu: "Bu kas
   kilit). Masaüstü yalnız zamanlar ve gösterir; geliştiricinin sunucusu da aynı komutu çağırıyor (2026-11-04).
 
 ## Kararlar
-Kullanıcıyla alınacak (2026-11-04 kartı). Önerilenler:
+Kullanıcıyla alındı (2026-11-04, dördü de önerilen seçenek):
 - **İzin:** GitHub App (OAuth App değil). Yalnız uygulamanın açtığı ya da seçilen repoya erişir: Contents okuma/yazma,
   Metadata okuma, Repository creation. Kullanıcı jetonu 8 saatte dolar, yenileme jetonuyla uygulama kendisi yeniler.
   OAuth App'in `repo` izni kullanıcının **bütün** özel repolarına yazma verirdi.
@@ -90,8 +90,8 @@ Account › (yok); "Repository creation" (varsa) açık; "Any account" kurulabil
 ## Açık sorular
 | Soru | Kim karar verir | Durum |
 |---|---|---|
-| GitHub App mı OAuth App mı | Geliştirici | Kartta (önerilen GitHub App) |
+| GitHub App mı OAuth App mı | Geliştirici | GitHub App (2026-11-04) |
 | Uygulamanın kullanıcı jetonuyla açtığı repoya kurulumun erişimi kendiliğinden gelir mi | Ölçüm (aşama 1) | GitHub belgesi "uygulama açtığı repolara erişir" diyor; kullanıcı jetonuyla denenmedi |
-| İlk kurulumda "Yedekle" adımı olsun mu | Geliştirici | Kartta |
-| Git yoksa MinGit indirilsin mi | Geliştirici | Kartta |
-| Aynı adlı farklı notta hangisi ad değiştirir | Geliştirici | Kartta (önerilen: bu bilgisayardaki) |
+| İlk kurulumda "Yedekle" adımı olsun mu | Geliştirici | Evet, isteğe bağlı (2026-11-04) |
+| Git yoksa MinGit indirilsin mi | Geliştirici | Evet, Windows'ta (2026-11-04) |
+| Aynı adlı farklı notta hangisi ad değiştirir | Geliştirici | Bu bilgisayardaki (2026-11-04) |
