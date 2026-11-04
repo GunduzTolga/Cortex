@@ -1224,73 +1224,81 @@ await shoot('13b-lmstudio.png');
   with its first message; a command it asks leave for is the same card. To the person it is Pyn:
   the name of the agent behind it is nowhere on screen.
 */
-console.log('\nPyn on a server');
-await page.locator('[data-app-view="pyn"]').click();
-await page.locator('[data-chat-new]').click();
-await page.locator('[data-chat-chip="cli"]').click();
-check('it is not offered in the tool chip before its address is given', (await page.locator('[data-chat-choice="hermes"]').count()) === 0);
-await page.locator('[data-chat-chip-footer]').click();
-const hermesCard = page.locator('[data-auth-tool="hermes"]');
-await hermesCard.waitFor();
-// Written as the server's page or Hermes's own path would have it: the closing `/` and `/p/…/` are taken off.
-await hermesCard.locator('[data-hermes-url]').fill(`${hermesBase}/`);
-await hermesCard.locator('[data-hermes-profile]').fill('/p/pyn/');
-await hermesCard.locator('[data-hermes-key]').fill(HERMES_KEY);
-await hermesCard.locator('[data-hermes-save]').click();
-check(
-  'its address, profile and key are saved; the key is not shown again, nor kept as written',
-  (await shownSoon(hermesCard.locator('[data-hermes-test]'))) &&
-    (await hermesCard.locator('[data-hermes-key]').inputValue()) === '' &&
-    (await hermesCard.locator('[data-hermes-url]').inputValue()) === hermesBase &&
-    (await hermesCard.locator('[data-hermes-profile]').inputValue()) === 'pyn' &&
-    !(await page.evaluate(() => document.body.innerHTML)).includes(HERMES_KEY) &&
-    !fs.readFileSync(path.join(userData, 'keys.json'), 'utf8').includes(HERMES_KEY),
-);
-await hermesCard.locator('[data-hermes-test]').click();
-check('the connection is tried as a chat asks it: the sessions it lists are counted', await shownSoon(page.locator('[data-toast="success"]', { hasText: 'Pyn answered. Recent sessions: 1' })));
-await shoot('15b-pyn-server-setup.png');
-await page.keyboard.press('Escape');
-await page.locator('[data-auth-list]').waitFor({ state: 'detached' });
-await page.locator('[data-chat-chip="cli"]').click();
-await page.locator('[data-chat-choice="hermes"]').click();
-check(
-  'then it is offered as Pyn on the server, its sessions on a chip before the first message',
-  (await shownSoon(page.locator('[data-chat-chip="session"]'))) && (await page.locator('[data-chat-chip="cli"]').textContent())?.trim() === 'Pyn on the server',
-);
-await page.locator('[data-chat-chip="session"]').click();
-check('the session begun on the phone is listed by its title', await shownSoon(page.locator('[data-chat-choice="phone_1"]', { hasText: 'Telefondan' })));
-await page.locator('[data-chat-choice="phone_1"]').click();
-check(
-  'chosen, it is shown from its last messages, the person’s and Pyn’s',
-  (await shownSoon(page.locator('[data-chat-text]', { hasText: 'Yarın 10:00 diş hekimi.' }))) && (await page.locator('[data-chat-user]', { hasText: 'yarın ne var' }).count()) === 1,
-);
-await page.locator('[data-chat-input]').fill('masaüstünden devam');
-await page.keyboard.press('Enter');
-check(
-  'and the next message goes on in it, under the profile, with the key; the answer streamed in',
-  (await shownSoon(page.locator('[data-chat-text]', { hasText: 'Masaüstünden merhaba.' }))) &&
-    hermesSeen.some((one) => one.method === 'POST' && one.route === '/api/sessions/phone_1/chat/stream' && one.profile === 'pyn' && one.auth === `Bearer ${HERMES_KEY}` && one.body?.input === 'masaüstünden devam') &&
-    !hermesSeen.some((one) => one.method === 'POST' && one.route === '/api/sessions'),
-);
-await shoot('13c-pyn-server.png');
-await page.locator('[data-chat-send]').waitFor();
-await page.locator('[data-chat-new]').click();
-await page.locator('[data-chat-chip="cli"]').click();
-await page.locator('[data-chat-choice="hermes"]').click();
-await page.locator('[data-chat-input]').fill('izin iste');
-await page.keyboard.press('Enter');
-check(
-  'a new chat begins a session of its own with its first message, marked as begun here',
-  await soon(() => hermesSeen.some((one) => one.method === 'POST' && one.route === '/api/sessions' && one.body?.source === 'cortex-desktop')),
-);
-check(
-  'a command it asks leave for is the same card, with the choices it offers',
-  (await shownSoon(page.locator('[data-chat-permission]'))) && (await page.locator('[data-chat-answer-option]').count()) === 3,
-);
-await page.locator('[data-chat-answer-option="allow_once"]').click();
-check('and the answer reaches it', await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: once' })));
-check('the name of the agent behind it is nowhere on screen', !(await page.evaluate(() => document.body.innerText)).includes('Hermes'));
-await page.locator('[data-chat-send]').waitFor();
+// Pyn on a server keeps its key with the system's store (safeStorage). A machine with no unlocked keyring (a server run
+// with CORTEX_HEADLESS=1) has none: there the key cannot be kept, and the section is skipped and said so - before, the
+// run stopped at its first check and nothing after it was ever checked there. Windows CI always has the store.
+const keyStore = await app.evaluate(({ safeStorage }) => safeStorage.isEncryptionAvailable());
+if (keyStore || process.env.CORTEX_HEADLESS !== '1') {
+  console.log('\nPyn on a server');
+  await page.locator('[data-app-view="pyn"]').click();
+  await page.locator('[data-chat-new]').click();
+  await page.locator('[data-chat-chip="cli"]').click();
+  check('it is not offered in the tool chip before its address is given', (await page.locator('[data-chat-choice="hermes"]').count()) === 0);
+  await page.locator('[data-chat-chip-footer]').click();
+  const hermesCard = page.locator('[data-auth-tool="hermes"]');
+  await hermesCard.waitFor();
+  // Written as the server's page or Hermes's own path would have it: the closing `/` and `/p/…/` are taken off.
+  await hermesCard.locator('[data-hermes-url]').fill(`${hermesBase}/`);
+  await hermesCard.locator('[data-hermes-profile]').fill('/p/pyn/');
+  await hermesCard.locator('[data-hermes-key]').fill(HERMES_KEY);
+  await hermesCard.locator('[data-hermes-save]').click();
+  check(
+    'its address, profile and key are saved; the key is not shown again, nor kept as written',
+    (await shownSoon(hermesCard.locator('[data-hermes-test]'))) &&
+      (await hermesCard.locator('[data-hermes-key]').inputValue()) === '' &&
+      (await hermesCard.locator('[data-hermes-url]').inputValue()) === hermesBase &&
+      (await hermesCard.locator('[data-hermes-profile]').inputValue()) === 'pyn' &&
+      !(await page.evaluate(() => document.body.innerHTML)).includes(HERMES_KEY) &&
+      !fs.readFileSync(path.join(userData, 'keys.json'), 'utf8').includes(HERMES_KEY),
+  );
+  await hermesCard.locator('[data-hermes-test]').click();
+  check('the connection is tried as a chat asks it: the sessions it lists are counted', await shownSoon(page.locator('[data-toast="success"]', { hasText: 'Pyn answered. Recent sessions: 1' })));
+  await shoot('15b-pyn-server-setup.png');
+  await page.keyboard.press('Escape');
+  await page.locator('[data-auth-list]').waitFor({ state: 'detached' });
+  await page.locator('[data-chat-chip="cli"]').click();
+  await page.locator('[data-chat-choice="hermes"]').click();
+  check(
+    'then it is offered as Pyn on the server, its sessions on a chip before the first message',
+    (await shownSoon(page.locator('[data-chat-chip="session"]'))) && (await page.locator('[data-chat-chip="cli"]').textContent())?.trim() === 'Pyn on the server',
+  );
+  await page.locator('[data-chat-chip="session"]').click();
+  check('the session begun on the phone is listed by its title', await shownSoon(page.locator('[data-chat-choice="phone_1"]', { hasText: 'Telefondan' })));
+  await page.locator('[data-chat-choice="phone_1"]').click();
+  check(
+    'chosen, it is shown from its last messages, the person’s and Pyn’s',
+    (await shownSoon(page.locator('[data-chat-text]', { hasText: 'Yarın 10:00 diş hekimi.' }))) && (await page.locator('[data-chat-user]', { hasText: 'yarın ne var' }).count()) === 1,
+  );
+  await page.locator('[data-chat-input]').fill('masaüstünden devam');
+  await page.keyboard.press('Enter');
+  check(
+    'and the next message goes on in it, under the profile, with the key; the answer streamed in',
+    (await shownSoon(page.locator('[data-chat-text]', { hasText: 'Masaüstünden merhaba.' }))) &&
+      hermesSeen.some((one) => one.method === 'POST' && one.route === '/api/sessions/phone_1/chat/stream' && one.profile === 'pyn' && one.auth === `Bearer ${HERMES_KEY}` && one.body?.input === 'masaüstünden devam') &&
+      !hermesSeen.some((one) => one.method === 'POST' && one.route === '/api/sessions'),
+  );
+  await shoot('13c-pyn-server.png');
+  await page.locator('[data-chat-send]').waitFor();
+  await page.locator('[data-chat-new]').click();
+  await page.locator('[data-chat-chip="cli"]').click();
+  await page.locator('[data-chat-choice="hermes"]').click();
+  await page.locator('[data-chat-input]').fill('izin iste');
+  await page.keyboard.press('Enter');
+  check(
+    'a new chat begins a session of its own with its first message, marked as begun here',
+    await soon(() => hermesSeen.some((one) => one.method === 'POST' && one.route === '/api/sessions' && one.body?.source === 'cortex-desktop')),
+  );
+  check(
+    'a command it asks leave for is the same card, with the choices it offers',
+    (await shownSoon(page.locator('[data-chat-permission]'))) && (await page.locator('[data-chat-answer-option]').count()) === 3,
+  );
+  await page.locator('[data-chat-answer-option="allow_once"]').click();
+  check('and the answer reaches it', await shownSoon(page.locator('[data-chat-text]', { hasText: 'izin: once' })));
+  check('the name of the agent behind it is nowhere on screen', !(await page.evaluate(() => document.body.innerText)).includes('Hermes'));
+  await page.locator('[data-chat-send]').waitFor();
+} else {
+  console.log('\nPyn on a server\n  skip no unlocked keyring here (safeStorage): its key cannot be kept; checked on Windows CI');
+}
 await page.locator('[data-app-view="graph"]').click();
 await page.waitForTimeout(1_500);
 const graphSize = await page.locator('[data-notes-graph="vault"]').evaluate((element) => ({ nodes: Number(element.dataset.graphNodes), edges: Number(element.dataset.graphEdges) }));
