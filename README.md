@@ -186,7 +186,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
-| [1.0.54](docs/v3/releases/1.0.54.md) | İlk yedek ve ikinci bilgisayar motorda: `beyin.py esitle --baslat` kasayı boş bir depoya ilk kez gönderir, `--baglan` dolu bir depoya bağlanır; aynı adlı farklı notta ikisi de kalır, hiçbir şey silinmez. |
+| [1.0.54](docs/v3/releases/1.0.54.md) | GitHub ile bağlan: kasa birkaç tıkla GitHub'daki özel bir repoya yedeklenir, ikinci bilgisayar aynı kasaya bağlanır; aynı adlı farklı notta ikisi de kalır, hiçbir şey silinmez. Windows'ta Git yoksa Cortex kendisi getirir. |
 | [1.0.53](docs/v3/releases/1.0.53.md) | Koyu tema (Sistem / Açık / Koyu), sohbet listesinde oturumun maliyeti, sohbete resim ve dosya ekleme (Claude Code, Codex). Kasa eşitlemesi motorda (`beyin.py esitle`) ve masaüstü onu kullanıyor. Ofis'te sunucu rafı. |
 | [1.0.52](docs/v3/releases/1.0.52.md) | Mikrofonu Cortex tutuyor: Windows'un mikrofon göstergesinde "Python" yerine Cortex görünüyor; uyandırma sözü ve yazıya çevirme değişmedi. Ayrıca yayımlanmadı, 1.0.53 ile geldi. |
 | [1.0.51](docs/v3/releases/1.0.51.md) | Giriş yalnız tarayıcıda: Claude Code ve Codex'in girişi terminal penceresi göstermeden açılıyor, giriş bitince Cortex onu kendisi kapatıyor. Giriş yap'a yeniden basmak tarayıcıyı yeniden açıyor. |
