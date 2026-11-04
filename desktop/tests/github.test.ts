@@ -22,7 +22,7 @@ import {
 } from '../electron/services/github';
 import { readSettings, updateSettings } from '../electron/services/settings';
 import { setVaultSyncEngine } from '../electron/services/vaultSync';
-import type { GithubStatus } from '../shared/github';
+import { GITHUB_APP, type GithubStatus } from '../shared/github';
 
 /**
  * The vault kept on GitHub (electron/services/github.ts) against a local server standing in for GitHub: the device
@@ -133,8 +133,11 @@ async function signIn(): Promise<void> {
   await settled('connected');
 }
 
-test('with no app set, the button is not offered and a start is refused', async () => {
+test('the app is set, as GitHub registered it; with none, the button is not offered and a start is refused', async () => {
   setGithubForTests(null);
+  assert.equal(githubStatus().offered, true);
+  assert.match(GITHUB_APP.clientId, /^Iv23[A-Za-z0-9]{16}$/);
+  setGithubForTests({ web: base, api: `${base}/api`, clientId: '', gitUrl: bare });
   assert.equal(githubStatus().offered, false);
   await assert.rejects(() => startGithub(), /GitHub bağlantısı yok/);
 });

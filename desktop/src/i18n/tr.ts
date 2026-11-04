@@ -280,6 +280,7 @@ export const tr: Record<keyof typeof en, string> = {
   'github.result.secret': "Gönderilmedi: bir notta sır olabilir. Sırrı nottan sil, sonra yeniden dene:",
   'github.result.offline': "GitHub'a ulaşılamadı; internet bağlantını kontrol et.",
   'github.result.already': "Bu kasa zaten başka bir uzak depoyla eşitleniyor. Önce bağlantıyı kes.",
+  'github.result.denied': "GitHub bu repoya girişi reddetti; GitHub'da Cortex Kasa'nın bu repoya izni olduğuna bak, sonra yeniden dene.",
   'github.result.error': "Bağlanılamadı:",
   'github.joined': "GitHub: {login} · {repo}",
   'github.disconnect': "Bağlantıyı kes",

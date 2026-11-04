@@ -459,6 +459,13 @@ if (process.platform === 'win32') {
 }
 await shoot('01c2-onboarding-tools.png');
 await onward();
+// The vault backed up on GitHub (src/ui/GithubConnect.tsx): an optional step last, skippable; here the engine was skipped,
+// so it says that comes first, and nothing reaches GitHub from a run.
+check(
+  'then backing the vault up on GitHub, optional, after the engine it needs',
+  (await shownSoon(page.locator('[data-onboarding-step="backup"]'))) && (await page.locator('[data-onboarding-backup]').textContent())?.includes('Pyn'),
+);
+await onward();
 check(
   'the last step lists what was left, to be set up later from the settings',
   (await shownSoon(page.locator('[data-onboarding-step="done"]'))) && (await page.locator('[data-onboarding-summary="engine"]').textContent())?.includes('skipped'),
@@ -874,10 +881,11 @@ check(
 );
 await page.keyboard.press('Control+,');
 check('Ctrl+, opens them too', await shownSoon(page.locator('[data-settings]')));
-// Settings › Sunucu (src/ui/ServerSection.tsx): a vault that is no git repository is not offered the sync switch, and says why.
+// Settings › Sunucu (src/ui/ServerSection.tsx): a vault that is no git repository is not offered the sync switch; GitHub's
+// button is, which makes it one (src/ui/GithubConnect.tsx). Not pressed: nothing reaches GitHub from a run.
 check(
-  'the server section says a vault that is no git repository cannot be synced, and offers no switch',
-  (await shownSoon(page.locator('[data-server-note="missing-repo"]'))) && (await page.locator('[data-server-sync]').count()) === 0 &&
+  'the server section offers no switch for a vault that is no git repository, and offers to connect it to GitHub',
+  (await shownSoon(page.locator('[data-github-start]'))) && (await page.locator('[data-server-sync]').count()) === 0 &&
     (await page.locator('[data-server-pyn]').count()) === 1,
 );
 await page.locator('[data-settings-name-icons]').click();

@@ -77,7 +77,7 @@ Kullanıcıyla alındı (2026-11-04, dördü de önerilen seçenek):
 - Gerçek test (geliştiricinin PC'si ve laptopu, gerçek GitHub App ile): yalnız elle, geliştiricinin onayıyla.
 
 ## Aşamalar
-1. GitHub App kaydı (geliştirici, bir kerelik; ayarlar aşağıda) ve uygulamanın açtığı repoya erişiminin denenmesi.
+1. GitHub App kaydı (geliştirici, bir kerelik; ayarlar aşağıda) ve uygulamanın açtığı repoya erişiminin denenmesi — 2026-11-04: "Cortex Kasa", Client ID `Iv23li1ZAbnrpvdJiZ7u`, slug `cortex-kasa`. Gerçek deneme (iki geçici kasa, `GunduzTolga/cortex-kasa-deneme`): ilk gönderim, bağlanma ("(bu bilgisayar)" ile), iki yönlü tur, Türkçe adlı dosya geçti. Bulunan hata: jetonsuz turda motor "çakışma" diyordu → yeni durum `denied`.
 2. Motor: `baslat` / `baglan`, ortamdan kimlik bilgisi, `.gitignore` listesi. Kendi sürümü.
 3. Masaüstü: `github.ts`, `GithubConnect`, Ayarlar › Sunucu akışı (dal `faz1/github-baglan`, 2026-11-04; sahte GitHub'la `tests/github.test.ts`). 1.0.54 ile birlikte yayımlanır (Tolga, 2026-11-04); Client ID girilmeden düğme görünmez.
 4. `gitTool` (MinGit) ve ilk kurulum adımı (Onboarding `backup`: araçlardan sonra, isteğe bağlı, yalnız GitHub sunuluyorsa) — 2026-11-04, `tests/gitTool.test.ts`.
@@ -88,13 +88,13 @@ Kullanıcıyla alındı (2026-11-04, dördü de önerilen seçenek):
 github.com › Settings › Developer settings › GitHub Apps › New: ad "Cortex"; Homepage repo adresi; Callback boş;
 "Enable Device Flow" açık; Webhook kapalı; izinler: Repository › Contents: Read and write, Metadata: Read-only;
 Account › (yok); "Repository creation" (varsa) açık; "Any account" kurulabilir. Çıkan **Client ID** koda girer
-(gizli değil); istemci sırrı ve özel anahtar üretilmez.
+(gizli değil); istemci sırrı üretilmez. GitHub uygulamanın kurulabilmesi için en az bir özel anahtar ister: bir kez üretilir, Cortex kullanmaz (dosya saklanmayabilir). İzin listesinde "Repository creation" ayrı bir satır olarak var (Administration gerekmez).
 
 ## Açık sorular
 | Soru | Kim karar verir | Durum |
 |---|---|---|
 | GitHub App mı OAuth App mı | Geliştirici | GitHub App (2026-11-04) |
-| Uygulamanın kullanıcı jetonuyla açtığı repoya kurulumun erişimi kendiliğinden gelir mi | Ölçüm (aşama 1) | GitHub belgesi "uygulama açtığı repolara erişir" diyor; kullanıcı jetonuyla denenmedi |
+| Uygulamanın kullanıcı jetonuyla açtığı repoya kurulumun erişimi kendiliğinden gelir mi | Ölçüm (aşama 1) | **Evet** (2026-11-04, gerçek GitHub, "Only select repositories" kurulumu: `POST /user/repos` 201, yeni repo kurulumun repolarına kendiliğinden eklendi 1 → 2). `x-access-token` + kullanıcı jetonuyla push ve pull çalıştı; yenileme istemci sırrı olmadan çalıştı |
 | İlk kurulumda "Yedekle" adımı olsun mu | Geliştirici | Evet, isteğe bağlı (2026-11-04) |
 | Git yoksa MinGit indirilsin mi | Geliştirici | Evet, Windows'ta (2026-11-04) |
 | Aynı adlı farklı notta hangisi ad değiştirir | Geliştirici | Bu bilgisayardaki (2026-11-04) |

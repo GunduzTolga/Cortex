@@ -9,7 +9,7 @@
  * The GitHub App Cortex signs in as. Its client ID is not a secret (the device flow needs no client secret, and none is
  * kept anywhere); empty, the button is not offered. The slug is the app's address on GitHub, where it is installed.
  */
-export const GITHUB_APP = { clientId: '', slug: 'cortex-kasa' };
+export const GITHUB_APP = { clientId: 'Iv23li1ZAbnrpvdJiZ7u', slug: 'cortex-kasa' };
 
 export type GithubState = 'off' | 'waiting' | 'connected' | 'expired' | 'denied' | 'error';
 

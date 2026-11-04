@@ -126,7 +126,9 @@ export function GithubConnect({ onConnected }: { onConnected?: () => void }) {
                 ? 'github.result.already'
                 : result.state === 'missing'
                   ? 'github.result.missing'
-                  : 'github.result.error',
+                  : result.state === 'denied'
+                    ? 'github.result.denied'
+                    : 'github.result.error',
         )}
         {result.detail.length ? ` ${result.detail.join(', ')}` : ''}
       </Line>
