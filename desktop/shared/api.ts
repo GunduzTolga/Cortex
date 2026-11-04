@@ -1,4 +1,5 @@
 import type { ChatApi, ChatPush, CliId } from './chat';
+import type { GithubApi, GithubStatus } from './github';
 import type { HermesApi } from './hermes';
 import type { AppLanguage } from './language';
 import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
@@ -124,6 +125,8 @@ export interface CortexApi {
   telegram: TelegramApi;
   /** The vault kept in step with its git remote (shared/vaultSync.ts, Settings › Sunucu). */
   vaultSync: VaultSyncApi;
+  /** The vault kept on GitHub: signed in with a code, a repository made or picked (shared/github.ts, Settings › Sunucu). */
+  github: GithubApi;
   /** A Hermes Agent on another machine as a chat engine: its address, profile and key (shared/hermes.ts). */
   hermes: HermesApi;
   /** The app's own update from the releases (electron/services/updater.ts). */
@@ -138,6 +141,7 @@ export interface CortexApi {
     notesChanged(handler: () => void): () => void;
     /** The vault's sync with its git remote: every change of its status. */
     vaultSync(handler: (status: SyncStatus) => void): () => void;
+    github(handler: (status: GithubStatus) => void): () => void;
     /** A chat going on: an event, its state, its list entry. */
     chat(handler: (push: ChatPush) => void): () => void;
     /** A sign-in window was closed, or a sign-in done (the tool's), or an install ended (null): ask the tools' statuses again. */

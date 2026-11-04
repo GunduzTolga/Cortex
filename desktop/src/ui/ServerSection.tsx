@@ -3,6 +3,7 @@ import { RefreshCw, Server } from 'lucide-react';
 import type { SyncStatus } from '@shared/vaultSync';
 import { useChat } from '../chat/chatStore';
 import { useT } from '../i18n/useT';
+import { GithubConnect } from './GithubConnect';
 import { Section } from './settingsParts';
 import { Button, Spinner, Switch } from './ui';
 
@@ -32,12 +33,15 @@ export function ServerSection({ open, onClose }: { open: boolean; onClose: () =>
   const t = useT();
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  // Where Cortex can sign in to GitHub, a vault that is no repository yet is not a dead end: the button below makes it one.
+  const [github, setGithub] = useState(false);
 
   const read = useCallback(() => {
     void window.cortex.vaultSync.status().then(setStatus, () => setStatus(null));
   }, []);
   useEffect(() => {
     if (open) read();
+    if (open) void window.cortex.github.status().then((status) => setGithub(status.offered), () => setGithub(false));
   }, [open, read]);
   useEffect(() => window.cortex.on.vaultSync(setStatus), []);
 
@@ -62,8 +66,9 @@ export function ServerSection({ open, onClose }: { open: boolean; onClose: () =>
   return (
     <Section title={t('server.title')} data="server">
       <p className="mb-1.5 px-3 text-[11.5px] leading-relaxed text-zinc-500">{t('server.hint')}</p>
+      {open ? <GithubConnect onConnected={read} /> : null}
       {!status ? null : !status.available ? (
-        <Note data={`missing-${status.missing ?? 'repo'}`}>{t(status.missing === 'git' ? 'server.missing.git' : status.missing === 'remote' ? 'server.missing.remote' : 'server.missing.repo')}</Note>
+        github && status.missing !== 'git' ? null : <Note data={`missing-${status.missing ?? 'repo'}`}>{t(status.missing === 'git' ? 'server.missing.git' : status.missing === 'remote' ? 'server.missing.remote' : 'server.missing.repo')}</Note>
       ) : (
         <>
           <Switch

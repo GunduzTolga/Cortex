@@ -118,6 +118,8 @@ const TURKISH_ALREADY = new Set([
   path.join('electron', 'services', 'officeTalk.ts'),
   path.join('electron', 'services', 'telegram.ts'),
   path.join('electron', 'services', 'inbox.ts'),
+  // Says each sentence in the window's language itself (`say(tr, en)`), as telegram.ts does.
+  path.join('electron', 'services', 'github.ts'),
 ]);
 
 /**

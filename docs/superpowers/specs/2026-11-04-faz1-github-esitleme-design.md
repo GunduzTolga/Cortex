@@ -35,21 +35,23 @@ Kullanıcıyla alındı (2026-11-04, dördü de önerilen seçenek):
 |---|---|---|
 | `template/.claude/scripts/beyin_v3_esitle.py` | `baslat` (git init, `.gitignore` + `.gitattributes`, ilk commit, boş repoya ilk gönderim) ve `baglan` (uzaktakini al, yereldekini üstüne koy, aynı adlı farklı notu "(bu bilgisayar)" ile ayır, gönder); kimlik bilgisi yalnız ortamdan | git |
 | `docs/v3/MULTI-MACHINE.md` + şablon `.gitignore` | önerilen liste tek kaynak (motor buradan yazar); `beyin-yakala` beceri klasörleri eklenir | — |
-| `desktop/electron/services/githubAuth.ts` | cihaz kodu akışı, jeton yenileme, çıkış; jetonlar `keys.ts` ile şifreli | GitHub OAuth uçları |
-| `desktop/electron/services/githubRepos.ts` | "yeni özel repo aç" (`POST /user/repos`), "kasalarım" listesi (uygulamanın eriştiği repolar) | GitHub REST |
+| `desktop/electron/services/github.ts` | cihaz kodu akışı, jeton yenileme (istemci sırrı yok: cihaz akışının jetonu sırsız yenilenir), çıkış; jetonlar `safeStorage` ile şifreli `github.json`'da; "yeni özel repo aç" (`POST /user/repos`), uygulamanın kurulu olduğu repolar (`/user/installations/*/repositories`), kurulu değilse kurulum sayfası; kasayı repoya bağlama | GitHub OAuth + REST |
+| `desktop/src/ui/GithubConnect.tsx` | "GitHub ile bağlan" → kod → izin → "Yeni yedek oluştur" / "Var olan kasama bağlan" → sonuç; bağlıyken hesap · repo, "Bağlantıyı kes" | — |
 | `desktop/electron/services/gitTool.ts` | git'i bul; yoksa (Windows) MinGit'i indir, özetini doğrula, aç (`toolPackages.ts` kalıbı) | — |
-| `desktop/electron/services/vaultSync.ts` | motoru çağırırken jetonu ortamla verir; jeton dolmuşsa önce yeniler | githubAuth |
-| `desktop/src/ui/ServerSection.tsx` | "GitHub ile bağlan" → kod → "Yeni yedek oluştur" / "Var olan kasama bağlan"; bağlıyken hesap, repo, "Bağlantıyı kes" | — |
+| `desktop/electron/services/vaultSync.ts` | motoru çağırırken jetonu ortamla verir (`setVaultSyncCredentials`, yalnız `github.com/…` uzağına); ilk bağlanma `joinVault` (`--baslat` / `--baglan`, motor kilidi meşgulse bekler) | github.ts |
+| `desktop/src/ui/ServerSection.tsx` | `GithubConnect`'i gösterir; GitHub sunuluyorsa "bu kasa git deposu değil" notu yerine o | — |
 | `desktop/src/onboarding/Onboarding.tsx` | isteğe bağlı "Yedekle" adımı (aynı bileşen) | — |
 
 ## Süreçler arası sözleşme
 | Mesaj / kanal | Yön | Alanlar | Ne zaman |
 |---|---|---|---|
 | `github:start` | pencere → ana | — → `{ userCode, verifyUrl, expiresIn }` | "GitHub ile bağlan" |
-| `github:state` | ana → pencere | `{ state: 'waiting' \| 'connected' \| 'expired' \| 'denied' \| 'error', login? }` | onay beklenirken, bitince |
-| `github:repos` | pencere → ana | — → `Array<{ fullName, private, empty }>` | "Var olan kasama bağlan" |
-| `github:create` | pencere → ana | `{ name }` → `{ fullName }` | "Yeni yedek oluştur" |
-| `vault:connect` | pencere → ana | `{ fullName, mode: 'baslat' \| 'baglan' }` → motorun JSON sonucu | repo seçilince |
+| `github:status` (çağrı ve yayın) | ana → pencere | `{ offered, state: 'off' \| 'waiting' \| 'connected' \| 'expired' \| 'denied' \| 'error', login, repo, detail }` | açılışta, onay beklenirken, bitince |
+| `github:openVerify` / `github:openInstall` | pencere → ana | — | kodu girme / uygulamayı kurma sayfası tarayıcıda (adresler sabit, cevaptan gelen adres açılmaz) |
+| `github:repos` | pencere → ana | — → `{ repos: Array<{ fullName, private, empty }>, installUrl: null }` ya da `{ repos: [], installUrl }` | giriş bitince |
+| `github:create` | pencere → ana | `name` → `{ fullName, private, empty: true }` | "Yeni yedek oluştur" |
+| `github:connect` | pencere → ana | `fullName` → `{ state, repo, kept, detail }` | repo seçilince / açılınca; yön (`baslat`/`baglan`) GitHub'ın boyutuna göre seçilir, motor `not_empty`/`empty` derse öbürüne geçilir |
+| `github:disconnect` | pencere → ana | — → durum | "Bağlantıyı kes": jetonlar silinir, eşitleme kapanır; repo ve notlar yerinde |
 | `beyin.py esitle --baslat <url> --json` / `--baglan <url> --json` | ana → motor | sonuç: `{ state, kept: [{ file, as }], pushed, pulled }` | bağlanırken bir kez |
 | Ortam `GIT_CONFIG_COUNT/KEY/VALUE` (`http.https://github.com/.extraheader`) | ana → git (motor üzerinden) | `Authorization: Basic …` | her eşitleme; jeton diske ve komut satırına yazılmaz |
 
@@ -77,7 +79,7 @@ Kullanıcıyla alındı (2026-11-04, dördü de önerilen seçenek):
 ## Aşamalar
 1. GitHub App kaydı (geliştirici, bir kerelik; ayarlar aşağıda) ve uygulamanın açtığı repoya erişiminin denenmesi.
 2. Motor: `baslat` / `baglan`, ortamdan kimlik bilgisi, `.gitignore` listesi. Kendi sürümü.
-3. Masaüstü: `githubAuth`, `githubRepos`, Ayarlar › Sunucu akışı. Kendi sürümü.
+3. Masaüstü: `github.ts`, `GithubConnect`, Ayarlar › Sunucu akışı (dal `faz1/github-baglan`, 2026-11-04; sahte GitHub'la `tests/github.test.ts`). 1.0.54 ile birlikte yayımlanır (Tolga, 2026-11-04); Client ID girilmeden düğme görünmez.
 4. `gitTool` (MinGit) ve ilk kurulum adımı.
 5. Sürüm notu, `MULTI-MACHINE.md`, gerçek test (PC + laptop).
 
