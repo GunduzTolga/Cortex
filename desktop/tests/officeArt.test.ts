@@ -185,3 +185,19 @@ test('the manager and their room are named after the vault’s owner; Tolga stay
   assert.equal(room()?.tr, 'MÜDÜR ODASI');
   assert.equal(art.CHARACTERS.tolga.name, 'Tolga', 'the developer who wrote Cortex, whoever owns the vault');
 });
+
+test('the manager is not drawn as Tolga: named after the owner, the two were one face, one walking and one typing', () => {
+  const look = (id: string) => (art.CHARACTERS as Record<string, { look: { hair: string; glasses?: unknown; stubble?: unknown } }>)[id].look;
+  assert.notEqual(look('mudur').hair, look('tolga').hair);
+  assert.ok(look('mudur').glasses && !look('tolga').glasses);
+});
+
+test('a walk back says where it goes, and the greeting says what the person did, in both languages', async () => {
+  const engine = await import('../src/office/ofis-engine.js');
+  const { enOf } = await import('../src/office/ofis-en.js');
+  const source = (await import('node:fs')).readFileSync('src/office/ofis-engine.js', 'utf8');
+  assert.ok(!/ag\.act = 'yürüyor'; this\.goTo/.test(source), 'a walk to a seat is not a bare "yürüyor"');
+  assert.ok(engine && source.includes("'yerine dönüyor'") && !source.includes("'{Kim} ofise uğradı'"));
+  assert.equal(enOf('yerine dönüyor'), 'heading back to the seat');
+  assert.equal(enOf('Tolga Bey beynine göz attı'), 'Tolga Bey looked into the brain');
+});

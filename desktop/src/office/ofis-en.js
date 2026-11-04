@@ -166,6 +166,7 @@ export const EN = {
 
   // ── ofis-engine.js: what the engine itself writes
   'yürüyor': 'walking',
+  'yerine dönüyor': 'heading back to the seat',
   'Baran ile buluşmaya gidiyor': 'going to meet Baran',
   'bekliyor': 'waiting',
   'Defne ve Baran «Proje planı» üzerine konuşuyor': 'Defne and Baran are talking about “Project plan”',
@@ -176,6 +177,7 @@ export const EN = {
   'etrafa bakıyor': 'looking around',
   // already chosen by language in the engine (greet, who, nameTheManager): here for completeness
   '{Kim} ofise uğradı': '{Kim} dropped by the office',
+  '{Kim} beynine göz attı': '{Kim} looked into the brain',
   'Hoş geldin, {kim}.': 'Welcome, {kim}.',
   'kasanın sahibi': 'the owner',
   // LIGHT_MODES and TOOL_LABEL (exported; the window uses its own i18n keys for these today)
@@ -241,6 +243,7 @@ export const EN_PATTERNS = [
   [/^Patron, (.+) yeni not göndermiş!$/u, (m) => `Boss, ${nameEn(m[1])} sent a new note!`],
   // greet(), after who() (the engine already writes these in English when lang is 'en').
   [/^(.+) ofise uğradı$/u, (m) => `${nameEn(m[1])} dropped by the office`],
+  [/^(.+) beynine göz attı$/u, (m) => `${nameEn(m[1])} looked into the brain`],
   [/^Hoş geldin, (.+)\.$/u, (m) => `Welcome, ${nameEn(m[1])}.`],
   // Log lines that carry a note title, with any title in «…».
   [/^Pyn onayladı: «(.+)»$/u, (m) => `Pyn approved: ${titled(m[1])}`],
