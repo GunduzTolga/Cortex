@@ -6,6 +6,7 @@ remote is a path that does not exist). The states are the ones the desktop app s
 from __future__ import annotations
 
 import json
+import re
 import os
 from pathlib import Path
 import shutil
@@ -168,6 +169,184 @@ class EsitleTest(unittest.TestCase):
         self.assertEqual(json.loads(buffer.getvalue())['state'], 'secret')
         with redirect_stdout(io.StringIO()):
             self.assertEqual(esitle.main([], vault=self.a, state=self.state), 1)
+
+
+@unittest.skipUnless(GIT, 'git yok')
+class IlkKezTest(unittest.TestCase):
+    """`--baslat` (a new backup to an empty remote) and `--baglan` (a second computer joins it)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix='esitle-ilk-'))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        os.environ.update({k: v for k, v in ENV.items() if k.startswith('GIT_')})
+        self.remote = self.tmp / 'uzak.git'
+        git(self.tmp, 'init', '-q', '--bare', '-b', 'main', str(self.remote))
+        self.state = self.tmp / 'state'
+
+    def vault(self, name, notes):
+        folder = self.tmp / name
+        for path, text in notes.items():
+            (folder / path).parent.mkdir(parents=True, exist_ok=True)
+            (folder / path).write_text(text, encoding='utf-8')
+        folder.mkdir(exist_ok=True)
+        return folder
+
+    def remote_files(self):
+        out = git(self.tmp, '--git-dir', str(self.remote), 'ls-tree', '-r', '--name-only', '-z', 'main')
+        return sorted(p for p in out.split('\0') if p)
+
+    def remote_text(self, path):
+        return git(self.tmp, '--git-dir', str(self.remote), 'show', f'main:{path}')
+
+    def test_a_new_backup_sends_the_vault_and_writes_the_ignore_list(self):
+        a = self.vault('a', {'ilk.md': '# İlk\n', '🔮 Notlar/bir.md': 'bir\n', 'beyin.py': '# motor\n'})
+        result = esitle.sync(a, self.state, start_url=str(self.remote))
+        self.assertEqual(result['state'], 'synced', result)
+        self.assertEqual(result['mode'], 'baslat')
+        files = self.remote_files()
+        self.assertIn('ilk.md', files)
+        self.assertIn('🔮 Notlar/bir.md', files)
+        self.assertIn('.gitignore', files)
+        self.assertNotIn('beyin.py', files)  # every machine installs its own
+        self.assertIn('**/Journal.md merge=union', self.remote_text('.gitattributes'))
+        # From now on the ordinary sync: it follows the remote.
+        self.assertEqual(esitle.sync(a, self.state)['state'], 'nothing')
+
+    def test_the_ignore_lines_already_there_are_kept_and_not_doubled(self):
+        a = self.vault('a', {'.gitignore': 'kendi-dosyam.txt\nbeyin.py\n', 'ilk.md': 'x\n'})
+        esitle.sync(a, self.state, start_url=str(self.remote))
+        text = (a / '.gitignore').read_text(encoding='utf-8')
+        self.assertTrue(text.startswith('kendi-dosyam.txt\nbeyin.py\n'))
+        self.assertEqual(text.count('beyin.py'), 1)
+        self.assertFalse(esitle.add_lines(a / '.gitignore', esitle.IGNORE))  # a second time: nothing to add
+
+    def test_a_new_backup_to_a_remote_that_holds_a_vault_is_refused(self):
+        esitle.sync(self.vault('a', {'ilk.md': 'a\n'}), self.state, start_url=str(self.remote))
+        result = esitle.sync(self.vault('b', {'b.md': 'b\n'}), self.state, start_url=str(self.remote))
+        self.assertEqual(result['state'], 'not_empty')
+        self.assertEqual(self.remote_files(), ['.gitattributes', '.gitignore', 'ilk.md'])
+
+    def test_a_vault_already_syncing_is_said(self):
+        a = self.vault('a', {'ilk.md': 'a\n'})
+        esitle.sync(a, self.state, start_url=str(self.remote))
+        other = self.tmp / 'baska.git'
+        git(self.tmp, 'init', '-q', '--bare', '-b', 'main', str(other))
+        for url in ({'start_url': str(other)}, {'join_url': str(other)}):
+            self.assertEqual(esitle.sync(a, self.state, **url)['state'], 'already')
+
+    def test_a_secret_stops_the_first_backup_and_nothing_goes(self):
+        a = self.vault('a', {'ilk.md': 'a\n', 'gizli.md': TOKEN_LINE + '\n'})
+        result = esitle.sync(a, self.state, start_url=str(self.remote))
+        self.assertEqual(result['state'], 'secret')
+        self.assertEqual(result['detail'], ['gizli.md:1 GitHub token'])
+        self.assertEqual(git(self.tmp, '--git-dir', str(self.remote), 'branch'), '')  # the remote still empty
+        (a / 'gizli.md').unlink()
+        self.assertEqual(esitle.sync(a, self.state, start_url=str(self.remote))['state'], 'synced')  # again, once fixed
+
+    def test_joining_keeps_both_sides_and_deletes_nothing(self):
+        esitle.sync(self.vault('a', {'ilk.md': '# İlk\n', 'ortak.md': 'aynı\n', 'klasor/not.md': 'uzak\n'}),
+                    self.state, start_url=str(self.remote))
+        b = self.vault('b', {'ortak.md': 'aynı\n', 'ilk.md': '# Buradaki ilk\n', 'yalniz-burada.md': 'b\n'})
+        result = esitle.sync(b, self.state, join_url=str(self.remote))
+        self.assertEqual(result['state'], 'synced', result)
+        self.assertEqual(result['kept'], [{'file': 'ilk.md', 'as': 'ilk (bu bilgisayar).md'}])
+        self.assertIn("'(bu bilgisayar)' adıyla kaldı", esitle.sentence(result))
+        self.assertEqual((b / 'ilk.md').read_text(encoding='utf-8'), '# İlk\n')
+        self.assertEqual((b / 'ilk (bu bilgisayar).md').read_text(encoding='utf-8'), '# Buradaki ilk\n')
+        self.assertEqual((b / 'klasor/not.md').read_text(encoding='utf-8'), 'uzak\n')
+        files = self.remote_files()
+        for path in ('ilk.md', 'ilk (bu bilgisayar).md', 'ortak.md', 'klasor/not.md', 'yalniz-burada.md'):
+            self.assertIn(path, files)
+        self.assertEqual(esitle.sync(b, self.state)['state'], 'nothing')
+
+    def test_a_local_file_where_the_remote_has_a_folder_is_set_aside(self):
+        esitle.sync(self.vault('a', {'klasor/not.md': 'uzak\n'}), self.state, start_url=str(self.remote))
+        b = self.vault('b', {'klasor': 'bir dosya\n'})
+        result = esitle.sync(b, self.state, join_url=str(self.remote))
+        self.assertEqual(result['state'], 'synced', result)
+        self.assertEqual(result['kept'], [{'file': 'klasor', 'as': 'klasor (bu bilgisayar)'}])
+        self.assertEqual((b / 'klasor/not.md').read_text(encoding='utf-8'), 'uzak\n')
+
+    def test_a_taken_kept_name_is_numbered(self):
+        esitle.sync(self.vault('a', {'n.md': 'uzak\n', 'n (bu bilgisayar).md': 'eski\n'}), self.state,
+                    start_url=str(self.remote))
+        b = self.vault('b', {'n.md': 'burada\n'})
+        result = esitle.sync(b, self.state, join_url=str(self.remote))
+        self.assertEqual(result['kept'], [{'file': 'n.md', 'as': 'n (bu bilgisayar 2).md'}])
+
+    def test_joining_an_empty_remote_says_so(self):
+        result = esitle.sync(self.vault('b', {'b.md': 'b\n'}), self.state, join_url=str(self.remote))
+        self.assertEqual(result['state'], 'empty')
+
+    def test_a_url_that_is_not_https_or_a_folder_is_refused(self):
+        b = self.vault('b', {'b.md': 'b\n'})
+        for url in ('http://example.com/x.git', '--upload-pack=x', 'git@github.com:a/b.git', 'https://a/b\nc'):
+            self.assertEqual(esitle.sync(b, self.state, start_url=url)['detail'], ['url'], url)
+        self.assertFalse((b / '.git').exists())
+
+    def test_the_command_line_takes_the_first_time_too(self):
+        a = self.vault('a', {'ilk.md': 'a\n'})
+        out = subprocess.run([sys.executable, str(SCRIPTS / 'beyin_v3_esitle.py'), '--vault', str(a), '--state',
+                              str(self.state), '--json', '--baslat', str(self.remote)],
+                             capture_output=True, encoding='utf-8', env={**os.environ, **ENV})
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout)['state'], 'synced')
+
+
+class TokenTest(unittest.TestCase):
+    def test_the_token_becomes_a_header_for_github_alone(self):
+        conf = esitle.token_config('ghu_abc123')
+        key = [k for k in conf if k.startswith('GIT_CONFIG_KEY_')][0]
+        self.assertEqual(conf[key], 'http.https://github.com/.extraheader')
+        value = conf[key.replace('KEY', 'VALUE')]
+        import base64
+        self.assertEqual(base64.b64decode(value.split()[-1]).decode(), 'x-access-token:ghu_abc123')
+        self.assertEqual(esitle.token_config(''), {})
+        self.assertEqual(esitle.token_config('a b'), {})
+
+    @unittest.skipIf(os.name == 'nt', 'sahte git bir kabuk betiği')
+    def test_the_token_reaches_git_in_its_environment_never_its_arguments(self):
+        tmp = Path(tempfile.mkdtemp(prefix='esitle-jeton-'))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        seen = tmp / 'gordu.txt'
+        fake = tmp / 'git'
+        fake.write_text('#!/bin/sh\n{ echo "ARGS $*"; env; } > "%s"\n' % seen, encoding='utf-8')
+        fake.chmod(0o755)
+        vault = tmp / 'kasa'
+        vault.mkdir()
+        old = {k: os.environ.get(k) for k in (esitle.GIT_ENV, esitle.TOKEN_ENV)}
+        os.environ.update({esitle.GIT_ENV: str(fake), esitle.TOKEN_ENV: 'ghu_gizli123'})
+        try:
+            esitle.Git(vault)('--version')
+        finally:
+            for k, v in old.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        text = seen.read_text(encoding='utf-8')
+        args = [line for line in text.splitlines() if line.startswith('ARGS ')][0]
+        self.assertNotIn('ghu_gizli123', args)
+        self.assertNotIn(esitle.TOKEN_ENV + '=', text)
+        self.assertIn('http.https://github.com/.extraheader', text)
+
+    def test_a_brought_git_inside_the_vault_is_not_run(self):
+        tmp = Path(tempfile.mkdtemp(prefix='esitle-git-'))
+        self.addCleanup(shutil.rmtree, tmp, True)
+        inside = tmp / 'git'
+        inside.write_text('', encoding='utf-8')
+        old = os.environ.get(esitle.GIT_ENV)
+        os.environ[esitle.GIT_ENV] = str(inside)
+        try:
+            self.assertNotEqual(esitle.git_program(tmp), str(inside.resolve()))
+        finally:
+            os.environ.pop(esitle.GIT_ENV) if old is None else os.environ.__setitem__(esitle.GIT_ENV, old)
+
+
+class ListeTest(unittest.TestCase):
+    def test_the_ignore_list_is_the_one_the_guide_shows(self):
+        guide = (ROOT / 'docs/v3/MULTI-MACHINE.md').read_text(encoding='utf-8')
+        blocks = re.findall(r'```gitignore\n(.*?)```', guide, re.S)
+        self.assertEqual(blocks[0], esitle.render(esitle.IGNORE))
+        blocks = re.findall(r'```gitattributes\n(.*?)```', guide, re.S)
+        self.assertEqual(blocks[0], esitle.render(esitle.ATTRIBUTES))
 
 
 if __name__ == '__main__':

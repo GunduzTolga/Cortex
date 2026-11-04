@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.53" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.53-E8B23A">
+  <img alt="Sürüm 1.0.54" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.54-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -186,6 +186,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.54](docs/v3/releases/1.0.54.md) | İlk yedek ve ikinci bilgisayar motorda: `beyin.py esitle --baslat` kasayı boş bir depoya ilk kez gönderir, `--baglan` dolu bir depoya bağlanır; aynı adlı farklı notta ikisi de kalır, hiçbir şey silinmez. |
 | [1.0.53](docs/v3/releases/1.0.53.md) | Koyu tema (Sistem / Açık / Koyu), sohbet listesinde oturumun maliyeti, sohbete resim ve dosya ekleme (Claude Code, Codex). Kasa eşitlemesi motorda (`beyin.py esitle`) ve masaüstü onu kullanıyor. Ofis'te sunucu rafı. |
 | [1.0.52](docs/v3/releases/1.0.52.md) | Mikrofonu Cortex tutuyor: Windows'un mikrofon göstergesinde "Python" yerine Cortex görünüyor; uyandırma sözü ve yazıya çevirme değişmedi. Ayrıca yayımlanmadı, 1.0.53 ile geldi. |
 | [1.0.51](docs/v3/releases/1.0.51.md) | Giriş yalnız tarayıcıda: Claude Code ve Codex'in girişi terminal penceresi göstermeden açılıyor, giriş bitince Cortex onu kendisi kapatıyor. Giriş yap'a yeniden basmak tarayıcıyı yeniden açıyor. |
