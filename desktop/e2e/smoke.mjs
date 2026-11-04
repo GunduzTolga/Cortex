@@ -425,6 +425,11 @@ if (await page.locator('[data-onboarding-step="python"]').count()) await onward(
 check('Pyn’s memory comes next, each step said before it is done', await shownSoon(page.locator('[data-onboarding-step="engine"] [data-onboarding] h1, [data-onboarding-step="engine"] h1')));
 await shoot('01c-onboarding-engine.png');
 await onward();
+// Voice comes before the tools (3 November): its download runs in the background while the tools are signed in to.
+if (process.platform === 'win32') {
+  check('then voice typing', await shownSoon(page.locator('[data-onboarding-step="voice"]')));
+  await onward();
+}
 check('then the AI tools', await shownSoon(page.locator('[data-onboarding-step="tools"]')));
 {
   const kept = await shownSoon(page.locator('[data-onboarding-tool="claude"] [data-onboarding-tool-state="onboarding.tools.kept"]'));
@@ -454,10 +459,6 @@ if (process.platform === 'win32') {
 }
 await shoot('01c2-onboarding-tools.png');
 await onward();
-if (process.platform === 'win32') {
-  check('then voice typing', await shownSoon(page.locator('[data-onboarding-step="voice"]')));
-  await onward();
-}
 check(
   'the last step lists what was left, to be set up later from the settings',
   (await shownSoon(page.locator('[data-onboarding-step="done"]'))) && (await page.locator('[data-onboarding-summary="engine"]').textContent())?.includes('skipped'),
