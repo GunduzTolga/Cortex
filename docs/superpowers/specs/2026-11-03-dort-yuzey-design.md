@@ -98,6 +98,8 @@ Bugün masaüstü uygulaması eşitlenmeyen ayrı bir kasada; asıl kasanın klo
 - Uygulama sunucuya motoru kurar, kasayı GitHub'dan klonlar, eşitleme zamanlayıcısını kurar: Faz 1'deki
   `beyin.py esitle`'yi `systemd --user` zamanlayıcısıyla çağırır (sudo'suz). Zamanlayıcının oturum kapalıyken de
   çalışması için `loginctl enable-linger` gerekir; bu sudo isteyebilir, ekranda açıkça söylenir.
+- **Beyin'de sunucu durumu** (geliştiricinin notu, 2 Kasım): Beyin ekranında odalar sunucuyu da gösterir; örneğin
+  "Sunucudaki Pyn" odası, sunucuya bağlantı varsa yeşil, yoksa kırmızı. Ekranda "Hermes" yazmaz (arkadaki program).
 - Bitti: boş bir Linux makinesi uygulamadan kuruluyor ve eşitleniyor.
 
 ### Faz 3 — Beceriler ve öğrenme masaüstünde (ürün)
@@ -112,6 +114,8 @@ Bugün masaüstü uygulaması eşitlenmeyen ayrı bir kasada; asıl kasanın klo
 - **Onay kartı:** önerilen beceri değişikliği, Onayla / Reddet. Telefondaki öğrenme onayının masaüstü karşılığı.
 - Gece hasadı: sunucu varsa sunucuda (bugünkü gibi); yoksa isteğe bağlı, uygulama açıkken günde bir (model maliyeti var).
 - Genel contribute becerisi Cortex'le gelir; geliştiricinin kişisel becerileri onun özel kasasında kalır.
+- Telefondaki marketplace (beceri listesi) ve contribute (öğrenme onayı) ekranları masaüstüne bu fazda gelir; iki
+  yüzey aynı veriyi (kasadaki `plugins/`, açık öğrenme PR'ları) aynı sözcüklerle gösterir (geliştiricinin notu, 2 Kasım).
 - Açık karar (fazın tasarımında): onay GitHub varken PR mı, her durumda yerel mi; tek yol seçilecek.
 
 ### Faz 4 — Telefon ve tek sunucu kapısı (ürün; en büyük faz, kendi tasarım oturumu)
@@ -124,6 +128,9 @@ Bugün masaüstü uygulaması eşitlenmeyen ayrı bir kasada; asıl kasanın klo
 - Hermes API'si dışarı açılmaz, kapının arkasında kalır; masaüstündeki sunucudaki Pyn de aynı kapıdan konuşur
   (`hermesChat.ts` için yalnız adres değişir).
 - Telefon uygulaması bu repoya girer, genel olur. Geliştiriciye özel akışlar atölye eklentisi olarak kalır.
+- **Tasarım birliği:** telefon ve masaüstü bugün farklı görünüyor (renk, yazı, bileşenler). Telefon şimdilik yalnız
+  geliştiricinin; genel olunca aynı tasarım dilini (renkler, koyu/açık tema, ikonlar, kart ve soru kartı biçimi)
+  paylaşır. Fazın tasarımında ortak tasarım belirteçleri (renk/aralık değişkenleri) tek kaynaktan gelir (geliştiricinin notu, 2 Kasım).
 
 ### Faz 5 — Cortex Browser
 - Kendi kasası ve eşitlemesi yok. Cortex Browser ADR-0006'ya göre aynı bilgisayardaki kasanın motorunu
