@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { ConfigOption, ToolStatus } from '../../shared/chat';
+import type { ChatEvent, ConfigOption, ToolStatus } from '../../shared/chat';
 import { childEnv } from './acp';
 import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
 import { launchFor } from './clis';
@@ -72,6 +72,21 @@ const FALLBACK_MODELS = [
 const turkish = () => readSettings().language !== 'en';
 
 /** The chat's settings: the model (Claude Code's own list once it has said it), the permission mode, the effort. */
+
+/**
+ * A turn's cost from Claude Code's `result`: its tokens (cache included, as they are priced), and the session's running
+ * total in dollars (`total_cost_usd`, counted across a resume: measured 4 November), from which the chat takes the rise.
+ */
+export function spendOf(message: Record<string, unknown>, sessionId: string | null): Extract<ChatEvent, { type: 'spend' }> | null {
+  const usage = (typeof message.usage === 'object' && message.usage !== null ? message.usage : {}) as Record<string, unknown>;
+  const count = (key: string) => (typeof usage[key] === 'number' && Number.isFinite(usage[key]) ? (usage[key] as number) : 0);
+  const tokens = count('input_tokens') + count('output_tokens') + count('cache_read_input_tokens') + count('cache_creation_input_tokens');
+  const usd = typeof message.total_cost_usd === 'number' && Number.isFinite(message.total_cost_usd) ? message.total_cost_usd : null;
+  const session = typeof message.session_id === 'string' && message.session_id ? message.session_id : sessionId;
+  if (!tokens && usd === null) return null;
+  return { type: 'spend', usd: null, tokens, subscription: true, ...(usd !== null && session ? { total: { session, usd } } : {}) };
+}
+
 export function claudeOptions(prefs: Readonly<Record<string, string>>, models: Array<{ value: string; name: string }> = FALLBACK_MODELS): ConfigOption[] {
   const tr = turkish();
   // Each choice names what it is, so a chip reads alone: "Default effort", not "Default" beside "Default (recommended)".
@@ -305,8 +320,11 @@ function receive(proc: Proc, line: string): void {
     case 'result': {
       const modelUsage = message.modelUsage as Record<string, { contextWindow?: unknown }> | undefined;
       const size = Math.max(0, ...Object.values(modelUsage ?? {}).map((one) => (typeof one?.contextWindow === 'number' ? one.contextWindow : 0)));
-      // Its cost in dollars is left out: on a subscription it is not what the person pays.
+      // The context ring shows no dollars: on a subscription they are not what the person pays. The chat's list shows
+      // them as the API's price of the work, marked so (2 November notes; ChatSpend).
       if (proc.lastUsage && size) turn.emit({ type: 'usage', used: proc.lastUsage.used, size, cost: null, currency: null });
+      const spent = spendOf(message, turn.sessionId);
+      if (spent) turn.emit(spent);
       const finish = proc.finish;
       const fail = proc.fail;
       proc.turn = null;

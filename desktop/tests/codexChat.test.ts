@@ -97,6 +97,8 @@ test('a message to Codex gets its thinking, its words as they come and its final
   assert.ok(!JSON.stringify(events).includes(vault));
 
   const opened = openChat(id);
+  // Codex counts no dollars: the chat's tokens alone, from the turn's first word of usage (2 November notes).
+  assert.deepEqual(opened.chat.spend, { usd: null, tokens: 4096, subscription: true });
   assert.deepEqual(opened.options.find((one) => one.id === 'model')?.choices.map((one) => one.value), ['gpt-6-luna', 'gpt-5.6-terra'], 'the server’s models, a hidden one left out');
   const [started] = turnsStarted(log);
   assert.equal(started.params.model, 'gpt-6-luna', 'the model the server marks as default');

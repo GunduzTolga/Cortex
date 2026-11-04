@@ -15,6 +15,7 @@ import { Button, Spinner } from '../ui/ui';
 import { toolName } from './AuthDialog';
 import { useChat, waitingChats } from './chatStore';
 import { Composer } from './Composer';
+import { spendWords } from './spend';
 import { SidePane } from './SidePane';
 import { Transcript } from './Transcript';
 import { notesOf, turnsOf, usageOf, waitingOn } from './turns';
@@ -113,8 +114,19 @@ function ChatList() {
                       ) : null}
                       <span className="truncate">{chat.title || t('chat.untitled')}</span>
                     </span>
-                    <span className="block truncate text-[10.5px] text-zinc-400">
-                      {cliName(chat.cli)} · {time(chat.updatedAt)}
+                    <span className="flex items-center gap-1 truncate text-[10.5px] text-zinc-400">
+                      <span className="truncate">
+                        {cliName(chat.cli)} · {time(chat.updatedAt)}
+                      </span>
+                      {(() => {
+                        // What the chat has cost, at the API's price where the tool tells one (src/chat/spend.ts).
+                        const spent = spendWords(chat.spend, language, t);
+                        return spent ? (
+                          <span className="ml-auto shrink-0 tabular-nums" title={spent.title} data-chat-spend={chat.id}>
+                            {spent.short}
+                          </span>
+                        ) : null;
+                      })()}
                     </span>
                   </button>
                   {/* Shown on hover and on keyboard focus: hover only, Tab never reached rename and delete. */}

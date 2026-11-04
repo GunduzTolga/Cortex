@@ -54,7 +54,12 @@ interface Running {
   streamed: Set<string>;
   /** The paths of each file change, as the server named them, for the card that asks to apply it. */
   changes: Map<string, string[]>;
+  /** Tokens the turn's model calls counted so far, told as its cost when it completes (ChatSpend; Codex counts no dollars). */
+  tokens: number;
 }
+
+/** Each thread's running token total as this server last told it: a turn counts the rise. */
+const threadTokens = new Map<string, number>();
 
 const conns = new Map<CliId, Conn>();
 const threads = new Map<string, { conn: Conn; threadId: string }>();
@@ -300,7 +305,14 @@ function heard(conn: Conn, method: string, params: unknown): void {
         });
       break;
     case 'thread/tokenUsage/updated': {
-      const usage = body.tokenUsage as { last?: { totalTokens?: unknown }; modelContextWindow?: unknown } | undefined;
+      const usage = body.tokenUsage as { last?: { totalTokens?: unknown }; total?: { totalTokens?: unknown }; modelContextWindow?: unknown } | undefined;
+      const threadId = body.threadId as string;
+      const total = typeof usage?.total?.totalTokens === 'number' && Number.isFinite(usage.total.totalTokens) ? usage.total.totalTokens : null;
+      const before = threadTokens.get(threadId);
+      // The rise of the thread's total since it was last told; the first word from this server counts its last call.
+      if (total !== null && before !== undefined) now.tokens += Math.max(0, total - before);
+      else if (typeof usage?.last?.totalTokens === 'number' && Number.isFinite(usage.last.totalTokens)) now.tokens += Math.max(0, usage.last.totalTokens);
+      if (total !== null) threadTokens.set(threadId, total);
       if (typeof usage?.last?.totalTokens === 'number' && typeof usage.modelContextWindow === 'number') turn.emit({ type: 'usage', used: usage.last.totalTokens, size: usage.modelContextWindow, cost: null, currency: null });
       break;
     }
@@ -310,6 +322,8 @@ function heard(conn: Conn, method: string, params: unknown): void {
     case 'turn/completed': {
       const ended = body.turn as { status?: unknown; error?: { message?: unknown; codexErrorInfo?: unknown } | null } | undefined;
       running.delete(body.threadId as string);
+      // What the turn counted, for the chat's total in the list; Codex says no dollars (subscription or not).
+      if (now.tokens > 0) turn.emit({ type: 'spend', usd: null, tokens: now.tokens, subscription: true });
       if (ended?.status === 'interrupted') now.finish('cancelled');
       else if (ended?.status === 'failed') {
         const sentence = sentenceOf(textOf(ended.error?.message, 2000) || 'Codex could not answer.');
@@ -410,7 +424,7 @@ export const codexBackend: Backend = {
       const policy = policyOf(mode);
       const effort = current('effort');
       const done = new Promise<string>((finish, fail) => {
-        entry = { turn, conn, turnId: null, stopRequested: false, finish, fail, streamed: new Set(), changes: new Map() };
+        entry = { turn, conn, turnId: null, stopRequested: false, finish, fail, streamed: new Set(), changes: new Map(), tokens: 0 };
         running.set(threadId as string, entry);
       });
       // Its server can end it while `turn/start` is still awaited (closed for another vault): the failure

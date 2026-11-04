@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
-import type { ChatEvent, ChatOpened, ChatPush, ChatSummary, CliId, CliInfo, ConfigOption } from '../../shared/chat';
+import type { ChatEvent, ChatOpened, ChatPush, ChatSpend, ChatSummary, CliId, CliInfo, ConfigOption } from '../../shared/chat';
 import { acpBackend } from './acpChat';
 import { type Backend, type Between, type Card, ChatRefusal, type Turn, failureEvent, scrubberFor } from './chatKit';
 import { claudeBackend } from './claudeChat';
@@ -48,6 +48,8 @@ interface Stored extends ChatSummary {
    * only with a turn, and a chat reopened had its tool's chip alone until the next message (29 October).
    */
   options?: ConfigOption[];
+  /** The last running total a tool told for this chat's session (the spend event's `total`), to take the next rise from. */
+  spendMark?: { session: string; usd: number };
 }
 
 interface Index {
@@ -211,7 +213,37 @@ function currentVault(): string {
   return vault;
 }
 
-const summaryOf = (stored: Stored): ChatSummary => ({ id: stored.id, title: stored.title, cli: stored.cli, createdAt: stored.createdAt, updatedAt: stored.updatedAt });
+const summaryOf = (stored: Stored): ChatSummary => ({
+  id: stored.id,
+  title: stored.title,
+  cli: stored.cli,
+  createdAt: stored.createdAt,
+  updatedAt: stored.updatedAt,
+  ...(validSpend(stored.spend) ? { spend: stored.spend } : {}),
+});
+
+/** A total read back from the list as it can be: numbers that are numbers, or none (a hand-edited or older list). */
+function validSpend(spend: unknown): spend is ChatSpend {
+  const one = spend as ChatSpend | undefined;
+  return typeof one === 'object' && one !== null && (one.usd === null || (typeof one.usd === 'number' && Number.isFinite(one.usd) && one.usd >= 0)) && typeof one.tokens === 'number' && Number.isFinite(one.tokens) && one.tokens >= 0 && typeof one.subscription === 'boolean';
+}
+
+/** A turn's cost added to its chat's: dollars stay none until one turn says them; the list hears it at once. */
+export function addSpend(stored: Stored, turn: Extract<ChatEvent, { type: 'spend' }>): void {
+  const had = validSpend(stored.spend) ? stored.spend : { usd: null, tokens: 0, subscription: turn.subscription };
+  let usd = turn.usd === null || !Number.isFinite(turn.usd) || turn.usd < 0 ? had.usd : (had.usd ?? 0) + turn.usd;
+  const total = turn.total;
+  if (total && typeof total.session === 'string' && Number.isFinite(total.usd) && total.usd >= 0) {
+    // The rise since the session's last total; a session not seen before (a new one, or one from before totals were
+    // kept) counts whole, which is what it has cost this chat.
+    const mark = stored.spendMark;
+    const rise = mark && mark.session === total.session && total.usd >= mark.usd ? total.usd - mark.usd : total.usd;
+    usd = (usd ?? 0) + rise;
+    stored.spendMark = { session: total.session, usd: total.usd };
+  }
+  const tokens = had.tokens + (Number.isFinite(turn.tokens) && turn.tokens > 0 ? Math.round(turn.tokens) : 0);
+  stored.spend = { usd, tokens, subscription: had.subscription || turn.subscription };
+}
 
 function storedOf(id: unknown): Stored {
   if (typeof id !== 'string' || !ID.test(id)) throw new ChatRefusal('Not a chat.');
@@ -300,7 +332,18 @@ function turnOf(chat: Live, signal: AbortSignal): Turn {
     // started with the CLI's last choices while the chip showed the chat's own ("Önce sor" shown, edits accepted: 30 October).
     prefs: { ...(readIndex().prefs[stored.cli] ?? {}), ...(chat.stale ? Object.fromEntries(chat.options.map((one) => [one.id, one.current])) : {}) },
     signal,
-    emit: (event) => chat.running && emit(chat, event),
+    emit: (event) => {
+      if (!chat.running) return;
+      // A turn's cost goes to the chat's total in the list, not into what the chat shows.
+      if (event.type === 'spend') {
+        if (!kept(chat)) return;
+        addSpend(stored, event);
+        saveIndexQuietly();
+        push({ chatId: stored.id, summary: summaryOf(stored) });
+        return;
+      }
+      emit(chat, event);
+    },
     setOptions: (options) => setState(chat, { options }),
     setSession: (sessionId) => {
       if (stored.sessionId === sessionId || !kept(chat)) return;

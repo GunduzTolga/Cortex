@@ -103,6 +103,9 @@ test('a message to Claude Code gets its answer streamed in pieces, its steps wit
   assert.ok(!JSON.stringify(events).includes(vault));
 
   const opened = openChat(id);
+  // 2 November notes: the chat's cost in the list, at the API's price and marked as on a subscription; not in its transcript.
+  assert.deepEqual(opened.chat.spend, { usd: 0.0123, tokens: 4240, subscription: true });
+  assert.ok(!events.some((one) => one.type === 'spend'), 'the cost is the list’s, not a line of the chat');
   assert.deepEqual(opened.options.find((one) => one.id === 'model')?.choices.map((one) => one.value), ['default', 'haiku', 'opus'], 'the models Claude Code named');
   const [first] = starts(log);
   assert.deepEqual(first.argv, CLAUDE_ARGS, 'started as the SDK starts it, with nothing else on a first message');

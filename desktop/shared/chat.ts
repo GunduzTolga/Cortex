@@ -48,6 +48,18 @@ export interface CliAuth {
   own?: boolean;
 }
 
+/**
+ * What a chat has cost so far (2 November notes: "sohbet kısmında session maliyeti"): dollars at the API's list price
+ * where the tool says them (Claude Code's own reckoning, an ACP agent's `cost`), and the tokens it counted. On a
+ * subscription (Claude Code, Codex) it is what the work would cost through the API, not what the person pays.
+ */
+export interface ChatSpend {
+  /** Null where the tool counts no money (Codex). */
+  usd: number | null;
+  tokens: number;
+  subscription: boolean;
+}
+
 export interface ChatSummary {
   id: string;
   /** Empty until the first message names it. */
@@ -55,6 +67,8 @@ export interface ChatSummary {
   cli: CliId;
   createdAt: number;
   updatedAt: number;
+  /** Absent until a turn has said what it cost. */
+  spend?: ChatSpend;
 }
 
 export interface ConfigChoice {
@@ -89,6 +103,19 @@ export type ChatEvent =
   | { type: 'answered'; id: string; option: string | null }
   | { type: 'plan'; entries: Array<{ content: string; status: string }> }
   | { type: 'usage'; used: number; size: number; cost: number | null; currency: string | null }
+  /** One turn's share of the chat's cost (ChatSpend), added to the chat's total in the list; not kept in its transcript. */
+  | {
+      type: 'spend';
+      /** This turn's dollars, where the tool tells them per turn; null where it tells none or only a running total. */
+      usd: number | null;
+      tokens: number;
+      subscription: boolean;
+      /**
+       * The session's running total, where the tool keeps one (Claude Code's `total_cost_usd` counts the whole session,
+       * across a resume too: measured 4 November). The chat takes the rise since the last total of the same session.
+       */
+      total?: { session: string; usd: number };
+    }
   | { type: 'done'; reason: string }
   | { type: 'error'; message: string; kind: string | null }
   /** Something the person should know about the answer: `new-session`, the CLI could not continue the chat's conversation and began a new one. */
