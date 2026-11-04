@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { type SyncState, type SyncStatus, remoteLabel } from '../../shared/vaultSync';
 import { onPathFile } from './clis';
+import { bringsGit, installGit, ownGit } from './gitTool';
 import { readSettings, updateSettings } from './settings';
 import { installedVersion, runPython } from './setup';
 
@@ -46,9 +47,19 @@ export function gitProgram(folder: string): string | null {
   return onPathFile([process.platform === 'win32' ? 'git.exe' : 'git'], process.env, (file) => path.isAbsolute(file) && !inside(file));
 }
 
+/** The git a sync runs: the one on the PATH, or else the one Cortex brought (services/gitTool.ts, Windows). */
+export const gitToUse = (folder: string): string | null => gitProgram(folder) ?? ownGit();
+
+/** The engine told which git to run where it is the one Cortex brought; it finds one on the PATH itself. */
+const gitEnv = (vault: string): Record<string, string> => {
+  if (gitProgram(vault)) return {};
+  const own = ownGit();
+  return own ? { CORTEX_GIT: own } : {};
+};
+
 const realGit: Git = (args, cwd, timeout = GIT_TIMEOUT_MS) =>
   new Promise((done) => {
-    const program = gitProgram(cwd);
+    const program = gitToUse(cwd);
     if (!program) return done({ code: 127, out: '', err: 'git not found' });
     execFile(
       program,
@@ -90,6 +101,16 @@ export function setVaultSyncGit(stand: Git | null): void {
  * The engine's sync command for a vault: its own `beyin.py esitle --json`. The tests, whose folders have no engine
  * installed, run the source module with the vault said (`--vault`).
  */
+/**
+ * The environment git is given for a remote, by its label (`github.com/owner/repo`): a GitHub token where the vault
+ * was joined to GitHub from here (services/github.ts), nothing otherwise (the person's own git credentials).
+ * Refused, with the sentence to show, where the token could not be had (the connection expired).
+ */
+let credentialsFor: (remote: string | null) => Promise<Record<string, string>> = async () => ({});
+export function setVaultSyncCredentials(provide: (remote: string | null) => Promise<Record<string, string>>): void {
+  credentialsFor = provide;
+}
+
 let engineCommand: (vault: string) => string[] | null = (vault) =>
   installedVersion(vault) ? [path.join(vault, 'beyin.py'), 'esitle', '--json'] : null;
 export function setVaultSyncEngine(module: string | null): void {
@@ -156,7 +177,7 @@ export async function vaultSyncStatus(): Promise<SyncStatus> {
     detail = [];
     lastSyncedAt = null;
   }
-  return { ...(await inspect(vault)), on: readSettings().vaultSync, state, lastSyncedAt, detail };
+  return { ...(await inspect(vault)), canBringGit: bringsGit(), on: readSettings().vaultSync, state, lastSyncedAt, detail };
 }
 
 async function say(next: SyncState, said: string[] = []): Promise<void> {
@@ -169,13 +190,22 @@ async function say(next: SyncState, said: string[] = []): Promise<void> {
 
 const SAID: Record<string, SyncState> = { synced: 'synced', nothing: 'synced', conflict: 'conflict', secret: 'secret', offline: 'offline', error: 'error', missing: 'error' };
 
-async function syncOnce(vault: string): Promise<void> {
+const setUpFirst = () => (readSettings().language === 'en' ? 'Set Cortex up in the vault first (Settings → Cortex).' : "Önce Cortex'i kasaya kur (Ayarlar → Cortex).");
+
+async function syncOnce(vault: string, remote: string | null): Promise<void> {
   await say('syncing', detail);
   const command = engineCommand(vault);
-  if (!command) return say('error', [readSettings().language === 'en' ? 'Set Cortex up in the vault first (Settings → Cortex).' : "Önce Cortex'i kasaya kur (Ayarlar → Cortex)."]);
+  if (!command) return say('error', [setUpFirst()]);
+  let env: Record<string, string>;
+  try {
+    env = await credentialsFor(remote);
+  } catch (err) {
+    // GitHub out of reach to renew the token: offline, as a remote out of reach is; anything else (expired) is said.
+    return say((err as { offline?: unknown })?.offline === true ? 'offline' : 'error', [String((err as Error)?.message ?? err).slice(0, 300)]);
+  }
   let result: Record<string, unknown>;
   try {
-    result = await runPython(command, { cwd: vault, timeout: ENGINE_TIMEOUT_MS });
+    result = await runPython(command, { cwd: vault, timeout: ENGINE_TIMEOUT_MS, env: { ...gitEnv(vault), ...env } });
   } catch (err) {
     // An engine older than the command says it does not know it: the vault's engine wants the app's update.
     return say('error', [String((err as Error)?.message ?? err).slice(0, 300)]);
@@ -202,11 +232,11 @@ function sync(): Promise<void> {
       if (!vault || !vaultSync) return;
       const offered = await inspect(vault);
       if (!offered.available) {
-        tell({ ...offered, on: vaultSync, state, lastSyncedAt, detail });
+        tell({ ...offered, canBringGit: bringsGit(), on: vaultSync, state, lastSyncedAt, detail });
         return;
       }
       try {
-        await syncOnce(vault);
+        await syncOnce(vault, offered.remote);
       } catch (err) {
         await say('error', [String((err as Error)?.message ?? err).slice(0, 300)]);
       } finally {
@@ -237,6 +267,56 @@ export async function setVaultSync(on: unknown): Promise<SyncStatus> {
   if (on) void sync();
   else if (soon) clearTimeout(soon);
   return vaultSyncStatus();
+}
+
+/**
+ * The vault joined to a remote for the first time (services/github.ts): sent to an empty one (`baslat`), or taken in
+ * from one that holds a vault (`baglan`), by the engine (`beyin.py esitle --baslat|--baglan <url>`); kept in step from
+ * then on when it went through. The engine's result as it gave it. Not while a sync runs: it waits for it.
+ */
+export async function joinVault(url: string, mode: 'baslat' | 'baglan', env: Record<string, string>): Promise<Record<string, unknown>> {
+  const vault = readSettings().vault;
+  if (!vault || !fs.existsSync(vault)) return { state: 'error', detail: [readSettings().language === 'en' ? 'Pick a vault first.' : 'Önce bir kasa seç.'] };
+  const command = engineCommand(vault);
+  if (!command) return { state: 'error', detail: [setUpFirst()] };
+  if (running) await running.catch(() => undefined);
+  // No git on this computer: on Windows, Cortex brings its own first (the person never sees a git setup).
+  if (!gitToUse(vault) && bringsGit()) {
+    try {
+      await installGit();
+    } catch (err) {
+      return { state: 'error', detail: [String((err as Error)?.message ?? err).slice(0, 300)] };
+    }
+  }
+  let result: Record<string, unknown> = { state: 'busy' };
+  // A sync of the same vault from elsewhere (the server's timer, a second window) holds the engine's lock: waited for.
+  for (let attempt = 0; attempt < 5 && result.state === 'busy'; attempt += 1) {
+    if (attempt) await new Promise((done) => setTimeout(done, 3_000));
+    try {
+      result = await runPython([...command, `--${mode}`, url], { cwd: vault, timeout: ENGINE_TIMEOUT_MS, env: { ...gitEnv(vault), ...env } });
+    } catch (err) {
+      return { state: 'error', detail: [String((err as Error)?.message ?? err).slice(0, 300)] };
+    }
+  }
+  if (result.state === 'synced') {
+    lastSyncedAt = Date.now();
+    quietUntil = Date.now() + 5_000;
+    updateSettings((settings) => {
+      settings.vaultSync = true;
+    });
+    state = 'synced';
+    detail = [];
+    tell(await vaultSyncStatus());
+  }
+  return result;
+}
+
+/** Git brought by Cortex where there is none (Windows, Settings › Sunucu "Git'i indir"); the status after it. */
+export async function installVaultGit(): Promise<SyncStatus> {
+  await installGit();
+  const status = await vaultSyncStatus();
+  tell(status);
+  return status;
 }
 
 /** In step now, when it is on; the status after it. */

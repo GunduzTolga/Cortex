@@ -11,6 +11,8 @@ export interface SyncStatus {
   available: boolean;
   /** What is missing when it is not: git itself, a repository at the vault's top, or a remote branch to follow. */
   missing: 'git' | 'repo' | 'remote' | null;
+  /** Where git is missing: Cortex can bring its own here (Windows: MinGit, services/gitTool.ts). */
+  canBringGit: boolean;
   /** Kept in step: the person's switch (Settings › Sunucu). */
   on: boolean;
   state: SyncState;
@@ -28,6 +30,8 @@ export interface VaultSyncApi {
   setOn(on: boolean): Promise<SyncStatus>;
   /** In step now: the status after it. */
   now(): Promise<SyncStatus>;
+  /** Git brought by Cortex where there is none (Windows); the status after it. */
+  installGit(): Promise<SyncStatus>;
 }
 
 /** The remote's address said without a name, password or token in it: `github.com/owner/repo`. */

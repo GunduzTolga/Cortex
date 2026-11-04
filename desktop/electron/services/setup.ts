@@ -662,7 +662,7 @@ export function installPython(): Promise<SetupStatus> {
 }
 
 /** The package taken apart into a folder, nothing written outside it; one JSON line says it is done. */
-const UNPACK = [
+export const UNPACK = [
   'import json, sys, zipfile, pathlib',
   'dest = pathlib.Path(sys.argv[2]).resolve()',
   'with zipfile.ZipFile(sys.argv[1]) as z:',

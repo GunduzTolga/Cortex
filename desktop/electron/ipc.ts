@@ -8,6 +8,7 @@ import { defaultVaultDir, setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
 import { keepAttachment } from './services/attachments';
+import * as github from './services/github';
 import * as hermes from './services/hermesChat';
 import { captureToInbox } from './services/inbox';
 import * as officeTalk from './services/officeTalk';
@@ -339,10 +340,23 @@ export function registerIpc(): void {
   handle('telegram:pairAgain', () => telegram.pairTelegramAgain());
   handle('telegram:disconnect', () => telegram.disconnectTelegram());
 
+  // The vault kept on GitHub (services/github.ts, Settings › Sunucu): signed in with a code, a repository made or
+  // picked, the vault joined to it. The tokens stay here; the window hears the account and the repository.
+  handle('github:status', () => github.githubStatus());
+  handle('github:start', () => github.startGithub());
+  handle('github:openVerify', () => github.openVerify());
+  handle('github:repos', () => github.githubRepos());
+  handle('github:openInstall', () => github.openInstall());
+  handle('github:create', (name) => github.createRepo(name));
+  handle('github:connect', (fullName) => github.connectRepo(fullName));
+  handle('github:disconnect', () => github.disconnectGithub());
+  github.onGithub((status) => broadcast('github:status', status));
+
   // The vault kept in step with its git remote (services/vaultSync.ts, Settings › Sunucu): a switch, a status, now.
   handle('vaultSync:status', () => vaultSync.vaultSyncStatus());
   handle('vaultSync:setOn', (on) => vaultSync.setVaultSync(on));
   handle('vaultSync:now', () => vaultSync.syncVaultNow());
+  handle('vaultSync:installGit', () => vaultSync.installVaultGit());
   vaultSync.onVaultSync((status) => broadcast('vaultSync:status', status));
   vaultSync.onVaultSyncTrouble((state, detail) => {
     const say = (tr: string, en: string) => (readSettings().language === 'en' ? en : tr);

@@ -4,6 +4,7 @@ import pineapple from '../../../tema/ananas/marka/pyn-ananas-512.png';
 import logo from '../../../tema/ananas/marka/pyn-logo-96.png';
 import sitting from '../../../tema/ananas/marka/pyn-oturan-512.png';
 import type { CliAuth, CliId } from '@shared/chat';
+import type { GithubStatus } from '@shared/github';
 import { messageOf } from '@shared/ipcError';
 import { engineAction, type SetupStatus, wakePhraseLabel } from '@shared/setup';
 import { AuthDialog, TOOL_NAMES } from '../chat/AuthDialog';
@@ -14,6 +15,7 @@ import { refusal, useApp } from '../store/app';
 import { useSetup } from '../store/setup';
 import { LanguageSwitch } from '../ui/LanguageSwitch';
 import { HotkeyBusy, Progress, VoiceHelperBar, engineButtonText, pythonWantingText } from '../ui/SetupSections';
+import { GithubConnect } from '../ui/GithubConnect';
 import { Button, Spinner, Switch, inputClass } from '../ui/ui';
 
 /**
@@ -26,7 +28,7 @@ import { Button, Spinner, Switch, inputClass } from '../ui/ui';
  * for later (src/ui/SettingsDialog.tsx), and can open this again.
  */
 
-type StepId = 'name' | 'vault' | 'python' | 'engine' | 'tools' | 'voice' | 'done';
+type StepId = 'name' | 'vault' | 'python' | 'engine' | 'tools' | 'voice' | 'backup' | 'done';
 /** A tool being installed from here (`failed`: its installer ended without it). */
 /** A tool being installed; `why`, where the main process refused before any window opened. */
 type Installing = { id: CliId; failed: boolean; why?: string } | null;
@@ -38,11 +40,12 @@ const TITLE: Record<StepId, Key> = {
   engine: 'onboarding.step.engine',
   tools: 'onboarding.step.tools',
   voice: 'onboarding.step.voice',
+  backup: 'onboarding.step.backup',
   done: 'onboarding.step.done',
 };
 
 /** The vault and the name are the person's to give; the rest can wait for the settings. */
-const OPTIONAL = new Set<StepId>(['name', 'python', 'engine', 'tools', 'voice']);
+const OPTIONAL = new Set<StepId>(['name', 'python', 'engine', 'tools', 'voice', 'backup']);
 
 /**
  * A model server with a model loaded is ready: it was just asked. A sign-in the tool keeps is
@@ -61,6 +64,12 @@ export function Onboarding() {
   const steps = useSetup((s) => s.steps);
   const error = useSetup((s) => s.error);
   const auth = useChat((s) => s.auth);
+  // The vault backed up on GitHub (Faz 1): offered as a last, optional step where Cortex can sign in to GitHub.
+  const [github, setGithub] = useState<GithubStatus | null>(null);
+  useEffect(() => {
+    void window.cortex.github.status().then(setGithub, () => setGithub(null));
+    return window.cortex.on.github(setGithub);
+  }, []);
   const [at, setAt] = useState<StepId>('name');
   const [skipped, setSkipped] = useState<Set<StepId>>(new Set());
   // Python's step stays in the list once it was needed, so it can be seen done.
@@ -169,9 +178,12 @@ export function Onboarding() {
     // signing in to the tools is the longest step, so the download is done by the end instead of starting there.
     list.push('engine');
     if (status?.voiceSupported) list.push('voice');
-    list.push('tools', 'done');
+    list.push('tools');
+    // Last before the end: the vault and Pyn's memory are there by then, and it is the one step nobody needs to start.
+    if (github?.offered) list.push('backup');
+    list.push('done');
     return list;
-  }, [neededPython, status]);
+  }, [neededPython, status, github?.offered]);
 
   const done: Record<StepId, boolean> = {
     name: Boolean(settings.userName),
@@ -181,6 +193,7 @@ export function Onboarding() {
     engine: Boolean(status?.engine.installed) && !engineAction(status?.engine),
     tools: fresh.size > 0 || Boolean(auth?.some(serving)),
     voice: Boolean(status?.voice?.installed),
+    backup: Boolean(github?.repo),
     done: false,
   };
 
@@ -263,6 +276,7 @@ export function Onboarding() {
           {at === 'engine' ? <EngineStep status={status} /> : null}
           {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} signingIn={signingIn} unfinished={unfinished} installing={installing} onLogin={login} onInstall={install} /> : null}
           {at === 'voice' ? <VoiceStep status={status} onStarted={next} /> : null}
+          {at === 'backup' ? <BackupStep status={status} /> : null}
           {at === 'done' ? <DoneStep order={order} done={done} skipped={skipped} canFinish={Boolean(vault)} /> : null}
 
           {steps && at === steps.job ? <Progress job={steps.job} lines={steps.lines} /> : busy && at === busy ? <Progress job={busy} lines={[]} /> : null}
@@ -520,6 +534,22 @@ function EngineStep({ status }: { status: SetupStatus | null }) {
       ) : (
         <p className="mt-5 text-[13px] text-zinc-600">{t('setup.engine.noneNoPackage')}</p>
       )}
+    </div>
+  );
+}
+
+/** The vault backed up on GitHub, optional: the same block as Settings › Sunucu (src/ui/GithubConnect.tsx). */
+function BackupStep({ status }: { status: SetupStatus | null }) {
+  const t = useT();
+  return (
+    <div>
+      <Heading title={t('onboarding.backup.title')}>
+        <p>{t('onboarding.backup.body')}</p>
+        <p className="text-[12.5px] text-zinc-500">{t('onboarding.backup.later')}</p>
+      </Heading>
+      <div className="mt-5 -mx-3" data-onboarding-backup>
+        {status?.engine.installed ? <GithubConnect /> : <p className="px-3 text-[13px] text-zinc-600">{t('onboarding.backup.needsEngine')}</p>}
+      </div>
     </div>
   );
 }
