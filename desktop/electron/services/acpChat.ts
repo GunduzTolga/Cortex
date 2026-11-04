@@ -279,6 +279,12 @@ function heard(conn: Conn, method: string, params: unknown): void {
       const cost = update.cost as { amount?: unknown; currency?: unknown } | undefined;
       if (typeof update.used === 'number' && typeof update.size === 'number')
         turn.emit({ type: 'usage', used: update.used, size: update.size, cost: typeof cost?.amount === 'number' ? cost.amount : null, currency: typeof cost?.currency === 'string' ? cost.currency : null });
+      // The agent's cost is the session's running total (ACP's usage_update): the chat's list takes its rise. Dollars only.
+      {
+        const session = sessions.get(turn.chatId)?.sessionId ?? turn.sessionId;
+        if (session && typeof cost?.amount === 'number' && Number.isFinite(cost.amount) && (cost.currency ?? 'USD') === 'USD')
+          turn.emit({ type: 'spend', usd: null, tokens: 0, subscription: false, total: { session, usd: cost.amount } });
+      }
       break;
     }
     case 'config_option_update': {

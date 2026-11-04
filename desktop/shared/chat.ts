@@ -48,6 +48,29 @@ export interface CliAuth {
   own?: boolean;
 }
 
+/**
+ * What a chat has cost so far (2 November notes: "sohbet kısmında session maliyeti"): dollars at the API's list price
+ * where the tool says them (Claude Code's own reckoning, an ACP agent's `cost`), and the tokens it counted. On a
+ * subscription (Claude Code, Codex) it is what the work would cost through the API, not what the person pays.
+ */
+/** A file added to a message (2 November notes): kept on this computer by the main process, named by its id. */
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  /** A picture the model is shown, or a file it reads. */
+  kind: 'image' | 'file';
+}
+
+/** The tools that take attachments now (Claude Code, Codex, and the tests' stand-ins for them); the others say they do not. */
+export const ATTACHING_CLIS: readonly CliId[] = ['claude', 'codex', 'test-claude', 'test-codex'];
+
+export interface ChatSpend {
+  /** Null where the tool counts no money (Codex). */
+  usd: number | null;
+  tokens: number;
+  subscription: boolean;
+}
+
 export interface ChatSummary {
   id: string;
   /** Empty until the first message names it. */
@@ -55,6 +78,8 @@ export interface ChatSummary {
   cli: CliId;
   createdAt: number;
   updatedAt: number;
+  /** Absent until a turn has said what it cost. */
+  spend?: ChatSpend;
 }
 
 export interface ConfigChoice {
@@ -77,7 +102,7 @@ export type PermissionKind = 'allow_once' | 'allow_always' | 'reject_once' | 're
 
 /** What a chat shows, in the order it happened. */
 export type ChatEvent =
-  | { type: 'user'; text: string; at: number }
+  | { type: 'user'; text: string; at: number; attachments?: Array<{ name: string; kind: 'image' | 'file' }> }
   /** A piece of the answer, to be added to the message of that id. */
   | { type: 'text'; id: string; text: string }
   /** A piece of the CLI's thinking, shown folded. */
@@ -89,6 +114,19 @@ export type ChatEvent =
   | { type: 'answered'; id: string; option: string | null }
   | { type: 'plan'; entries: Array<{ content: string; status: string }> }
   | { type: 'usage'; used: number; size: number; cost: number | null; currency: string | null }
+  /** One turn's share of the chat's cost (ChatSpend), added to the chat's total in the list; not kept in its transcript. */
+  | {
+      type: 'spend';
+      /** This turn's dollars, where the tool tells them per turn; null where it tells none or only a running total. */
+      usd: number | null;
+      tokens: number;
+      subscription: boolean;
+      /**
+       * The session's running total, where the tool keeps one (Claude Code's `total_cost_usd` counts the whole session,
+       * across a resume too: measured 4 November). The chat takes the rise since the last total of the same session.
+       */
+      total?: { session: string; usd: number };
+    }
   | { type: 'done'; reason: string }
   | { type: 'error'; message: string; kind: string | null }
   /** Something the person should know about the answer: `new-session`, the CLI could not continue the chat's conversation and began a new one. */
@@ -119,7 +157,9 @@ export interface ChatApi {
   list(): Promise<ChatSummary[]>;
   open(id: string): Promise<ChatOpened>;
   /** A message, to the chat of that id or to a new one with that CLI; the chat's id. The answer comes as pushes. */
-  send(id: string | null, cli: CliId, text: string): Promise<{ id: string }>;
+  send(id: string | null, cli: CliId, text: string, attachments?: string[]): Promise<{ id: string }>;
+  /** A file's bytes (base64) kept for a message to come; at most 20 MB. */
+  attach(name: string, data: string): Promise<ChatAttachment>;
   cancel(id: string): Promise<void>;
   answer(id: string, permission: string, option: string | null): Promise<void>;
   setOption(id: string, option: string, value: string): Promise<ConfigOption[]>;

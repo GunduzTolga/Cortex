@@ -29,7 +29,7 @@ export interface Asked {
 }
 
 export interface Turn {
-  user: { text: string; at: number } | null;
+  user: { text: string; at: number; attachments?: Array<{ name: string; kind: 'image' | 'file' }> } | null;
   thought: string;
   steps: Step[];
   /** The answer's words, its messages one after another. */
@@ -57,7 +57,7 @@ export function turnsOf(events: readonly ChatEvent[]): Turn[] {
   for (const event of events) {
     switch (event.type) {
       case 'user':
-        turn = empty({ text: event.text, at: event.at });
+        turn = empty({ text: event.text, at: event.at, ...(event.attachments?.length ? { attachments: event.attachments } : {}) });
         turns.push(turn);
         lastText = null;
         break;

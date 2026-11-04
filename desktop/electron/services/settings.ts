@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
+import type { ThemeChoice } from '../../shared/api';
 import type { CliId } from '../../shared/chat';
 import { HERMES_PROFILE, hermesAddress } from '../../shared/hermes';
 import type { AppLanguage } from '../../shared/language';
@@ -29,6 +30,8 @@ import { renameRetrying } from './fileWrite';
  */
 
 export interface Settings {
+  /** Light, dark, or as the system is (shared/api.ts); the system's by default. Applied through nativeTheme (services/theme.ts). */
+  theme: ThemeChoice;
   /** The vault by its real path, or null before one is chosen. */
   vault: string | null;
   /** Null until somebody picks; read through `appLanguage` (shared/language.ts). */
@@ -74,7 +77,7 @@ export function tidyName(value: unknown): string | null {
   return name || null;
 }
 
-const EMPTY: Settings = { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null };
+const EMPTY: Settings = { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null };
 
 let cache: Settings | null = null;
 let keepOff = false;
@@ -86,6 +89,7 @@ export function settingsPath(): string {
 
 function hydrate(raw: Record<string, unknown>): Settings {
   return {
+    theme: raw.theme === 'light' || raw.theme === 'dark' ? raw.theme : 'system',
     vault: typeof raw.vault === 'string' && raw.vault ? raw.vault : null,
     language: raw.language === 'en' || raw.language === 'tr' ? raw.language : null,
     allFiles: raw.allFiles === true,

@@ -10,7 +10,7 @@ import { OfficeTalkSection } from './OfficeTalkSection';
 import { SetupSections } from './SetupSections';
 import { ServerSection } from './ServerSection';
 import { TelegramSection } from './TelegramSection';
-import { Row, SaveButton, Section } from './settingsParts';
+import { Row, SaveButton, Section, Segments } from './settingsParts';
 import { Button, Modal, Switch, inputClass } from './ui';
 
 /**
@@ -39,6 +39,19 @@ export function SettingsDialog() {
           </Row>
           <Row label={t('settings.name')}>
             <NameField />
+          </Row>
+          <Row label={t('settings.theme')}>
+            <Segments
+              options={[
+                { id: 'system', label: t('settings.theme.system') },
+                { id: 'light', label: t('settings.theme.light') },
+                { id: 'dark', label: t('settings.theme.dark') },
+              ]}
+              chosen={settings.theme}
+              onChoose={(theme) => void set({ theme })}
+              label={t('settings.theme')}
+              data="settings-theme"
+            />
           </Row>
           <Switch checked={settings.background} onChange={(on) => void set({ background: on })} label={t('settings.background')} hint={t('settings.background.hint')} data-settings-background />
           {vault ? (

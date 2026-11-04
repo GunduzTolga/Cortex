@@ -6,7 +6,7 @@ import test from 'node:test';
 import type { ChatEvent, ChatPush } from '../shared/chat';
 import { answerChat, cancelChat, forgetChats, onChatPush, openChat, restartIdleChats, sendChat, setChatOption, shutdownChats } from '../electron/services/chat';
 import { STOP_GRACE } from '../electron/services/chatKit';
-import { codexOptions, sentenceOf } from '../electron/services/codexChat';
+import { codexOptions, sentenceOf, inputOf } from '../electron/services/codexChat';
 import { updateSettings } from '../electron/services/settings';
 
 /**
@@ -97,6 +97,8 @@ test('a message to Codex gets its thinking, its words as they come and its final
   assert.ok(!JSON.stringify(events).includes(vault));
 
   const opened = openChat(id);
+  // Codex counts no dollars: the chat's tokens alone, from the turn's first word of usage (2 November notes).
+  assert.deepEqual(opened.chat.spend, { usd: null, tokens: 4096, subscription: true });
   assert.deepEqual(opened.options.find((one) => one.id === 'model')?.choices.map((one) => one.value), ['gpt-6-luna', 'gpt-5.6-terra'], 'the server’s models, a hidden one left out');
   const [started] = turnsStarted(log);
   assert.equal(started.params.model, 'gpt-6-luna', 'the model the server marks as default');
@@ -359,4 +361,16 @@ test('a turn let go before Codex has named it is interrupted, and never heard ag
     STOP_GRACE.ms = grace;
     shutdownChats();
   }
+});
+
+test('Codex is given an attached picture as a local image and an attached file by its path', () => {
+  const held = [
+    { id: 'a', name: 'grafik.png', kind: 'image' as const, path: '/ekler/a__grafik.png', mime: 'image/png', size: 10 },
+    { id: 'b', name: 'notlar.txt', kind: 'file' as const, path: '/ekler/b__notlar.txt', mime: null, size: 7 },
+  ];
+  assert.deepEqual(inputOf('bak', held), [
+    { type: 'text', text: 'bak\n\n[Attached files - read them from these paths]\n- notlar.txt: /ekler/b__notlar.txt', text_elements: [] },
+    { type: 'localImage', path: '/ekler/a__grafik.png' },
+  ]);
+  assert.deepEqual(inputOf('', [held[0]]), [{ type: 'localImage', path: '/ekler/a__grafik.png' }], 'a picture alone, no empty words');
 });

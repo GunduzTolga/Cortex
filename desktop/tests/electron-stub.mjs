@@ -92,5 +92,6 @@ export const session = {};
 export const contextBridge = { exposeInMainWorld: noop };
 export const ipcRenderer = { invoke: async () => undefined, on: noop, removeListener: noop };
 // One 1920x1080 screen, its taskbar at the foot.
+export const nativeTheme = { themeSource: 'system' };
 export const screen = { getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1040 } }] };
-export default { app, ipcMain, dialog, shell, safeStorage, BrowserWindow, Menu, nativeImage, Tray, session, contextBridge, ipcRenderer, screen };
+export default { app, ipcMain, dialog, shell, safeStorage, BrowserWindow, Menu, nativeImage, Tray, session, contextBridge, ipcRenderer, screen, nativeTheme };

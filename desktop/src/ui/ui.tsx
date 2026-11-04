@@ -15,7 +15,7 @@ type ButtonTone = 'primary' | 'ghost' | 'quiet' | 'danger';
 
 const TONES: Record<ButtonTone, string> = {
   // Gold, an ink outline and a hard shadow it presses into.
-  primary: 'kg-press border-[1.5px] border-darkDelegation bg-gold text-darkDelegation shadow-[3px_3px_0_0_#1b1712] hover:bg-signal',
+  primary: 'kg-press border-[1.5px] border-darkDelegation bg-gold text-onGold shadow-[3px_3px_0_0_var(--color-shadow)] hover:bg-signal',
   ghost: 'bg-white text-zinc-600 border border-darkDelegation/25 hover:border-darkDelegation hover:text-darkDelegation',
   quiet: 'bg-transparent text-zinc-400 hover:bg-zinc-100 hover:text-darkDelegation',
   danger: 'bg-transparent text-zinc-400 border border-transparent hover:bg-red-50 hover:text-red-500',

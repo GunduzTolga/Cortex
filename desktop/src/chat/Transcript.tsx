@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Brain, Check, ChevronRight, FileText, Globe, Info, ListChecks, PencilLine, Search, Terminal, Wrench, X } from 'lucide-react';
+import { AlertTriangle, Brain, Check, ChevronRight, FileText, Globe, Image as ImageIcon, Info, ListChecks, PencilLine, Search, Terminal, Wrench, X } from 'lucide-react';
 // Pyn beside its answers, the logo's small copy (drawn for 24-36 px). While Pyn is still writing, it pulses.
 import face from '../../../tema/ananas/marka/pyn-logo-96.png';
 import { turkishOf } from '@shared/refusalsTr';
@@ -173,7 +173,7 @@ function Answer({ turn, live, onSignIn, onRetry }: { turn: Turn; live: boolean; 
             {/* What the main process said, in English; a CLI's own words are left as they came. */}
             <p className="mt-0.5 break-words font-mono text-[11px] text-zinc-500">{language === 'en' ? turn.end.message : turkishOf(turn.end.message)}</p>
             {(turn.end.error === 'auth' || turn.end.error === 'provider-auth' || turn.end.error === 'provider-key') && onSignIn ? (
-              <button type="button" onClick={onSignIn} className="mt-2 rounded-lg border-[1.5px] border-darkDelegation bg-gold px-2.5 py-1 text-[11.5px] font-semibold text-darkDelegation hover:bg-signal" data-chat-sign-in>
+              <button type="button" onClick={onSignIn} className="mt-2 rounded-lg border-[1.5px] border-darkDelegation bg-gold px-2.5 py-1 text-[11.5px] font-semibold text-onGold hover:bg-signal" data-chat-sign-in>
                 {t('chat.signIn')}
               </button>
             ) : null}
@@ -223,8 +223,23 @@ export function Transcript({ turns, running, onSignIn, onRetry }: { turns: Turn[
         {turns.map((turn, at) => (
           <div key={at} className="flex flex-col gap-4">
             {turn.user ? (
-              <div className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-zinc-200/80 bg-paper-2 px-4 py-2.5 text-[14px] leading-relaxed text-darkDelegation" data-chat-user>
-                {turn.user.text}
+              <div className="ml-auto flex max-w-[85%] flex-col items-end gap-1.5">
+                {/* What went with the message, by name (2 November notes); the files themselves stay on this computer. */}
+                {turn.user.attachments?.length ? (
+                  <div className="flex flex-wrap justify-end gap-1.5" data-chat-user-attachments>
+                    {turn.user.attachments.map((one, index) => (
+                      <span key={index} className="flex max-w-[16rem] items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1 text-[12px] text-zinc-600">
+                        {one.kind === 'image' ? <ImageIcon size={13} className="shrink-0 text-zinc-500" /> : <FileText size={13} className="shrink-0 text-zinc-500" />}
+                        <span className="truncate">{one.name}</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {turn.user.text ? (
+                  <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-zinc-200/80 bg-paper-2 px-4 py-2.5 text-[14px] leading-relaxed text-darkDelegation" data-chat-user>
+                    {turn.user.text}
+                  </div>
+                ) : null}
               </div>
             ) : null}
             <Answer
