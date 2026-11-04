@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { app, dialogAnswer, handlers, sent } from 'electron';
+import { app, dialogAnswer, handlers, nativeTheme, sent } from 'electron';
 import { registerIpc, trustPagesWhere } from '../electron/ipc';
 import { forgetSettings, readSettings, settingsPath, updateSettings } from '../electron/services/settings';
 import { pythonOf } from '../electron/services/localChat';
@@ -52,14 +52,14 @@ test('a frame that is not the page, or a page that is not the app’s, is refuse
 
 test('the window may set the language and how the tree shows the vault, and never the vault', async () => {
   firstRun();
-  const off = { allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false };
+  const off = { theme: 'system', allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false };
   assert.deepEqual(await call('settings:set', { language: 'en', vault: '/etc' }), { language: 'en', ...off });
   assert.equal(readSettings().vault, null);
   assert.deepEqual(await call('settings:set', { language: 'de' }), { language: 'en', ...off }, 'a language the app does not have changes nothing');
   assert.deepEqual(await call('settings:set', { language: null }), { language: null, ...off });
-  assert.deepEqual(await call('settings:set', { allFiles: true }), { language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false }, 'one setting changed leaves the others');
-  assert.deepEqual(await call('settings:set', { nameIcons: 'yes', allFiles: 0 }), { language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false }, 'what is not a yes or a no changes nothing');
-  assert.deepEqual(await call('settings:set', null), { language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false });
+  assert.deepEqual(await call('settings:set', { allFiles: true }), { theme: 'system', language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false }, 'one setting changed leaves the others');
+  assert.deepEqual(await call('settings:set', { nameIcons: 'yes', allFiles: 0 }), { theme: 'system', language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false }, 'what is not a yes or a no changes nothing');
+  assert.deepEqual(await call('settings:set', null), { theme: 'system', language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false });
   // How Pyn addresses the person, and the first-run screen gone through: from the window, as values they can be.
   const named = (await call('settings:set', { userName: '  Tolga   Bey ', onboarded: true })) as { userName: string | null; onboarded: boolean };
   assert.deepEqual([named.userName, named.onboarded], ['Tolga Bey', true]);
@@ -253,3 +253,14 @@ test('a vault opened while there was no Python is bound once the setup has insta
   assert.equal(asked.filter((one) => one === 'relocate').length, 1);
   assert.equal(sent.filter(([channel]) => channel === 'app:notice').length, 1, 'said once');
 });
+
+test('the theme is set from the window as one of its three values, and turned at once (2 November notes)', async () => {
+  firstRun();
+  assert.equal(((await call('settings:set', { theme: 'dark' })) as { theme: string }).theme, 'dark');
+  assert.equal(nativeTheme.themeSource, 'dark', 'the window and its frame follow at once');
+  assert.equal(((await call('settings:set', { theme: 'blue' })) as { theme: string }).theme, 'dark', 'a theme the app does not have changes nothing');
+  assert.equal(((await call('settings:set', { theme: 'system' })) as { theme: string }).theme, 'system');
+  assert.equal(nativeTheme.themeSource, 'system');
+  fs.rmSync(settingsPath(), { recursive: true, force: true });
+});
+

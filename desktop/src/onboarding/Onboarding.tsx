@@ -212,7 +212,7 @@ export function Onboarding() {
 
   return (
     <div
-      className="relative flex h-full bg-[#f3efe4]"
+      className="relative flex h-full bg-white"
       data-onboarding
       data-onboarding-step={at}
       onPointerDownCapture={() => (touched.current = true)}
@@ -223,7 +223,7 @@ export function Onboarding() {
       </div>
       <nav className="flex w-60 shrink-0 flex-col border-r border-darkDelegation/10 px-4 py-8" aria-label={t('onboarding.title')}>
         <div className="mb-6 flex items-center gap-2 px-2">
-          <img src={logo} alt="" className="h-9 w-9" />
+          <img src={logo} alt="" className="kg-logo h-9 w-9" />
           <span className="font-display text-xl text-darkDelegation">Cortex</span>
         </div>
         <ol className="space-y-1">
@@ -239,7 +239,7 @@ export function Onboarding() {
                   data-onboarding-mark={mark}
                 >
                   <span
-                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-[1.5px] text-[10px] font-black ${mark === 'done' ? 'border-darkDelegation bg-gold text-darkDelegation' : 'border-darkDelegation/30 text-zinc-500'}`}
+                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-[1.5px] text-[10px] font-black ${mark === 'done' ? 'border-darkDelegation bg-gold text-onGold' : 'border-darkDelegation/30 text-zinc-500'}`}
                   >
                     {mark === 'done' ? <Check size={11} strokeWidth={3} /> : mark === 'skipped' ? <SkipForward size={10} /> : i + 1}
                   </span>
@@ -307,7 +307,7 @@ function Heading({ title, children }: { title: string; children?: React.ReactNod
 function Done({ children }: { children: React.ReactNode }) {
   return (
     <p className="mt-5 flex items-center gap-2 text-[13px] font-semibold text-darkDelegation" data-onboarding-ready>
-      <span className="flex h-5 w-5 items-center justify-center rounded-full border-[1.5px] border-darkDelegation bg-gold">
+      <span className="flex h-5 w-5 items-center justify-center rounded-full border-[1.5px] border-darkDelegation bg-gold text-onGold">
         <Check size={11} strokeWidth={3} />
       </span>
       {children}

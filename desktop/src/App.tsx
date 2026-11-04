@@ -44,6 +44,7 @@ export function App() {
   const vault = useApp((s) => s.vault);
   const unreadable = useApp((s) => s.settingsUnreadable);
   const nameIcons = useApp((s) => s.settings.nameIcons);
+  const theme = useApp((s) => s.settings.theme);
   const onboarded = useApp((s) => s.settings.onboarded);
 
   useEffect(() => {
@@ -109,6 +110,19 @@ export function App() {
   // A word from work done in the background (yakala moved to the vault chosen): a failure stays until it is closed.
   useEffect(() => window.cortex.on.notice((word) => void useApp.getState().toast({ ...word, sticky: word.tone === 'error' })), []);
 
+  // Light or dark on the page itself (src/index.css, `:root[data-theme='dark']`): the system's, followed as it changes,
+  // or the one chosen. The main process turns the frame (electron/services/theme.ts); the page does not wait on it to
+  // reach prefers-color-scheme, which a hidden or offscreen window was not given (the dark pictures came out light).
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      document.documentElement.dataset.theme = theme === 'dark' || (theme === 'system' && query.matches) ? 'dark' : 'light';
+    };
+    apply();
+    query.addEventListener('change', apply);
+    return () => query.removeEventListener('change', apply);
+  }, [theme]);
+
   // The notes are named as the settings say, wherever they are shown (src/notes/notesStore.ts).
   useEffect(() => useNotes.getState().setNameIcons(nameIcons), [nameIcons]);
 
@@ -151,7 +165,7 @@ function Welcome() {
         <LanguageSwitch />
       </div>
       <div className="flex max-w-xl items-center gap-8">
-        <img src={logo} alt="" className="h-32 w-32 shrink-0" data-welcome-logo />
+        <img src={logo} alt="" className="kg-logo h-32 w-32 shrink-0" data-welcome-logo />
         <div>
           <h1 className="font-display text-4xl text-darkDelegation">Cortex</h1>
           <p className="mt-2 text-[15px] text-zinc-700">{t('welcome.tagline')}</p>
@@ -290,7 +304,7 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-white" data-vault-screen>
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-zinc-100 px-3" role="group" aria-label={t('app.view')}>
-        <img src={smallLogo} alt="" className="mr-2 h-6 w-6" />
+        <img src={smallLogo} alt="" className="kg-logo mr-2 h-6 w-6" />
         {views.map(([one, icon, words]) => (
           <button
             key={one}

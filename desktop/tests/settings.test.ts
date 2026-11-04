@@ -22,12 +22,12 @@ const fresh = () => {
 
 test('a missing file is a first run, and what is changed is written at once, through a temporary', () => {
   fresh();
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
+  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
   assert.equal(settingsUnreadable(), null);
   updateSettings((settings) => {
     settings.language = 'en';
   });
-  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')), { vault: null, language: 'en', allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')), { theme: 'system', vault: null, language: 'en', allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
   assert.deepEqual(fs.readdirSync(dir()).filter((name) => name.endsWith('.tmp')), [], 'no temporary left');
   forgetSettings();
   assert.equal(readSettings().language, 'en', 'read back from disk');
@@ -36,7 +36,7 @@ test('a missing file is a first run, and what is changed is written at once, thr
 test('a file that will not parse is copied aside before an empty one is saved', () => {
   fresh();
   fs.writeFileSync(settingsPath(), '{"vault": "C:\\\\Notlar", "lang');
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
+  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
   assert.equal(settingsUnreadable(), 'copied');
   const copies = fs.readdirSync(dir()).filter((name) => name.startsWith('settings.json.corrupt-'));
   assert.equal(copies.length, 1);
@@ -51,7 +51,7 @@ test('a file the disk will not hand over is left as it is, and nothing is writte
   fresh();
   // A folder where the file should be: read fails without the text ever arriving, as a locked file's does.
   fs.mkdirSync(settingsPath());
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
+  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
   assert.equal(settingsUnreadable(), 'left');
   updateSettings((settings) => {
     settings.language = 'en';
@@ -63,10 +63,10 @@ test('a file the disk will not hand over is left as it is, and nothing is writte
 test('what is not a known value is read as none', () => {
   fresh();
   fs.writeFileSync(settingsPath(), JSON.stringify({ vault: 42, language: 'de', other: true, allFiles: 'yes', nameIcons: 1, userName: 7, onboarded: 'yes' }));
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
+  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
   fs.writeFileSync(settingsPath(), JSON.stringify(['not', 'an', 'object']));
   forgetSettings();
-  assert.deepEqual(readSettings(), { vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
+  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
   assert.equal(settingsUnreadable(), 'copied');
 });
 
@@ -81,7 +81,7 @@ test('a name is kept tidied and cut to a way of addressing somebody; an empty on
 test('a file saved with a BOM in front (Notepad, PowerShell 5.1) is read as it is, not taken for a damaged one', () => {
   // Read as damaged, it was set aside and the app opened on a first run: vault, name and language gone (29 October).
   fresh();
-  fs.writeFileSync(settingsPath(), '\uFEFF' + JSON.stringify({ vault: null, language: 'en', userName: 'Deniz', onboarded: true }));
+  fs.writeFileSync(settingsPath(), '\uFEFF' + JSON.stringify({ theme: 'system', vault: null, language: 'en', userName: 'Deniz', onboarded: true }));
   const read = readSettings();
   assert.deepEqual([read.language, read.userName, read.onboarded], ['en', 'Deniz', true]);
   assert.equal(settingsUnreadable(), null);
@@ -138,4 +138,13 @@ test('from the AI tools window a tool is added to the chat or taken from it; wit
   assert.deepEqual(readSettings().chatTools, ['claude', 'opencode', 'codex'], 'once');
   setChatTool('lmstudio', false, ['claude']);
   assert.deepEqual(readSettings().chatTools, ['claude', 'opencode', 'codex'], 'a model server is not one of them');
+});
+
+test('the theme is read as one of its three values; anything else is the system theme (2 November notes)', () => {
+  fresh();
+  fs.writeFileSync(settingsPath(), JSON.stringify({ theme: 'dark' }));
+  assert.equal(readSettings().theme, 'dark');
+  forgetSettings();
+  fs.writeFileSync(settingsPath(), JSON.stringify({ theme: 'sepia' }));
+  assert.equal(readSettings().theme, 'system');
 });

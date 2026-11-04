@@ -291,9 +291,11 @@ export function OfficeView({ visible }: { visible: boolean }) {
     if (!offCtx) return;
     art.paintCharacter(offCtx, selected, 'idle', 'down', 0);
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = '#EAE4D6';
+    // The card's ground from the panel's tokens, so it follows the theme (office.css).
+    const tokens = getComputedStyle(canvas ?? document.documentElement);
+    ctx.fillStyle = tokens.getPropertyValue('--ofis-kart-zemin').trim() || '#EAE4D6';
     ctx.fillRect(0, 0, 56, 80);
-    ctx.fillStyle = '#E4E0D5';
+    ctx.fillStyle = tokens.getPropertyValue('--ofis-kart-zemin-2').trim() || '#E4E0D5';
     ctx.fillRect(0, 62, 56, 18);
     if (cell.h === 16) ctx.drawImage(off, 4, 22, 48, 48);
     else ctx.drawImage(off, 4, -(art.anchors(selected, 'idle', 'down', 0).head[1] - 3) * 3, 48, 96);

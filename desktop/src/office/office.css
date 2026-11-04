@@ -25,6 +25,13 @@
   --ofis-cay: #b9781c;
   --ofis-tokluk: #2e8b4a;
   --ofis-enerji: #3b78b5;
+  --ofis-panel-saydam: rgba(255, 250, 240, 0.92);
+  --ofis-yesil-zemin: #d8eedc;
+  --ofis-altin-zemin: #fbf1d6;
+  --ofis-altin-zemin-2: #f5e6bb;
+  /* The character card's picture behind the sprite (OfficeView.tsx). */
+  --ofis-kart-zemin: #eae4d6;
+  --ofis-kart-zemin-2: #e4e0d5;
   --ofis-font-piksel: 'Pixelify Sans', monospace;
   --ofis-font-mono-piksel: 'VT323', monospace;
   --ofis-font-okunakli: 'Schibsted Grotesk Variable', 'Schibsted Grotesk', system-ui, 'Segoe UI', sans-serif;
@@ -94,7 +101,7 @@
 }
 
 .ofis-box {
-  background: rgba(255, 250, 240, 0.92);
+  background: var(--ofis-panel-saydam);
   border: 2px solid var(--ofis-cizgi);
   box-shadow: 2px 2px 0 rgba(27, 23, 18, 0.12);
 }
@@ -223,7 +230,7 @@
 }
 .ofis-switch[aria-checked='true'] {
   border-color: var(--ofis-yesil);
-  background: #d8eedc;
+  background: var(--ofis-yesil-zemin);
   justify-content: flex-end;
 }
 .ofis-switch[aria-checked='true'] span {
@@ -278,14 +285,14 @@
 .ofis-cta {
   padding: 6px 10px;
   border: 2px solid var(--ofis-altin);
-  background: #fbf1d6;
+  background: var(--ofis-altin-zemin);
   color: var(--ofis-altin) !important;
   cursor: pointer;
   font-size: 13px;
   font-weight: 700;
 }
 .ofis-cta:hover {
-  background: #f5e6bb;
+  background: var(--ofis-altin-zemin-2);
 }
 
 .ofis-card {
@@ -417,7 +424,7 @@
   bottom: 12px;
   transform: translateX(-50%);
   padding: 4px 12px;
-  background: rgba(255, 250, 240, 0.92);
+  background: var(--ofis-panel-saydam);
   border: 1px solid var(--ofis-cizgi);
   color: var(--ofis-soluk);
   font-size: 12px;
@@ -457,7 +464,7 @@
   line-height: 1;
 }
 .ofis-zoom-buttons button:hover {
-  background: #eae4d6;
+  background: var(--ofis-panel-hover);
 }
 
 .ofis-chips {
@@ -540,7 +547,7 @@
   width: min(460px, 50%);
   height: 170px;
   z-index: 2;
-  background: rgba(255, 250, 240, 0.9);
+  background: var(--ofis-panel-saydam);
 }
 .ofis-log-title {
   padding: 6px 12px 4px;
@@ -588,7 +595,7 @@
   bottom: 10px;
   padding: 3px 10px;
   border: 1px solid var(--ofis-altin);
-  background: #fbf1d6;
+  background: var(--ofis-altin-zemin);
   color: var(--ofis-altin) !important;
   cursor: pointer;
   font-size: 12px;
@@ -600,4 +607,32 @@
   .ofis-line.is-new {
     animation: none;
   }
+}
+
+/* The dark theme (src/index.css, `:root[data-theme='dark']`): the panel's tokens at night. The map is drawn as it is. */
+:root[data-theme='dark'] .ofis {
+  --ofis-zemin: #1c1a16;
+  --ofis-harita-zemin: #1c1a16;
+  --ofis-panel: #26231e;
+  --ofis-panel-hover: #2f2b25;
+  --ofis-cizgi: #36322c;
+  --ofis-cizgi-guclu: #514b42;
+  --ofis-yazi: #ece6d8;
+  --ofis-yazi-ikincil: #c9c2b4;
+  --ofis-soluk: #9a9387;
+  --ofis-altin: #dcae55;
+  --ofis-altin-acik: #e8c069;
+  --ofis-yesil: #6cc489;
+  --ofis-tehlike: #e6866b;
+  --ofis-oda-cerceve: #5cb8bc;
+  --ofis-oda-baslik: #7cc9c3;
+  --ofis-cay: #e0a64a;
+  --ofis-tokluk: #6cc489;
+  --ofis-enerji: #7fb0e0;
+  --ofis-panel-saydam: rgba(38, 35, 30, 0.92);
+  --ofis-yesil-zemin: #22352a;
+  --ofis-altin-zemin: #3a3020;
+  --ofis-altin-zemin-2: #4a3c22;
+  --ofis-kart-zemin: #2a2722;
+  --ofis-kart-zemin-2: #36322c;
 }

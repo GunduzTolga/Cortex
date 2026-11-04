@@ -13,8 +13,13 @@ import type { SyncStatus, VaultSyncApi } from './vaultSync';
  * No call takes or returns a path outside the vault.
  */
 
+/** How the window is drawn: the system's light or dark, or one kept whatever the system says (Settings › General). */
+export type ThemeChoice = 'system' | 'light' | 'dark';
+
 /** What the window may change of the settings. The vault is not here: it comes through the system's dialog. */
 export interface WindowSettings {
+  /** Light, dark, or as the system is; the system's by default (2 November notes: "koyu mod yok"). */
+  theme: ThemeChoice;
   language: AppLanguage | null;
   /** The tree lists every kind of file, scripts and JSON with the notes; off, only notes and what notes show. */
   allFiles: boolean;

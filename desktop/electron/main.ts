@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, session, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -11,6 +11,7 @@ import { startMicrophoneWord, stopMicrophoneWord } from './services/microphone';
 import { startMicCapture, stopMicCapture } from './services/micWindow';
 import { keepStartWithWindows, listeningNow, startTray, trayNotice } from './services/tray';
 import { WINDOW_MIN, keepWindowState, readWindowState } from './services/windowState';
+import { applyTheme } from './services/theme';
 
 const DEV_SERVER = process.env.VITE_DEV_SERVER_URL;
 const isDev = Boolean(DEV_SERVER);
@@ -26,6 +27,8 @@ const HIDDEN = process.env.CORTEX_HIDDEN === '1';
 
 /** The paper the window is drawn on before the page paints (tema/ananas: --ananas-paper). */
 const PAPER = '#f3efe4';
+/** The dark theme's paper (src/index.css), the window's colour before the page is drawn. */
+const NIGHT_PAPER = '#1c1a16';
 
 /*
   Windows names a notification, and groups the taskbar button, by this id; it
@@ -243,7 +246,7 @@ function createWindow(showNow = true): void {
     ...(kept.bounds ? { x: kept.bounds.x, y: kept.bounds.y } : {}),
     minWidth: WINDOW_MIN.width,
     minHeight: WINDOW_MIN.height,
-    backgroundColor: PAPER,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? NIGHT_PAPER : PAPER,
     title: 'Cortex',
     icon: windowIcon(),
     show: false,
@@ -439,7 +442,8 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     buildMenu();
     // Read once at start, so a settings file that will not be read is found before the window asks.
-    readSettings();
+    // The theme is set before the window is made: a dark choice did not open on a light frame first.
+    applyTheme(readSettings().theme);
     createWindow(!START_HIDDEN);
     if (!HIDDEN) {
       // The microphone listens all the time only while Cortex runs: said from now until it quits.

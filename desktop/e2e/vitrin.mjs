@@ -14,11 +14,17 @@ import path from 'node:path';
  * a stand-in for LM Studio's server with a written answer, as the smoke run's are; the rest is the app.
  *
  *   npm run build && node e2e/vitrin.mjs
+ *
+ * CORTEX_VITRIN_THEME=dark takes them in the dark theme (Settings › General › Theme), and CORTEX_VITRIN_OUT puts
+ * them in another folder: the README's pictures stay the light ones. A dark run also photographs the settings' top.
  */
-const out = path.resolve('..', 'docs', 'gorseller');
+const theme = process.env.CORTEX_VITRIN_THEME === 'dark' ? 'dark' : process.env.CORTEX_VITRIN_THEME === 'light' ? 'light' : null;
+const out = process.env.CORTEX_VITRIN_OUT ? path.resolve(process.env.CORTEX_VITRIN_OUT) : path.resolve('..', 'docs', 'gorseller');
 fs.mkdirSync(out, { recursive: true });
 
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-vitrin-'));
+// The theme chosen before the first start, as a person who set it would have it: the first-run screen is drawn in it too.
+if (theme) fs.writeFileSync(path.join(userData, 'settings.json'), JSON.stringify({ theme }));
 const parent = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-vitrin-kasa-')));
 const vaultDir = path.join(parent, 'Beynim');
 const enginePackages = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-vitrin-paket-'));
@@ -200,7 +206,7 @@ else:
 
 const software = process.platform === 'linux' || process.env.CORTEX_SOFTWARE === '1';
 const app = await electron.launch({
-  args: ['.', `--user-data-dir=${userData}`, ...(process.platform === 'linux' ? ['--no-sandbox'] : []), ...(software ? ['--disable-gpu'] : [])],
+  args: ['.', `--user-data-dir=${userData}`, ...(process.platform === 'linux' ? ['--no-sandbox'] : []), ...(process.env.CORTEX_VITRIN_HEADLESS === '1' ? ['--ozone-platform=headless'] : []), ...(software ? ['--disable-gpu'] : [])],
   env: {
     ...process.env,
     ELECTRON_RUN_AS_NODE: undefined,
@@ -324,6 +330,14 @@ try {
     await phrase.scrollIntoViewIfNeeded();
     await page.waitForTimeout(500);
     await shoot('ayarlar-ses.png');
+    await page.keyboard.press('Escape');
+  }
+  if (theme) {
+    // The settings' top, where the theme is chosen.
+    await page.keyboard.press('Control+,');
+    await wait(page.locator('[data-settings-theme]'));
+    await page.waitForTimeout(500);
+    await shoot('ayarlar.png');
     await page.keyboard.press('Escape');
   }
 } finally {

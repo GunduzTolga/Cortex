@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { AppNotice, AppUpdate, BootstrapPayload, WindowSettings } from '../shared/api';
 import { readSettings, settingsUnreadable, tidyName, updateSettings } from './services/settings';
+import { applyTheme } from './services/theme';
 import { restartingListener, sayMicrophone } from './services/microphone';
 import { currentListener, expectVoiceTurn, onHelperChange, startWithWindows, trayChanged } from './services/tray';
 import { defaultVaultDir, setVault, vaultStatus } from './services/vault';
@@ -98,8 +99,8 @@ export function startAppUpdates(trayWord: (title: string, body: string) => void)
 }
 
 function windowSettings(): WindowSettings {
-  const { language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent } = readSettings();
-  return { language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent };
+  const { theme, language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent } = readSettings();
+  return { theme, language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent };
 }
 
 export function registerIpc(): void {
@@ -118,6 +119,7 @@ export function registerIpc(): void {
   handle('settings:set', (patch: unknown) => {
     const asked = patch && typeof patch === 'object' ? (patch as Record<string, unknown>) : {};
     const change: Partial<WindowSettings> = {};
+    if (asked.theme === 'system' || asked.theme === 'light' || asked.theme === 'dark') change.theme = asked.theme;
     if (asked.language === 'en' || asked.language === 'tr' || asked.language === null) change.language = asked.language;
     if (typeof asked.allFiles === 'boolean') change.allFiles = asked.allFiles;
     if (typeof asked.nameIcons === 'boolean') change.nameIcons = asked.nameIcons;
@@ -128,6 +130,7 @@ export function registerIpc(): void {
     if (typeof asked.wakeConsent === 'boolean') change.wakeConsent = asked.wakeConsent;
     if (Object.keys(change).length) updateSettings((settings) => Object.assign(settings, change));
     if (change.background !== undefined) startWithWindows(change.background);
+    if (change.theme !== undefined) applyTheme(change.theme);
     // The listener hears it within two seconds: allowed, the microphone listens; taken back, it lets go. Yakala's
     // window takes the language from the same word.
     if (change.wakeConsent !== undefined || change.language !== undefined) sayMicrophone();

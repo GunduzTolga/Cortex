@@ -184,7 +184,7 @@ function PermissionCard({ asked, onAnswer, visible }: { asked: Asked; onAnswer: 
     return () => window.removeEventListener('keydown', key);
   }, [visible, once, onAnswer]);
   return (
-    <div ref={card} className="mb-2 rounded-xl border-[1.5px] border-darkDelegation bg-paper-2 px-4 py-3 shadow-[3px_3px_0_0_#1b1712]" data-chat-permission={asked.id}>
+    <div ref={card} className="mb-2 rounded-xl border-[1.5px] border-darkDelegation bg-paper-2 px-4 py-3 shadow-[3px_3px_0_0_var(--color-shadow)]" data-chat-permission={asked.id}>
       <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-darkDelegation">
         <ShieldQuestion size={13} />
         {t('chat.permission.title')}
@@ -207,7 +207,7 @@ function PermissionCard({ asked, onAnswer, visible }: { asked: Asked; onAnswer: 
             data-chat-answer-option={option.kind}
             className={`rounded-lg px-2.5 py-1 text-[11.5px] font-semibold transition-colors ${
               option.kind === 'allow_once'
-                ? 'border-[1.5px] border-darkDelegation bg-gold text-darkDelegation hover:bg-signal'
+                ? 'border-[1.5px] border-darkDelegation bg-gold text-onGold hover:bg-signal'
                 : option.kind.startsWith('reject')
                   ? 'border border-zinc-200 text-zinc-500 hover:border-red-300 hover:text-bad'
                   : 'border border-darkDelegation/25 text-zinc-600 hover:border-darkDelegation hover:text-darkDelegation'

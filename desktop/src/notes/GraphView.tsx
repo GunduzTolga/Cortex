@@ -30,6 +30,11 @@ interface Point extends SimulationNodeDatum, GraphNode {
 
 type Line = SimulationLinkDatum<Point>;
 
+/** A colour of the page's palette by its variable, as the theme has it now; the fallback before styles are there. */
+function paletteColour(name: string, fallback: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
 /** The colours the palette has, in an order where neighbours differ. */
 const COLOURS = ['#3f6670', '#7a6a9e', '#a8761f', '#5c6b4a', '#b4472f', '#4f7d96', '#8c5a7a', '#6f7d3f', '#9a6b4f', '#56524c'];
 
@@ -323,6 +328,9 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
         context.lineTo(b.x ?? 0, b.y ?? 0);
         context.stroke();
       }
+      // Ink and label colours from the page's palette, so the graph follows the light or dark theme (src/index.css).
+      const ink = paletteColour('--color-darkDelegation', '#1b1712');
+      const labelInk = paletteColour('--color-zinc-700', '#433f39');
       for (const node of nodes) {
         const isFront = node.id === around || node.id === front;
         context.globalAlpha = filtered(node) ? 0.18 : focus && !near.has(node.id) ? towards(1, 0.18) : 1;
@@ -333,11 +341,11 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
           context.lineWidth = 1.2 / k;
           context.stroke();
         } else {
-          context.fillStyle = isFront ? '#1b1712' : node.color;
+          context.fillStyle = isFront ? ink : node.color;
           context.fill();
         }
         if (isFront) {
-          context.strokeStyle = '#1b1712';
+          context.strokeStyle = ink;
           context.lineWidth = 2 / k;
           context.beginPath();
           context.arc(node.x ?? 0, node.y ?? 0, node.r + 3 / k, 0, Math.PI * 2);
@@ -350,7 +358,7 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
         context.textBaseline = 'top';
         const fontSize = 11 / Math.max(k, 0.6);
         context.font = `${fontSize}px "Schibsted Grotesk Variable", system-ui, sans-serif`;
-        context.fillStyle = '#433f39';
+        context.fillStyle = labelInk;
         for (const node of nodes) {
           const touching = focus !== null && near.has(node.id);
           const show = k > 1.1 || touching || node.id === around || (k > 0.7 && node.degree > 3) || nodes.length < 40;
