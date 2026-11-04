@@ -61,13 +61,23 @@ görüntüsü gelince bu belgeye eklenir. 5-7. maddeler yol haritasına yazıld�
 - Gerçek test (geliştiricinin PC'si): deneme sürümünde Windows koyu temasıyla açılış, Claude'a resim ekleme.
 
 ## Aşamalar
-1. Koyu mod (ayar + palet + sabit renkler + görüntüler).
-2. Oturum maliyeti (olay + toplam + liste etiketi).
-3. Sohbete ek (Claude, Codex).
+1. Koyu mod (ayar + palet + sabit renkler + görüntüler). **Yapıldı** (2026-11-04).
+2. Oturum maliyeti (olay + toplam + liste etiketi). **Yapıldı** (2026-11-04).
+3. Sohbete ek (Claude, Codex). **Yapıldı** (2026-11-04).
 4. 4. madde (Beyin alt yazıları), ekran görüntüsü gelince.
+
+## Uygulamada öğrenilenler
+- Gizli/ekran dışı pencerede (ve Linux'ta `--ozone-platform=headless`) `nativeTheme.themeSource` sayfanın
+  `prefers-color-scheme`'ine ulaşmadı; koyu palet bu yüzden `:root[data-theme='dark']`'a bağlandı, sayfa temayı
+  ayardan ve sistemin renginden kendisi işaretler (`src/App.tsx`).
+- Claude Code `total_cost_usd` oturumun birikimli toplamıdır ve `--resume` ile devam eden oturumda eski toplamı da
+  taşır (Haiku ile ölçüldü: devam eden turun bildirdiği tutar ilk turun iki katı). Sohbet, aynı oturumun son
+  toplamından artışı alır (`spendMark`).
+- Sunucuda görüntü: `CORTEX_HEADLESS=1 CORTEX_VITRIN_THEME=dark CORTEX_VITRIN_OUT=<klasör> node e2e/vitrin.mjs`.
+  Smoke aynı bayrakla "Pyn on a server" bölümüne kadar koşar (orada anahtar kasası kilitli).
 
 ## Açık sorular
 | Soru | Kim karar verir | Durum |
 |---|---|---|
 | 4. madde: Beyin sekmesinde hangi alt yazı yanlış | Geliştirici | Ekran görüntüsü bekleniyor |
-| Claude Code `total_cost_usd` birikimli mi tur başına mı | Ölçüm | 2. aşamada sahte değil gerçek CLI ile denenecek |
+| Claude Code `total_cost_usd` birikimli mi tur başına mı | Ölçüm | Birikimli, devamda da (4 Kasım ölçümü) |

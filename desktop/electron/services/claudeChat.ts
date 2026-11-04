@@ -1,6 +1,8 @@
+import fs from 'node:fs';
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { ChatEvent, ConfigOption, ToolStatus } from '../../shared/chat';
+import { fileLines, IMAGE_INLINE_MAX, type HeldAttachment } from './attachments';
 import { childEnv } from './acp';
 import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
 import { launchFor } from './clis';
@@ -438,6 +440,24 @@ async function start(turn: Turn, options: ConfigOption[]): Promise<Proc> {
 /** Each chat's settings, as last set, for its next start. */
 const settings = new Map<string, ConfigOption[]>();
 
+/**
+ * The message's content as Claude Code takes it: the words, the files' paths to read with its own tools, and the
+ * pictures shown as images (base64 blocks, the Messages API's own; one larger than the API takes goes as a file).
+ */
+export function contentOf(message: string, attachments: readonly HeldAttachment[]): Array<Record<string, unknown>> {
+  const shown = attachments.filter((one) => one.kind === 'image' && one.mime && one.size <= IMAGE_INLINE_MAX);
+  const read = attachments.filter((one) => !shown.includes(one));
+  const images = shown.flatMap((one) => {
+    try {
+      return [{ type: 'image', source: { type: 'base64', media_type: one.mime, data: fs.readFileSync(one.path).toString('base64') } }];
+    } catch {
+      return [];
+    }
+  });
+  const text = `${message}${fileLines(read)}`.trim();
+  return [...(text ? [{ type: 'text', text }] : []), ...images];
+}
+
 /** A message sent to the chat's program, as its next turn; how the turn ended. */
 function send(proc: Proc, turn: Turn, message: string): Promise<string> {
   if (turn.signal.aborted) return Promise.resolve('cancelled');
@@ -447,7 +467,7 @@ function send(proc: Proc, turn: Turn, message: string): Promise<string> {
     proc.lastUsage = null;
     proc.finish = resolve;
     proc.fail = reject;
-    write(proc, { type: 'user', message: { role: 'user', content: [{ type: 'text', text: message }] }, parent_tool_use_id: null });
+    write(proc, { type: 'user', message: { role: 'user', content: contentOf(message, turn.attachments) }, parent_tool_use_id: null });
   });
 }
 

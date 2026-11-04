@@ -267,7 +267,7 @@ export function ChatView({ visible }: { visible: boolean }) {
       chatKey={draftKey}
       draft={drafts[draftKey] ?? ''}
       onDraft={(text) => state.setDraft(draftKey, text)}
-      onSend={(text) => state.send(text)}
+      onSend={(text, attachments) => state.send(text, false, attachments)}
       onStop={() => state.cancel()}
       running={Boolean(chat?.running)}
       clis={clis}

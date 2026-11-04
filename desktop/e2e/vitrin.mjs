@@ -17,6 +17,7 @@ import path from 'node:path';
  *
  * CORTEX_VITRIN_THEME=dark takes them in the dark theme (Settings › General › Theme), and CORTEX_VITRIN_OUT puts
  * them in another folder: the README's pictures stay the light ones. A dark run also photographs the settings' top.
+ * CORTEX_HEADLESS=1 runs it on a Linux machine with no display (Chromium's headless platform).
  */
 const theme = process.env.CORTEX_VITRIN_THEME === 'dark' ? 'dark' : process.env.CORTEX_VITRIN_THEME === 'light' ? 'light' : null;
 const out = process.env.CORTEX_VITRIN_OUT ? path.resolve(process.env.CORTEX_VITRIN_OUT) : path.resolve('..', 'docs', 'gorseller');
@@ -206,7 +207,7 @@ else:
 
 const software = process.platform === 'linux' || process.env.CORTEX_SOFTWARE === '1';
 const app = await electron.launch({
-  args: ['.', `--user-data-dir=${userData}`, ...(process.platform === 'linux' ? ['--no-sandbox'] : []), ...(process.env.CORTEX_VITRIN_HEADLESS === '1' ? ['--ozone-platform=headless'] : []), ...(software ? ['--disable-gpu'] : [])],
+  args: ['.', `--user-data-dir=${userData}`, ...(process.platform === 'linux' ? ['--no-sandbox'] : []), ...(process.env.CORTEX_HEADLESS === '1' ? ['--ozone-platform=headless'] : []), ...(software ? ['--disable-gpu'] : [])],
   env: {
     ...process.env,
     ELECTRON_RUN_AS_NODE: undefined,

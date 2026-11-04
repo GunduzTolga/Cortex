@@ -7,6 +7,7 @@ import { currentListener, expectVoiceTurn, onHelperChange, startWithWindows, tra
 import { defaultVaultDir, setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
 import * as chat from './services/chat';
+import { keepAttachment } from './services/attachments';
 import * as hermes from './services/hermesChat';
 import { captureToInbox } from './services/inbox';
 import * as officeTalk from './services/officeTalk';
@@ -232,7 +233,8 @@ export function registerIpc(): void {
     return chats;
   });
   handle('chat:open', (id) => chat.openChat(id));
-  handle('chat:send', (id, cli, text) => chat.sendChat(id, cli, text));
+  handle('chat:send', (id, cli, text, attachments) => chat.sendChat(id, cli, text, attachments));
+  handle('chat:attach', (name, data) => keepAttachment(name, data));
   handle('chat:cancel', (id) => chat.cancelChat(id));
   handle('chat:answer', (id, permission, option) => chat.answerChat(id, permission, option));
   handle('chat:setOption', (id, option, value) => chat.setChatOption(id, option, value));

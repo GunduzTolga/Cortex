@@ -69,7 +69,7 @@ interface ChatState {
   setCli(cli: CliId): void;
   setDraft(key: string, text: string): void;
   /** `again`: a failed message sent once more, which leaves what is being typed in the field as it is. */
-  send(text: string, again?: boolean): Promise<boolean>;
+  send(text: string, again?: boolean, attachments?: string[]): Promise<boolean>;
   cancel(): void;
   answer(permission: string, option: string | null): void;
   /** A setting chosen: the chat in front's; or, for a new chat, one it is offered before its first message, which begins it (a Hermes session continued). */
@@ -299,12 +299,12 @@ export const useChat = create<ChatState>((set, get) => {
       keep(DRAFTS_KEY, drafts);
     },
 
-    async send(text, again = false) {
+    async send(text, again = false, attachments) {
       const { active, cli, open } = get();
       const chatCli = active ? get().chats.find((one) => one.id === active)?.cli : cli;
-      if (!chatCli || !text.trim()) return false;
+      if (!chatCli || (!text.trim() && !attachments?.length)) return false;
       try {
-        const { id } = await window.cortex.chat.send(active, chatCli, text);
+        const { id } = await window.cortex.chat.send(active, chatCli, text, attachments);
         if (!open[id]) {
           // A new chat: read whole once, its pushes after that taken by their numbers.
           const opened = await window.cortex.chat.open(id);

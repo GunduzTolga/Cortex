@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
 import type { ChatEvent, ChatOpened, ChatPush, ChatSpend, ChatSummary, CliId, CliInfo, ConfigOption } from '../../shared/chat';
+import { ATTACHING_CLIS } from '../../shared/chat';
+import { heldAttachments, type HeldAttachment } from './attachments';
 import { acpBackend } from './acpChat';
 import { type Backend, type Between, type Card, ChatRefusal, type Turn, failureEvent, scrubberFor } from './chatKit';
 import { claudeBackend } from './claudeChat';
@@ -320,13 +322,14 @@ async function askPerson(chat: Live, card: Card): Promise<string | null> {
 const kept = (chat: Live) => live.get(chat.stored.id) === chat;
 
 /** The turn a backend runs, told through this chat. */
-function turnOf(chat: Live, signal: AbortSignal): Turn {
+function turnOf(chat: Live, signal: AbortSignal, attachments: readonly HeldAttachment[] = []): Turn {
   const stored = chat.stored;
   return {
     chatId: stored.id,
     cli: stored.cli,
     vault: stored.vault,
     sessionId: stored.sessionId,
+    attachments,
     number: chat.turn,
     // A chat reopened after a restart runs as its chips say: its engine had not seen the options kept for it, and
     // started with the CLI's last choices while the chip showed the chat's own ("Önce sor" shown, edits accepted: 30 October).
@@ -365,14 +368,14 @@ function turnOf(chat: Live, signal: AbortSignal): Turn {
 /** A restart of the CLIs asked for while a turn went on, made when the last turn ends (restartIdleChats). */
 let restartWanted = false;
 
-async function run(chat: Live, message: string): Promise<void> {
+async function run(chat: Live, message: string, files: readonly HeldAttachment[] = []): Promise<void> {
   const stop = new AbortController();
   chat.stop = stop;
   try {
     // The vault just opened is bound to where it is first, so its hooks point there (services/setup.ts); Stop ends the wait.
     await Promise.race([vaultSettled(), new Promise((done) => stop.signal.addEventListener('abort', done, { once: true }))]);
     // Stopped while it waited: the CLI is not started for a turn already ended.
-    const reason = stop.signal.aborted ? 'cancelled' : await backendOf(chat.stored.cli).run(turnOf(chat, stop.signal), message);
+    const reason = stop.signal.aborted ? 'cancelled' : await backendOf(chat.stored.cli).run(turnOf(chat, stop.signal, files), message);
     // Once Stop was asked for, the turn was stopped, whatever the CLI reports: an agent asked to end while a card
     // waited said end_turn, and what it wrote after Stop read as a finished answer (29 October).
     emit(chat, { type: 'done', reason: stop.signal.aborted ? 'cancelled' : reason });
@@ -520,8 +523,9 @@ export async function beginChat(cli: unknown, option: unknown, value: unknown): 
 }
 
 /** A message to a chat, or to a new chat with that CLI. Answered at once with the chat's id; the answer itself comes as pushes. */
-export function sendChat(id: unknown, cli: unknown, message: unknown): { id: string } {
-  if (typeof message !== 'string' || !message.trim()) throw new ChatRefusal('An empty message is not sent.');
+export function sendChat(id: unknown, cli: unknown, message: unknown, attachments?: unknown): { id: string } {
+  const files = heldAttachments(attachments);
+  if (typeof message !== 'string' || (!message.trim() && !files.length)) throw new ChatRefusal('An empty message is not sent.');
   if (message.length > MESSAGE_MAX) throw new ChatRefusal('That message is too long to send.');
   const vault = currentVault();
   let chat: Live;
@@ -546,14 +550,15 @@ export function sendChat(id: unknown, cli: unknown, message: unknown): { id: str
     if (chat.stored.vault !== vault) throw new ChatRefusal('That chat was held in another vault.');
   }
   if (chat.running) throw new ChatRefusal('Wait for the answer, or stop it, before writing again.');
+  if (files.length && !ATTACHING_CLIS.includes(chat.stored.cli)) throw new ChatRefusal('This tool does not take attachments.');
   chat.turn += 1;
-  emit(chat, { type: 'user', text: message, at: Date.now() });
-  if (!chat.stored.title) chat.stored.title = message.trim().replace(/\s+/g, ' ').slice(0, TITLE_MAX);
+  emit(chat, { type: 'user', text: message, at: Date.now(), ...(files.length ? { attachments: files.map((one) => ({ name: one.name, kind: one.kind })) } : {}) });
+  if (!chat.stored.title) chat.stored.title = (message.trim() || files[0]?.name || '').replace(/\s+/g, ' ').slice(0, TITLE_MAX);
   chat.stored.updatedAt = Date.now();
   saveIndex();
   push({ chatId: chat.stored.id, summary: summaryOf(chat.stored) });
   setState(chat, { running: true });
-  void run(chat, message);
+  void run(chat, message, files);
   return { id: chat.stored.id };
 }
 

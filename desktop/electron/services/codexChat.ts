@@ -1,4 +1,5 @@
 import { app } from 'electron';
+import { fileLines, type HeldAttachment } from './attachments';
 import type { CliId, ConfigOption, ToolStatus } from '../../shared/chat';
 import { AcpConnection, AcpError } from './acp';
 import { type Backend, type Card, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
@@ -60,6 +61,13 @@ interface Running {
 
 /** Each thread's running token total as this server last told it: a turn counts the rise. */
 const threadTokens = new Map<string, number>();
+
+/** The turn's input as Codex takes it: the words with the files' paths, and each picture as a local image it opens. */
+export function inputOf(message: string, attachments: readonly HeldAttachment[]): Array<Record<string, unknown>> {
+  const images = attachments.filter((one) => one.kind === 'image');
+  const text = `${message}${fileLines(attachments.filter((one) => one.kind !== 'image'))}`.trim();
+  return [...(text ? [{ type: 'text', text, text_elements: [] }] : []), ...images.map((one) => ({ type: 'localImage', path: one.path }))];
+}
 
 const conns = new Map<CliId, Conn>();
 const threads = new Map<string, { conn: Conn; threadId: string }>();
@@ -432,7 +440,7 @@ export const codexBackend: Backend = {
       done.catch(() => undefined);
       const started = (await conn.rpc.request('turn/start', {
         threadId,
-        input: [{ type: 'text', text: message, text_elements: [] }],
+        input: inputOf(message, turn.attachments),
         ...(current('model') ? { model: current('model') } : {}),
         ...(effort && effort !== 'default' ? { effort } : {}),
         approvalPolicy: policy.approvalPolicy,

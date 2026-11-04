@@ -236,7 +236,9 @@ const obsidianBefore = fs.readFileSync(vaultNote('.obsidian/workspace.json'), 'u
   pictures are wanted without a window put in front of the person.
 */
 const software = process.platform === 'linux' || process.env.CORTEX_SOFTWARE === '1';
-const launchArgs = ['.', `--user-data-dir=${userData}`, ...(process.platform === 'linux' ? ['--no-sandbox'] : []), ...(software ? ['--disable-gpu'] : [])];
+// CORTEX_HEADLESS=1: Chromium's own headless platform, for a Linux machine with neither a display nor Xvfb (a server).
+// There no keyring is unlocked, so the run stops at "Pyn on a server" (its key is not saved): the checks before it hold.
+const launchArgs = ['.', `--user-data-dir=${userData}`, ...(process.platform === 'linux' ? ['--no-sandbox'] : []), ...(process.env.CORTEX_HEADLESS === '1' ? ['--ozone-platform=headless'] : []), ...(software ? ['--disable-gpu'] : [])];
 const launch = () =>
   electron.launch({
     args: launchArgs,

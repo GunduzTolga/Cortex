@@ -12,6 +12,8 @@ import type { ChatEvent, CliId, ConfigOption, PermissionKind } from '../../share
 
 export class ChatRefusal extends Error {}
 
+import type { HeldAttachment } from './attachments';
+
 /** A turn's end that is not an answer: what was said, and what kind of trouble it is, for the window to say plainly. */
 export class TurnFailure extends Error {
   constructor(
@@ -43,6 +45,8 @@ export interface Turn {
   signal: AbortSignal;
   /** The session the chat continues, or null for a new one. */
   sessionId: string | null;
+  /** The files added to this turn's message, as kept on this computer (services/attachments.ts); none for most turns. */
+  attachments: readonly HeldAttachment[];
   /** The turn's number in the chat since the app started, for a message the CLI gave no id. */
   number: number;
   /** What the person last chose for this CLI - its model, its mode - for a new session. */

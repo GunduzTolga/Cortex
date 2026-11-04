@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, ChevronDown, Inbox, Settings2, ShieldQuestion, Square } from 'lucide-react';
-import type { CliAuth, CliId, CliInfo, ConfigOption, PermissionKind } from '@shared/chat';
+import { ArrowUp, Check, ChevronDown, FileText, Image as ImageIcon, Inbox, Paperclip, Settings2, ShieldQuestion, Square, X } from 'lucide-react';
+import { ATTACHING_CLIS, type ChatAttachment, type CliAuth, type CliId, type CliInfo, type ConfigOption, type PermissionKind } from '@shared/chat';
 import { messageOf } from '@shared/ipcError';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
@@ -138,6 +138,17 @@ function ChipSelect({
 }
 
 /** How full the model's context is: a ring, the numbers on hover. */
+/** The largest file added from the window; the main process holds to the same (services/attachments.ts). */
+const ATTACH_LIMIT = 20 * 1024 * 1024;
+
+/** A file's bytes as base64, in pieces: one call over a whole file of megabytes overflows the stack. */
+async function base64Of(file: Blob): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  return btoa(binary);
+}
+
 function ContextRing({ used, size, cost, currency }: { used: number; size: number; cost: number | null; currency: string | null }) {
   const t = useT();
   const language = useLanguage();
@@ -252,7 +263,7 @@ export function Composer({
 }: {
   draft: string;
   onDraft: (text: string) => void;
-  onSend: (text: string) => Promise<boolean>;
+  onSend: (text: string, attachments?: string[]) => Promise<boolean>;
   onStop: () => void;
   running: boolean;
   clis: CliInfo[];
@@ -312,11 +323,46 @@ export function Composer({
   // The cursor goes back to the field after a click on Send, Stop or a card's answer: the button it was on is taken
   // away or disabled, focus fell to the page and what was typed next went nowhere (29 October).
   const refocus = () => field.current?.focus();
+
+  // Files added to the message (2 November notes): kept by the main process as they are added, sent by their ids.
+  // Claude Code and Codex take them; another tool's button stays faint and says it does not.
+  const [files, setFiles] = useState<ChatAttachment[]>([]);
+  const [adding, setAdding] = useState(0);
+  const picker = useRef<HTMLInputElement>(null);
+  const canAttach = cli !== null && ATTACHING_CLIS.includes(cli);
+  useEffect(() => setFiles([]), [chatKey]);
+  const addFiles = async (list: readonly File[]) => {
+    if (!list.length) return;
+    if (!canAttach) {
+      useApp.getState().toast({ tone: 'error', title: t('chat.attach.unsupported') });
+      return;
+    }
+    for (const file of list.slice(0, 10 - files.length)) {
+      if (file.size > ATTACH_LIMIT) {
+        useApp.getState().toast({ tone: 'error', title: t('chat.attach.large', { name: file.name }) });
+        continue;
+      }
+      setAdding((count) => count + 1);
+      try {
+        // A picture pasted has no name of its own: named by the hour it came, as a screenshot is.
+        const name = file.name && file.name !== 'image.png' ? file.name : `${t('chat.attach.pasted')}-${new Date().toTimeString().slice(0, 8).replace(/:/g, '')}.png`;
+        const kept = await window.cortex.chat.attach(name, await base64Of(file));
+        setFiles((now) => [...now, kept]);
+      } catch (err) {
+        useApp.getState().toast({ tone: 'error', title: t('chat.attach.failed', { name: file.name }), detail: messageOf(err) });
+      } finally {
+        setAdding((count) => count - 1);
+      }
+    }
+    refocus();
+  };
+  const ready = (draft.trim() || files.length) && !adding;
   const send = async () => {
-    if (!draft.trim() || running || sending || !cli) return;
+    if (!ready || running || sending || !cli) return;
     setSending(true);
     refocus();
-    await onSend(draft);
+    const sent = await onSend(draft, files.length ? files.map((one) => one.id) : undefined);
+    if (sent) setFiles([]);
     setSending(false);
     refocus();
   };
@@ -350,11 +396,53 @@ export function Composer({
   return (
     <div className={`mx-auto w-full max-w-[46rem] ${big ? '' : 'px-6 pb-5'}`} data-chat-composer>
       {asked ? <PermissionCard asked={asked} onAnswer={onAnswer} visible={visible} /> : null}
-      <div className="rounded-2xl border border-zinc-200 bg-paper-2 shadow-[0_1px_2px_rgba(27,23,18,0.06)] transition-colors focus-within:border-zinc-400">
+      <div
+        className="rounded-2xl border border-zinc-200 bg-paper-2 shadow-[0_1px_2px_rgba(27,23,18,0.06)] transition-colors focus-within:border-zinc-400"
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes('Files')) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          if (!event.dataTransfer.files.length) return;
+          event.preventDefault();
+          void addFiles([...event.dataTransfer.files]);
+        }}
+      >
+        {files.length || adding ? (
+          <div className="flex flex-wrap gap-1.5 px-3 pt-2.5" data-chat-attachments>
+            {files.map((one) => (
+              <span key={one.id} className="flex max-w-[16rem] items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 py-1 pl-2 pr-1 text-[12px] text-zinc-700" data-chat-attachment={one.kind}>
+                {one.kind === 'image' ? <ImageIcon size={13} className="shrink-0 text-zinc-500" /> : <FileText size={13} className="shrink-0 text-zinc-500" />}
+                <span className="truncate">{one.name}</span>
+                <button
+                  type="button"
+                  onClick={() => setFiles((now) => now.filter((other) => other.id !== one.id))}
+                  title={t('chat.attach.remove')}
+                  aria-label={t('chat.attach.remove')}
+                  className="rounded p-0.5 text-zinc-400 hover:bg-zinc-200 hover:text-darkDelegation"
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+            {adding ? (
+              <span className="flex items-center gap-1.5 px-1 text-[12px] text-zinc-400">
+                <Spinner size={11} />
+                {t('chat.attach.adding')}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
         <textarea
           ref={field}
           value={draft}
           onChange={(event) => onDraft(event.target.value)}
+          onPaste={(event) => {
+            // A picture or file pasted is added to the message; words pasted are written as before.
+            const pasted = [...event.clipboardData.files];
+            if (!pasted.length) return;
+            event.preventDefault();
+            void addFiles(pasted);
+          }}
           onKeyDown={(event) => {
             if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
             event.preventDefault();
@@ -382,6 +470,29 @@ export function Composer({
           ))}
           <div className="ml-auto flex items-center gap-1">
             {usage ? <ContextRing {...usage} /> : null}
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              hidden
+              onChange={(event) => {
+                const chosen = [...(event.target.files ?? [])];
+                event.target.value = '';
+                void addFiles(chosen);
+              }}
+              data-chat-attach-input
+            />
+            <button
+              type="button"
+              onClick={() => picker.current?.click()}
+              disabled={!canAttach || files.length >= 10}
+              title={canAttach ? t('chat.attach') : t('chat.attach.unsupported')}
+              aria-label={t('chat.attach')}
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 text-zinc-600 transition-opacity hover:border-zinc-400 hover:text-darkDelegation disabled:opacity-25"
+              data-chat-attach
+            >
+              <Paperclip size={14} />
+            </button>
             <button
               type="button"
               onClick={() => void keep()}
@@ -412,7 +523,7 @@ export function Composer({
               <button
                 type="button"
                 onClick={() => void send()}
-                disabled={!draft.trim() || sending || !cli}
+                disabled={!ready || sending || !cli}
                 title={t('chat.send')}
                 aria-label={t('chat.send')}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-darkDelegation text-white transition-opacity hover:bg-zinc-700 disabled:opacity-25"

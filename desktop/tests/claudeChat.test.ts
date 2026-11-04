@@ -8,6 +8,7 @@ import { childEnv } from '../electron/services/acp';
 import { answerChat, cancelChat, forgetChats, onChatPush, openChat, sendChat, setChatOption, shutdownChats } from '../electron/services/chat';
 import { STOP_GRACE, cardTextFor } from '../electron/services/chatKit';
 import { cardOf, claudeArgs, claudeOptions, stepOf } from '../electron/services/claudeChat';
+import { attachmentsFolder, heldAttachments, keepAttachment, safeName } from '../electron/services/attachments';
 import { CLAUDE_ARGS } from '../electron/services/clis';
 import { updateSettings } from '../electron/services/settings';
 
@@ -280,4 +281,37 @@ test('a session Claude Code no longer has is not resumed for ever: the message g
       delete process.env.FAKE_CLAUDE_GONE_AT;
     }
   }
+});
+
+// 2 November notes: "chate resim ve dosya ekleme". Kept on this computer beside the chats, never in the vault.
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+
+test('a file added to a message is kept in the app’s data under its own name, and found again only by its id', () => {
+  useVault();
+  const kept = keepAttachment('../../ekran görüntüsü.png', PNG.toString('base64'));
+  assert.deepEqual([kept.name, kept.kind], ['ekran görüntüsü.png', 'image'], 'the name without the path it came with');
+  const [held] = heldAttachments([kept.id]);
+  assert.equal(path.dirname(held.path), attachmentsFolder());
+  assert.deepEqual(fs.readFileSync(held.path), PNG);
+  assert.equal(held.mime, 'image/png');
+  assert.equal(keepAttachment('rapor.pdf', Buffer.from('%PDF').toString('base64')).kind, 'file');
+  assert.equal(safeName('C:\\Users\\x\\a<b>.txt'), 'a_b_.txt');
+  assert.throws(() => keepAttachment('bos.txt', ''), /empty/);
+  assert.throws(() => keepAttachment('buyuk.bin', 'A'.repeat(30 * 1024 * 1024)), /too large/);
+  assert.throws(() => heldAttachments(['../settings']), /not one of the chat/);
+  assert.throws(() => heldAttachments(['00000000-0000-4000-8000-000000000000']), /not found/);
+});
+
+test('Claude Code is shown an attached picture as an image and told an attached file’s path; the chat shows both by name', async () => {
+  const { log } = useVault();
+  const picture = keepAttachment('grafik.png', PNG.toString('base64'));
+  const notes = keepAttachment('notlar.txt', Buffer.from('merhaba').toString('base64'));
+  const { id } = sendChat(null, 'test-claude', 'bunlara bak', [picture.id, notes.id]);
+  assert.deepEqual(await doneOf(id), { type: 'done', reason: 'end_turn' });
+  const sent = await until(() => linesIn(log).find((one) => one.in?.type === 'user')?.in, 'the message on its way');
+  const content = (sent.message as { content: Array<Record<string, unknown>> }).content;
+  assert.equal(content[0].type, 'text');
+  assert.match(String(content[0].text), /^bunlara bak\n\n\[Attached files - read them from these paths\]\n- notlar\.txt: .*notlar\.txt$/);
+  assert.deepEqual(content[1], { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG.toString('base64') } });
+  assert.deepEqual(eventsOf(id).find((one) => one.type === 'user'), { type: 'user', text: 'bunlara bak', at: (eventsOf(id).find((one) => one.type === 'user') as { at: number }).at, attachments: [{ name: 'grafik.png', kind: 'image' }, { name: 'notlar.txt', kind: 'file' }] });
 });

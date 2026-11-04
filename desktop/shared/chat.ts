@@ -53,6 +53,17 @@ export interface CliAuth {
  * where the tool says them (Claude Code's own reckoning, an ACP agent's `cost`), and the tokens it counted. On a
  * subscription (Claude Code, Codex) it is what the work would cost through the API, not what the person pays.
  */
+/** A file added to a message (2 November notes): kept on this computer by the main process, named by its id. */
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  /** A picture the model is shown, or a file it reads. */
+  kind: 'image' | 'file';
+}
+
+/** The tools that take attachments now (Claude Code, Codex, and the tests' stand-ins for them); the others say they do not. */
+export const ATTACHING_CLIS: readonly CliId[] = ['claude', 'codex', 'test-claude', 'test-codex'];
+
 export interface ChatSpend {
   /** Null where the tool counts no money (Codex). */
   usd: number | null;
@@ -91,7 +102,7 @@ export type PermissionKind = 'allow_once' | 'allow_always' | 'reject_once' | 're
 
 /** What a chat shows, in the order it happened. */
 export type ChatEvent =
-  | { type: 'user'; text: string; at: number }
+  | { type: 'user'; text: string; at: number; attachments?: Array<{ name: string; kind: 'image' | 'file' }> }
   /** A piece of the answer, to be added to the message of that id. */
   | { type: 'text'; id: string; text: string }
   /** A piece of the CLI's thinking, shown folded. */
@@ -146,7 +157,9 @@ export interface ChatApi {
   list(): Promise<ChatSummary[]>;
   open(id: string): Promise<ChatOpened>;
   /** A message, to the chat of that id or to a new one with that CLI; the chat's id. The answer comes as pushes. */
-  send(id: string | null, cli: CliId, text: string): Promise<{ id: string }>;
+  send(id: string | null, cli: CliId, text: string, attachments?: string[]): Promise<{ id: string }>;
+  /** A file's bytes (base64) kept for a message to come; at most 20 MB. */
+  attach(name: string, data: string): Promise<ChatAttachment>;
   cancel(id: string): Promise<void>;
   answer(id: string, permission: string, option: string | null): Promise<void>;
   setOption(id: string, option: string, value: string): Promise<ConfigOption[]>;
