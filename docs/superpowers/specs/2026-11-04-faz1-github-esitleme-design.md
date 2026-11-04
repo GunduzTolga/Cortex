@@ -37,7 +37,7 @@ Kullanıcıyla alındı (2026-11-04, dördü de önerilen seçenek):
 | `docs/v3/MULTI-MACHINE.md` + şablon `.gitignore` | önerilen liste tek kaynak (motor buradan yazar); `beyin-yakala` beceri klasörleri eklenir | — |
 | `desktop/electron/services/github.ts` | cihaz kodu akışı, jeton yenileme (istemci sırrı yok: cihaz akışının jetonu sırsız yenilenir), çıkış; jetonlar `safeStorage` ile şifreli `github.json`'da; "yeni özel repo aç" (`POST /user/repos`), uygulamanın kurulu olduğu repolar (`/user/installations/*/repositories`), kurulu değilse kurulum sayfası; kasayı repoya bağlama | GitHub OAuth + REST |
 | `desktop/src/ui/GithubConnect.tsx` | "GitHub ile bağlan" → kod → izin → "Yeni yedek oluştur" / "Var olan kasama bağlan" → sonuç; bağlıyken hesap · repo, "Bağlantıyı kes" | — |
-| `desktop/electron/services/gitTool.ts` | git'i bul; yoksa (Windows) MinGit'i indir, özetini doğrula, aç (`toolPackages.ts` kalıbı) | — |
+| `desktop/electron/services/gitTool.ts` | yoksa (Windows) MinGit 2.56.0.4'ü indir (x64 / arm64; boyut ve SHA-256 sabit, 64 bit'inki ayrıca indirilip hesaplandı), paketi Python `zipfile` ile klasör dışına çıkmadan aç, yerine bütün koy; motora `CORTEX_GIT` ile verilir, PATH'teki git hep önce gelir. Ayarlar › Sunucu'da "Git'i indir"; "GitHub ile bağlan" git yoksa önce bunu yapar | setup.ts `UNPACK` |
 | `desktop/electron/services/vaultSync.ts` | motoru çağırırken jetonu ortamla verir (`setVaultSyncCredentials`, yalnız `github.com/…` uzağına); ilk bağlanma `joinVault` (`--baslat` / `--baglan`, motor kilidi meşgulse bekler) | github.ts |
 | `desktop/src/ui/ServerSection.tsx` | `GithubConnect`'i gösterir; GitHub sunuluyorsa "bu kasa git deposu değil" notu yerine o | — |
 | `desktop/src/onboarding/Onboarding.tsx` | isteğe bağlı "Yedekle" adımı (aynı bileşen) | — |
@@ -80,7 +80,8 @@ Kullanıcıyla alındı (2026-11-04, dördü de önerilen seçenek):
 1. GitHub App kaydı (geliştirici, bir kerelik; ayarlar aşağıda) ve uygulamanın açtığı repoya erişiminin denenmesi.
 2. Motor: `baslat` / `baglan`, ortamdan kimlik bilgisi, `.gitignore` listesi. Kendi sürümü.
 3. Masaüstü: `github.ts`, `GithubConnect`, Ayarlar › Sunucu akışı (dal `faz1/github-baglan`, 2026-11-04; sahte GitHub'la `tests/github.test.ts`). 1.0.54 ile birlikte yayımlanır (Tolga, 2026-11-04); Client ID girilmeden düğme görünmez.
-4. `gitTool` (MinGit) ve ilk kurulum adımı.
+4. `gitTool` (MinGit) ve ilk kurulum adımı (Onboarding `backup`: araçlardan sonra, isteğe bağlı, yalnız GitHub sunuluyorsa) — 2026-11-04, `tests/gitTool.test.ts`.
+   Not: MinGit'in kendi ayarı `core.autocrlf=true` (Git for Windows'unki gibi); Windows'ta notlar CRLF açılır, depoda LF durur.
 5. Sürüm notu, `MULTI-MACHINE.md`, gerçek test (PC + laptop).
 
 ### GitHub App kaydı (aşama 1, geliştiricinin yapacağı)

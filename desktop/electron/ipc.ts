@@ -356,6 +356,7 @@ export function registerIpc(): void {
   handle('vaultSync:status', () => vaultSync.vaultSyncStatus());
   handle('vaultSync:setOn', (on) => vaultSync.setVaultSync(on));
   handle('vaultSync:now', () => vaultSync.syncVaultNow());
+  handle('vaultSync:installGit', () => vaultSync.installVaultGit());
   vaultSync.onVaultSync((status) => broadcast('vaultSync:status', status));
   vaultSync.onVaultSyncTrouble((state, detail) => {
     const say = (tr: string, en: string) => (readSettings().language === 'en' ? en : tr);

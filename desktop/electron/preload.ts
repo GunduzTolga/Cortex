@@ -120,6 +120,7 @@ const api: CortexApi = {
     status: () => invoke('vaultSync:status'),
     setOn: (on) => invoke('vaultSync:setOn', on),
     now: () => invoke('vaultSync:now'),
+    installGit: () => invoke('vaultSync:installGit'),
   },
   telegram: {
     status: () => invoke('telegram:status'),

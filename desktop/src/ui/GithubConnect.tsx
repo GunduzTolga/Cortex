@@ -117,7 +117,17 @@ export function GithubConnect({ onConnected }: { onConnected?: () => void }) {
       </>
     ) : (
       <Line tone="error" data={`result-${result.state}`}>
-        {t(result.state === 'secret' ? 'github.result.secret' : result.state === 'offline' ? 'github.result.offline' : result.state === 'already' ? 'github.result.already' : 'github.result.error')}
+        {t(
+          result.state === 'secret'
+            ? 'github.result.secret'
+            : result.state === 'offline'
+              ? 'github.result.offline'
+              : result.state === 'already'
+                ? 'github.result.already'
+                : result.state === 'missing'
+                  ? 'github.result.missing'
+                  : 'github.result.error',
+        )}
         {result.detail.length ? ` ${result.detail.join(', ')}` : ''}
       </Line>
     )

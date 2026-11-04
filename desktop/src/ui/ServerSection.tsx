@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, Server } from 'lucide-react';
+import { Download, RefreshCw, Server } from 'lucide-react';
 import type { SyncStatus } from '@shared/vaultSync';
 import { useChat } from '../chat/chatStore';
 import { useT } from '../i18n/useT';
@@ -62,13 +62,40 @@ export function ServerSection({ open, onClose }: { open: boolean; onClose: () =>
     }
   };
 
+  const [gitRefusal, setGitRefusal] = useState<string | null>(null);
+  const bringGit = async () => {
+    setBusy(true);
+    setGitRefusal(null);
+    try {
+      setStatus(await window.cortex.vaultSync.installGit());
+    } catch (err) {
+      setGitRefusal((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const syncing = status?.state === 'syncing';
   return (
     <Section title={t('server.title')} data="server">
       <p className="mb-1.5 px-3 text-[11.5px] leading-relaxed text-zinc-500">{t('server.hint')}</p>
       {open ? <GithubConnect onConnected={read} /> : null}
-      {!status ? null : !status.available ? (
-        github && status.missing !== 'git' ? null : <Note data={`missing-${status.missing ?? 'repo'}`}>{t(status.missing === 'git' ? 'server.missing.git' : status.missing === 'remote' ? 'server.missing.remote' : 'server.missing.repo')}</Note>
+      {!status ? null : !status.available && status.missing === 'git' ? (
+        // No git here: on Windows Cortex brings its own (MinGit); elsewhere, where to get it.
+        <div className="space-y-1" data-server-git>
+          <Note data="missing-git">{t(status.canBringGit ? 'server.missing.git.bring' : 'server.missing.git')}</Note>
+          {status.canBringGit ? (
+            <div className="px-3 pt-0.5">
+              <Button tone="ghost" disabled={busy} onClick={() => void bringGit()} data-server-bring-git>
+                {busy ? <Spinner size={12} /> : <Download size={13} />}
+                {t(busy ? 'server.git.bringing' : 'server.git.bring')}
+              </Button>
+            </div>
+          ) : null}
+          {gitRefusal ? <Note tone="error" data="git-refusal">{gitRefusal}</Note> : null}
+        </div>
+      ) : !status.available ? (
+        github ? null : <Note data={`missing-${status.missing ?? 'repo'}`}>{t(status.missing === 'remote' ? 'server.missing.remote' : 'server.missing.repo')}</Note>
       ) : (
         <>
           <Switch
