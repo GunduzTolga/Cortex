@@ -70,6 +70,40 @@ class EsitleTest(unittest.TestCase):
         message = git(self.remote, 'log', '-1', '--format=%s')
         self.assertTrue(message.startswith('senkron: '), message)
 
+    def test_a_remote_that_turns_the_credentials_down_is_denied_not_a_conflict(self):
+        # A server that asks for a name and password, as GitHub does for a private repository without a token:
+        # git, never prompting, says "could not read Username" (seen with GitHub, 4 November; it was called a conflict).
+        import http.server
+        import threading
+
+        class Asks(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(401)
+                self.send_header('WWW-Authenticate', 'Basic realm="GitHub"')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Asks)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        git(self.a, 'remote', 'set-url', 'origin', f'http://127.0.0.1:{server.server_port}/kasa.git')
+        (self.a / 'yeni.md').write_text('yeni\n', encoding='utf-8')
+        result = self.sync(self.a)
+        self.assertEqual(result['state'], 'denied', result)
+        self.assertNotIn('conflict', json.dumps(result))
+        self.assertTrue((self.a / 'yeni.md').exists(), 'nothing lost')
+        self.assertIn('bağlantıyı yenile', esitle.sentence(result))
+        for said, state in (("fatal: could not read Username for 'https://github.com': terminal prompts disabled", 'denied'),
+                            ('remote: Repository not found.', 'denied'),
+                            ("remote: Permission to a/b.git denied to x.", 'denied'),
+                            ("fatal: unable to access 'https://github.com/a/b.git/': Could not resolve host: github.com", 'offline'),
+                            ('error: failed to push some refs', 'error')):
+            self.assertEqual(esitle._remote_state(said), state, said)
+
     def test_a_secret_in_a_new_line_stops_before_the_commit_and_says_where_never_what(self):
         note = self.a / 'not.md'
         note.write_text('merhaba\n' + TOKEN_LINE + '\n', encoding='utf-8')

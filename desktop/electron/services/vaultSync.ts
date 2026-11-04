@@ -215,6 +215,14 @@ async function syncOnce(vault: string, remote: string | null): Promise<void> {
   // Another sync of the same vault was running (the server's timer, a second window): this round is skipped.
   if (state === 'busy') return say(lastSyncedAt ? 'synced' : 'idle', detail);
   if (state === 'missing') return say('error', [String(result.missing ?? 'missing')]);
+  // The remote turned the credentials down (a GitHub connection expired or taken back): said as what to do, not git's words.
+  if (state === 'denied') {
+    return say('error', [
+      readSettings().language === 'en'
+        ? 'The remote turned the sign-in down; disconnect and connect again in Settings › Server. The notes stay here.'
+        : "Uzak depo girişi reddetti; Ayarlar › Sunucu'da bağlantıyı kesip yeniden bağlan. Notlar burada duruyor.",
+    ]);
+  }
   if (state === 'synced' || state === 'nothing') lastSyncedAt = Date.now();
   return say(SAID[state] ?? 'error', said);
 }

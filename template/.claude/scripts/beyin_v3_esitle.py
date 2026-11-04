@@ -41,7 +41,18 @@ KEPT = 'bu bilgisayar'
 SECRET_ALLOWED = 'sir-tarama:izin'
 UNREACHABLE = re.compile(
     r'could not resolve host|unable to access|failed to connect|connection (?:timed out|refused|reset)|'
-    r'network is unreachable|could not read from remote repository|authentication failed|timed out', re.I)
+    r'network is unreachable|could not read from remote repository|timed out', re.I)
+# The remote turned the credentials down (a GitHub token expired or taken back, no access to the repository): no
+# network trouble and no conflict, but a connection to renew. Seen with GitHub, 4 November: a pull without the token
+# said "could not read Username ... terminal prompts disabled", and the sync called it a conflict.
+DENIED = re.compile(
+    r'could not read (?:username|password)|authentication failed|invalid username or (?:password|token)|'
+    r'permission to \S+ denied|returned error: 40[13]|repository not found|write access to repository not granted', re.I)
+
+
+def _remote_state(err: str) -> str:
+    """Why talking to the remote failed: its credentials turned down, the network, or something else."""
+    return 'denied' if DENIED.search(err) else 'offline' if UNREACHABLE.search(err) else 'error'
 PATTERNS = (
     ('private key', re.compile(r'-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY')),
     ('GitHub token', re.compile(r'\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,})')),
@@ -270,15 +281,16 @@ def sync_once(vault: Path, state: Path | None = None, host: str | None = None) -
     if code:
         conflicted = [one for one in git('diff', '--name-only', '--diff-filter=U')[1].split('\n') if one]
         git('rebase', '--abort')
-        if not conflicted and UNREACHABLE.search(err):
-            return {**result, 'state': 'offline', 'detail': [_last(err)]}
+        reach = _remote_state(err)
+        if not conflicted and reach != 'error':
+            return {**result, 'state': reach, 'detail': [_last(err)]}
         return {**result, 'state': 'conflict', 'detail': conflicted[:10] or [_last(err)]}
     result['pulled'] = _count(git, f'{before}..@{{u}}') if before else 0
     ahead = _count(git, '@{u}..HEAD')
     if ahead:
         code, _, err = git('push', '-q')
         if code:
-            return {**result, 'state': 'offline' if UNREACHABLE.search(err) else 'error', 'detail': [_last(err)]}
+            return {**result, 'state': _remote_state(err), 'detail': [_last(err)]}
         result['pushed'] = ahead
     result['state'] = 'synced' if (committed or ahead or result['pulled']) else 'nothing'
     return result
@@ -400,7 +412,7 @@ def _remote_branch(git: Git) -> tuple[int, str | None, str]:
 
 
 def _failed(result: dict, err: str) -> dict:
-    return {**result, 'state': 'offline' if UNREACHABLE.search(err) else 'error', 'detail': [_last(err)]}
+    return {**result, 'state': _remote_state(err), 'detail': [_last(err)]}
 
 
 def _commit_all(git: Git, state: Path | None, message: str, result: dict) -> dict | None:
@@ -606,6 +618,7 @@ SENTENCE = {
     'secret': lambda r: 'Gönderilmedi: yeni satırlarda sır olabilir (' + ', '.join(r['detail']) + '). Sırrı sil; örnekse satıra sir-tarama:izin yaz.',
     'conflict': lambda r: 'Eşitleme durdu: buradaki ve uzaktaki notlar aynı yerde ayrıştı, hiçbir şey silinmedi (' + ', '.join(r['detail']) + ').',
     'offline': lambda r: 'Uzak depoya ulaşılamadı; notlar burada, bir sonraki turda gider.',
+    'denied': lambda r: 'Uzak depo girişi reddetti (' + ', '.join(r['detail']) + '); bağlantıyı yenile. Notlar burada duruyor.',
     'error': lambda r: 'Eşitlenemedi: ' + ', '.join(r['detail']),
     'already': lambda r: 'Bu kasa zaten ' + (r['remote'] or 'bir uzak depo') + ' ile eşitleniyor; önce bağlantıyı kes.',
     'not_empty': lambda r: 'Bu depoda zaten bir kasa var; yeni yedek yerine ona bağlan.',

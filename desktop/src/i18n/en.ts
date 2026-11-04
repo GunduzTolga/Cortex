@@ -286,6 +286,7 @@ export const en = {
   'github.result.secret': "Not sent: a note may hold a secret. Take it out of the note, then try again:",
   'github.result.offline': "GitHub could not be reached; check the internet connection.",
   'github.result.already': "This vault is already kept in step with another remote. Disconnect it first.",
+  'github.result.denied': "GitHub turned the sign-in down for this repository; check that Cortex Kasa may reach it on GitHub, then try again.",
   'github.result.error': "Could not join:",
   'github.joined': "GitHub: {login} · {repo}",
   'github.disconnect': "Disconnect",
