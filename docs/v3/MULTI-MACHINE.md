@@ -21,24 +21,33 @@ makineye özeldir ve eşitlenmez; her makine onu vault'taki Markdown'dan kendisi
 
 ## Önerilen `.gitignore`
 
+Cortex masaüstünde "Yeni yedek oluştur" ya da "Var olan kasama bağlan" (`beyin.py esitle --baslat/--baglan`) bu listeyi
+`.gitignore`'a kendisi ekler; dosyada zaten olan satırlara dokunmaz.
+
 ```gitignore
 # Beyin kurulumu: her makine Beyin'i kendisi kurar ve günceller
 .beyin-runtime.json
 .beyin-version
 beyin.py
 Beyni Guncelle.cmd
+Beyni Güncelle.sh
+Beyni Güncelle.desktop
 .claude/settings.local.json
 .claude/scripts/
 .claude/hermes-plugin/
 .claude/skills/beyin/
 .claude/skills/beyin-doktor/
 .claude/skills/beyin-guncelle/
+.claude/skills/beyin-yakala/
 .agents/hooks.json
 .agents/skills/beyin/
 .agents/skills/beyin-doktor/
 .agents/skills/beyin-guncelle/
+.agents/skills/beyin-yakala/
 .codex/config.toml
 .codex/hooks.json
+.gemini/settings.json
+.qwen/settings.json
 .kiro/hooks/beyin-v3.json
 .kiro/skills/beyin/
 .kiro/skills/beyin-doktor/
@@ -52,6 +61,12 @@ Beyni Guncelle.cmd
 # Yerel veritabanından üretilen görünümler: her makine kendisininkini üretir
 daily/v3/
 knowledge/v3/
+# Yakala: ham metinler ve yakalanan dosyalar bu bilgisayarda kalır
+📥 000-Inbox/Yakala/.ham/
+📥 000-Inbox/Yakala/dosyalar/
+# Gizli değerler ve makineye özel çalışma alanı
+.env
+.obsidian/workspace*.json
 ```
 
 Kontrol: kurulumdan ya da güncellemeden hemen sonra `git status --short` boş olmalıdır.

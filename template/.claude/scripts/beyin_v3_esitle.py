@@ -7,6 +7,13 @@ sides; a secret in a new line stops it before the commit, the files untouched; w
 here and go the next time. Git is the person's own, found on the PATH and never inside the vault; it is told
 never to prompt, runs no hook of the repository's and no file-system monitor.
 
+First time (Faz 1, 4 November): `--baslat <url>` makes the vault a repository and sends it to an empty remote;
+`--baglan <url>` joins a vault to a remote that already holds one (a second computer). Neither ever deletes a
+file: a note that differs on the two sides keeps both, this computer's copy renamed "<ad> (bu bilgisayar)". The
+desktop app gives a GitHub token only in the environment (CORTEX_GIT_TOKEN); it reaches git as an HTTP header
+through GIT_CONFIG_* variables, never a file, the command line or the repository's config. CORTEX_GIT names a git
+the app brought (MinGit), outside the vault.
+
 Standard library only. The result is one line: JSON with --json (the desktop app reads it), else a sentence.
 Exit code: with --json always 0 once the line is written (the state is in it: the desktop app's runner takes a JSON
 result only from an exit 0); without it 0 synced / nothing to do / busy, 3 missing (git, a repository, a remote
@@ -28,6 +35,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 GIT_TIMEOUT = 120
+TOKEN_ENV = 'CORTEX_GIT_TOKEN'
+GIT_ENV = 'CORTEX_GIT'
+KEPT = 'bu bilgisayar'
 SECRET_ALLOWED = 'sir-tarama:izin'
 UNREACHABLE = re.compile(
     r'could not resolve host|unable to access|failed to connect|connection (?:timed out|refused|reset)|'
@@ -133,6 +143,14 @@ def git_program(vault: Path) -> str | None:
     """Git found on the PATH alone and never inside the vault (a git.exe a remote brought must not run)."""
     names = ('git.exe',) if os.name == 'nt' else ('git',)
     root = Path(vault).resolve()
+    brought = os.environ.get(GIT_ENV, '')
+    if brought and os.path.isabs(brought):
+        try:
+            resolved = Path(brought).resolve()
+        except OSError:
+            resolved = None
+        if resolved and resolved.is_file() and root not in (resolved, *resolved.parents):
+            return str(resolved)
     for folder in os.environ.get('PATH', '').split(os.pathsep):
         if not folder or not os.path.isabs(folder):
             continue
@@ -147,22 +165,36 @@ def git_program(vault: Path) -> str | None:
     return None
 
 
+def token_config(token: str) -> dict:
+    """A GitHub token as git's HTTP header for github.com alone, in GIT_CONFIG_* variables (git 2.31+): never written
+    to a file, the command line (other users can read a process's arguments) or the repository's config."""
+    token = (token or '').strip()
+    if not token or any(ch.isspace() for ch in token):
+        return {}
+    import base64
+    basic = base64.b64encode(f'x-access-token:{token}'.encode()).decode()
+    count = int(os.environ.get('GIT_CONFIG_COUNT', '0') or 0)
+    return {'GIT_CONFIG_COUNT': str(count + 1), f'GIT_CONFIG_KEY_{count}': 'http.https://github.com/.extraheader',
+            f'GIT_CONFIG_VALUE_{count}': f'Authorization: Basic {basic}'}
+
+
 class Git:
     def __init__(self, vault: Path):
         self.vault = Path(vault)
         self.program = git_program(self.vault)
 
-    def __call__(self, *args: str, timeout: int = GIT_TIMEOUT) -> tuple[int, str, str]:
+    def __call__(self, *args: str, timeout: int = GIT_TIMEOUT, input_text: str | None = None) -> tuple[int, str, str]:
         if not self.program:
             return 127, '', 'git not found'
         env = {**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'GCM_INTERACTIVE': 'never', 'LC_ALL': 'C', 'LANG': 'C'}
+        env.update(token_config(env.pop(TOKEN_ENV, '')))
         command = [self.program, '-C', str(self.vault), '-c', 'core.quotepath=false',
                    '-c', f'core.hooksPath={os.devnull}', '-c', 'core.fsmonitor=false', *args]
         try:
             # Run from outside the vault (see git_program); the home folder, or the temp folder where it is gone.
             outside = Path.home() if Path.home().is_dir() else Path(tempfile.gettempdir())
-            done = subprocess.run(command, cwd=str(outside), env=env, capture_output=True, timeout=timeout,
-                                  stdin=subprocess.DEVNULL,
+            feed = {'input': input_text.encode('utf-8')} if input_text is not None else {'stdin': subprocess.DEVNULL}
+            done = subprocess.run(command, cwd=str(outside), env=env, capture_output=True, timeout=timeout, **feed,
                                   creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         except subprocess.TimeoutExpired:
             return 124, '', 'timed out'
@@ -252,6 +284,268 @@ def sync_once(vault: Path, state: Path | None = None, host: str | None = None) -
     return result
 
 
+# ---------- the first time: a new backup, or joining one ----------
+
+# What every machine installs or makes for itself, and what stays on it (docs/v3/MULTI-MACHINE.md shows the same
+# list; a test holds the two together). Written into .gitignore the first time; lines already there are kept.
+IGNORE = (
+    ("# Beyin kurulumu: her makine Beyin'i kendisi kurar ve günceller", (
+        '.beyin-runtime.json', '.beyin-version', 'beyin.py', 'Beyni Guncelle.cmd', 'Beyni Güncelle.sh',
+        'Beyni Güncelle.desktop', '.claude/settings.local.json', '.claude/scripts/', '.claude/hermes-plugin/',
+        '.claude/skills/beyin/', '.claude/skills/beyin-doktor/', '.claude/skills/beyin-guncelle/',
+        '.claude/skills/beyin-yakala/', '.agents/hooks.json', '.agents/skills/beyin/', '.agents/skills/beyin-doktor/',
+        '.agents/skills/beyin-guncelle/', '.agents/skills/beyin-yakala/', '.codex/config.toml', '.codex/hooks.json',
+        '.gemini/settings.json', '.qwen/settings.json', '.kiro/hooks/beyin-v3.json', '.kiro/skills/beyin/',
+        '.kiro/skills/beyin-doktor/', '.kiro/skills/beyin-guncelle/', '.opencode/plugins/beyin-v3.js',
+        '.omp/hooks/pre/beyin-v3.ts')),
+    ('# companion-compact süreçler arası kilidi; kalıcıdır ama kullanıcı verisi değildir', ('**/.beyin-compact.lock',)),
+    ("# note-edit'in bu makineye ait yazma kilidi ve notların eski hâllerinin yedekleri", ('.beyin-note-write/',)),
+    ('# Yerel veritabanından üretilen görünümler: her makine kendisininkini üretir', ('daily/v3/', 'knowledge/v3/')),
+    ('# Yakala: ham metinler ve yakalanan dosyalar bu bilgisayarda kalır',
+     ('📥 000-Inbox/Yakala/.ham/', '📥 000-Inbox/Yakala/dosyalar/')),
+    ('# Gizli değerler ve makineye özel çalışma alanı', ('.env', '.obsidian/workspace*.json')),
+)
+ATTRIBUTES = (
+    ('# Receipt dosyaları bayt bayt karşılaştırılır: satır sonu dönüştürülmez', ('receipts/** -text',)),
+    ('# Kart ve kayıt düzenindeki companion dosyaları: iki makinenin eklemeleri birlikte kalır',
+     ('**/Last-Session.md merge=union', '**/Journal.md merge=union', '**/Arşiv/*.md merge=union')),
+)
+
+
+def render(groups) -> str:
+    return '\n'.join(line for comment, entries in groups for line in (comment, *entries)) + '\n'
+
+
+def add_lines(file: Path, groups) -> bool:
+    """The groups' lines missing from the file added at its end (with their comment); what is there stays. True if written."""
+    try:
+        text = file.read_text(encoding='utf-8')
+    except FileNotFoundError:
+        text = ''
+    have = {line.strip() for line in text.splitlines()}
+    missing = [(comment, [one for one in entries if one not in have]) for comment, entries in groups]
+    missing = [(comment, entries) for comment, entries in missing if entries]
+    if not missing:
+        return False
+    if text and not text.endswith('\n'):
+        text += '\n'
+    file.write_text(text + ('\n' if text else '') + render(missing), encoding='utf-8')
+    return True
+
+
+def _usable_url(url: str) -> bool:
+    """An https remote, or a folder (a bare repository on this computer or the network: the tests, a NAS)."""
+    text = (url or '').strip()
+    if not text or text.startswith('-') or any(ch in text for ch in '\r\n\0'):
+        return False
+    if re.match(r'^https://[^\s/@]+/', text):
+        return True
+    return os.path.isabs(text) and os.path.isdir(text)
+
+
+def _identity(git: Git, host: str) -> None:
+    """A name for the commits where git has none (a fresh computer, a MinGit the app brought): the app's, else the host's."""
+    if git('config', 'user.name', timeout=15)[0] != 0:
+        git('config', 'user.name', os.environ.get('CORTEX_GIT_NAME') or host, timeout=15)
+    if git('config', 'user.email', timeout=15)[0] != 0:
+        git('config', 'user.email', os.environ.get('CORTEX_GIT_EMAIL') or f'cortex@{host}.local', timeout=15)
+
+
+def _begin(git: Git, vault: Path, url: str, result: dict) -> dict | None:
+    """Git there, the vault a repository of its own that follows no remote yet, `origin` pointing at the url.
+    Returns the result to give back when it cannot go on, else None."""
+    if not _usable_url(url):
+        return {**result, 'detail': ['url']}
+    if git('--version', timeout=15)[0] != 0:
+        return {**result, 'state': 'missing', 'missing': 'git'}
+    if not vault.is_dir():
+        return {**result, 'state': 'missing', 'missing': 'repo'}
+    code, out, _ = git('rev-parse', '--show-toplevel', timeout=15)
+    if code == 0 and _same(out.strip(), vault):
+        seen = inspect(git)
+        if not seen['missing']:
+            return {**result, 'state': 'already', 'remote': seen['remote']}
+    else:
+        # Not a repository, or a folder inside another one: the vault becomes its own.
+        code, _, err = git('init', '-q', '-b', 'main')
+        if code:  # git before 2.28 has no -b: the branch named after
+            code, _, err = git('init', '-q')
+            if not code:
+                code, _, err = git('symbolic-ref', 'HEAD', 'refs/heads/main', timeout=15)
+        if code:
+            return {**result, 'detail': [_last(err)]}
+    if git('remote', 'get-url', 'origin', timeout=15)[0] == 0:
+        code, _, err = git('remote', 'set-url', 'origin', url, timeout=15)
+    else:
+        code, _, err = git('remote', 'add', 'origin', url, timeout=15)
+    if code:
+        return {**result, 'detail': [_last(err)]}
+    result['remote'] = remote_label(url)
+    return None
+
+
+def _remote_branch(git: Git) -> tuple[int, str | None, str]:
+    """The remote's default branch: (0, name) if it has one, (0, None) if it is empty, else git's failure."""
+    code, out, err = git('ls-remote', '--symref', 'origin', 'HEAD')
+    if code:
+        return code, None, err
+    found = re.search(r'^ref: refs/heads/(\S+)\s+HEAD', out, re.M)
+    if found:
+        return 0, found.group(1), ''
+    code, out, err = git('ls-remote', '--heads', 'origin')
+    if code:
+        return code, None, err
+    heads = [line.split('refs/heads/', 1)[1] for line in out.splitlines() if 'refs/heads/' in line]
+    return 0, ('main' if 'main' in heads else heads[0]) if heads else None, ''
+
+
+def _failed(result: dict, err: str) -> dict:
+    return {**result, 'state': 'offline' if UNREACHABLE.search(err) else 'error', 'detail': [_last(err)]}
+
+
+def _commit_all(git: Git, state: Path | None, message: str, result: dict) -> dict | None:
+    """Everything added and, with no secret in it, committed. Returns the result to give back when it stops."""
+    code, _, err = git('add', '-A')
+    if code:
+        return {**result, 'detail': [_last(err)]}
+    found = secrets_added(git('diff', '--cached', '-U0', '--no-color', '--no-ext-diff')[1], _literals(state))
+    if found:
+        git('reset', '-q')
+        return {**result, 'state': 'secret', 'detail': [f"{one['file']}:{one['line']} {one['kind']}" for one in found[:10]]}
+    if git('diff', '--cached', '--quiet')[0] == 1 or git('rev-parse', '-q', '--verify', 'HEAD', timeout=15)[0] != 0:
+        code, out, err = git('commit', '-q', '--no-verify', '--allow-empty', '-m', message)
+        if code:
+            return {**result, 'detail': [_last(err or out)]}
+    return None
+
+
+def start(vault: Path, url: str, state: Path | None = None, host: str | None = None) -> dict:
+    """`--baslat`: the vault sent, for the first time, to an empty remote (a new private repository)."""
+    git, host = Git(vault), host or socket.gethostname()
+    result = {'state': 'error', 'mode': 'baslat', 'missing': None, 'remote': None, 'detail': [], 'pulled': 0,
+              'pushed': 0, 'kept': []}
+    stop = _begin(git, Path(vault), url, result)
+    if stop:
+        return stop
+    code, branch, err = _remote_branch(git)
+    if code:
+        return _failed(result, err)
+    if branch:
+        return {**result, 'state': 'not_empty'}  # a vault is there already: --baglan joins it
+    add_lines(Path(vault) / '.gitignore', IGNORE)
+    add_lines(Path(vault) / '.gitattributes', ATTRIBUTES)
+    _identity(git, host)
+    stop = _commit_all(git, state, f'ilk yedek: {host} {_stamp()}', result)
+    if stop:
+        return stop
+    current = git('symbolic-ref', '--short', 'HEAD', timeout=15)[1].strip() or 'main'
+    code, _, err = git('push', '-q', '-u', 'origin', f'HEAD:refs/heads/{current}')
+    if code:
+        return _failed(result, err)
+    git('branch', '-q', f'--set-upstream-to=origin/{current}', current, timeout=15)
+    return {**result, 'state': 'synced', 'pushed': _count(git, 'HEAD')}
+
+
+def _kept_name(vault: Path, path: str, taken: set[str]) -> str:
+    """`<ad> (bu bilgisayar)<.uzantı>`, numbered if that is taken too, here or on the remote."""
+    folder, name = os.path.split(path)
+    stem, dot, ext = name.rpartition('.') if '.' in name.lstrip('.') else (name, '', '')
+    for n in range(1, 1000):
+        label = KEPT if n == 1 else f'{KEPT} {n}'
+        candidate = f'{stem} ({label}){dot}{ext}' if dot else f'{name} ({label})'
+        whole = f'{folder}/{candidate}' if folder else candidate
+        if whole not in taken and not os.path.lexists(vault / whole):
+            return whole
+    raise RuntimeError(path)
+
+
+def join(vault: Path, url: str, state: Path | None = None, host: str | None = None) -> dict:
+    """`--baglan`: the vault joined to a remote that already holds one. The remote's notes come in, this computer's
+    stay; a path both have with different content keeps both, this computer's copy renamed. Nothing is deleted."""
+    vault = Path(vault)
+    git, host = Git(vault), host or socket.gethostname()
+    result = {'state': 'error', 'mode': 'baglan', 'missing': None, 'remote': None, 'detail': [], 'pulled': 0,
+              'pushed': 0, 'kept': []}
+    stop = _begin(git, vault, url, result)
+    if stop:
+        return stop
+    code, branch, err = _remote_branch(git)
+    if code:
+        return _failed(result, err)
+    if not branch:
+        return {**result, 'state': 'empty'}  # nothing there yet: --baslat sends this vault
+    code, _, err = git('fetch', '-q', 'origin', f'+refs/heads/{branch}:refs/remotes/origin/{branch}')
+    if code:
+        return _failed(result, err)
+    code, out, err = git('ls-tree', '-r', '-z', '--full-tree', f'origin/{branch}')
+    if code:
+        return {**result, 'detail': [_last(err)]}
+    remote = {}
+    for row in out.split('\0'):
+        if '\t' in row:
+            meta, path = row.split('\t', 1)
+            mode, kind, sha = meta.split()
+            if kind == 'blob':
+                remote[path] = sha
+    taken = set(remote) | {os.path.dirname(p) for p in remote}
+    moves: list[tuple[str, str]] = []
+
+    def set_aside(path: str) -> None:
+        if path in (old for old, _ in moves):
+            return
+        new = _kept_name(vault, path, taken)
+        taken.add(new)
+        moves.append((path, new))
+
+    # A local file where the remote has a folder, a local folder where it has a file: set aside.
+    for path in remote:
+        parts = path.split('/')
+        for depth in range(1, len(parts)):
+            prefix = '/'.join(parts[:depth])
+            if (vault / prefix).is_file() or (vault / prefix).is_symlink():
+                set_aside(prefix)
+        if (vault / path).is_dir() and not (vault / path).is_symlink():
+            set_aside(path)
+    # Files both have: compared as git would store them (its line-ending rules applied), different ones set aside.
+    both = [p for p in remote if (vault / p).is_file() and not any(p == old or p.startswith(old + '/') for old, _ in moves)]
+    for at in range(0, len(both), 200):
+        chunk = both[at:at + 200]
+        code, out, err = git('hash-object', '--stdin-paths', input_text='\n'.join(chunk) + '\n')
+        if code:
+            return {**result, 'detail': [_last(err)]}
+        for path, sha in zip(chunk, out.split()):
+            if sha != remote[path]:
+                set_aside(path)
+    for old, new in moves:
+        os.replace(vault / old, vault / new)
+        result['kept'].append({'file': old, 'as': new})
+    result['pulled'] = sum(1 for p in remote if not (vault / p).exists())
+    # The branch made the remote's; the index its tree; the files it has that are not here written out.
+    code, _, err = git('update-ref', f'refs/heads/{branch}', f'origin/{branch}', timeout=15)
+    if not code:
+        code, _, err = git('symbolic-ref', 'HEAD', f'refs/heads/{branch}', timeout=15)
+    if not code:
+        code, _, err = git('reset', '-q')
+    if not code:
+        code, _, err = git('checkout', '-q', '--', '.')
+    if code:
+        return {**result, 'detail': [_last(err)]}
+    git('branch', '-q', f'--set-upstream-to=origin/{branch}', branch, timeout=15)
+    add_lines(vault / '.gitignore', IGNORE)
+    add_lines(vault / '.gitattributes', ATTRIBUTES)
+    _identity(git, host)
+    stop = _commit_all(git, state, f'bağlandı: {host} {_stamp()}', result)
+    if stop:
+        return stop
+    ahead = _count(git, '@{u}..HEAD')
+    if ahead:
+        code, _, err = git('push', '-q')
+        if code:
+            return _failed(result, err)
+        result['pushed'] = ahead
+    return {**result, 'state': 'synced'}
+
+
 # One sync per vault on this machine: an OS advisory lock on state/esitle.lock (flock / msvcrt; the `_portalock`
 # primitive written inline, as beyin_v3_telegram does: that helper is not in the release package).
 def _lock(handle) -> bool:
@@ -281,16 +575,23 @@ def _unlock(handle) -> None:
         pass
 
 
-def sync(vault: Path, state: Path | None = None) -> dict:
-    """One sync at a time: while one runs, another says `busy` at once instead of waiting."""
+def sync(vault: Path, state: Path | None = None, start_url: str | None = None, join_url: str | None = None) -> dict:
+    """One sync at a time: while one runs, another says `busy` at once instead of waiting. With a url, the first
+    time instead (`start` to an empty remote, `join` one that holds a vault), under the same lock."""
+    def work():
+        if start_url is not None:
+            return start(vault, start_url, state)
+        if join_url is not None:
+            return join(vault, join_url, state)
+        return sync_once(vault, state)
     if state is None:
-        return sync_once(vault)
+        return work()
     state.mkdir(parents=True, exist_ok=True)
     with open(state / 'esitle.lock', 'a+b') as handle:
         if not _lock(handle):
             return {'state': 'busy', 'missing': None, 'remote': None, 'detail': [], 'pulled': 0, 'pushed': 0}
         try:
-            return sync_once(vault, state)
+            return work()
         finally:
             _unlock(handle)
 
@@ -306,12 +607,26 @@ SENTENCE = {
     'conflict': lambda r: 'Eşitleme durdu: buradaki ve uzaktaki notlar aynı yerde ayrıştı, hiçbir şey silinmedi (' + ', '.join(r['detail']) + ').',
     'offline': lambda r: 'Uzak depoya ulaşılamadı; notlar burada, bir sonraki turda gider.',
     'error': lambda r: 'Eşitlenemedi: ' + ', '.join(r['detail']),
+    'already': lambda r: 'Bu kasa zaten ' + (r['remote'] or 'bir uzak depo') + ' ile eşitleniyor; önce bağlantıyı kes.',
+    'not_empty': lambda r: 'Bu depoda zaten bir kasa var; yeni yedek yerine ona bağlan.',
+    'empty': lambda r: 'Bu depo boş; bağlanmak yerine yeni yedek olarak bu kasayı gönder.',
 }
+
+
+def sentence(result: dict) -> str:
+    said = SENTENCE[result['state']](result)
+    if result.get('kept'):
+        n = len(result['kept'])
+        said += f" {n} not iki yerde farklıydı; buradakiler '({KEPT})' adıyla kaldı."
+    return said
 
 
 def main(argv=None, vault=None, state=None) -> int:
     parser = argparse.ArgumentParser(prog='beyin.py esitle', description='Kasayı git uzak deposuyla eşitler.')
     parser.add_argument('--json', action='store_true', help='Sonucu tek satır JSON yaz')
+    first = parser.add_mutually_exclusive_group()
+    first.add_argument('--baslat', metavar='URL', help='Kasayı ilk kez boş bir uzak depoya gönder (yeni yedek)')
+    first.add_argument('--baglan', metavar='URL', help='Kasayı içinde kasa olan bir uzak depoya bağla')
     # Run on its own (the desktop app's tests, a folder with no engine installed): the vault and state said here.
     parser.add_argument('--vault', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--state', type=Path, help=argparse.SUPPRESS)
@@ -320,11 +635,11 @@ def main(argv=None, vault=None, state=None) -> int:
     state = state if state is not None else args.state
     if vault is None:
         raise SystemExit('Kasa bilinmiyor; beyin.py esitle ile çalıştırın.')
-    result = sync(Path(vault), Path(state) if state else None)
+    result = sync(Path(vault), Path(state) if state else None, start_url=args.baslat, join_url=args.baglan)
     if args.json:
         print(json.dumps(result, ensure_ascii=False), flush=True)
         return 0
-    print(SENTENCE[result['state']](result), flush=True)
+    print(sentence(result), flush=True)
     return 0 if result['state'] in ('synced', 'nothing', 'busy') else 3 if result['state'] == 'missing' else 1
 
 
