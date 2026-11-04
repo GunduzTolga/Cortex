@@ -186,8 +186,8 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
-| [1.0.53](docs/v3/releases/1.0.53.md) | Kasa eşitlemesi motorda: `beyin.py esitle` gönderme, çekme, sır taraması ve çakışmada geri çekilme kurallarını tek yerde topluyor; masaüstü ve sunucu aynı kuralları kullanacak. |
-| [1.0.52](docs/v3/releases/1.0.52.md) | Mikrofonu Cortex tutuyor: Windows'un mikrofon göstergesinde "Python" yerine Cortex görünüyor; uyandırma sözü ve yazıya çevirme değişmedi. |
+| [1.0.53](docs/v3/releases/1.0.53.md) | Koyu tema (Sistem / Açık / Koyu), sohbet listesinde oturumun maliyeti, sohbete resim ve dosya ekleme (Claude Code, Codex). Kasa eşitlemesi motorda (`beyin.py esitle`) ve masaüstü onu kullanıyor. Ofis'te sunucu rafı. |
+| [1.0.52](docs/v3/releases/1.0.52.md) | Mikrofonu Cortex tutuyor: Windows'un mikrofon göstergesinde "Python" yerine Cortex görünüyor; uyandırma sözü ve yazıya çevirme değişmedi. Ayrıca yayımlanmadı, 1.0.53 ile geldi. |
 | [1.0.51](docs/v3/releases/1.0.51.md) | Giriş yalnız tarayıcıda: Claude Code ve Codex'in girişi terminal penceresi göstermeden açılıyor, giriş bitince Cortex onu kendisi kapatıyor. Giriş yap'a yeniden basmak tarayıcıyı yeniden açıyor. |
 | [1.0.50](docs/v3/releases/1.0.50.md) | OpenCode'a yalnız OpenCode Go API anahtarıyla bağlanılıyor; ilk açılışta anahtar soruluyor. Her araçta tek "Sil" aracı sıfırlıyor, "Ekle" yetkilendirmeyi yeniden açıyor ve giriş bitince pencere kendiliğinden "Giriş yapıldı" oluyor. |
 | [1.0.49](docs/v3/releases/1.0.49.md) | OpenCode'un "Giriş yap" penceresi açık kalıyor: gerçek bir terminalde açılıyor, menüsü 0,1 saniyede kapanmıyor. opencode.ai'nin tanımadığı anahtar "bir şeyler ters gitti" yerine anahtarın reddi olarak, ne yapılacağıyla söyleniyor. |
