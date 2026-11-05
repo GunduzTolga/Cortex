@@ -244,6 +244,8 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
         </p>
       ) : signingIn ? (
         <p className="mt-2 text-[11.5px] text-zinc-500">{t('auth.login.waiting')}</p>
+      ) : tool.loginEnded && tool.signedIn !== true ? (
+        <LoginEnded ended={tool.loginEnded} onRetry={() => void login()} />
       ) : null}
       {keying ? (
         <form
@@ -268,6 +270,27 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
         </form>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * How the last sign-in from here ended without signing in, and what to do: again, or in a terminal where the browser
+ * could not be opened from here (its address is pasted by hand). Shown in the AI tools window and on the first-run screen.
+ */
+export function LoginEnded({ ended, onRetry }: { ended: NonNullable<CliAuth['loginEnded']>; onRetry?: () => void }) {
+  // Here a Refresh button; on the first-run screen the status is read again when the person comes back to the window.
+  const t = useT();
+  return (
+    <div className="mt-2 rounded-lg bg-bad/5 px-2.5 py-2 text-[11.5px] leading-relaxed" data-auth-login-ended={ended.end}>
+      <p className="font-semibold text-bad">{t(`auth.login.ended.${ended.end}`, { code: ended.code ?? '' })}</p>
+      <p className="mt-0.5 text-zinc-600">{t(onRetry ? 'auth.login.ended.hint' : 'onboarding.tools.ended.hint', { command: ended.command })}</p>
+      {onRetry ? (
+        <Button tone="quiet" className="mt-1.5 h-7" onClick={onRetry} data-auth-login-retry>
+          <LogIn size={12} />
+          {t('auth.login.retry')}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 

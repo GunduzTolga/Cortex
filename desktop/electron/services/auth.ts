@@ -119,6 +119,21 @@ function ask(id: CliId, args: string[]): Promise<string | null> {
   });
 }
 
+/**
+ * How a sign-in ended without signing in, by tool (CliAuth.loginEnded). Before, the window only stopped waiting: a
+ * browser that never opened, a sign-in left for ten minutes and an error all looked the same, and said nothing (2026-11-05).
+ */
+const loginEnds = new Map<CliId, NonNullable<CliAuth['loginEnded']>>();
+
+/** A sign-in's end, from its program's exit code and whether it was ended for taking too long. */
+export function loginEndOf(code: number | null, timedOut: boolean): NonNullable<CliAuth['loginEnded']>['end'] {
+  return timedOut ? 'timeout' : code ? 'failed' : 'closed';
+}
+
+function noteLoginEnd(tool: (typeof TOOLS)[number], code: number | null, timedOut: boolean): void {
+  loginEnds.set(tool.id, { end: loginEndOf(code, timedOut), code: timedOut ? null : code, command: [tool.id, ...(tool.login ?? [])].join(' ') });
+}
+
 async function statusOf(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
   const installed = programOf(tool.id) !== null;
   const base: CliAuth = {
@@ -134,6 +149,7 @@ async function statusOf(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
     kept: keptHere(tool.id),
     chosen: offeredInChat(tool.id),
     own: ownProgram(tool.id) !== null,
+    loginEnded: loginEnds.get(tool.id) ?? null,
   };
   if (!installed) return base;
   // A key kept here that this computer cannot read back (kept on another one, or under another Windows account) is not
@@ -256,7 +272,7 @@ export function commandLineArg(arg: string): string {
  * so no path is written into the command to survive its quoting.
  */
 export const LOGIN_SCRIPT =
-  "$o = @{ FilePath = $env:CORTEX_LOGIN_PROGRAM; WindowStyle = 'Hidden'; PassThru = $true }; if ($env:CORTEX_LOGIN_ARGS) { $o.ArgumentList = $env:CORTEX_LOGIN_ARGS }; (Start-Process @o).WaitForExit()";
+  "$o = @{ FilePath = $env:CORTEX_LOGIN_PROGRAM; WindowStyle = 'Hidden'; PassThru = $true }; if ($env:CORTEX_LOGIN_ARGS) { $o.ArgumentList = $env:CORTEX_LOGIN_ARGS }; $p = Start-Process @o; $p.WaitForExit(); exit $p.ExitCode";
 
 /** The sign-ins going on, by tool: the PowerShell waiting on each. */
 const logins = new Map<CliId, ChildProcess>();
@@ -286,16 +302,24 @@ export function startLogin(id: unknown): void {
   if (process.platform !== 'win32') throw new KeyRefusal('Signing in from Cortex opens a console window, which only Windows does here.');
   chooseChatTool(tool.id);
   endLogin(tool.id);
+  loginEnds.delete(tool.id);
   const env = { ...childEnv(program.env), CORTEX_LOGIN_PROGRAM: program.command, CORTEX_LOGIN_ARGS: [...program.args, ...tool.login].map(commandLineArg).join(' ') };
   // Not detached: a PowerShell started detached ran the script and opened nothing, with no word of why (2 November).
   const child = spawn(powerShellExe(), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', LOGIN_SCRIPT], { cwd: os.homedir(), env, stdio: 'ignore', windowsHide: true, shell: false });
   logins.set(tool.id, child);
-  const ended = () => {
-    if (logins.get(tool.id) === child) logins.delete(tool.id);
-    changed(tool.id);
+  // Ended by itself (not by a new press, nor by watchLogin): how it ended is kept when it left the tool signed out.
+  const ended = (code: number | null) => {
+    if (logins.get(tool.id) !== child) return changed(tool.id);
+    logins.delete(tool.id);
+    void statusOf(tool)
+      .then((now) => {
+        if (now.signedIn !== true) noteLoginEnd(tool, code, false);
+      })
+      .catch(() => undefined)
+      .finally(() => changed(tool.id));
   };
-  child.on('error', ended);
-  child.on('exit', ended);
+  child.on('error', () => ended(null));
+  child.on('exit', (code) => ended(code));
   child.unref();
   void watchLogin(tool, () => logins.get(tool.id) === child);
 }
@@ -319,7 +343,12 @@ async function watchLogin(tool: (typeof TOOLS)[number], open: () => boolean): Pr
       return;
     }
   }
-  if (open()) endLogin(tool.id);
+  if (open()) {
+    // Ten minutes and not signed in: ended, and said so (it ended in silence before).
+    noteLoginEnd(tool, null, true);
+    endLogin(tool.id);
+    changed(tool.id);
+  }
 }
 
 /**
