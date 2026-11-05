@@ -90,7 +90,13 @@ export class Tray {
 }
 export const session = {};
 /** Chromium's fetch, as Node's here: the tests' fake servers are on this machine. */
-export const net = { fetch: (url, init) => globalThis.fetch(url, init) };
+export const netCalls = [];
+export const net = {
+  fetch: (url, init) => {
+    netCalls.push([url, init]);
+    return globalThis.fetch(url, init);
+  },
+};
 export const contextBridge = { exposeInMainWorld: noop };
 export const ipcRenderer = { invoke: async () => undefined, on: noop, removeListener: noop };
 // One 1920x1080 screen, its taskbar at the foot.

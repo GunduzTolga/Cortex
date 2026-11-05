@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
 import type { CliId } from '../shared/chat';
-import { addTool, authStatuses, claudeStatus, codexStatus, commandLineArg, installScript, installTool, LOGIN_SCRIPT, loginEndOf, onAuthChanged, removeTool, setToolKey, startLogin } from '../electron/services/auth';
+import { addTool, authStatuses, claudeStatus, codexStatus, commandLineArg, installScript, installTool, LOGIN_SCRIPT, loginCommandOf, loginEndOf, onAuthChanged, removeTool, setToolKey, startLogin } from '../electron/services/auth';
 import { READ_PATH, pathOutput, powerShellExe, withDirs } from '../electron/services/clis';
 import { forgetKey, hasKey, keyEnv, saveKey } from '../electron/services/keys';
 import { readSettings, updateSettings } from '../electron/services/settings';
@@ -201,6 +201,15 @@ test('a sign-in that ended without signing in says how: closed, an error with it
   assert.equal(loginEndOf(1, false), 'failed');
   assert.equal(loginEndOf(null, false), 'closed', 'no code (the console could not start) is not said as an error code');
   assert.equal(loginEndOf(0, true), 'timeout');
+  // The command to sign in by hand: the name where the PATH finds it, else the whole path of the one Cortex downloaded,
+  // run as PowerShell runs a path with spaces.
+  assert.equal(loginCommandOf('codex', ['login'], { command: 'C:\\x\\codex.exe', args: [] }, true), 'codex login');
+  assert.equal(loginCommandOf('codex', ['login'], null, false), 'codex login');
+  assert.equal(loginCommandOf('codex', ['login'], { command: 'C:\\Tools\\codex.exe', args: [] }, false), 'C:\\Tools\\codex.exe login');
+  assert.equal(
+    loginCommandOf('codex', ['login'], { command: 'C:\\Users\\Şule Gündüz\\AppData\\Local\\Cortex\\node.exe', args: ['C:\\Users\\Şule Gündüz\\codex.js'] }, false),
+    '& "C:\\Users\\Şule Gündüz\\AppData\\Local\\Cortex\\node.exe" "C:\\Users\\Şule Gündüz\\codex.js" login',
+  );
 });
 
 test('pressed again while a sign-in goes on: the one before is ended, a new one begun', { skip: process.platform !== 'win32' }, async () => {
@@ -258,11 +267,16 @@ test('a sign-in closed with an error, not signed in, is said with its code and t
   process.env.STANDIN_CLOSE_CODE = '3';
   try {
     standIn('codex', home, []);
-    const told = new Promise<void>((resolve) => onAuthChanged((cli) => cli === 'codex' && resolve()));
     startLogin('codex');
-    await told;
-    const codex = (await authStatuses()).find((one) => one.id === 'codex');
-    assert.deepEqual(codex?.loginEnded, { end: 'failed', code: 3, command: 'codex login' });
+    // Its own end, not the end of one before it (a sign-in left from the test before, ended by this press).
+    let codex = (await authStatuses()).find((one) => one.id === 'codex');
+    for (let waited = 0; !codex?.loginEnded && waited < 15_000; waited += 300) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      codex = (await authStatuses()).find((one) => one.id === 'codex');
+    }
+    assert.equal(codex?.loginEnded?.end, 'failed');
+    assert.equal(codex?.loginEnded?.code, 3);
+    assert.match(codex?.loginEnded?.command ?? '', /codex(\.exe)?"? login$|tool\.js"? login$/, 'run by hand: its name, or its whole path where it is not on the PATH');
   } finally {
     onAuthChanged(() => undefined);
     for (const [name, value] of Object.entries(kept)) {

@@ -1269,13 +1269,17 @@ def _streamed(command, say, timeout, popen=subprocess.Popen):
 SETUP_SPARE_GB = 1.5
 
 
-def _disk_enough(folder, engine, config, usage=None):
+def _disk_enough(state, engine, config, usage=None):
     """A first install that cannot fit stops before it starts, not after 1-3 GB of downloads with
-    "no space left on device" (2026-11-05). Not on a later `kur`: its packages and model are
-    mostly there already, and the estimate would turn away one that fits."""
-    if (Path(folder) / MARKER).exists():
+    "no space left on device" (2026-11-05). Not on a later `kur`, nor on one after a first that
+    broke off (its environment is there: kurulum.json is taken back when a first install fails):
+    the packages and part of the model are on the disk already, and the estimate would turn away one
+    that fits. On a Vulkan card the processor's estimate: the card's own model is smaller than
+    download_size counts it, and the processor is where a card that fails goes."""
+    folder = ses_dir(state)
+    if (folder / MARKER).exists() or venv_python(state).exists():
         return
-    need = float(download_size(engine, config).replace(',', '.')) + SETUP_SPARE_GB
+    need = float(download_size('islemci' if engine == 'vulkan' else engine, config).replace(',', '.')) + SETUP_SPARE_GB
     try:
         free = (usage or shutil.disk_usage)(folder).free / 1e9
     except OSError:
@@ -1287,8 +1291,12 @@ def _disk_enough(folder, engine, config, usage=None):
 FETCH_TRIES = 3  # the model's download, asked again when the network broke off (Hugging Face resumes its own part)
 # A connection that broke off mid-download, not one that was never there: with no network at all
 # (LocalEntryNotFoundError) the install goes on at once to what it can do without (a card that works).
-CUT_WORDS = ('read timed out', 'connection reset', 'connection aborted', 'connection broken', 'incompleteread',
-             'remotedisconnected', 'chunkedencodingerror', 'bağlantı dosya bitmeden kapandı')
+# requests/urllib3's words and httpx's (huggingface_hub 1.x and later: "The read operation timed out",
+# "peer closed connection without sending complete message body"), and Windows' socket codes, whose
+# text is in the system's language ([WinError 10054]).
+CUT_WORDS = ('read timed out', 'read operation timed out', 'readtimeout', 'readerror', 'remoteprotocolerror',
+             'peer closed connection', 'connection reset', 'connection aborted', 'connection broken', 'incompleteread',
+             'remotedisconnected', 'chunkedencodingerror', 'winerror 10054', 'errno 104', 'bağlantı dosya bitmeden kapandı')
 
 
 def _trial_load(state, marker, say, run, previous, pause=None):
@@ -1342,10 +1350,10 @@ def install(state, say=print, run=subprocess.run, download=_download, which=shut
     folder.mkdir(parents=True, exist_ok=True)
     say('Python: ' + plan['python'])
     say('Motor: ' + ENGINE_NAMES[plan['motor']])
+    _disk_enough(state, plan['motor'], load_config(state))  # before anything is downloaded, the Vulkan build too
     if plan['motor'] == 'vulkan' and not _vulkan_ready(state, say, download_checked):
         say('İşlemciye geçiliyor.')
         plan.update(motor='islemci', paketler=packages_for('islemci'), ekran_karti=False)
-    _disk_enough(folder, plan['motor'], load_config(state))
     if not _venv_works(state, run):
         say('Sanal ortam kuruluyor…')
         # --clear: a broken one left from before is built anew, not reused.
@@ -1442,6 +1450,9 @@ def setup_error(exc, state):
             any(word in text for word in DISK_WORDS):
         return SetupError('Sesle yazma kurulamadı: diskte yer kalmadı (%s; ses için yaklaşık 3 GB gerekir); yer açıp yeniden dene.'
                           % folder, 'voice_disk_full')
+    if isinstance(exc, PermissionError) and 'antivirüs' in str(exc):
+        # _replace_retrying's own sentence: said as it is, not as "beklenmeyen bir hata (PermissionError)".
+        return SetupError('Sesle yazma kurulamadı: ' + str(exc), 'voice_failed')
     timed_out = isinstance(exc, subprocess.TimeoutExpired)
     building = timed_out and 'venv' in [str(part) for part in (exc.cmd or [])]
     if not building and (timed_out or network_error(exc) or any(word in text for word in NETWORK_WORDS)):

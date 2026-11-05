@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { CliAuth, CliId } from '../../shared/chat';
 import { childEnv } from './acp';
-import { LOCAL_IDS, onPathAny, powerShellExe, programOf, refreshPath } from './clis';
+import { LOCAL_IDS, onPathAny, powerShellExe, programOf, refreshPath, type Launch } from './clis';
 import { LOCAL, type LocalId, findLocal, localModel, shortContext } from './localModels';
 import { KEY_ENV, KeyRefusal, forgetKey, hasKey, keptHere, keptReadable, saveKey } from './keys';
 import { CHAT_TOOLS, chooseChatTool, readSettings, setChatTool } from './settings';
@@ -130,11 +130,31 @@ export function loginEndOf(code: number | null, timedOut: boolean): NonNullable<
   return timedOut ? 'timeout' : code ? 'failed' : 'closed';
 }
 
-function noteLoginEnd(tool: (typeof TOOLS)[number], code: number | null, timedOut: boolean): void {
-  loginEnds.set(tool.id, { end: loginEndOf(code, timedOut), code: timedOut ? null : code, command: [tool.id, ...(tool.login ?? [])].join(' ') });
+/**
+ * What to type in a terminal to sign in by hand: the tool's own name where the PATH finds it, else its program's whole
+ * path (one Cortex downloaded is in its own folder, not on the PATH: "codex" was "not recognized" there), quoted the way
+ * PowerShell, Windows' terminal, runs a path with spaces in it ("C:\Users\Şule Gündüz\…").
+ */
+export function loginCommandOf(id: CliId, login: string[], program: Launch | null, onPath: boolean): string {
+  if (onPath || !program) return [id, ...login].join(' ');
+  const words = [program.command, ...program.args];
+  const quoted = words.some((word) => /\s/.test(word));
+  return (quoted ? `& ${words.map((word) => `"${word}"`).join(' ')}` : words.join(' ')) + ' ' + login.join(' ');
 }
 
+function noteLoginEnd(tool: (typeof TOOLS)[number], code: number | null, timedOut: boolean): void {
+  const onPath = onPathAny([`${tool.id}.exe`, `${tool.id}.cmd`, tool.id]);
+  loginEnds.set(tool.id, { end: loginEndOf(code, timedOut), code: timedOut ? null : code, command: loginCommandOf(tool.id, tool.login ?? [], programOf(tool.id), onPath) });
+}
+
+/** The status, and a sign-in's end forgotten once the tool is signed in (by any way: a terminal, another try). */
 async function statusOf(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
+  const now = await statusNow(tool);
+  if (now.signedIn === true && loginEnds.delete(tool.id)) return { ...now, loginEnded: null };
+  return now;
+}
+
+async function statusNow(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
   const installed = programOf(tool.id) !== null;
   const base: CliAuth = {
     id: tool.id,
@@ -236,6 +256,7 @@ export async function removeTool(id: unknown): Promise<void> {
     else if (tool.id === 'codex') await run('codex', ['logout']);
   }
   setChatTool(tool.id, false, installedTools());
+  loginEnds.delete(tool.id);
   const folder = PACKAGES[tool.id] ? path.join(toolsDir(), tool.id) : null;
   try {
     // Windows lets go of a program's files a moment after it ends: tried again for a few seconds.
@@ -276,6 +297,8 @@ export const LOGIN_SCRIPT =
 
 /** The sign-ins going on, by tool: the PowerShell waiting on each. */
 const logins = new Map<CliId, ChildProcess>();
+/** How many sign-ins have been begun, by tool: an end is kept only for the latest. */
+const loginTries = new Map<CliId, number>();
 
 /**
  * A sign-in's hidden console ended, with the tool it started (Start-Process's program is its PowerShell's child): its
@@ -303,17 +326,22 @@ export function startLogin(id: unknown): void {
   chooseChatTool(tool.id);
   endLogin(tool.id);
   loginEnds.delete(tool.id);
+  const mine = (loginTries.get(tool.id) ?? 0) + 1;
+  loginTries.set(tool.id, mine);
   const env = { ...childEnv(program.env), CORTEX_LOGIN_PROGRAM: program.command, CORTEX_LOGIN_ARGS: [...program.args, ...tool.login].map(commandLineArg).join(' ') };
   // Not detached: a PowerShell started detached ran the script and opened nothing, with no word of why (2 November).
   const child = spawn(powerShellExe(), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', LOGIN_SCRIPT], { cwd: os.homedir(), env, stdio: 'ignore', windowsHide: true, shell: false });
   logins.set(tool.id, child);
   // Ended by itself (not by a new press, nor by watchLogin): how it ended is kept when it left the tool signed out.
+  // One ended by a new press says nothing: its end told the window, and the window took the new sign-in for over
+  // (the review of 1.0.56). One ended by watchLogin has told the window itself.
   const ended = (code: number | null) => {
-    if (logins.get(tool.id) !== child) return changed(tool.id);
+    if (logins.get(tool.id) !== child) return;
     logins.delete(tool.id);
     void statusOf(tool)
       .then((now) => {
-        if (now.signedIn !== true) noteLoginEnd(tool, code, false);
+        // A new sign-in begun while this one's status was asked: this one's end is not said over it.
+        if (now.signedIn !== true && loginTries.get(tool.id) === mine) noteLoginEnd(tool, code, false);
       })
       .catch(() => undefined)
       .finally(() => changed(tool.id));

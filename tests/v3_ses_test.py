@@ -339,6 +339,10 @@ class WordsTest(unittest.TestCase):
 
 class SetupTest(unittest.TestCase):
     def setUp(self):
+        # `kur` asks the disk before it starts (_disk_enough): not this machine's, whose free space is not the test's.
+        disk = mock.patch.object(ses.shutil, 'disk_usage', lambda _path: types.SimpleNamespace(free=int(1e12)))
+        disk.start()
+        self.addCleanup(disk.stop)
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-')
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / 'state'
@@ -867,6 +871,10 @@ class InstallRobustnessTest(unittest.TestCase):
     """What a real install meets: a Turkish user name, a broken venv, a slow card, no network."""
 
     def setUp(self):
+        # `kur` asks the disk before it starts (_disk_enough): not this machine's, whose free space is not the test's.
+        disk = mock.patch.object(ses.shutil, 'disk_usage', lambda _path: types.SimpleNamespace(free=int(1e12)))
+        disk.start()
+        self.addCleanup(disk.stop)
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-kurulum-')
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / 'state'
@@ -1268,23 +1276,36 @@ class InstallRobustnessTest(unittest.TestCase):
         with mock.patch.object(ses.os, 'replace', held), self.assertRaises(PermissionError) as caught:
             ses._replace_retrying(source, Path(self.tmp.name) / 'other.bin', tries=3, pause=paused.append)
         self.assertIn('antivirüs', str(caught.exception))
+        said = str(ses.setup_error(caught.exception, self.state))
+        self.assertIn('antivirüs', said, 'the person reads the sentence, not "beklenmeyen bir hata (PermissionError)"')
+        self.assertNotIn('beklenmeyen', said)
 
     def test_a_first_install_that_cannot_fit_stops_before_downloading(self):
-        folder = Path(self.tmp.name) / 'ses'
-        folder.mkdir()
+        folder = ses.ses_dir(self.state)
+        folder.mkdir(parents=True)
         small = lambda _path: types.SimpleNamespace(free=int(1.2e9))
         with self.assertRaises(OSError) as caught:
-            ses._disk_enough(folder, 'islemci', dict(ses.DEFAULTS), usage=small)
+            ses._disk_enough(self.state, 'islemci', dict(ses.DEFAULTS), usage=small)
         self.assertEqual(caught.exception.errno, 28)
         error = ses.setup_error(caught.exception, self.state)
         self.assertEqual(error.code, 'voice_disk_full', 'said as the full disk it is, not "beklenmeyen bir hata"')
-        ses._disk_enough(folder, 'islemci', dict(ses.DEFAULTS), usage=lambda _path: types.SimpleNamespace(free=int(50e9)))
+        ses._disk_enough(self.state, 'islemci', dict(ses.DEFAULTS), usage=lambda _path: types.SimpleNamespace(free=int(50e9)))
+        # A Vulkan card is asked for the processor's estimate (2.2 GB), not its own model counted as 1.6 GB (3.3 GB).
+        ses._disk_enough(self.state, 'vulkan', dict(ses.DEFAULTS), usage=lambda _path: types.SimpleNamespace(free=int(2.6e9)))
+        with self.assertRaises(OSError):
+            ses._disk_enough(self.state, 'cuda', dict(ses.DEFAULTS), usage=lambda _path: types.SimpleNamespace(free=int(2.6e9)))
+        # A first install that broke off: its environment is there, and part of what it needs with it.
+        ses.venv_python(self.state).parent.mkdir(parents=True)
+        ses.venv_python(self.state).write_text('')
+        ses._disk_enough(self.state, 'islemci', dict(ses.DEFAULTS), usage=small)
+        ses.venv_python(self.state).unlink()
         (folder / ses.MARKER).write_text('{}', encoding='utf-8')
-        ses._disk_enough(folder, 'islemci', dict(ses.DEFAULTS), usage=small)  # a later `kur`: mostly there already
+        ses._disk_enough(self.state, 'islemci', dict(ses.DEFAULTS), usage=small)  # a later `kur`: mostly there already
+        (folder / ses.MARKER).unlink()
 
         def unknown(_path):
             raise OSError('no such drive')
-        ses._disk_enough(Path(self.tmp.name) / 'yok', 'cuda', dict(ses.DEFAULTS), usage=unknown)
+        ses._disk_enough(self.state, 'cuda', dict(ses.DEFAULTS), usage=unknown)
 
     def test_a_wake_checker_that_did_not_come_is_said_by_kur(self):
         # Only isci.log knew: `kur` said it was ready, and every "Hey Pyn" waited on the big model.
@@ -1297,19 +1318,21 @@ class InstallRobustnessTest(unittest.TestCase):
         self.assertTrue(any(line.startswith('Uyarı:') and ses.CHECK_MODEL in line for line in said), said)
 
     def test_a_model_download_the_network_broke_is_asked_again_not_left_to_the_person(self):
-        answers = [subprocess.CompletedProcess([], 1, '', 'requests.exceptions.ReadTimeout: Read timed out.'),
+        # httpx's words, as huggingface_hub 1.x and later say a cut (the review of 1.0.56: the first list knew only requests').
+        answers = [subprocess.CompletedProcess([], 1, '', 'httpx.RemoteProtocolError: peer closed connection without sending complete message body'),
+                   subprocess.CompletedProcess([], 1, '', 'httpx.ReadTimeout: The read operation timed out'),
                    subprocess.CompletedProcess([], 0, 'small (işlemci)\n', '')]
         said, paused = [], []
         ses.ses_dir(self.state).mkdir(parents=True)
         model, _seconds = ses._trial_load(self.state, {'motor': 'islemci'}, said.append, lambda *_a, **_k: answers.pop(0), None,
                                           pause=paused.append)
-        self.assertEqual((model, len(paused)), ('small (işlemci)', 1))
-        self.assertTrue(any('yeniden deneniyor (2/3)' in line for line in said), said)
+        self.assertEqual((model, len(paused)), ('small (işlemci)', 2))
+        self.assertTrue(any('yeniden deneniyor (3/3)' in line for line in said), said)
         # Not the network's: said at once, not asked three times.
         broken = [subprocess.CompletedProcess([], 1, '', 'ValueError: model.bin bozuk')] * 3
         with self.assertRaises(RuntimeError):
             ses._trial_load(self.state, {'motor': 'islemci'}, said.append, lambda *_a, **_k: broken.pop(0), None, pause=paused.append)
-        self.assertEqual((len(broken), len(paused)), (2, 1))
+        self.assertEqual((len(broken), len(paused)), (2, 2))
 
     def test_the_vulkan_build_is_pinned_to_a_tag_the_workflow_never_replaces(self):
         workflow = (ROOT / '.github/workflows/whisper-vulkan.yml').read_text(encoding='utf-8')
