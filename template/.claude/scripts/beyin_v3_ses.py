@@ -1289,6 +1289,7 @@ def _disk_enough(state, engine, config, usage=None):
 
 
 FETCH_TRIES = 3  # the model's download, asked again when the network broke off (Hugging Face resumes its own part)
+LAST_TRY_ENV = 'BEYIN_SES_SON_DENEME'  # told to the helper on the last: a card's cut download goes to the processor then
 # A connection that broke off mid-download, not one that was never there: with no network at all
 # (LocalEntryNotFoundError) the install goes on at once to what it can do without (a card that works).
 # requests/urllib3's words and httpx's (huggingface_hub 1.x and later: "The read operation timed out",
@@ -1310,9 +1311,10 @@ def _trial_load(state, marker, say, run, previous, pause=None):
     import time
     try:
         for attempt in range(FETCH_TRIES):
+            env = dict(worker_env(state), **({LAST_TRY_ENV: '1'} if attempt == FETCH_TRIES - 1 else {}))
             with relayed_progress(folder / PROGRESS_FILE, say):
                 done = run(worker_command(state, '--indir'), capture_output=True, text=True, encoding='utf-8', errors='replace',
-                           timeout=7200, env=worker_env(state), creationflags=NO_WINDOW)
+                           timeout=7200, env=env, creationflags=NO_WINDOW)
             output = (done.stderr or done.stdout or '').strip()
             # A dropped connection over 0.5-1.6 GB asked the person to start the whole `kur` again (2026-11-05).
             if not done.returncode or attempt == FETCH_TRIES - 1 or not any(word in output.lower() for word in CUT_WORDS):
@@ -2264,8 +2266,13 @@ def _processor_model(config, report):
         raise
 
 
-def load_model(state, config, report=None):
-    """(model, what it is), on the engine `ses kur` set up; a failed card says why on stderr (isci.log)."""
+def load_model(state, config, report=None, fetching=False):
+    """(model, what it is), on the engine `ses kur` set up; a failed card says why on stderr (isci.log).
+
+    `fetching` (`--indir`, run by `kur`): a CUDA model whose download broke off is raised, not left
+    to the processor: `kur` asks it again from where it stopped (_trial_load, CUT_WORDS). Before, a
+    cut 1.6 GB download settled the install on the processor for good (the review of 1.0.56). Not
+    while listening: there a card that cannot load still leaves the processor writing."""
     engine = ses.engine_in_use(state, config)
     if engine == 'vulkan':
         exe, model, log = ses.server_exe(state), ses.ggml_in_place(state), ses.ses_dir(state) / 'whisper-server.log'
@@ -2290,6 +2297,8 @@ def load_model(state, config, report=None):
             list(model.transcribe(_silence(), language=config['dil'])[0])  # CUDA loads on first use
             return model, config['model'] + ' (ekran kartı, CUDA)'
         except Exception as exc:
+            if fetching and any(word in ('%s: %s' % (type(exc).__name__, exc)).lower() for word in ses.CUT_WORDS):
+                raise
             print('CUDA açılamadı, işlemciye geçiliyor: ' + str(exc)[:400], file=sys.stderr, flush=True)
     return _processor_model(config, report)
 
@@ -3479,7 +3488,8 @@ def main(argv=None):
             except OSError:
                 pass
         try:
-            model, what = load_model(state, config, downloading)
+            # On `kur`'s last try a cut download goes to the processor as before: a working install over none.
+            model, what = load_model(state, config, downloading, fetching=os.environ.get(ses.LAST_TRY_ENV) != '1')
             # Fetched now, with the model, not when the listener first starts. One that would not come
             # was only in isci.log: `kur` said it was ready and every "Hey Pyn" waited on the big model.
             if checker_wanted(what) and checker_for(config, what, downloading) is None:

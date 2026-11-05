@@ -1328,11 +1328,20 @@ class InstallRobustnessTest(unittest.TestCase):
                                           pause=paused.append)
         self.assertEqual((model, len(paused)), ('small (işlemci)', 2))
         self.assertTrue(any('yeniden deneniyor (3/3)' in line for line in said), said)
+        # Only the last try lets a card's cut download go to the processor (a working install over none).
+        tries = []
+        answers = [subprocess.CompletedProcess([], 1, '', 'Read timed out.')] * 2 + [subprocess.CompletedProcess([], 0, 'small (işlemci)\n', '')]
+
+        def run(_command, **options):
+            tries.append(options['env'].get(ses.LAST_TRY_ENV))
+            return answers[len(tries) - 1]
+        ses._trial_load(self.state, {'motor': 'islemci'}, said.append, run, None, pause=paused.append)
+        self.assertEqual(tries, [None, None, '1'])
         # Not the network's: said at once, not asked three times.
         broken = [subprocess.CompletedProcess([], 1, '', 'ValueError: model.bin bozuk')] * 3
         with self.assertRaises(RuntimeError):
             ses._trial_load(self.state, {'motor': 'islemci'}, said.append, lambda *_a, **_k: broken.pop(0), None, pause=paused.append)
-        self.assertEqual((len(broken), len(paused)), (2, 2))
+        self.assertEqual((len(broken), len(paused)), (2, 4))
 
     def test_the_vulkan_build_is_pinned_to_a_tag_the_workflow_never_replaces(self):
         workflow = (ROOT / '.github/workflows/whisper-vulkan.yml').read_text(encoding='utf-8')
@@ -2088,6 +2097,33 @@ class VulkanServerTest(unittest.TestCase):
             model, what = self.helper.load_model(self.folder, dict(ses.DEFAULTS))
         self.assertEqual((model, what, opened), ('yazi', 'small (işlemci)', [('small', 'cpu', 'int8')]))
         self.assertEqual(len([entry for entry in self.seen() if 'argv' in entry]), 1, 'whisper.cpp not started on the processor')
+
+    def test_a_cuda_download_that_broke_off_is_asked_again_by_kur_not_left_to_the_processor(self):
+        # The review of 1.0.56: a cut 1.6 GB download settled the install on the processor for good.
+        from contextlib import redirect_stderr
+        self.helper.ses = types.SimpleNamespace(engine_in_use=lambda _state, _config: 'cuda', CUT_WORDS=ses.CUT_WORDS,
+                                                CPU_MODELS=ses.CPU_MODELS)
+        self.helper._cuda_dirs = lambda: None
+        self.helper._cuda_compute = lambda: 'float16'
+
+        def cut(name, device, compute, report=None):
+            if device == 'cuda':
+                raise OSError('httpx.RemoteProtocolError: peer closed connection without sending complete message body')
+            return 'yazi'
+        self.helper._open = cut
+        with redirect_stderr(io.StringIO()), self.assertRaises(OSError):
+            self.helper.load_model(self.folder, dict(ses.DEFAULTS), fetching=True)
+        # While listening, or a card that does not work (not a cut download): the processor writes, as before.
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(self.helper.load_model(self.folder, dict(ses.DEFAULTS))[1], 'small (işlemci)')
+
+        def no_card(name, device, compute, report=None):
+            if device == 'cuda':
+                raise RuntimeError('CUDA failed with error no CUDA-capable device is detected')
+            return 'yazi'
+        self.helper._open = no_card
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(self.helper.load_model(self.folder, dict(ses.DEFAULTS), fetching=True)[1], 'small (işlemci)')
 
     def test_a_cards_speed_is_measured_on_the_whole_window(self):
         require_numpy(self)
