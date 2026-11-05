@@ -150,7 +150,8 @@ export class OfficeEngine {
   /** Ofis açıldığında: günlükte bir satır, Pyn'den bir selam. */
   greet() {
     const en = this.lang === 'en';
-    this.log('👋', en ? '{Kim} dropped by the office' : '{Kim} ofise uğradı', '#F2C14E');
+    // What the person did - opened the brain - not something the office shows: nobody walks in at the door.
+    this.log('👋', en ? '{Kim} looked into the brain' : '{Kim} beynine göz attı', '#F2C14E');
     const pyn = this.byId && this.byId.pyn; if (pyn) this.say(pyn, en ? 'Welcome, {kim}.' : 'Hoş geldin, {kim}.', 4);
   }
   /** Sunucu kabinlerinin LED'leri: { claude: 'ok' | 'wait' | 'off', … }, araçların gerçek giriş durumundan. */
@@ -229,7 +230,8 @@ export class OfficeEngine {
       const s = this.seat[st.sit];
       const sitDown = () => { ag.x = s.px; ag.y = s.py; ag.dir = s.dir; ag.pose = st.pose; ag.seatId = s.id; ag.wait = st.dur; ag.act = st.act; ag.mood = st.mood || (ag.id === 'pyn' ? '😑' : '🙂'); if (st.icon) this.status(ag, st.icon, 3); if (st.say) this.say(ag, st.say); if (st.notes) ag.cnt.notes++; ag.busy = false; };
       if (ag.seatId === s.id) return sitDown();
-      ag.act = 'yürüyor'; this.goTo(ag, s.from || [s.x, s.y], sitDown); return;
+      // Where to, not only "walking": seen beside someone typing, a bare "yürüyor" read as the wrong one walking.
+      ag.act = 'yerine dönüyor'; this.goTo(ag, s.from || [s.x, s.y], sitDown); return;
     }
     if (st.go) { const t = this.target(st.go); ag.act = st.label || 'yürüyor'; if (st.files) ag.cnt.files++; this.goTo(ag, t.tile, () => { if (t.dir) ag.dir = t.dir; ag.pose = ag.carry ? 'carry' : 'idle'; next(); }); return; }
     if (st.act) {

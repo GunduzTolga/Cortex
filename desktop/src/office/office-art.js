@@ -1110,7 +1110,9 @@ export const CHARACTERS = {
     bio: 'Ofisin patronu, huysuz bakışlı bir ananas. Az konuşur, her şeyi bir "Hmm." ile onaylar; ekibiyle gizlice gurur duyar.', look: { body: [O[1], O[3], O[4]], leaf: [G[1], G[2], G[3], G[4]], tie: [B[0], B[1]] } },
   mudur: { name: 'Müdür', role: 'Müdür', roleEn: 'Manager', tool: null, color: '#F5F0E6', kind: 'mudur', label: 'CORTEX · MÜDÜR', home: 'mudur',
     bio: 'Ofisin müdürü, bu beynin sahibi. Lacivert takımını hiç çıkarmaz; işler yolunda gidince kollarını kavuşturup gülümser.',
-    look: { skin: 'sk1', hair: 'tolga', hc: [W[2], W[3], W[4]], top: { kind: 'blazer', c: [B[0], B[1], B[2]], inner: [B[3], B[4], K[7]] }, bottom: { kind: 'pants', c: [B[0], B[1], B[2]] }, shoes: { kind: 'shoe', c: [K[0], K[1], K[2]] }, tie: [S[3], S[4]], stubble: true, smile: true } },
+    // Not drawn as Tolga (the developer, below): the manager is named after whoever owns the vault, and for Cortex's own
+    // author both were "Tolga" with the same hair and stubble - one walking, the other typing (4 November).
+    look: { skin: 'sk1', hair: 'toprak', hc: [K[2], K[3], K[5]], top: { kind: 'blazer', c: [B[0], B[1], B[2]], inner: [B[3], B[4], K[7]] }, bottom: { kind: 'pants', c: [B[0], B[1], B[2]] }, shoes: { kind: 'shoe', c: [K[0], K[1], K[2]] }, tie: [S[3], S[4]], glasses: K[1], smile: true } },
   tolga: { name: 'Tolga', role: 'Yazılımcı', roleEn: 'Developer', tool: null, color: '#7C9CF0', kind: 'dev', label: 'CORTEX · YAZILIMCI', home: 'tolga', hardy: true,
     bio: 'Cortex\'i yazan yazılımcı; bu ofisin her tuğlası onun klavyesinden çıktı. Hızlı karar verir, tek pikseli kaçırmaz, terminali sevmez: her şey uygulamanın içinden kurulsun. Gece ikide "yarın devam" der, sabah ilk o gelir.',
     look: { skin: 'sk1', hair: 'tolga', hc: [W[2], W[3], W[4]], top: { kind: 'hoodie', c: [B[0], B[1], B[2]], mark: O[4] }, bottom: { kind: 'pants', c: [K[1], K[2], K[3]] }, shoes: { kind: 'sneaker', c: [K[4], K[6], K[7]] }, stubble: true, smile: true, neckphones: true } },

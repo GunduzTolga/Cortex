@@ -333,6 +333,16 @@ export function OfficeView({ visible }: { visible: boolean }) {
   }, [room]);
 
   const byId = useMemo(() => Object.fromEntries(snapshot.map((one) => [one.id, one])), [snapshot]);
+  // First names said by more than one character (read each render: the manager's name follows the owner's).
+  const firstWord = (name: string) => name.trim().split(/\s+/)[0].toLocaleLowerCase('tr');
+  const sharedFirstNames = (() => {
+    const seen = new Map<string, number>();
+    for (const [id, character] of Object.entries(art.CHARACTERS)) {
+      const key = firstWord(nameOf(id, character.name));
+      seen.set(key, (seen.get(key) ?? 0) + 1);
+    }
+    return new Set([...seen].filter(([, n]) => n > 1).map(([key]) => key));
+  })();
 
   // What the rooms say of the vault: its notes, links, receipts and the pages the engine signed off.
   const stats = useMemo(() => {
@@ -777,12 +787,16 @@ export function OfficeView({ visible }: { visible: boolean }) {
           <div className="ofis-chips" data-ofis-chips>
             {Object.entries(art.CHARACTERS).map(([id, character]) => {
               const act = byId[id]?.act ?? '';
+              const name = nameOf(id, character.name);
+              // Two who share a first name (the manager is named after the owner: Cortex's author is "Tolga" twice) say their role.
+              const twin = sharedFirstNames.has(firstWord(name));
               return (
                 <button key={id} type="button" className="ofis-chip" aria-pressed={selected === id} onClick={() => pickCharacter(id)} data-ofis-chip={id}>
                   <i style={{ background: character.color }} />
-                  <span style={{ fontWeight: 700 }}>{nameOf(id, character.name)}</span>
+                  <span style={{ fontWeight: 700 }}>{name}</span>
+                  {twin ? <span className="ofis-dim" data-ofis-chip-role>· {language === 'en' ? character.roleEn : character.role}</span> : null}
                   <span className="ofis-chip-mood">{byId[id]?.mood ?? '🙂'}</span>
-                  <span className="ofis-dim" title={act}>{act.length > 12 ? `${act.slice(0, 11)}…` : act}</span>
+                  <span className="ofis-dim ofis-chip-act" title={act}>{act}</span>
                 </button>
               );
             })}
