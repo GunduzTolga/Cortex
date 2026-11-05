@@ -14,6 +14,7 @@ import {
 } from '../../shared/github';
 import { remoteLabel } from '../../shared/vaultSync';
 import { writeWhole } from './fileWrite';
+import { netFetch } from './netFetch';
 import { readSettings } from './settings';
 import { joinVault, setVaultSync, setVaultSyncCredentials } from './vaultSync';
 
@@ -140,7 +141,7 @@ const unreachable = () => say("GitHub'a ulaşılamadı; internet bağlantını k
 async function postForm(where: string, form: Record<string, string>): Promise<Record<string, unknown>> {
   let response: Response;
   try {
-    response = await fetch(`${hosts.web}${where}`, {
+    response = await netFetch(`${hosts.web}${where}`, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Cortex' },
       body: new URLSearchParams(form).toString(),
@@ -158,7 +159,7 @@ async function postForm(where: string, form: Record<string, string>): Promise<Re
 async function api(method: string, where: string, token: string, body?: unknown): Promise<{ status: number; json: unknown }> {
   let response: Response;
   try {
-    response = await fetch(`${hosts.api}${where}`, {
+    response = await netFetch(`${hosts.api}${where}`, {
       method,
       headers: {
         Accept: 'application/vnd.github+json',

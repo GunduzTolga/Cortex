@@ -66,6 +66,14 @@ test('a command is run with execFile and its arguments, never through a shell', 
   }
 });
 
+test("the main process reaches the network through Chromium's stack, which keeps Windows' proxy and certificates", () => {
+  // Node's own fetch ignored a company proxy: GitHub's sign-in and the Git download failed where the browser worked.
+  for (const file of ['electron'].flatMap(sources)) {
+    if (file.endsWith('netFetch.ts')) continue;
+    assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /(?<![.\w])fetch\(/, file);
+  }
+});
+
 test('nothing is opened by its own program: a file is shown in its folder', () => {
   for (const file of ['electron'].flatMap(sources)) assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /shell\.openPath\(/, file);
 });
