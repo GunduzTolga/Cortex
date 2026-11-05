@@ -46,6 +46,12 @@ export interface CliAuth {
   chosen?: boolean;
   /** Whether Cortex downloaded its program (toolPackages.ts): deleted with it when it is removed. */
   own?: boolean;
+  /**
+   * How its last sign-in from here ended without signing in: its window closed by itself, with an error code, or
+   * ended after ten minutes. With the command that does the same in a terminal, where the browser could not be opened
+   * from here and the address it gives is pasted by hand. Null once signed in or a new sign-in begun.
+   */
+  loginEnded?: { end: 'closed' | 'failed' | 'timeout'; code: number | null; command: string } | null;
 }
 
 /**

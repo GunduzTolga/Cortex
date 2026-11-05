@@ -339,6 +339,10 @@ class WordsTest(unittest.TestCase):
 
 class SetupTest(unittest.TestCase):
     def setUp(self):
+        # `kur` asks the disk before it starts (_disk_enough): not this machine's, whose free space is not the test's.
+        disk = mock.patch.object(ses.shutil, 'disk_usage', lambda _path: types.SimpleNamespace(free=int(1e12)))
+        disk.start()
+        self.addCleanup(disk.stop)
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-')
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / 'state'
@@ -612,7 +616,7 @@ class SetupTest(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, 'large-v3-turbo (işlemci)\n', '')
             return subprocess.CompletedProcess(command, 0, '', '')
 
-        def download(url, target):
+        def download(url, target, say=None):
             self.assertTrue(url.startswith('https://'))
             copy = target.with_name('indirilen.zip')
             copy.write_bytes(archive.read_bytes())
@@ -867,6 +871,10 @@ class InstallRobustnessTest(unittest.TestCase):
     """What a real install meets: a Turkish user name, a broken venv, a slow card, no network."""
 
     def setUp(self):
+        # `kur` asks the disk before it starts (_disk_enough): not this machine's, whose free space is not the test's.
+        disk = mock.patch.object(ses.shutil, 'disk_usage', lambda _path: types.SimpleNamespace(free=int(1e12)))
+        disk.start()
+        self.addCleanup(disk.stop)
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-kurulum-')
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / 'state'
@@ -1238,6 +1246,102 @@ class InstallRobustnessTest(unittest.TestCase):
         self.assertEqual(len(paused), 1)
         self.assertTrue(any('kaldığı yerden' in line for line in said))
         self.assertFalse(target.with_name('ggml.bin.part').exists())
+
+    def test_the_wake_model_archive_is_fetched_resumably_and_checked(self):
+        # It was one plain read into a temporary file: a cut left the file behind and failed `kur`
+        # after the long pip step; a wrong archive met the unpacking as "beklenmeyen bir hata".
+        asked = []
+        with mock.patch.object(ses, '_download_checked', lambda url, target, sha256, say=print: asked.append((url, sha256)) or target):
+            ses._download(ses.VOSK_MODEL_URL, Path(self.tmp.name) / 'vosk.zip')
+            ses._download('https://example.invalid/other.zip', Path(self.tmp.name) / 'other.zip')
+        self.assertEqual(asked, [(ses.VOSK_MODEL_URL, ses.VOSK_MODEL_SHA256), ('https://example.invalid/other.zip', None)])
+        self.assertRegex(ses.VOSK_MODEL_SHA256, r'^[0-9a-f]{64}$')
+
+    def test_a_file_an_antivirus_holds_is_moved_once_it_lets_go(self):
+        source, target = Path(self.tmp.name) / 'model.bin.part', Path(self.tmp.name) / 'model.bin'
+        source.write_bytes(b'model')
+        real, tries, paused = os.replace, [], []
+
+        def held_twice(a, b):
+            tries.append(a)
+            if len(tries) <= 2:
+                raise PermissionError(32, 'The process cannot access the file because it is being used by another process')
+            real(a, b)
+        with mock.patch.object(ses.os, 'replace', held_twice):
+            ses._replace_retrying(source, target, pause=paused.append)
+        self.assertEqual((target.read_bytes(), len(tries), len(paused)), (b'model', 3, 2))
+
+        def held(a, b):
+            raise PermissionError(5, 'Access is denied')
+        with mock.patch.object(ses.os, 'replace', held), self.assertRaises(PermissionError) as caught:
+            ses._replace_retrying(source, Path(self.tmp.name) / 'other.bin', tries=3, pause=paused.append)
+        self.assertIn('antivirüs', str(caught.exception))
+        said = str(ses.setup_error(caught.exception, self.state))
+        self.assertIn('antivirüs', said, 'the person reads the sentence, not "beklenmeyen bir hata (PermissionError)"')
+        self.assertNotIn('beklenmeyen', said)
+
+    def test_a_first_install_that_cannot_fit_stops_before_downloading(self):
+        folder = ses.ses_dir(self.state)
+        folder.mkdir(parents=True)
+        small = lambda _path: types.SimpleNamespace(free=int(1.2e9))
+        with self.assertRaises(OSError) as caught:
+            ses._disk_enough(self.state, 'islemci', dict(ses.DEFAULTS), usage=small)
+        self.assertEqual(caught.exception.errno, 28)
+        error = ses.setup_error(caught.exception, self.state)
+        self.assertEqual(error.code, 'voice_disk_full', 'said as the full disk it is, not "beklenmeyen bir hata"')
+        ses._disk_enough(self.state, 'islemci', dict(ses.DEFAULTS), usage=lambda _path: types.SimpleNamespace(free=int(50e9)))
+        # A Vulkan card is asked for the processor's estimate (2.2 GB), not its own model counted as 1.6 GB (3.3 GB).
+        ses._disk_enough(self.state, 'vulkan', dict(ses.DEFAULTS), usage=lambda _path: types.SimpleNamespace(free=int(2.6e9)))
+        with self.assertRaises(OSError):
+            ses._disk_enough(self.state, 'cuda', dict(ses.DEFAULTS), usage=lambda _path: types.SimpleNamespace(free=int(2.6e9)))
+        # A first install that broke off: its environment is there, and part of what it needs with it.
+        ses.venv_python(self.state).parent.mkdir(parents=True)
+        ses.venv_python(self.state).write_text('')
+        ses._disk_enough(self.state, 'islemci', dict(ses.DEFAULTS), usage=small)
+        ses.venv_python(self.state).unlink()
+        (folder / ses.MARKER).write_text('{}', encoding='utf-8')
+        ses._disk_enough(self.state, 'islemci', dict(ses.DEFAULTS), usage=small)  # a later `kur`: mostly there already
+        (folder / ses.MARKER).unlink()
+
+        def unknown(_path):
+            raise OSError('no such drive')
+        ses._disk_enough(self.state, 'cuda', dict(ses.DEFAULTS), usage=unknown)
+
+    def test_a_wake_checker_that_did_not_come_is_said_by_kur(self):
+        # Only isci.log knew: `kur` said it was ready, and every "Hey Pyn" waited on the big model.
+        def run(command, **_options):
+            return subprocess.CompletedProcess(command, 0, '{"dogrulayici": "yok"}\nsmall (işlemci)\n', '')
+        said = []
+        ses.ses_dir(self.state).mkdir(parents=True)
+        model, seconds = ses._trial_load(self.state, {'motor': 'islemci'}, said.append, run, None)
+        self.assertEqual((model, seconds), ('small (işlemci)', None))
+        self.assertTrue(any(line.startswith('Uyarı:') and ses.CHECK_MODEL in line for line in said), said)
+
+    def test_a_model_download_the_network_broke_is_asked_again_not_left_to_the_person(self):
+        # httpx's words, as huggingface_hub 1.x and later say a cut (the review of 1.0.56: the first list knew only requests').
+        answers = [subprocess.CompletedProcess([], 1, '', 'httpx.RemoteProtocolError: peer closed connection without sending complete message body'),
+                   subprocess.CompletedProcess([], 1, '', 'httpx.ReadTimeout: The read operation timed out'),
+                   subprocess.CompletedProcess([], 0, 'small (işlemci)\n', '')]
+        said, paused = [], []
+        ses.ses_dir(self.state).mkdir(parents=True)
+        model, _seconds = ses._trial_load(self.state, {'motor': 'islemci'}, said.append, lambda *_a, **_k: answers.pop(0), None,
+                                          pause=paused.append)
+        self.assertEqual((model, len(paused)), ('small (işlemci)', 2))
+        self.assertTrue(any('yeniden deneniyor (3/3)' in line for line in said), said)
+        # Only the last try lets a card's cut download go to the processor (a working install over none).
+        tries = []
+        answers = [subprocess.CompletedProcess([], 1, '', 'Read timed out.')] * 2 + [subprocess.CompletedProcess([], 0, 'small (işlemci)\n', '')]
+
+        def run(_command, **options):
+            tries.append(options['env'].get(ses.LAST_TRY_ENV))
+            return answers[len(tries) - 1]
+        ses._trial_load(self.state, {'motor': 'islemci'}, said.append, run, None, pause=paused.append)
+        self.assertEqual(tries, [None, None, '1'])
+        # Not the network's: said at once, not asked three times.
+        broken = [subprocess.CompletedProcess([], 1, '', 'ValueError: model.bin bozuk')] * 3
+        with self.assertRaises(RuntimeError):
+            ses._trial_load(self.state, {'motor': 'islemci'}, said.append, lambda *_a, **_k: broken.pop(0), None, pause=paused.append)
+        self.assertEqual((len(broken), len(paused)), (2, 4))
 
     def test_the_vulkan_build_is_pinned_to_a_tag_the_workflow_never_replaces(self):
         workflow = (ROOT / '.github/workflows/whisper-vulkan.yml').read_text(encoding='utf-8')
@@ -1994,6 +2098,33 @@ class VulkanServerTest(unittest.TestCase):
         self.assertEqual((model, what, opened), ('yazi', 'small (işlemci)', [('small', 'cpu', 'int8')]))
         self.assertEqual(len([entry for entry in self.seen() if 'argv' in entry]), 1, 'whisper.cpp not started on the processor')
 
+    def test_a_cuda_download_that_broke_off_is_asked_again_by_kur_not_left_to_the_processor(self):
+        # The review of 1.0.56: a cut 1.6 GB download settled the install on the processor for good.
+        from contextlib import redirect_stderr
+        self.helper.ses = types.SimpleNamespace(engine_in_use=lambda _state, _config: 'cuda', CUT_WORDS=ses.CUT_WORDS,
+                                                CPU_MODELS=ses.CPU_MODELS)
+        self.helper._cuda_dirs = lambda: None
+        self.helper._cuda_compute = lambda: 'float16'
+
+        def cut(name, device, compute, report=None):
+            if device == 'cuda':
+                raise OSError('httpx.RemoteProtocolError: peer closed connection without sending complete message body')
+            return 'yazi'
+        self.helper._open = cut
+        with redirect_stderr(io.StringIO()), self.assertRaises(OSError):
+            self.helper.load_model(self.folder, dict(ses.DEFAULTS), fetching=True)
+        # While listening, or a card that does not work (not a cut download): the processor writes, as before.
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(self.helper.load_model(self.folder, dict(ses.DEFAULTS))[1], 'small (işlemci)')
+
+        def no_card(name, device, compute, report=None):
+            if device == 'cuda':
+                raise RuntimeError('CUDA failed with error no CUDA-capable device is detected')
+            return 'yazi'
+        self.helper._open = no_card
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(self.helper.load_model(self.folder, dict(ses.DEFAULTS), fetching=True)[1], 'small (işlemci)')
+
     def test_a_cards_speed_is_measured_on_the_whole_window(self):
         require_numpy(self)
         asked = []
@@ -2567,6 +2698,8 @@ class ServeTest(unittest.TestCase):
         self.assertEqual(helper.checker_for(dict(ses.DEFAULTS), 'large-v3-turbo (işlemci, whisper.cpp)'), 'denetci',
                          'whisper.cpp writing on the processor is as slow there: checked by the small model where it can be had')
         self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS, cpu_model='base'), 'base (işlemci)'), 'it checks itself')
+        self.assertEqual([helper.checker_wanted(w) for w in ('small (işlemci)', 'base (işlemci)', 'large-v3-turbo (ekran kartı, CUDA)')],
+                         [True, False, False], '`--indir` says a missing checker only where one is wanted')
 
         def offline(*_args):
             raise OSError('no network')

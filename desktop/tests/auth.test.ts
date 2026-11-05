@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
 import type { CliId } from '../shared/chat';
-import { addTool, authStatuses, claudeStatus, codexStatus, commandLineArg, installScript, installTool, LOGIN_SCRIPT, onAuthChanged, removeTool, setToolKey, startLogin } from '../electron/services/auth';
+import { addTool, authStatuses, claudeStatus, codexStatus, commandLineArg, installScript, installTool, LOGIN_SCRIPT, loginCommandOf, loginEndOf, onAuthChanged, removeTool, setToolKey, startLogin } from '../electron/services/auth';
 import { READ_PATH, pathOutput, powerShellExe, withDirs } from '../electron/services/clis';
 import { forgetKey, hasKey, keyEnv, saveKey } from '../electron/services/keys';
 import { readSettings, updateSettings } from '../electron/services/settings';
@@ -48,7 +48,7 @@ if (args[0] === 'login' && args.length === 1) {
   setTimeout(() => fs.writeFileSync(${JSON.stringify(state)}, JSON.stringify(['ChatGPT'])), Number(process.env.STANDIN_SIGN_IN_AFTER || 1500));
   setTimeout(() => {
     fs.writeFileSync(${JSON.stringify(path.join(home, `${id}-login-closed`))}, '');
-    process.exit(0);
+    process.exit(Number(process.env.STANDIN_CLOSE_CODE || 0));
   }, Number(process.env.STANDIN_CLOSE_AFTER || 20000));
 } else if (args[0] === 'logout' || (args[0] === 'login' && args[1] === 'status')) {
   if (args[0] === 'logout') fs.writeFileSync(${JSON.stringify(state)}, '[]');
@@ -194,6 +194,24 @@ test('a sign-in’s console is hidden: the browser is where it is done', () => {
   assert.ok(!LOGIN_SCRIPT.includes('"'), 'single quotes only: a double quote does not survive Windows’ command line');
 });
 
+test('a sign-in that ended without signing in says how: closed, an error with its code, or ten minutes gone', () => {
+  // 2026-11-05: the window only stopped waiting; a browser that never opened and a timeout looked the same as nothing.
+  assert.match(LOGIN_SCRIPT, /\$p\.WaitForExit\(\); exit \$p\.ExitCode$/, "the tool's own exit code is the console's, so an error is told apart");
+  assert.equal(loginEndOf(0, false), 'closed');
+  assert.equal(loginEndOf(1, false), 'failed');
+  assert.equal(loginEndOf(null, false), 'closed', 'no code (the console could not start) is not said as an error code');
+  assert.equal(loginEndOf(0, true), 'timeout');
+  // The command to sign in by hand: the name where the PATH finds it, else the whole path of the one Cortex downloaded,
+  // run as PowerShell runs a path with spaces.
+  assert.equal(loginCommandOf('codex', ['login'], { command: 'C:\\x\\codex.exe', args: [] }, true), 'codex login');
+  assert.equal(loginCommandOf('codex', ['login'], null, false), 'codex login');
+  assert.equal(loginCommandOf('codex', ['login'], { command: 'C:\\Tools\\codex.exe', args: [] }, false), 'C:\\Tools\\codex.exe login');
+  assert.equal(
+    loginCommandOf('codex', ['login'], { command: 'C:\\Users\\Şule Gündüz\\AppData\\Local\\Cortex\\node.exe', args: ['C:\\Users\\Şule Gündüz\\codex.js'] }, false),
+    '& "C:\\Users\\Şule Gündüz\\AppData\\Local\\Cortex\\node.exe" "C:\\Users\\Şule Gündüz\\codex.js" login',
+  );
+});
+
 test('pressed again while a sign-in goes on: the one before is ended, a new one begun', { skip: process.platform !== 'win32' }, async () => {
   // Its console hidden, nothing else ends the one before; a second press used to do nothing for ten minutes.
   const kept = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, STANDIN_SIGN_IN_AFTER: process.env.STANDIN_SIGN_IN_AFTER, STANDIN_CLOSE_AFTER: process.env.STANDIN_CLOSE_AFTER };
@@ -227,6 +245,40 @@ test('pressed again while a sign-in goes on: the one before is ended, a new one 
     assert.ok(second && alive(second), 'a new one begun');
     await until(() => !alive(second));
   } finally {
+    for (const [name, value] of Object.entries(kept)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    updateSettings((settings) => {
+      settings.chatTools = before;
+    });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  }
+});
+
+test('a sign-in closed with an error, not signed in, is said with its code and the command to run it by hand', { skip: process.platform !== 'win32' }, async () => {
+  const kept = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, STANDIN_SIGN_IN_AFTER: process.env.STANDIN_SIGN_IN_AFTER, STANDIN_CLOSE_AFTER: process.env.STANDIN_CLOSE_AFTER, STANDIN_CLOSE_CODE: process.env.STANDIN_CLOSE_CODE };
+  const before = readSettings().chatTools;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-ended-'));
+  process.env.PATH = '';
+  process.env.LOCALAPPDATA = home;
+  process.env.STANDIN_SIGN_IN_AFTER = '60000';
+  process.env.STANDIN_CLOSE_AFTER = '1500';
+  process.env.STANDIN_CLOSE_CODE = '3';
+  try {
+    standIn('codex', home, []);
+    startLogin('codex');
+    // Its own end, not the end of one before it (a sign-in left from the test before, ended by this press).
+    let codex = (await authStatuses()).find((one) => one.id === 'codex');
+    for (let waited = 0; !codex?.loginEnded && waited < 15_000; waited += 300) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      codex = (await authStatuses()).find((one) => one.id === 'codex');
+    }
+    assert.equal(codex?.loginEnded?.end, 'failed');
+    assert.equal(codex?.loginEnded?.code, 3);
+    assert.match(codex?.loginEnded?.command ?? '', /codex(\.exe)?"? login$|tool\.js"? login$/, 'run by hand: its name, or its whole path where it is not on the PATH');
+  } finally {
+    onAuthChanged(() => undefined);
     for (const [name, value] of Object.entries(kept)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
@@ -309,6 +361,7 @@ test('with no tool installed, each is said to be missing and nothing is offered;
     assert.deepEqual(statuses.map((one) => one.id), ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'lmstudio', 'ollama']);
     const [tools, servers] = [statuses.slice(0, 5), statuses.slice(5)];
     assert.ok(tools.every((one) => !one.installed && !one.canLogin && one.key === null && one.signedIn === null && !one.local));
+    assert.ok(tools.every((one) => one.loginEnded === null), 'no sign-in begun here: nothing to say about one');
     // Installed from the app in a console window, Windows only: Claude Code by Anthropic's installer, the others by npm
     // (1 November: a fresh install offered only Claude Code; OpenCode could not be had from the app).
     assert.deepEqual(tools.filter((one) => one.canInstall).map((one) => one.id), process.platform === 'win32' ? ['claude', 'codex', 'opencode', 'gemini', 'qwen'] : []);

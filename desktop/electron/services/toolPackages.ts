@@ -7,6 +7,7 @@ import { Readable, Transform, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip } from 'node:zlib';
 import type { CliId } from '../../shared/chat';
+import { netFetch } from './netFetch';
 
 /**
  * OpenCode, Codex, Gemini CLI and Qwen Code, installed by Cortex itself: no npm, no Node.js, no console window.
@@ -108,7 +109,7 @@ interface Manifest {
 async function manifestOf(url: string): Promise<Manifest> {
   let answer: Response;
   try {
-    answer = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+    answer = await netFetch(url, { signal: AbortSignal.timeout(60_000) });
   } catch {
     throw new PackageRefusal('The download did not start: check the internet connection and try again.');
   }
@@ -143,7 +144,7 @@ export async function installPackage(id: CliId, options: { dir?: string; registr
   try {
     let answer: Response;
     try {
-      answer = await fetch(manifest.tarball, { signal: AbortSignal.timeout(DOWNLOAD_LIMIT) });
+      answer = await netFetch(manifest.tarball, { signal: AbortSignal.timeout(DOWNLOAD_LIMIT) });
     } catch {
       throw new PackageRefusal('The download did not start: check the internet connection and try again.');
     }

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { readSettings } from './settings';
+import { netFetch } from './netFetch';
 import { UNPACK, runPython } from './setup';
 import { toolsDir } from './toolPackages';
 
@@ -83,7 +84,7 @@ export async function installGit(step: (text: string) => void = () => undefined,
     step(say(`Git indiriliyor (${Math.round(pin.size / 1e6)} MB)…`, `Downloading Git (${Math.round(pin.size / 1e6)} MB)…`));
     let answer: Response;
     try {
-      answer = await fetch(`${releases}${pin.file}`, { signal: AbortSignal.timeout(DOWNLOAD_LIMIT) });
+      answer = await netFetch(`${releases}${pin.file}`, { signal: AbortSignal.timeout(DOWNLOAD_LIMIT) });
     } catch {
       throw new GitToolRefusal(say('Git indirilemedi; internet bağlantını kontrol edip yeniden dene.', 'Git could not be downloaded; check the internet connection and try again.'));
     }

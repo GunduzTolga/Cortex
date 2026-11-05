@@ -187,6 +187,14 @@ test('a token about to stop is renewed with its refresh token and no client secr
   assert.ok(renewal && renewal.form.get('refresh_token') === 'ref-1' && !renewal.form.has('client_secret'));
   assert.equal(await githubToken(), 'tok-2', 'renewed once, then kept');
 
+  // A passing error keeps the connection: only a refused refresh token ends it.
+  fake.refresh = { error: 'server_error' };
+  const busy = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.writeFileSync(file, JSON.stringify({ ...busy, accessUntil: Date.now() }));
+  await assert.rejects(() => githubToken(), /yenilenemedi \(server_error\)/);
+  assert.equal(fs.existsSync(file), true, 'still connected');
+  assert.notEqual(githubStatus().state, 'expired');
+
   fake.refresh = { error: 'bad_refresh_token' };
   const again = JSON.parse(fs.readFileSync(file, 'utf8'));
   fs.writeFileSync(file, JSON.stringify({ ...again, accessUntil: Date.now() }));

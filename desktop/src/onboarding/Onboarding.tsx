@@ -7,7 +7,7 @@ import type { CliAuth, CliId } from '@shared/chat';
 import type { GithubStatus } from '@shared/github';
 import { messageOf } from '@shared/ipcError';
 import { engineAction, type SetupStatus, wakePhraseLabel } from '@shared/setup';
-import { AuthDialog, TOOL_NAMES } from '../chat/AuthDialog';
+import { AuthDialog, LoginEnded, TOOL_NAMES } from '../chat/AuthDialog';
 import { useChat } from '../chat/chatStore';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
@@ -654,6 +654,7 @@ function ToolsStep({
               <span className="min-w-[7rem] flex-1 break-words text-[13px] font-semibold text-darkDelegation">
                 {TOOL_NAMES[tool.id] ?? tool.id}
                 {going ? <span className="mt-0.5 block text-[11.5px] font-normal text-zinc-500">{t('onboarding.tools.signingIn.note')}</span> : null}
+                {!going && tool.loginEnded && tool.signedIn !== true && !fresh.has(tool.id) ? <span className="block font-normal"><LoginEnded ended={tool.loginEnded} /></span> : null}
                 {tool.local?.shortContext && tool.signedIn ? (
                   <span className="mt-0.5 block text-[11.5px] font-normal text-zinc-500" data-onboarding-tool-short>
                     {t('auth.local.short', { tokens: tool.local.shortContext })}

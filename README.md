@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.55" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.55-E8B23A">
+  <img alt="Sürüm 1.0.56" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.56-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -186,6 +186,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.56](docs/v3/releases/1.0.56.md) | İlk kurulum daha sağlam: sesli yazmanın modelleri kopan bağlantıda kaldığı yerden iniyor, disk yetmiyorsa en başta söyleniyor, "Hey Pyn"in küçük doğrulayıcısı inmezse uyarı çıkıyor; yarım kalan giriş nedenini söylüyor; şirket ağında Windows proxy'si kullanılıyor; geçici bir GitHub hatası bağlantıyı silmiyor. |
 | [1.0.55](docs/v3/releases/1.0.55.md) | Beyin'de alt yazılar ekrandakiyle uyuşuyor: Müdür ile Yazılımcı Tolga ayrı çiziliyor ve aynı adda rolleriyle yazılıyor, alt yazılar kesilmiyor, "yürüyor" yerine gidilen yer yazıyor. |
 | [1.0.54](docs/v3/releases/1.0.54.md) | GitHub ile bağlan: kasa birkaç tıkla GitHub'daki özel bir repoya yedeklenir, ikinci bilgisayar aynı kasaya bağlanır; aynı adlı farklı notta ikisi de kalır, hiçbir şey silinmez. Windows'ta Git yoksa Cortex kendisi getirir. |
 | [1.0.53](docs/v3/releases/1.0.53.md) | Koyu tema (Sistem / Açık / Koyu), sohbet listesinde oturumun maliyeti, sohbete resim ve dosya ekleme (Claude Code, Codex). Kasa eşitlemesi motorda (`beyin.py esitle`) ve masaüstü onu kullanıyor. Ofis'te sunucu rafı. |
