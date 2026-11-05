@@ -169,7 +169,8 @@ async function statusNow(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
     kept: keptHere(tool.id),
     chosen: offeredInChat(tool.id),
     own: ownProgram(tool.id) !== null,
-    loginEnded: loginEnds.get(tool.id) ?? null,
+    // One not installed has no sign-in to speak of (removed by hand, or this was another machine's).
+    loginEnded: installed ? (loginEnds.get(tool.id) ?? null) : null,
   };
   if (!installed) return base;
   // A key kept here that this computer cannot read back (kept on another one, or under another Windows account) is not
@@ -299,6 +300,8 @@ export const LOGIN_SCRIPT =
 const logins = new Map<CliId, ChildProcess>();
 /** How many sign-ins have been begun, by tool: an end is kept only for the latest. */
 const loginTries = new Map<CliId, number>();
+/** Sign-ins ended by a new press: their end tells the window nothing (it took the new one for over, the review of 1.0.56). */
+const replaced = new WeakSet<ChildProcess>();
 
 /**
  * A sign-in's hidden console ended, with the tool it started (Start-Process's program is its PowerShell's child): its
@@ -324,6 +327,8 @@ export function startLogin(id: unknown): void {
   if (!tool.login || !program) throw new KeyRefusal('This tool is not signed in to from here.');
   if (process.platform !== 'win32') throw new KeyRefusal('Signing in from Cortex opens a console window, which only Windows does here.');
   chooseChatTool(tool.id);
+  const before = logins.get(tool.id);
+  if (before) replaced.add(before);
   endLogin(tool.id);
   loginEnds.delete(tool.id);
   const mine = (loginTries.get(tool.id) ?? 0) + 1;
@@ -334,9 +339,10 @@ export function startLogin(id: unknown): void {
   logins.set(tool.id, child);
   // Ended by itself (not by a new press, nor by watchLogin): how it ended is kept when it left the tool signed out.
   // One ended by a new press says nothing: its end told the window, and the window took the new sign-in for over
-  // (the review of 1.0.56). One ended by watchLogin has told the window itself.
+  // (the review of 1.0.56). One ended by watchLogin (signed in, or ten minutes gone) tells the window it ended, as before.
   const ended = (code: number | null) => {
-    if (logins.get(tool.id) !== child) return;
+    if (replaced.has(child)) return;
+    if (logins.get(tool.id) !== child) return changed(tool.id);
     logins.delete(tool.id);
     void statusOf(tool)
       .then((now) => {
