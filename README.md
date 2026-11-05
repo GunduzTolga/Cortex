@@ -186,7 +186,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
-| [1.0.56](docs/v3/releases/1.0.56.md) | İlk kurulum daha sağlam: sesli yazmanın modelleri kopan bağlantıda kaldığı yerden iniyor, disk yetmiyorsa en başta söyleniyor, "Hey Pyn"in küçük doğrulayıcısı inmezse uyarı çıkıyor; geçici bir GitHub hatası bağlantıyı silmiyor. |
+| [1.0.56](docs/v3/releases/1.0.56.md) | İlk kurulum daha sağlam: sesli yazmanın modelleri kopan bağlantıda kaldığı yerden iniyor, disk yetmiyorsa en başta söyleniyor, "Hey Pyn"in küçük doğrulayıcısı inmezse uyarı çıkıyor; yarım kalan giriş nedenini söylüyor; şirket ağında Windows proxy'si kullanılıyor; geçici bir GitHub hatası bağlantıyı silmiyor. |
 | [1.0.55](docs/v3/releases/1.0.55.md) | Beyin'de alt yazılar ekrandakiyle uyuşuyor: Müdür ile Yazılımcı Tolga ayrı çiziliyor ve aynı adda rolleriyle yazılıyor, alt yazılar kesilmiyor, "yürüyor" yerine gidilen yer yazıyor. |
 | [1.0.54](docs/v3/releases/1.0.54.md) | GitHub ile bağlan: kasa birkaç tıkla GitHub'daki özel bir repoya yedeklenir, ikinci bilgisayar aynı kasaya bağlanır; aynı adlı farklı notta ikisi de kalır, hiçbir şey silinmez. Windows'ta Git yoksa Cortex kendisi getirir. |
 | [1.0.53](docs/v3/releases/1.0.53.md) | Koyu tema (Sistem / Açık / Koyu), sohbet listesinde oturumun maliyeti, sohbete resim ve dosya ekleme (Claude Code, Codex). Kasa eşitlemesi motorda (`beyin.py esitle`) ve masaüstü onu kullanıyor. Ofis'te sunucu rafı. |
