@@ -633,12 +633,20 @@ const releaseChannel = (channel) =>
 const callsOf = (channel) => app.evaluate((_electron, channel) => globalThis.cortexCalls?.[channel] ?? 0, channel);
 /** A note opened by its name with Ctrl+O, as the person would. */
 const openNote = async (name, at) => {
-  await page.keyboard.press('Control+o');
-  await notesView.locator('[data-notes-switcher-input]').fill(name);
-  // Enter once the note is the one offered first: pressed before, it chose nothing and left the switcher over the page.
-  await shownSoon(notesView.locator(`[data-switch-at="0"][data-switch-path="${at}"]`), 5_000);
-  await page.keyboard.press('Enter');
-  return shownSoon(notesView.locator(`[data-note-pane="${at}"]`));
+  // Twice at most: on a loaded runner the switcher offered the note after the 5 s waited for it, Enter chose nothing, and
+  // the switcher left over the page made the next click time out after 30 s (Windows CI and this server, 5 November).
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await page.keyboard.press('Control+o');
+    await notesView.locator('[data-notes-switcher-input]').fill(name);
+    // Enter once the note is the one offered first: pressed before, it chose nothing and left the switcher over the page.
+    if (await shownSoon(notesView.locator(`[data-switch-at="0"][data-switch-path="${at}"]`), 15_000)) {
+      await page.keyboard.press('Enter');
+      return shownSoon(notesView.locator(`[data-note-pane="${at}"]`));
+    }
+    // Not offered: the switcher is closed, so a failure is this check's own and not the next click's.
+    await page.keyboard.press('Escape');
+  }
+  return false;
 };
 /** The note in front, written in at its end. */
 const writeAtEnd = async (text, delay = 0) => {
