@@ -34,7 +34,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 
 sys.dont_write_bytecode = True
@@ -45,6 +44,8 @@ MARKER = 'kurulum.json'
 LOG = 'isci.log'
 VOSK_DIR = 'vosk-tr'
 VOSK_MODEL_URL = 'https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip'
+# Its digest, so a cut or wrong archive is not unpacked (36,855,784 bytes; read 2026-11-05).
+VOSK_MODEL_SHA256 = '8c8d07cec1bce31add14967c16891c84152cdf76d391e33c08278119b9ea96e5'
 WORKER = 'isci.py'
 ENGINES = ('cuda', 'vulkan', 'islemci')
 # Recording and the wake word, for every engine.
@@ -952,15 +953,12 @@ def install_plan(state, which=shutil.which, run=subprocess.run, system=None):
     }
 
 
-def _download(url, target):
-    """A model archive, over HTTPS only, into a temporary file beside its target."""
-    from urllib.request import urlopen
-    if not url.startswith('https://'):
-        raise ValueError('Yalnız HTTPS adresinden indirilir: ' + url)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with urlopen(url, timeout=60) as response, tempfile.NamedTemporaryFile(dir=target.parent, delete=False, suffix='.zip') as out:
-        shutil.copyfileobj(response, out)
-        return Path(out.name)
+def _download(url, target, say=print):
+    """A model archive, over HTTPS only, to `target`: asked again from where a dropped connection
+    stopped, its digest checked when known (_download_checked). It was one plain read into a
+    temporary file before: a cut left that file behind and failed `kur` after the long pip step,
+    and a wrong archive reached the unpacking as "beklenmeyen bir hata" (2026-11-05)."""
+    return _download_checked(url, target, VOSK_MODEL_SHA256 if url == VOSK_MODEL_URL else None, say=say)
 
 
 def network_error(exc):
@@ -1031,8 +1029,24 @@ def _download_checked(url, target, sha256, say=print, tries=4, pause=None):
     if sha256 and _sha256(part) != sha256:
         part.unlink(missing_ok=True)
         raise ValueError('İndirilen dosya beklenen dosya değil (SHA-256 tutmadı): ' + target.name)
-    os.replace(part, target)
+    _replace_retrying(part, target)
     return target
+
+
+def _replace_retrying(source, target, tries=10, pause=None):
+    """os.replace, asked again for a few seconds while another program holds the file: on Windows an
+    antivirus scans a file just written (hundreds of MB) and the rename fails with WinError 5/32
+    meanwhile. The desktop app's own writes do the same (fileWrite.ts renameRetrying)."""
+    import time
+    for attempt in range(tries):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == tries - 1:
+                raise PermissionError('%s yerine taşınamadı: başka bir program (çoğu zaman antivirüs) dosyayı tutuyor; '
+                                      'bir dakika sonra yeniden dene.' % Path(target).name)
+            (pause or time.sleep)(0.5 * (attempt + 1))
 
 
 def _sha256(path):
@@ -1251,7 +1265,33 @@ def _streamed(command, say, timeout, popen=subprocess.Popen):
     return code, ''.join(kept)
 
 
-def _trial_load(state, marker, say, run, previous):
+# What the packages and the environment take besides the model (CUDA's wheels are the most, ~1.1 GB).
+SETUP_SPARE_GB = 1.5
+
+
+def _disk_enough(folder, engine, config, usage=None):
+    """A first install that cannot fit stops before it starts, not after 1-3 GB of downloads with
+    "no space left on device" (2026-11-05). Not on a later `kur`: its packages and model are
+    mostly there already, and the estimate would turn away one that fits."""
+    if (Path(folder) / MARKER).exists():
+        return
+    need = float(download_size(engine, config).replace(',', '.')) + SETUP_SPARE_GB
+    try:
+        free = (usage or shutil.disk_usage)(folder).free / 1e9
+    except OSError:
+        return  # unknown: the install says it if it really runs out
+    if free < need:
+        raise OSError(28, 'No space left on device: %.1f GB boş, ses için yaklaşık %.1f GB gerekir' % (free, need))
+
+
+FETCH_TRIES = 3  # the model's download, asked again when the network broke off (Hugging Face resumes its own part)
+# A connection that broke off mid-download, not one that was never there: with no network at all
+# (LocalEntryNotFoundError) the install goes on at once to what it can do without (a card that works).
+CUT_WORDS = ('read timed out', 'connection reset', 'connection aborted', 'connection broken', 'incompleteread',
+             'remotedisconnected', 'chunkedencodingerror', 'bağlantı dosya bitmeden kapandı')
+
+
+def _trial_load(state, marker, say, run, previous, pause=None):
     """The helper loads the model once on the engine `marker` names, so the install fetches it, not
     the first word: (what it loaded, how long a second of sound took on a card, or None). Failed,
     the marker is put back as it was: a working install stays working."""
@@ -1259,12 +1299,20 @@ def _trial_load(state, marker, say, run, previous):
     (folder / MARKER).write_text(json.dumps(marker, ensure_ascii=False) + '\n', encoding='utf-8')
     say('Whisper modeli hazırlanıyor' + (' (ilk seferde yaklaşık %s GB iner)…' % download_size(marker['motor'], load_config(state))
                                          if marker['motor'] != 'vulkan' else '…'))
+    import time
     try:
-        with relayed_progress(folder / PROGRESS_FILE, say):
-            done = run(worker_command(state, '--indir'), capture_output=True, text=True, encoding='utf-8', errors='replace',
-                       timeout=7200, env=worker_env(state), creationflags=NO_WINDOW)
+        for attempt in range(FETCH_TRIES):
+            with relayed_progress(folder / PROGRESS_FILE, say):
+                done = run(worker_command(state, '--indir'), capture_output=True, text=True, encoding='utf-8', errors='replace',
+                           timeout=7200, env=worker_env(state), creationflags=NO_WINDOW)
+            output = (done.stderr or done.stdout or '').strip()
+            # A dropped connection over 0.5-1.6 GB asked the person to start the whole `kur` again (2026-11-05).
+            if not done.returncode or attempt == FETCH_TRIES - 1 or not any(word in output.lower() for word in CUT_WORDS):
+                break
+            say('  Bağlantı koptu; model indirmesi kaldığı yerden yeniden deneniyor (%d/%d)…' % (attempt + 2, FETCH_TRIES))
+            (pause or time.sleep)(10 * (attempt + 1))
         if done.returncode:
-            raise RuntimeError('Whisper modeli hazırlanamadı: ' + (done.stderr or done.stdout).strip()[-4000:])
+            raise RuntimeError('Whisper modeli hazırlanamadı: ' + output[-4000:])
     except Exception:
         if previous is None:
             (folder / MARKER).unlink(missing_ok=True)
@@ -1280,6 +1328,9 @@ def _trial_load(state, marker, say, run, previous):
             continue
         if isinstance(said, dict) and isinstance(said.get('sure_sn'), (int, float)) and not isinstance(said['sure_sn'], bool):
             seconds = float(said['sure_sn'])
+        if isinstance(said, dict) and said.get('dogrulayici') == 'yok':
+            say('Uyarı: "Hey Pyn"i doğrulayan küçük model (%s) indirilemedi; şimdilik yazı modeli doğrulayacak, uyandırma '
+                'işlemcide yavaş olabilir. İnternet düzelince sesli yazmayı yeniden kur.' % CHECK_MODEL)
     return (lines[-1] if lines else ''), seconds
 
 
@@ -1294,6 +1345,7 @@ def install(state, say=print, run=subprocess.run, download=_download, which=shut
     if plan['motor'] == 'vulkan' and not _vulkan_ready(state, say, download_checked):
         say('İşlemciye geçiliyor.')
         plan.update(motor='islemci', paketler=packages_for('islemci'), ekran_karti=False)
+    _disk_enough(folder, plan['motor'], load_config(state))
     if not _venv_works(state, run):
         say('Sanal ortam kuruluyor…')
         # --clear: a broken one left from before is built anew, not reused.
@@ -1307,7 +1359,7 @@ def install(state, say=print, run=subprocess.run, download=_download, which=shut
         raise RuntimeError('Paketler yüklenemedi: ' + output.strip()[-4000:])
     if not (folder / VOSK_DIR).is_dir():
         say('Uyandırma modeli indiriliyor (yaklaşık 40 MB)…')
-        archive = download(VOSK_MODEL_URL, folder / 'vosk.zip')
+        archive = download(VOSK_MODEL_URL, folder / 'vosk.zip', say=say)
         try:
             _unpack(archive, folder / VOSK_DIR)
         finally:
@@ -2231,6 +2283,11 @@ def load_model(state, config, report=None):
     return _processor_model(config, report)
 
 
+def checker_wanted(what):
+    """Whether the wake phrase gets its own small checker for the model `what` names (checker_for)."""
+    return ('(işlemci' in what or '(ekran kartı, Vulkan)' in what) and what.split(' ', 1)[0] not in ses.QUICK_MODELS
+
+
 def checker_for(config, what, report=None):
     """The model that checks the wake phrase on the processor (ses.CHECK_MODEL): the dictation's
     took 15-30 seconds a check on a laptop's processor, and the window opened that late. On a
@@ -2239,7 +2296,7 @@ def checker_for(config, what, report=None):
     `base` on the processor takes a few tenths, and leaves the card to the dictation. None on a CUDA
     card, quick enough to check it itself, for a model quick enough on the processor, or where it
     cannot be had (the dictation's model checks)."""
-    if not ('(işlemci' in what or '(ekran kartı, Vulkan)' in what) or what.split(' ', 1)[0] in ses.QUICK_MODELS:
+    if not checker_wanted(what):
         return None
     try:
         return _open(ses.CHECK_MODEL, 'cpu', 'int8', report)
@@ -3412,7 +3469,10 @@ def main(argv=None):
                 pass
         try:
             model, what = load_model(state, config, downloading)
-            checker_for(config, what, downloading)  # fetched now, with the model, not when the listener first starts
+            # Fetched now, with the model, not when the listener first starts. One that would not come
+            # was only in isci.log: `kur` said it was ready and every "Hey Pyn" waited on the big model.
+            if checker_wanted(what) and checker_for(config, what, downloading) is None:
+                print(json.dumps({'dogrulayici': 'yok'}), flush=True)
             if '(ekran kartı' in what:
                 # How long the card takes for a second of sound, its pipelines built: one slower than
                 # the processor's quick model is not kept (`kur`, SLOW_CARD_SN).

@@ -612,7 +612,7 @@ class SetupTest(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, 'large-v3-turbo (işlemci)\n', '')
             return subprocess.CompletedProcess(command, 0, '', '')
 
-        def download(url, target):
+        def download(url, target, say=None):
             self.assertTrue(url.startswith('https://'))
             copy = target.with_name('indirilen.zip')
             copy.write_bytes(archive.read_bytes())
@@ -1238,6 +1238,78 @@ class InstallRobustnessTest(unittest.TestCase):
         self.assertEqual(len(paused), 1)
         self.assertTrue(any('kaldığı yerden' in line for line in said))
         self.assertFalse(target.with_name('ggml.bin.part').exists())
+
+    def test_the_wake_model_archive_is_fetched_resumably_and_checked(self):
+        # It was one plain read into a temporary file: a cut left the file behind and failed `kur`
+        # after the long pip step; a wrong archive met the unpacking as "beklenmeyen bir hata".
+        asked = []
+        with mock.patch.object(ses, '_download_checked', lambda url, target, sha256, say=print: asked.append((url, sha256)) or target):
+            ses._download(ses.VOSK_MODEL_URL, Path(self.tmp.name) / 'vosk.zip')
+            ses._download('https://example.invalid/other.zip', Path(self.tmp.name) / 'other.zip')
+        self.assertEqual(asked, [(ses.VOSK_MODEL_URL, ses.VOSK_MODEL_SHA256), ('https://example.invalid/other.zip', None)])
+        self.assertRegex(ses.VOSK_MODEL_SHA256, r'^[0-9a-f]{64}$')
+
+    def test_a_file_an_antivirus_holds_is_moved_once_it_lets_go(self):
+        source, target = Path(self.tmp.name) / 'model.bin.part', Path(self.tmp.name) / 'model.bin'
+        source.write_bytes(b'model')
+        real, tries, paused = os.replace, [], []
+
+        def held_twice(a, b):
+            tries.append(a)
+            if len(tries) <= 2:
+                raise PermissionError(32, 'The process cannot access the file because it is being used by another process')
+            real(a, b)
+        with mock.patch.object(ses.os, 'replace', held_twice):
+            ses._replace_retrying(source, target, pause=paused.append)
+        self.assertEqual((target.read_bytes(), len(tries), len(paused)), (b'model', 3, 2))
+
+        def held(a, b):
+            raise PermissionError(5, 'Access is denied')
+        with mock.patch.object(ses.os, 'replace', held), self.assertRaises(PermissionError) as caught:
+            ses._replace_retrying(source, Path(self.tmp.name) / 'other.bin', tries=3, pause=paused.append)
+        self.assertIn('antivirüs', str(caught.exception))
+
+    def test_a_first_install_that_cannot_fit_stops_before_downloading(self):
+        folder = Path(self.tmp.name) / 'ses'
+        folder.mkdir()
+        small = lambda _path: types.SimpleNamespace(free=int(1.2e9))
+        with self.assertRaises(OSError) as caught:
+            ses._disk_enough(folder, 'islemci', dict(ses.DEFAULTS), usage=small)
+        self.assertEqual(caught.exception.errno, 28)
+        error = ses.setup_error(caught.exception, self.state)
+        self.assertEqual(error.code, 'voice_disk_full', 'said as the full disk it is, not "beklenmeyen bir hata"')
+        ses._disk_enough(folder, 'islemci', dict(ses.DEFAULTS), usage=lambda _path: types.SimpleNamespace(free=int(50e9)))
+        (folder / ses.MARKER).write_text('{}', encoding='utf-8')
+        ses._disk_enough(folder, 'islemci', dict(ses.DEFAULTS), usage=small)  # a later `kur`: mostly there already
+
+        def unknown(_path):
+            raise OSError('no such drive')
+        ses._disk_enough(Path(self.tmp.name) / 'yok', 'cuda', dict(ses.DEFAULTS), usage=unknown)
+
+    def test_a_wake_checker_that_did_not_come_is_said_by_kur(self):
+        # Only isci.log knew: `kur` said it was ready, and every "Hey Pyn" waited on the big model.
+        def run(command, **_options):
+            return subprocess.CompletedProcess(command, 0, '{"dogrulayici": "yok"}\nsmall (işlemci)\n', '')
+        said = []
+        ses.ses_dir(self.state).mkdir(parents=True)
+        model, seconds = ses._trial_load(self.state, {'motor': 'islemci'}, said.append, run, None)
+        self.assertEqual((model, seconds), ('small (işlemci)', None))
+        self.assertTrue(any(line.startswith('Uyarı:') and ses.CHECK_MODEL in line for line in said), said)
+
+    def test_a_model_download_the_network_broke_is_asked_again_not_left_to_the_person(self):
+        answers = [subprocess.CompletedProcess([], 1, '', 'requests.exceptions.ReadTimeout: Read timed out.'),
+                   subprocess.CompletedProcess([], 0, 'small (işlemci)\n', '')]
+        said, paused = [], []
+        ses.ses_dir(self.state).mkdir(parents=True)
+        model, _seconds = ses._trial_load(self.state, {'motor': 'islemci'}, said.append, lambda *_a, **_k: answers.pop(0), None,
+                                          pause=paused.append)
+        self.assertEqual((model, len(paused)), ('small (işlemci)', 1))
+        self.assertTrue(any('yeniden deneniyor (2/3)' in line for line in said), said)
+        # Not the network's: said at once, not asked three times.
+        broken = [subprocess.CompletedProcess([], 1, '', 'ValueError: model.bin bozuk')] * 3
+        with self.assertRaises(RuntimeError):
+            ses._trial_load(self.state, {'motor': 'islemci'}, said.append, lambda *_a, **_k: broken.pop(0), None, pause=paused.append)
+        self.assertEqual((len(broken), len(paused)), (2, 1))
 
     def test_the_vulkan_build_is_pinned_to_a_tag_the_workflow_never_replaces(self):
         workflow = (ROOT / '.github/workflows/whisper-vulkan.yml').read_text(encoding='utf-8')
@@ -2567,6 +2639,8 @@ class ServeTest(unittest.TestCase):
         self.assertEqual(helper.checker_for(dict(ses.DEFAULTS), 'large-v3-turbo (işlemci, whisper.cpp)'), 'denetci',
                          'whisper.cpp writing on the processor is as slow there: checked by the small model where it can be had')
         self.assertIsNone(helper.checker_for(dict(ses.DEFAULTS, cpu_model='base'), 'base (işlemci)'), 'it checks itself')
+        self.assertEqual([helper.checker_wanted(w) for w in ('small (işlemci)', 'base (işlemci)', 'large-v3-turbo (ekran kartı, CUDA)')],
+                         [True, False, False], '`--indir` says a missing checker only where one is wanted')
 
         def offline(*_args):
             raise OSError('no network')

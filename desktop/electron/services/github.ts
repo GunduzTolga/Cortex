@@ -98,7 +98,13 @@ function writeKept(kept: Kept | null): void {
   writeWhole(file(), JSON.stringify(kept), 0o600);
 }
 
-const seal = (text: string) => safeStorage.encryptString(text).toString('base64');
+/** Sealed by the system's encrypted store; where there is none (a broken Windows profile), one sentence, not Electron's English. */
+const seal = (text: string) => {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new GithubRefusal(say('Bu bilgisayar GitHub bağlantısını saklayacak güvenli bir yer sunmuyor.', 'This computer offers no safe place to keep the GitHub connection.'));
+  }
+  return safeStorage.encryptString(text).toString('base64');
+};
 const unseal = (text: string): string | null => {
   try {
     return safeStorage.decryptString(Buffer.from(text, 'base64'));
@@ -294,8 +300,14 @@ async function renew(kept: Kept): Promise<string> {
   }
   const answer = await postForm('/login/oauth/access_token', { client_id: clientId, grant_type: 'refresh_token', refresh_token: refresh });
   if (typeof answer.access_token !== 'string') {
-    forgetTokens('expired');
-    throw new GithubRefusal(expiredText());
+    // Only a refusal of the refresh token itself ends the connection; any other answer without a
+    // token (GitHub busy, a rate limit) left the person signed out for a passing error before.
+    if (answer.error === 'bad_refresh_token' || answer.error === 'invalid_grant') {
+      forgetTokens('expired');
+      throw new GithubRefusal(expiredText());
+    }
+    const why = typeof answer.error === 'string' ? answer.error : 'yanıt';
+    throw new GithubRefusal(say(`GitHub bağlantısı şu an yenilenemedi (${why}); biraz sonra yeniden dene.`, `The GitHub connection could not be renewed just now (${why}); try again shortly.`));
   }
   return keep(answer, kept, kept.repo);
 }
