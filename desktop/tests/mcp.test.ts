@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { after } from 'node:test';
 import { handlers } from 'electron';
 import type { McpAdded, McpStatus } from '../shared/mcp';
 import { registerIpc, trustPagesWhere } from '../electron/ipc';
@@ -26,9 +26,20 @@ const call = <T>(channel: string, ...args: unknown[]) => (handlers.get(channel) 
 
 const WINDOWS = process.platform === 'win32';
 
+/** Every folder this file made, gone once its tests are done. */
+const made: string[] = [];
+const folder = (prefix: string) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  made.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 /** A vault with an engine of this version, the gate's module in it unless told otherwise; in a folder with spaces and Turkish letters. */
 function vaultWith(version: string | null, gate = true): string {
-  const vault = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-mcp-')), 'Kasa Notları Şule');
+  const vault = path.join(folder('cortex-mcp-'), 'Kasa Notları Şule');
   fs.mkdirSync(path.join(vault, '.claude', 'scripts'), { recursive: true });
   if (version !== null) {
     fs.writeFileSync(path.join(vault, 'beyin.py'), '');
@@ -56,8 +67,8 @@ interface Machine {
 function machine(options: { claude?: boolean; mode?: string } = {}): Machine {
   const names = ['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'APPDATA', 'LOCALAPPDATA', 'BEYIN_PYTHON', 'FAKE_CLAUDE_MODE'];
   const kept = Object.fromEntries(names.map((name) => [name, process.env[name]]));
-  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-mcp-home-')));
-  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-mcp-bin-'));
+  const home = fs.realpathSync(folder('cortex-mcp-home-'));
+  const bin = folder('cortex-mcp-bin-');
   const log = path.join(bin, 'asked.log');
   const state = path.join(bin, 'servers.json');
   const script = path.join(bin, 'claude-standin.mjs');
