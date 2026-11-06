@@ -60,12 +60,13 @@ interface Machine {
 }
 
 /**
- * This machine as the test has it: a home with nothing in it (Windows' PowerShell not found there either, so no PATH is
- * read back from the machine's), the Python named by BEYIN_PYTHON - a path with a space in it, never run - and, unless
- * told otherwise, Claude Code's stand-in alone on the PATH, answering in `mode`.
+ * This machine as the test has it: a home with nothing in it, no PATH read back from the machine's
+ * (CORTEX_NO_PATH_REFRESH; SystemRoot is left as it is: node, which runs the stand-in, cannot start on Windows without
+ * it), the Python named by BEYIN_PYTHON - a path with a space in it, never run - and, unless told otherwise, Claude
+ * Code's stand-in alone on the PATH, answering in `mode`.
  */
 function machine(options: { claude?: boolean; mode?: string } = {}): Machine {
-  const names = ['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'APPDATA', 'LOCALAPPDATA', 'BEYIN_PYTHON', 'FAKE_CLAUDE_MODE'];
+  const names = ['PATH', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'BEYIN_PYTHON', 'FAKE_CLAUDE_MODE', 'CORTEX_NO_PATH_REFRESH'];
   const kept = Object.fromEntries(names.map((name) => [name, process.env[name]]));
   const home = fs.realpathSync(folder('cortex-mcp-home-'));
   const bin = folder('cortex-mcp-bin-');
@@ -109,7 +110,8 @@ if (args[0] === 'mcp' && args[1] === 'get') {
   }
   const python = WINDOWS ? 'C:\\Program Files\\Python 3\\python.exe' : '/opt/py thon/bin/python3';
   process.env.PATH = bin;
-  for (const name of ['HOME', 'USERPROFILE', 'SystemRoot', 'APPDATA', 'LOCALAPPDATA']) process.env[name] = home;
+  for (const name of ['HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA']) process.env[name] = home;
+  process.env.CORTEX_NO_PATH_REFRESH = '1';
   process.env.BEYIN_PYTHON = python;
   if (options.mode) process.env.FAKE_CLAUDE_MODE = options.mode;
   else delete process.env.FAKE_CLAUDE_MODE;
