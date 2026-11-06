@@ -1,0 +1,126 @@
+name: tailnet-helper
+
+# cortex-tailnet: the small tailnet node the desktop app downloads on its first "Kodla bağlan", so a
+# person reaches their own server without installing Tailscale (design:
+# docs/superpowers/specs/2026-11-06-gomulu-tailscale-eslestirme-design.md). Source: tools/cortex-tailnet.
+#
+# A push or pull request that changes it runs the Go tests and builds every platform as the run's
+# artifact. Run by hand with "publish", the builds go to a pre-release of their own
+# (cortex-tailnet-<HELPER_VERSION>): a pre-release is never "latest", so Cortex's updater, which reads
+# the latest release, does not take it for a Cortex version.
+#
+# A published build is never replaced. The app pins each file by its SHA-256 (toolPackages.ts); bytes
+# replaced under the same name would be refused by every shipped version. Taking up a new build is an
+# explicit change of HELPER_VERSION here and of the url and sha256 there.
+
+on:
+  push:
+    paths:
+      - 'tools/cortex-tailnet/**'
+      - '.github/workflows/tailnet-helper.yml'
+  pull_request:
+    paths:
+      - 'tools/cortex-tailnet/**'
+      - '.github/workflows/tailnet-helper.yml'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Attach the builds to the cortex-tailnet pre-release
+        type: boolean
+        default: false
+
+env:
+  HELPER_VERSION: '0.1.0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tailnet-helper-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: tools/cortex-tailnet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/cortex-tailnet/go.mod
+          cache-dependency-path: tools/cortex-tailnet/go.sum
+      - run: go vet ./...
+      - run: go test -count=1 -v ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        target: [windows/amd64, windows/arm64, darwin/arm64, darwin/amd64, linux/amd64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/cortex-tailnet/go.mod
+          cache-dependency-path: tools/cortex-tailnet/go.sum
+      - name: Derle
+        working-directory: tools/cortex-tailnet
+        env:
+          CGO_ENABLED: '0'
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          os="${TARGET%/*}"; arch="${TARGET#*/}"; ext=""
+          [ "$os" = windows ] && ext=".exe"
+          name="cortex-tailnet-${os}-${arch}${ext}"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          GOOS="$os" GOARCH="$arch" go build -trimpath -buildvcs=false -ldflags "-s -w" -o "$GITHUB_WORKSPACE/out/$name" .
+          # BSD-3-Clause asks for Tailscale's notice beside the binary.
+          cp "$(go list -m -f '{{.Dir}}' tailscale.com)/LICENSE" "$GITHUB_WORKSPACE/out/LICENSE-tailscale.txt"
+          cd "$GITHUB_WORKSPACE/out"
+          sha256sum "$name" > "$name.sha256"
+          cat "$name.sha256"
+          echo "NAME=$name" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: |
+            out/${{ env.NAME }}
+            out/${{ env.NAME }}.sha256
+            out/LICENSE-tailscale.txt
+          retention-days: 30
+
+  publish:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="cortex-tailnet-${HELPER_VERSION}"
+          cd out
+          # grep reads all of it (no -q): one that stops at the match could leave gh a broken pipe.
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -x 'cortex-tailnet-windows-amd64.exe' >/dev/null; then
+            echo "$tag already has its builds; refusing to replace published ones (Cortex pins their SHA-256)." >&2
+            exit 1
+          fi
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+              --title "cortex-tailnet ${HELPER_VERSION}" \
+              --notes "Masaüstü Cortex'in sunucuya kurulumsuz bağlanmak için indirdiği küçük bağlantı aracı (Tailscale tsnet). Uygulama bunu kendisi indirir ve SHA-256'sını denetler; elle bir şey yapman gerekmez. Lisans: BSD-3-Clause (LICENSE-tailscale.txt)."
+          # Never with the clobber flag: without it gh refuses an asset name that is there already.
+          gh release upload "$tag" cortex-tailnet-* LICENSE-tailscale.txt --repo "$GITHUB_REPOSITORY"
