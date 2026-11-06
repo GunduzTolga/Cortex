@@ -196,9 +196,13 @@ const REFRESH_EVERY = 10_000;
  * (21 October). The machine's and the person's PATH are read again, and the folders this
  * process lacks are added to its own, so every tool found and started after sees them; the
  * installer's folder with them. At most every ten seconds unless `now`; elsewhere a no-op.
+ *
+ * CORTEX_NO_PATH_REFRESH=1 (tests only): the PATH a test set is kept as it is. Tests used to point SystemRoot at an
+ * empty folder so PowerShell was not found, but a node started from that environment could not start on Windows, and a
+ * stand-in CLI run by node answered nothing (6 November, the MCP section's tests on Windows CI).
  */
 export function refreshPath(now = false): Promise<void> {
-  if (!WINDOWS) return Promise.resolve();
+  if (!WINDOWS || process.env.CORTEX_NO_PATH_REFRESH === '1') return Promise.resolve();
   if (refreshing) return refreshing;
   if (!now && Date.now() - refreshedAt < REFRESH_EVERY) return Promise.resolve();
   refreshing = new Promise<void>((resolve) => {

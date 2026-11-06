@@ -106,6 +106,10 @@ const api: CortexApi = {
     forget: () => invoke('hermes:forget'),
     test: () => invoke('hermes:test'),
   },
+  mcp: {
+    status: () => invoke('mcp:status'),
+    addToClaude: () => invoke('mcp:addToClaude'),
+  },
   github: {
     status: () => invoke('github:status'),
     start: () => invoke('github:start'),

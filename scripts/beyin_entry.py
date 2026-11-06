@@ -628,6 +628,20 @@ def load_cli(directory):
     return cli
 
 
+def mcp_refusal(vault, installed_version, error):
+    """`beyin.py mcp` where the engine cannot start (no runtime config, an unreadable pin): the client still
+    gets an MCP answer, its initialize refused with one sentence, not a process that ends without a word."""
+    directory = str(vault / '.claude/scripts')
+    if directory not in sys.path:
+        sys.path.insert(0, directory)
+    try:
+        import beyin_v3_mcp as mcp
+    except Exception:
+        print("Bu kasada Cortex'in hafızası kurulu değil ya da eski; Cortex'i güncelle.", file=sys.stderr)
+        return 1
+    return mcp.main([], vault=vault, state=None, version=installed_version, setup_error=error)
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     passthrough = argv[1:]  # `pyn` hands these to the client untouched, --json and --human included
@@ -699,6 +713,10 @@ def main(argv=None):
             # Keep the vault in step with its git remote (the desktop app's and a server's timer call this); its own CLI.
             import beyin_v3_esitle as esitle
             return esitle.main(argv[1:] + (['--json'] if force_json and '--json' not in argv else []), vault=vault, state=state)
+        if argv and argv[0] == 'mcp':
+            # The vault's MCP door for AI clients (stdio): reads, and writes only new notes (capture, note_create).
+            import beyin_v3_mcp as mcp
+            return mcp.main(argv[1:], vault=vault, state=state, version=installed_version)
         if argv and argv[0] == 'pyn':
             # Open Pyn in a chosen AI client inside this vault; its own small CLI.
             import beyin_v3_pyn as pyn
@@ -760,6 +778,8 @@ def main(argv=None):
         print(message, file=sys.stderr if code else sys.stdout)
         return code
     except Exception as exc:
+        if command == 'mcp':
+            return mcp_refusal(vault, installed_version, exc)
         error = {'error': type(exc).__name__, 'message': str(exc)}
         # A failure that names itself (voice_network, updater_busy...): the desktop app says it in
         # the person's language and, where it can, offers what to do.

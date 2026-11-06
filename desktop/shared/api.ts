@@ -2,6 +2,7 @@ import type { ChatApi, ChatPush, CliId } from './chat';
 import type { GithubApi, GithubStatus } from './github';
 import type { HermesApi } from './hermes';
 import type { AppLanguage } from './language';
+import type { McpApi } from './mcp';
 import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
 import type { OfficeApi } from './office';
 import type { ListenerSeen, SetupApi, SetupPush, VoiceStatus } from './setup';
@@ -11,7 +12,9 @@ import type { SyncStatus, VaultSyncApi } from './vaultSync';
 /**
  * Everything the window can ask of the main process: the object the preload
  * puts on `window.cortex` (electron/preload.ts), answered in electron/ipc.ts.
- * No call takes or returns a path outside the vault.
+ * No call takes a path outside the vault. One returns one: `mcp.status`, the
+ * lines that connect the vault to an AI tool, to be shown and copied as they
+ * are - the vault's own folder and the Python that runs its engine.
  */
 
 /** How the window is drawn: the system's light or dark, or one kept whatever the system says (Settings › General). */
@@ -129,6 +132,8 @@ export interface CortexApi {
   github: GithubApi;
   /** A Hermes Agent on another machine as a chat engine: its address, profile and key (shared/hermes.ts). */
   hermes: HermesApi;
+  /** The vault connected to the person's AI tools through its MCP gate (shared/mcp.ts, Settings). */
+  mcp: McpApi;
   /** The app's own update from the releases (electron/services/updater.ts). */
   update: {
     /** The one downloaded and waiting, if any: a window opened after it was told asks. */
