@@ -1,6 +1,6 @@
 # `beyin.py mcp`: kasanın tek MCP kapısı — tasarım (taslak)
-Tarih: 2026-11-05 · Dal: `mcp/tasarim` · Durum: **1. aşama uygulandı (dal `mcp/asama-1-okuma`, 1.0.57); 2. aşama (yazma) uygulandı, onay bekliyor (dal
-`mcp/asama-2-yazma`, 1.0.58); açık sorular öneriyle, onay bekliyor** · Kaynak: Tolga'nın 10. adam kararı
+Tarih: 2026-11-05 · Dal: `mcp/tasarim` · Durum: **1. aşama uygulandı (dal `mcp/asama-1-okuma`, 1.0.57); 2. aşama (yazma) uygulandı (dal
+`mcp/asama-2-yazma`, 1.0.58); varsayımlar ve iki aşamanın tek sürümde çıkması Tolga'nın onayıyla (2026-11-06, uygulama 12497)** · Kaynak: Tolga'nın 10. adam kararı
 "`beyin.py mcp` Faz 1" (2026-11-03, kasa `projects/Cortex/Tecrube.md`), Cortex-Browser ADR-0006 "Cortex bağlayıcısı: tek
 hafıza, stdio üzerinden MCP" (2026-10-29), yol haritası incelemesi (kasa `projects/Cortex/yol-haritasi-inceleme-2026-11-03.md` §1)
 
@@ -13,9 +13,9 @@ kancalar); bu kapı onların yerini almaz, yanına tek ve denetlenebilir bir yol
 ## Kararlar
 Belgede öneri olarak; Tolga onaylayınca "kullanıcıyla alındı" diye işaretlenecek.
 
-**2026-11-06, Tolga "başla" dedi; açık sorular öneriyle uygulandı, onay bekliyor:** araç adları İngilizce (`search`,
+**2026-11-06, Tolga "başla" dedi; açık sorular öneriyle uygulandı, varsayımlar onaylandı (uygulama 12497):** araç adları İngilizce (`search`,
 `context`); `note_create` 2. aşamada; kancalar kalır, MCP onların yanına eklenir. 1. aşamada uygulamanın netleştirdiği
-üç nokta (onay bekliyor):
+üç nokta (onaylandı, uygulama 12497):
 - **`trust: untrusted` kayıtlar dönmez.** Motorun `audience="internal"` kapısı bu kayıtları (`trust: untrusted`,
   `trusted: false`, `kind`/`status: untrusted`) hiç vermiyor; MCP bu kapıyı gevşetmedi. `untrusted: true` işareti
   kapıdan geçen ama dışarıdan gelmiş notlara konur: `untrusted: true`, `kaynak_guveni: guvenilmeyen` ve gelen kutusu
@@ -35,7 +35,7 @@ Belgede öneri olarak; Tolga onaylayınca "kullanıcıyla alındı" diye işaret
   (Browser her yazmayı kullanıcıya sorar, ADR-0006 §3); sunucu yine de sınırları uygular.
 - **Ağa çıkmaz:** `capture` metni istemciden hazır alır; URL'yi yeniden indirmez (ADR-0006 §4, K-05).
 
-**2026-11-06, 2. aşama (yazma) uygulandı, onay bekliyor.** Uygulamanın netleştirdiği noktalar:
+**2026-11-06, 2. aşama (yazma) uygulandı; varsayımlar onaylandı (uygulama 12497).** Uygulamanın netleştirdiği noktalar:
 - **`capture` notu bir Yakala kartıdır** (`tur: yakala`, `durum: bekliyor`, `arac: mcp`, `uygulama: <origin>`):
   Yakala'nın klasörü, dosya adı, URL kuralı (`_safe_source_url`, ağsız) ve ön bilgi yazıcısı (`_dump`) kullanılır;
   `yakala liste`/`isle` ve masaüstü onu görür. Web Clipper kartı gibi `visibility: internal` ve metin `## Icerik`
@@ -101,7 +101,7 @@ Belgede öneri olarak; Tolga onaylayınca "kullanıcıyla alındı" diye işaret
 
 ## Aşamalar
 1. Okuma: `search`, `context` + belge + Claude Code bağlama satırı. Kendi sürümü.
-2. Yazma: `capture`, `note_create`. Uygulandı (1.0.58), onay bekliyor.
+2. Yazma: `capture`, `note_create`. Uygulandı (1.0.58), onaylandı.
 3. Masaüstünde "AI araçlarına bağla" düğmesi.
 4. Browser Engine'i istemci (Cortex-Browser reposunda).
 
@@ -109,6 +109,6 @@ Belgede öneri olarak; Tolga onaylayınca "kullanıcıyla alındı" diye işaret
 | Soru | Kim karar verir | Durum |
 |---|---|---|
 | Faz 1'e (GitHub ile bağlan, bitti) hemen sonra mı, yoksa ilk kurulum ölçümünden sonra mı | Tolga | Kapandı: 2026-11-06, Tolga "beyin.py mcp uygulamasına başla" |
-| Claude Code için kancalar (bugünkü bağlam enjeksiyonu) kalsın mı, MCP yanına mı eklensin | Tolga | Öneriyle uygulandı (2026-11-06): ikisi birlikte; onay bekliyor |
-| `note_create` ilk sürümde olsun mu (yazma riskini azaltmak için yalnız `capture`) | Tolga | Öneriyle uygulandı (2026-11-06): aşama 2'de; onay bekliyor |
-| Araç adları Türkçe mi (`ara`, `yakala`) İngilizce mi | Tolga | Öneriyle uygulandı (2026-11-06): İngilizce; onay bekliyor |
+| Claude Code için kancalar (bugünkü bağlam enjeksiyonu) kalsın mı, MCP yanına mı eklensin | Tolga | Öneriyle uygulandı (2026-11-06): ikisi birlikte; onaylandı (12497) |
+| `note_create` ilk sürümde olsun mu (yazma riskini azaltmak için yalnız `capture`) | Tolga | Öneriyle uygulandı (2026-11-06): aşama 2'de; onaylandı (12497) |
+| Araç adları Türkçe mi (`ara`, `yakala`) İngilizce mi | Tolga | Öneriyle uygulandı (2026-11-06): İngilizce; onaylandı (12497) |
