@@ -699,6 +699,10 @@ def main(argv=None):
             # Keep the vault in step with its git remote (the desktop app's and a server's timer call this); its own CLI.
             import beyin_v3_esitle as esitle
             return esitle.main(argv[1:] + (['--json'] if force_json and '--json' not in argv else []), vault=vault, state=state)
+        if argv and argv[0] == 'eslestir':
+            # A one-off pairing code for a desktop Cortex to reach this server with nothing installed; its own small CLI.
+            import beyin_v3_eslestir as eslestir
+            return eslestir.main(argv[1:], vault=vault, state=state)
         if argv and argv[0] == 'pyn':
             # Open Pyn in a chosen AI client inside this vault; its own small CLI.
             import beyin_v3_pyn as pyn
