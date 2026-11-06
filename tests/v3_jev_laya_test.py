@@ -84,10 +84,15 @@ class FakeLaya:
                         outer.wait.wait(10)
                     time.sleep(outer.delay)
                     code = outer.status.get(index, 200)
-                    self.reply(code, outer.answer(body) if code == 200 else dict(detail='PRIVATE server detail'))
+                    payload = outer.answer(body) if code == 200 else dict(detail='PRIVATE server detail')
                 finally:
+                    # The request stops counting as in flight BEFORE its reply is written. Decremented after the reply,
+                    # the counter outlived the request: the client (one worker) sends the next request the moment the
+                    # reply arrives, and on a loaded runner this handler thread was not yet back from writing, so two
+                    # sequential requests read as a peak of 2 (seen on CI, ubuntu / Python 3.11, 2026-11-06).
                     with outer.lock:
                         outer.active -= 1
+                self.reply(code, payload)
 
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
