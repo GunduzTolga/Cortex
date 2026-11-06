@@ -176,7 +176,8 @@ Arama sözcük tabanlıdır, anlamsal değildir: `beyin.py context` ile aynı s�
 - **Sırlar maskelenir.** Bilinen sır biçimleri (API anahtarları, GitHub jetonları, parolalar) ve kasanın kendi sır
   listesi (runtime klasöründeki `secret-patterns.txt`) dışarıya `[REDACTED]` olarak gider. Asistan sorgusunu kendisi
   seçebildiği için ("token" da bir sorgudur) bu süzgeç MCP'de her zaman açıktır. Sır listesi okunamazsa Cortex not
-  göndermez ve nedenini söyler.
+  göndermez ve nedenini söyler. Maskeleme kısaltmadan önce yapılır: `search` alıntısı ve başlık maskelenmiş metinden
+  kesilir, böylece kesim bir sırrın ortasına denk gelse de sırrın bir parçası dışarı çıkmaz.
 - **Yazılanda da sırlar maskelenir.** `capture` ve `note_create` metni, başlığı ve ön bilgi alanlarını kasaya
   yazmadan önce aynı süzgeçten geçirir; kasanın `secret_filter` tercihi kapalı olsa da. Maskelenen bir adres başka
   bir adres olacağı için sır taşıyan bir `url` maskelenmez, reddedilir. Sır listesi okunamazsa Cortex hiçbir şey
@@ -184,9 +185,18 @@ Arama sözcük tabanlıdır, anlamsal değildir: `beyin.py context` ile aynı s�
 - **Okuma hiçbir şey yazmaz.** `search` ve `context` için indeks salt okunur açılır; kasaya ve runtime klasörüne
   hiçbir şey yazılmaz, eşitleme yapılmaz. Bu yüzden son eşitlemeden sonra eklenen bir not, bir sonraki eşitlemeden
   sonra görünür (kanca, `beyin.py sync` ya da masaüstü uygulaması). Değişen ya da silinen not o arada zaten dönmez.
-- **Yazma yalnız yeni bir dosya ekler.** Var olan bir not değişmez, silinmez, üzerine yazılmaz. Bir yolda not olup
-  olmadığını `note_create`'in "zaten var" cevabı söyler (gizli bir notun yolu için de); notun içeriği hiçbir yazma
-  cevabında yoktur.
+- **Yazma yalnız yeni bir dosya ekler.** Var olan bir not değişmez, silinmez, üzerine yazılmaz. Notun içeriği
+  hiçbir yazma cevabında yoktur.
+- **Bilinen sınır: `note_create` bir yolun dolu olduğunu söyler.** Üzerine yazmamak için yolun dolu olup olmadığına
+  bakılır ve bu, metin doğrulanmadan önce olur. Bu yüzden asistan adını tahmin ettiği bir yolda not olup olmadığını,
+  hiçbir şey yazmadan öğrenebilir; `visibility: private` bir not ve dizin dışında tutulan bir klasör için de ("Bu
+  klasör dizinin dışında tutuluyor" ayrı bir cevaptır). Öğrenilen yalnız yolun varlığıdır, içerik değil. Adı bile
+  bilinmemesi gereken notu, adında "Şifreler" ya da "Özel" geçen bir klasörde ya da kasanın dışında tut.
+- **Bilinen sınır: `note_create` ile yazılan not "güvenilir" döner.** `capture` dışarıdan gelen içeriği
+  `untrusted: true` ile yazar; `note_create` yazdığına böyle bir işaret koymaz, aramada `untrusted: false` döner.
+  Asistan bir web sayfasındaki gizli talimatı `note_create` ile not yaparsa o metin sonradan işaretsiz gelir. Koruma
+  onaydadır: her `note_create` çağrısını onaylamadan önce metne bak ("Yazma ve onay"); dışarıdan gelen içerik için
+  asistandan `capture` kullanmasını iste.
 - **Ağa çıkmaz.** `capture` adresi indirmez. Dönen notlar, kancalarda olduğu gibi, kullandığın yapay zeka
   sağlayıcısına gider. Yerel bir model kullanırsan hiçbir şey bilgisayardan çıkmaz.
 
