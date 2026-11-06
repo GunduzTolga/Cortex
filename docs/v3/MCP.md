@@ -21,6 +21,26 @@ notu değiştirmez, silmez ya da üzerine yazmaz. Yazmadan önce aracın sana so
 Komut her araçta aynıdır: `<python> <kasa>/beyin.py mcp`. Python, Windows'ta `py -3`, macOS ve Linux'ta `python3`
 olur. Kasa yolu tam yol olmalıdır.
 
+### Masaüstü uygulamasından (1.0.59)
+
+Cortex masaüstü uygulamasında **Ayarlar › Yapay zeka araçlarına bağla** bu satırları açık kasa için hazır verir:
+Cortex'in o bilgisayarda çalıştığı Python'un tam yolu, kasanın `beyin.py`'si ve `mcp`. Claude Code, Codex ve OpenCode
+için birer satır, her birinin yanında **Kopyala**. Boşluklu ya da Türkçe harfli bir klasör adı terminalin okuyacağı
+gibi tırnaklanır (Windows'ta PowerShell'in tırnakları).
+
+- **Claude Code'a ekle:** Claude Code kuruluysa düğme, sana sorduktan sonra Claude Code'un kendi komutunu çalıştırır:
+  `claude mcp add --scope user cortex -- <python> <kasa>/beyin.py mcp`. Bağlantı her projede kullanılır. "Eklendi"
+  yalnız Claude Code bağlantıyı gösterince (`claude mcp get cortex`) yazılır.
+- **Zaten bağlıysa** bölüm bunu söyler ve düğme çıkmaz. Claude Code'da `cortex` adıyla başka bir kasa ya da sunucu
+  varsa Cortex ona dokunmaz; önce `claude mcp remove cortex` çalıştırmanı söyler.
+- **Claude Code yoksa** yalnız kopyalanacak satırlar kalır.
+- **Motor 1.0.58'den eskiyse** (ya da kasada `beyin.py mcp` yoksa) satırlar yerine "Cortex'i güncelle" yazar; güncelleme
+  aynı ekrandaki Cortex bölümündedir.
+
+Uygulama hiçbir komutu kabuk üzerinden çalıştırmaz ve pencereden gelen bir yolu kullanmaz: kasa, uygulamanın açık
+tuttuğu kasadır. Gerçek bir Claude Code'a ekleme, Windows ve macOS'ta henüz denenmedi; düğme sahte bir `claude`
+ile test edildi (`desktop/tests/mcp.test.ts`, e2e smoke).
+
 ### Claude Code
 
 ```

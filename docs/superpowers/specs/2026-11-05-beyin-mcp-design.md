@@ -1,6 +1,6 @@
 # `beyin.py mcp`: kasanın tek MCP kapısı — tasarım (taslak)
 Tarih: 2026-11-05 · Dal: `mcp/tasarim` · Durum: **1. aşama uygulandı (dal `mcp/asama-1-okuma`, 1.0.57); 2. aşama (yazma) uygulandı (dal
-`mcp/asama-2-yazma`, 1.0.58); varsayımlar ve iki aşamanın tek sürümde çıkması Tolga'nın onayıyla (2026-11-06, uygulama 12497)** · Kaynak: Tolga'nın 10. adam kararı
+`mcp/asama-2-yazma`, 1.0.58); varsayımlar ve iki aşamanın tek sürümde çıkması Tolga'nın onayıyla (2026-11-06, uygulama 12497); 3. aşama (masaüstü) uygulandı (dal `mcp/asama-3-masaustu`, 1.0.59)** · Kaynak: Tolga'nın 10. adam kararı
 "`beyin.py mcp` Faz 1" (2026-11-03, kasa `projects/Cortex/Tecrube.md`), Cortex-Browser ADR-0006 "Cortex bağlayıcısı: tek
 hafıza, stdio üzerinden MCP" (2026-10-29), yol haritası incelemesi (kasa `projects/Cortex/yol-haritasi-inceleme-2026-11-03.md` §1)
 
@@ -70,7 +70,7 @@ Belgede öneri olarak; Tolga onaylayınca "kullanıcıyla alındı" diye işaret
 | `scripts/beyin_entry.py` | `mcp` komutu → `beyin_v3_mcp.main()` | — |
 | `docs/v3/MCP.md` | kullanıcı belgesi: Claude Code / Codex / OpenCode için bağlama satırı, araçlar, gizlilik | — |
 | `tests/v3_mcp_test.py` | süreç olarak başlatıp stdin/stdout üzerinden konuşan testler | — |
-| Masaüstü (sonra) | Ayarlar'da "Bu kasayı AI araçlarına bağla" (Claude Code `claude mcp add` satırını yazar) | — |
+| Masaüstü (3. aşama, 1.0.59) | Ayarlar › "Yapay zeka araçlarına bağla": Claude Code, Codex, OpenCode satırları (Kopyala), Claude Code kuruluysa onaydan sonra `claude mcp add --scope user`; `desktop/electron/services/mcp.ts`, `desktop/src/ui/McpSection.tsx` | Masaüstünün Python bulucusu (`usablePython`), Claude Code bulucusu (`programOf`) |
 
 ## Süreçler arası sözleşme
 | Mesaj | Yön | Alanlar | Not |
@@ -102,7 +102,16 @@ Belgede öneri olarak; Tolga onaylayınca "kullanıcıyla alındı" diye işaret
 ## Aşamalar
 1. Okuma: `search`, `context` + belge + Claude Code bağlama satırı. Kendi sürümü.
 2. Yazma: `capture`, `note_create`. Uygulandı (1.0.58), onaylandı.
-3. Masaüstünde "AI araçlarına bağla" düğmesi.
+3. Masaüstünde "AI araçlarına bağla" düğmesi. Uygulandı (1.0.59). Uygulamanın netleştirdiği noktalar:
+   - **`--scope user`:** Claude Code'un varsayılanı (`local`) bağlantıyı komutun çalıştığı klasöre bağlar; uygulamanın
+     klasörü ev klasörü olurdu. Düğme ve gösterilen satır aynıdır: her projede.
+   - **"Zaten var" Claude Code'un sözüyle:** `claude mcp get cortex` çıktısında kasanın `beyin.py` yolu aranır
+     (`this` / `other` / `none` / `unknown`). Aynı adda başka bir sunucu silinmez, değiştirilmez; kullanıcıya
+     `claude mcp remove cortex` söylenir. "Eklendi" yalnız ekledikten sonra `get` bu kasayı gösterince yazılır.
+   - **Motor kapısı:** `.beyin-version` 1.0.58'den eski, öncül (2.x/3.x), okunamaz ya da `beyin_v3_mcp.py` yoksa satır
+     yerine "Cortex'i güncelle".
+   - **IPC:** `mcp:status`, `mcp:addToClaude`; ikisi de argüman almaz. Gösterilen satır kasanın ve Python'un tam
+     yolunu içerir (pencereye yol veren tek kanal); kopyalanmak için.
 4. Browser Engine'i istemci (Cortex-Browser reposunda).
 
 ## Açık sorular
