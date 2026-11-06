@@ -35,6 +35,11 @@ GATED_CANARY = 'MCPGATEDCANARY52ac'     # trust: untrusted, which the engine's g
 FIELD_CANARY = 'MCPFIELDVALUECANARY'    # an argument's value, which a refusal must never repeat
 FAKE_TOKEN = 'ghp_' + 'Zq7' * 12       # GitHub's token shape, built here so no literal sits in the file
 WRITE_CANARY = 'MCPWRITTENPRIVATE93be'  # a private note written through note_create
+# A private key's shape, built here so no literal sits in the file; its body lines are what must never leak.
+KEY_LINE = 'Pq9' * 21 + 'P'
+FAKE_KEY = ('-----BEGIN ' + 'RSA PRIVATE KEY-----\n' + '\n'.join([KEY_LINE] * 12) + '\n-----END ' + 'RSA PRIVATE KEY-----')
+# Words after a secret, one per query, so the excerpt window slides across the secret a few characters at a time.
+SLIDE = ['kel%02d' % i for i in range(40)]
 INBOX = '📥 000-Inbox/Yakala'
 TIMEOUT = 30
 INITIALIZE = {'protocolVersion': '2025-06-18', 'capabilities': {},
@@ -170,6 +175,13 @@ class McpProcessTest(McpCase):
         note(v / '📥 000-Inbox/Yakala/kart.md', '# Kart\n\nQuartz rollout amber, a card in the capture inbox.\n')
         note(v / 'notes/sir.md', 'Quartz rollout amber deploy key: ' + FAKE_TOKEN + '\n')
         note(v / 'notes/uzun.md', '# Uzun\n\n' + 'Quartz rollout amber long notes. ' * 300 + '\n')
+        # Longer than an excerpt: a cut through the secret must not leave a part the masking no longer sees.
+        note(v / 'notes/sir-uzun.md', 'Kirpi dolgu ' + ' '.join('on%02d' % i for i in range(42)) + ' '
+             + FAKE_TOKEN + ' ' + ' '.join(SLIDE) + ' ' + 'son dolgu ' * 40 + '\n')
+        note(v / 'notes/anahtar.md', 'Sunucu anahtari asagida.\n' + FAKE_KEY + '\n' + ' '.join(SLIDE)
+             + ' ' + 'son dolgu ' * 40 + '\n')
+        note(v / 'notes/sir-baslik.md', '---\ntitle: ' + 'Baslik uzun ' * 15 + FAKE_TOKEN + '\n---\n'
+             'Baslikli kirpi notu.\n')
         result = run_python(v / 'beyin.py', ['sync', '--json'], v, cls.env)
         if result.returncode or json.loads(result.stdout)['status'] != 'succeeded':
             raise AssertionError(result.stdout.decode('utf-8', 'replace') + result.stderr.decode('utf-8', 'replace'))
@@ -303,6 +315,30 @@ class McpProcessTest(McpCase):
         for answer in (search, context):
             self.assertNotIn(FAKE_TOKEN, json.dumps(answer))
             self.assertIn('[REDACTED]', json.dumps(answer))
+
+    def test_secrets_are_masked_before_the_excerpt_and_title_are_cut(self):
+        # Cutting first left half a token or a key's body that no pattern matches any more.
+        session = self.session()
+        leaks = ('Zq7Zq7Zq', 'Pq9Pq9Pq')
+        for query in ['kirpi dolgu', 'sunucu anahtari', 'baslikli kirpi', 'on40', 'on41'] + SLIDE:
+            for name, arguments in (('search', {'query': query, 'limit': 20}),
+                                    ('context', {'query': query, 'budget_chars': 8000})):
+                raw, answer = self.raw_call(session, name, arguments)
+                for leak in leaks:
+                    self.assertNotIn(leak, raw, (name, query))
+        titles = {item['source']: item['title']
+                  for item in self.structured(session.call('search', {'query': 'baslikli kirpi', 'limit': 20}))['results']}
+        self.assertIn('notes/sir-baslik.md', titles)
+        self.assertIn('[REDACTED]', titles['notes/sir-baslik.md'])
+        found = {item['source'] for query in ('kel05', 'kel20', 'sunucu anahtari')
+                 for item in self.structured(session.call('search', {'query': query, 'limit': 20}))['results']}
+        self.assertTrue({'notes/sir-uzun.md', 'notes/anahtar.md'} <= found, found)  # the search itself works
+
+    def test_an_id_that_cannot_be_utf8_does_not_end_the_session(self):
+        session = self.session()
+        session.send_raw(b'{"jsonrpc":"2.0","id":"\\ud800","method":"ping"}\n')
+        session.receive()  # answered (escaped) or refused; either way the server is still there
+        self.assertIn('result', session.request('ping', {}))
 
     # --- refusals ---------------------------------------------------------------------------------------------
     def test_unknown_tools_and_methods_are_refused(self):
@@ -706,7 +742,7 @@ class McpWriteTest(McpCase):
             for name, arguments in (('search', {'query': query, 'limit': 20}),
                                     ('context', {'query': query, 'budget_chars': 8000})):
                 raw, answer = self.raw_call(session, name, arguments)
-                rest = raw.replace(json.dumps(query)[1:-1], '')
+                rest = raw.replace(json.dumps(query), '')  # with its quotes: the bare canary is what must not be here
                 self.assertNotIn(WRITE_CANARY, rest, (name, query))
                 self.assertNotIn(PRIVATE_CANARY, rest, (name, query))
                 self.assertNotIn('notes/mcp/ozel.md', rest, (name, query))

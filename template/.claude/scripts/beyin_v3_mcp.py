@@ -292,14 +292,15 @@ def untrusted(record):
             or record.get('kind') == 'untrusted' or record.get('status') == 'untrusted')
 
 
-def title_of(record):
+def title_of(record, clean):
+    """The note's title, masked before it is cut: a cut through a secret leaves a part no pattern matches."""
     title = record.get('title')
     if isinstance(title, (str, int, float)) and str(title).strip():
         text = str(title)
     else:
         heading = re.search(r'^#[ \t]+(\S.*)$', record.get('text', ''), re.M)
         text = heading.group(1) if heading else Path(str(record.get('source', ''))).stem
-    text = ' '.join(text.split())
+    text = clean(' '.join(text.split()))
     return text[:TITLE_CHARS] + ('…' if len(text) > TITLE_CHARS else '')
 
 
@@ -309,7 +310,9 @@ def _fold(text):
 
 
 def snippet(text, query):
-    """A short excerpt around the first query word the note holds, else its opening."""
+    """A short excerpt around the first query word the note holds, else its opening. The text comes in already
+    masked: cutting first left half a token, or a private key's body without its END line, that redact no longer
+    sees."""
     flat = ' '.join(text.split())
     if len(flat) <= SNIPPET_CHARS:
         return flat
@@ -475,8 +478,8 @@ class Server:
 
     def search(self, query, limit, project=None):
         records = self.store.candidates(query, project=project, audience='internal', limit=limit)
-        return {'results': [{'source': record['source'], 'title': self.clean(title_of(record)),
-                             'snippet': self.clean(snippet(record['text'], query)),
+        return {'results': [{'source': record['source'], 'title': title_of(record, self.clean),
+                             'snippet': snippet(self.clean(record['text']), query),
                              'untrusted': untrusted(record)}
                             for record in records if deliverable(record)]}
 
@@ -635,7 +638,7 @@ def render(records, budget, clean=lambda text: text):
     admitted, used = [], 0
     for record in records:
         flagged = untrusted(record)
-        title = clean(title_of(record))
+        title = title_of(record, clean)
         body = clean(record['text']).strip()
         head = '[' + str(len(admitted) + 1) + '] ' + title + '\nsource: ' + record['source'] + '\n'
         tail = ''
@@ -750,7 +753,11 @@ def serve(server, stdin, stdout):
         else:
             answer = server.handle_line(line)
         if answer is not None:
-            stdout.write(json.dumps(answer, ensure_ascii=False, separators=(',', ':')).encode('utf-8') + b'\n')
+            try:
+                data = json.dumps(answer, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+            except UnicodeEncodeError:  # a lone surrogate (an echoed id) has no UTF-8; escaped, the session goes on
+                data = json.dumps(answer, separators=(',', ':')).encode('ascii')
+            stdout.write(data + b'\n')
             stdout.flush()
 
 
