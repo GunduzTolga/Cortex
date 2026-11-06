@@ -1,5 +1,5 @@
 # `beyin.py mcp`: kasanın tek MCP kapısı — tasarım (taslak)
-Tarih: 2026-11-05 · Dal: `mcp/tasarim` · Durum: **taslak, kararlar Tolga'ya sorulacak** · Kaynak: Tolga'nın 10. adam kararı
+Tarih: 2026-11-05 · Dal: `mcp/tasarim` · Durum: **1. aşama uygulandı (dal `mcp/asama-1-okuma`, 1.0.57); açık sorular öneriyle, onay bekliyor** · Kaynak: Tolga'nın 10. adam kararı
 "`beyin.py mcp` Faz 1" (2026-11-03, kasa `projects/Cortex/Tecrube.md`), Cortex-Browser ADR-0006 "Cortex bağlayıcısı: tek
 hafıza, stdio üzerinden MCP" (2026-10-29), yol haritası incelemesi (kasa `projects/Cortex/yol-haritasi-inceleme-2026-11-03.md` §1)
 
@@ -11,6 +11,18 @@ kancalar); bu kapı onların yerini almaz, yanına tek ve denetlenebilir bir yol
 
 ## Kararlar
 Belgede öneri olarak; Tolga onaylayınca "kullanıcıyla alındı" diye işaretlenecek.
+
+**2026-11-06, Tolga "başla" dedi; açık sorular öneriyle uygulandı, onay bekliyor:** araç adları İngilizce (`search`,
+`context`); `note_create` 2. aşamada; kancalar kalır, MCP onların yanına eklenir. 1. aşamada uygulamanın netleştirdiği
+üç nokta (onay bekliyor):
+- **`trust: untrusted` kayıtlar dönmez.** Motorun `audience="internal"` kapısı bu kayıtları (`trust: untrusted`,
+  `trusted: false`, `kind`/`status: untrusted`) hiç vermiyor; MCP bu kapıyı gevşetmedi. `untrusted: true` işareti
+  kapıdan geçen ama dışarıdan gelmiş notlara konur: `untrusted: true`, `kaynak_guveni: guvenilmeyen` ve gelen kutusu
+  (`📥 000-Inbox/`). Untrusted kayıtların işaretli dönmesi istenirse motorun kapısında ayrı bir karar gerekir.
+- **Protokol sürümü:** desteklenen sürüm aynen döner; daha yeni bir tarih en yeni desteklenenle cevaplanır (MCP
+  belirtimi bunu ister; istemci devam eder ya da "Cortex'i güncelle" der); biçimsiz ya da daha eski değer -32602.
+- **Yalnız okuma, eşitleme yok:** indeks salt okunur açılır (`context --no-sync` gibi); yeni not bir sonraki
+  eşitlemede görünür. Sırlar (`beyin_v3_secrets.redact`) MCP çıktısında her zaman maskelenir.
 - **Taşıma: yalnız stdio** (ADR-0006 seçenek A). HTTP/SSE yok: port, token ve DNS rebinding sorunları hiç doğmaz.
 - **Yalnız standart kütüphane** (Cortex motorunun ilkesi): JSON-RPC 2.0 çerçevesi elle; dış `mcp` paketi yok.
 - **Araç listesi küçük ve sabit** (ADR-0006 §3): `search`, `context` (observe), `capture`, `note_create` (act). Kasayı değiştiren
@@ -72,7 +84,7 @@ Belgede öneri olarak; Tolga onaylayınca "kullanıcıyla alındı" diye işaret
 ## Açık sorular
 | Soru | Kim karar verir | Durum |
 |---|---|---|
-| Faz 1'e (GitHub ile bağlan, bitti) hemen sonra mı, yoksa ilk kurulum ölçümünden sonra mı | Tolga | Açık |
-| Claude Code için kancalar (bugünkü bağlam enjeksiyonu) kalsın mı, MCP yanına mı eklensin | Tolga | Öneri: ikisi birlikte; kancalar otomatik bağlam, MCP isteğe bağlı arama |
-| `note_create` ilk sürümde olsun mu (yazma riskini azaltmak için yalnız `capture`) | Tolga | Öneri: aşama 2'de |
-| Araç adları Türkçe mi (`ara`, `yakala`) İngilizce mi | Tolga | Öneri: İngilizce (MCP istemcileri ve ADR-0006 İngilizce adlar kullanıyor) |
+| Faz 1'e (GitHub ile bağlan, bitti) hemen sonra mı, yoksa ilk kurulum ölçümünden sonra mı | Tolga | Kapandı: 2026-11-06, Tolga "beyin.py mcp uygulamasına başla" |
+| Claude Code için kancalar (bugünkü bağlam enjeksiyonu) kalsın mı, MCP yanına mı eklensin | Tolga | Öneriyle uygulandı (2026-11-06): ikisi birlikte; onay bekliyor |
+| `note_create` ilk sürümde olsun mu (yazma riskini azaltmak için yalnız `capture`) | Tolga | Öneriyle uygulandı (2026-11-06): aşama 2'de; onay bekliyor |
+| Araç adları Türkçe mi (`ara`, `yakala`) İngilizce mi | Tolga | Öneriyle uygulandı (2026-11-06): İngilizce; onay bekliyor |

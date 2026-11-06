@@ -156,6 +156,8 @@ Hafızayı model değil istemci taşır; ücretsiz, uygun fiyatlı ya da yerel m
 
 **Tam hafıza:** hook'lar hafızayı her oturum açılışında ve her mesajda bağlama ekler. Kurulum bu dosyalardaki diğer ayarlarına dokunmaz.
 
+**MCP:** Hook'ların yanında asistan kasada kendisi de arayabilir: `claude mcp add cortex -- <python> <kasa>/beyin.py mcp` (Codex, OpenCode ve diğerleri aynı komutu kendi ayarlarına yazar). Yalnız okur; gizli notlar hiç dönmez. [Ayrıntılar](docs/v3/MCP.md)
+
 ## Gizlilik
 
 Cortex notlarını kendi başına hiçbir yere göndermez ve telemetri toplamaz.
@@ -176,6 +178,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 | --- | --- |
 | [Kullanım rehberi](docs/KULLANIM.md) | Masaüstü uygulaması, Not al ve sesle yazma, Yakala, Telegram, komutlar, güncelleme, sorun giderme |
 | [Yakala](docs/v3/YAKALA.md) · [Telegram](docs/v3/TELEGRAM.md) | Yakalama ve telefondan gelen kutusu, ayrıntılarıyla |
+| [MCP](docs/v3/MCP.md) | Kasayı Claude Code, Codex, OpenCode gibi araçlara `beyin.py mcp` ile bağlamak; araçlar ve gizlilik |
 | [Güncelleme ve geri alma](docs/v3/UPDATE.md) | Sürüm paketi, doğrulama, kurtarma |
 | [Tercihler](docs/v3/PREFERENCES.md) · [Birden çok makine](docs/v3/MULTI-MACHINE.md) | Motorun ayarları; aynı kasayı birkaç bilgisayarda kullanmak |
 | [Kaynak formatı](docs/v3/MARKDOWN.md) · [Runtime](docs/v3/RUNTIME.md) | Notların ve motorun iç yapısı |
