@@ -83,6 +83,8 @@ interface Hooks {
   helper: () => string | null;
   /** Whether this computer reaches the address itself. */
   probe: (url: string) => Promise<boolean>;
+  /** How the pinned helper is fetched: GitHub in the app, a stand-in in the tests (no test reaches the network). */
+  download: typeof downloadPinned;
   readyTimeout: number;
   now: () => number;
 }
@@ -91,6 +93,7 @@ const defaults = (): Hooks => ({
   dir: () => path.join(localDir(), 'tailnet'),
   helper: () => process.env.CORTEX_TAILNET_HELPER || null,
   probe: reachable,
+  download: downloadPinned,
   // The helper gives up joining after 90 seconds (main.go, joinTimeout) and says so: a little longer here.
   readyTimeout: 120_000,
   now: () => Date.now(),
@@ -219,7 +222,7 @@ async function ensureHelper(): Promise<{ program: string } | { trouble: Trouble 
   if (own) return { program: own };
   const pin = tailnetPin();
   if (!pin) return { trouble: 'platform' };
-  const got = await downloadPinned(TAILNET_HELPER.releases + pin.file, pin, path.join(localDir(), 'tools', 'cortex-tailnet', pin.file));
+  const got = await hooks.download(TAILNET_HELPER.releases + pin.file, pin, path.join(localDir(), 'tools', 'cortex-tailnet', pin.file));
   if (got.ok) return { program: got.file };
   console.error(`[tailnet] the helper was not downloaded (${got.reason})`);
   return { trouble: got.reason === 'unpublished' ? 'unpublished' : 'download' };

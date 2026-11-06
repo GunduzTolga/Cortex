@@ -277,7 +277,7 @@ test('canary: the code, the auth key and the agent’s key never reach the log',
 /* The real helper's download                                          */
 /* ------------------------------------------------------------------ */
 
-test('the helper is pinned per platform from its pre-release; not published yet, every pin is the placeholder', () => {
+test('the helper is pinned per platform from its pre-release, each by its SHA-256 and size', () => {
   assert.equal(TAILNET_HELPER.version, '0.1.0');
   assert.equal(TAILNET_HELPER.releases, 'https://github.com/GunduzTolga/Cortex/releases/download/cortex-tailnet-0.1.0/');
   assert.deepEqual(tailnetPin('win32', 'x64')?.file, 'cortex-tailnet-windows-amd64.exe');
@@ -285,8 +285,8 @@ test('the helper is pinned per platform from its pre-release; not published yet,
   assert.deepEqual(tailnetPin('darwin', 'arm64')?.file, 'cortex-tailnet-darwin-arm64');
   assert.deepEqual(tailnetPin('linux', 'x64')?.file, 'cortex-tailnet-linux-amd64');
   assert.equal(tailnetPin('linux', 'arm64'), null, 'not built');
-  // When the pre-release is made, each becomes its 64 hex digits; until then none is anything but the placeholder.
-  for (const pin of Object.values(TAILNET_HELPER.pins)) assert.ok(pin.sha256 === UNPUBLISHED || /^[0-9a-f]{64}$/.test(pin.sha256));
+  // Published 2026-11-06: every platform is pinned by a real SHA-256 and its size, none is left at UNPUBLISHED.
+  for (const pin of Object.values(TAILNET_HELPER.pins)) assert.ok(/^[0-9a-f]{64}$/.test(pin.sha256) && (pin.size ?? 0) > 1_000_000, pin.file);
 });
 
 test('a pin that is the placeholder downloads nothing at all', async () => {
@@ -303,11 +303,21 @@ test('a pin that is the placeholder downloads nothing at all', async () => {
   assert.equal(fs.existsSync(target), false);
 });
 
-test('without the stand-in, pairing says the tool is not in this version yet, and never spends the key', async () => {
+test('when the helper cannot be downloaded, pairing says so in one sentence and never spends the key', async () => {
   await fresh();
-  setTailnetForTests({ dir: () => stateDir, helper: () => null, probe: async () => false, readyTimeout: 2000, now: () => NOW });
+  const asked: string[] = [];
+  setTailnetForTests({
+    dir: () => stateDir, helper: () => null, probe: async () => false, readyTimeout: 2000, now: () => NOW,
+    download: async (url) => {
+      asked.push(url);
+      return { ok: false, reason: 'network' } as Awaited<ReturnType<typeof downloadPinned>>;
+    },
+  });
   try {
-    await assert.rejects(pairTailnet(CODE), { message: 'Bağlantı aracı bu Cortex sürümünde henüz yok. Sonraki sürümü bekle.' });
+    await assert.rejects(pairTailnet(CODE), { message: 'Bağlantı aracı indirilemedi. İnternet bağlantısını kontrol edip yeniden dene.' });
+    // The pinned file of this platform, from the published pre-release.
+    assert.deepEqual(asked.length, 1);
+    assert.ok(asked[0].startsWith('https://github.com/GunduzTolga/Cortex/releases/download/cortex-tailnet-0.1.0/cortex-tailnet-'), asked[0]);
     assert.deepEqual(launches(), []);
     assert.equal(hermesStatus().url, null);
   } finally {

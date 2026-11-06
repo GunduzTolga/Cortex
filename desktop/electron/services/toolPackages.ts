@@ -313,10 +313,10 @@ export function untar(dest: string): Writable {
  * `cortex-tailnet-<version>`, never replaced once published; each platform's file is pinned here by its SHA-256, as
  * MinGit is (gitTool.ts), and bytes that are not those are deleted before they are ever run.
  *
- * NOT PUBLISHED YET (2026-11-06): the pre-release has not been made, so its SHA-256 values are not known. Each is the
- * placeholder UNPUBLISHED, which is no SHA-256 at all, and `downloadPinned` refuses to fetch anything while a pin holds
- * it. Taking up the release means writing the 64 hex digits from its `.sha256` files here (and its size, read from the
- * release), in the same change that may bump `version`.
+ * Published 2026-11-06 (run 42237350294, from main 76ae710). Each pin below was read from the release's `.sha256`
+ * files and checked again by downloading every file and hashing it (`sha256sum -c` OK for all five); the sizes are the
+ * release's. A pin left at UNPUBLISHED (no SHA-256 at all) makes `downloadPinned` refuse to fetch anything: a later
+ * version is taken up by writing its digits here, in the same change that bumps `version`.
  */
 export const UNPUBLISHED = 'YAYIMLANMADI-sha256-bilinmiyor';
 
@@ -333,11 +333,11 @@ export const TAILNET_HELPER = {
   releases: `https://github.com/GunduzTolga/Cortex/releases/download/${TAILNET_TAG}/`,
   /** By `<GOOS>-<GOARCH>`, as the workflow names them: cortex-tailnet-<os>-<arch>[.exe]. */
   pins: {
-    'windows-amd64': { file: 'cortex-tailnet-windows-amd64.exe', sha256: UNPUBLISHED },
-    'windows-arm64': { file: 'cortex-tailnet-windows-arm64.exe', sha256: UNPUBLISHED },
-    'darwin-amd64': { file: 'cortex-tailnet-darwin-amd64', sha256: UNPUBLISHED },
-    'darwin-arm64': { file: 'cortex-tailnet-darwin-arm64', sha256: UNPUBLISHED },
-    'linux-amd64': { file: 'cortex-tailnet-linux-amd64', sha256: UNPUBLISHED },
+    'windows-amd64': { file: 'cortex-tailnet-windows-amd64.exe', sha256: 'fa14d9a7cedf43f40131a4e048b81bc75be6083a91b7d4afa9c52ecd9a63efa3', size: 22477824 },
+    'windows-arm64': { file: 'cortex-tailnet-windows-arm64.exe', sha256: '658dbf270b666f6153a3f1686816d5124af6e9aa1a311d3d2a04aeba8469d7e2', size: 20537344 },
+    'darwin-amd64': { file: 'cortex-tailnet-darwin-amd64', sha256: '44fb2f67d9aa22d91a378b8417c0bf59616858a99bcd0b3b95669eb8b908f6f4', size: 22027872 },
+    'darwin-arm64': { file: 'cortex-tailnet-darwin-arm64', sha256: '0029efe6a1a541e551b27dd9950d0cff99ef448fbcab637bbb50b631b7d513d5', size: 20536242 },
+    'linux-amd64': { file: 'cortex-tailnet-linux-amd64', sha256: '03e128871c24c487e1c53465d8ef46bb3f87f8a484ee5e3d5db5ab965a9b666b', size: 22229152 },
   } as Record<string, Pin>,
 };
 
