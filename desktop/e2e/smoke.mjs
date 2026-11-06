@@ -50,10 +50,21 @@ const agentGate = path.join(agentGateDir, 'open');
   The chat's own Claude is CORTEX_TEST_CLAUDE's stand-in, as before.
 */
 const toolBin = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-e2e-bin-'));
+/*
+  Its MCP servers too (Settings › "Yapay zeka araçlarına bağla", src/ui/McpSection.tsx): what `claude mcp add` is given
+  is kept in a file of the run's, and `claude mcp get cortex` says it back as Claude Code 2.1 does, or that there is
+  none. The machine's own Claude Code, and its settings, are never reached.
+*/
+const claudeServers = path.join(toolBin, 'claude-mcp.json');
 fs.writeFileSync(
   path.join(toolBin, 'claude-status.mjs'),
-  "const [what, how] = process.argv.slice(2);\n" +
+  "import fs from 'node:fs';\n" +
+    `const servers = ${JSON.stringify(claudeServers)};\n` +
+    "const [what, how, ...rest] = process.argv.slice(2);\n" +
     "if (what === 'auth' && how === 'status') console.log(JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', email: 'e2e@example.com' }));\n" +
+    "else if (what === 'mcp' && how === 'get' && !fs.existsSync(servers)) { console.error('No MCP server named \"cortex\". Run `claude mcp add` to add one.'); process.exit(1); }\n" +
+    "else if (what === 'mcp' && how === 'get') { const kept = JSON.parse(fs.readFileSync(servers, 'utf8')); console.log(['cortex:', '  Type: stdio', '  Command: ' + kept[0], '  Args: ' + kept.slice(1).join(' ')].join('\\n')); }\n" +
+    "else if (what === 'mcp' && how === 'add') { fs.writeFileSync(servers, JSON.stringify(rest.slice(rest.indexOf('--') + 1))); console.log('Added stdio MCP server cortex to user config'); }\n" +
     "else process.exit(1);\n",
 );
 /*
@@ -385,7 +396,7 @@ const windowAlone = await page.evaluate(async () => {
   });
   return { node: typeof require + typeof process, bridge: Object.keys(window.cortex).sort(), fetched, image, opened: window.open('https://example.com/') === null };
 });
-check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,github,hermes,notes,office,on,settings,setup,tailnet,telegram,update,vault,vaultSync');
+check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,github,hermes,mcp,notes,office,on,settings,setup,tailnet,telegram,update,vault,vaultSync');
 check('it reaches nothing on the network: no request, no image', windowAlone.fetched === 'blocked' && windowAlone.image === 'blocked');
 check('and opens no window of its own', windowAlone.opened && app.windows().length === 1);
 
@@ -915,6 +926,58 @@ check(
 await page.locator('[data-settings-name-icons]').click();
 await page.keyboard.press('Escape');
 check('and the emoji go again', await page.waitForFunction(() => document.querySelector('[data-tree-path="🎯 100-Command-Center"]')?.textContent?.trim() === '100-Command-Center', null, { timeout: 5_000 }).then(() => true, () => false));
+/*
+  Settings › "Yapay zeka araçlarına bağla" (src/ui/McpSection.tsx): a vault without Cortex's memory is told to set it
+  up first and given no line. With an engine that has the gate - a stamp of 1.0.58, the template bringing the gate's
+  module - and a Python, each tool's line names this vault's beyin.py, and Claude Code's stand-in, once the person said
+  yes and not before, is given `claude mcp add` with it; said added only once its `mcp get` shows it.
+*/
+await page.keyboard.press('Control+,');
+const mcpSection = page.locator('[data-settings-section="mcp"]');
+check(
+  'the AI tools section tells a vault without Cortex’s memory to set it up first, with no line to copy',
+  (await shownSoon(mcpSection.locator('[data-mcp-note="engine"]'))) && (await mcpSection.locator('[data-mcp-line]').count()) === 0,
+);
+await page.keyboard.press('Escape');
+if ((await page.evaluate(() => window.cortex.setup.status())).python) {
+  // An engine that only says its version: anything run with it ends at once (Telegram's status, in the section below).
+  fs.writeFileSync(vaultNote('beyin.py'), 'import sys\nsys.exit(1)\n');
+  fs.writeFileSync(vaultNote('.beyin-version'), '1.0.58\n');
+  await page.keyboard.press('Control+,');
+  const claudeLine = mcpSection.locator('[data-mcp-text="claude"]');
+  const beyinHere = path.join(vaultDir, 'beyin.py');
+  check(
+    'with the gate, Claude Code, Codex and OpenCode each get a line naming this vault’s beyin.py, and Claude Code is offered',
+    (await shownSoon(claudeLine, 20_000)) &&
+      (await claudeLine.textContent()).startsWith('claude mcp add --scope user cortex -- ') &&
+      (await claudeLine.textContent()).includes(beyinHere) &&
+      (await mcpSection.locator('[data-mcp-text="codex"]').textContent()).includes(JSON.stringify(beyinHere)) &&
+      JSON.parse(await mcpSection.locator('[data-mcp-text="opencode"]').textContent()).mcp.cortex.command.includes(beyinHere) &&
+      (await shownSoon(mcpSection.locator('[data-mcp-claude-add]'))),
+  );
+  await mcpSection.locator('[data-mcp-copy="codex"]').click();
+  check('a line is copied with one press, and says so', await shownSoon(mcpSection.locator('[data-mcp-copy="codex"]', { hasText: /Kopyalandı|Copied/ }), 3_000));
+  await mcpSection.locator('[data-mcp-claude-add]').click();
+  check('Claude Code is asked first: nothing is added before the person says yes', (await shownSoon(mcpSection.locator('[data-mcp-confirm]'))) && !fs.existsSync(claudeServers));
+  await mcpSection.locator('[data-mcp-confirm-yes]').click();
+  const addedNote = mcpSection.locator('[data-mcp-note="added"]');
+  check(
+    'said yes, Claude Code’s own add is given this vault’s gate, and it is said added once Claude Code shows it',
+    (await shownSoon(addedNote, 30_000)) && JSON.parse(fs.readFileSync(claudeServers, 'utf8')).slice(-2).join('|') === `${beyinHere}|mcp`,
+  );
+  await addedNote.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  await shoot('07g-ai-tools.png');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+,');
+  check(
+    'opened again, the section says this vault is connected and offers the button no more',
+    (await shownSoon(mcpSection.locator('[data-mcp-note="this"]'), 20_000)) && (await mcpSection.locator('[data-mcp-claude-add]').count()) === 0,
+  );
+  await page.keyboard.press('Escape');
+  fs.rmSync(vaultNote('beyin.py'));
+  fs.rmSync(vaultNote('.beyin-version'));
+}
 /*
   The spoken commands, set from the settings (src/ui/SetupSections.tsx): a
   stand-in for the vault's engine says voice typing is installed and keeps what

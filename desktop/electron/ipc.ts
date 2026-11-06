@@ -12,6 +12,7 @@ import * as github from './services/github';
 import * as hermes from './services/hermesChat';
 import * as tailnet from './services/tailnet';
 import { captureToInbox } from './services/inbox';
+import * as mcp from './services/mcp';
 import * as officeTalk from './services/officeTalk';
 import * as setup from './services/setup';
 import * as telegram from './services/telegram';
@@ -328,6 +329,12 @@ export function registerIpc(): void {
     expectVoiceTurn();
     return setup.setVoice(patch);
   });
+
+  // The vault connected to the person's AI tools through its MCP gate (services/mcp.ts, Settings): the lines to copy,
+  // and Claude Code's own `claude mcp add`. Neither takes anything from the window: the vault is the one open now, the
+  // Python and Claude Code the ones found here.
+  handle('mcp:status', () => mcp.mcpStatus());
+  handle('mcp:addToClaude', () => mcp.addToClaude());
 
   // A Hermes Agent on another machine as a chat engine (services/hermesChat.ts): its address set here, its key going in and never sent back.
   handle('hermes:status', () => hermes.hermesStatus());

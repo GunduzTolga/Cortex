@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.56" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.56-E8B23A">
+  <img alt="Sürüm 1.0.59" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.59-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -156,6 +156,8 @@ Hafızayı model değil istemci taşır; ücretsiz, uygun fiyatlı ya da yerel m
 
 **Tam hafıza:** hook'lar hafızayı her oturum açılışında ve her mesajda bağlama ekler. Kurulum bu dosyalardaki diğer ayarlarına dokunmaz.
 
+**MCP:** Hook'ların yanında asistan kasada kendisi de arayabilir: `claude mcp add cortex -- <python> <kasa>/beyin.py mcp` (Codex, OpenCode ve diğerleri aynı komutu kendi ayarlarına yazar). Masaüstü uygulamasında Ayarlar › Yapay zeka araçlarına bağla bu satırları kasanın kendi yoluyla hazır verir ve Claude Code'a tek düğmeyle ekler. Okur; sen onaylarsan gelen kutusuna ya da `notes/`, `knowledge/` altına yeni not da yazar, var olan notu değiştirmez. Gizli notlar hiç dönmez. [Ayrıntılar](docs/v3/MCP.md)
+
 ## Gizlilik
 
 Cortex notlarını kendi başına hiçbir yere göndermez ve telemetri toplamaz.
@@ -176,6 +178,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 | --- | --- |
 | [Kullanım rehberi](docs/KULLANIM.md) | Masaüstü uygulaması, Not al ve sesle yazma, Yakala, Telegram, komutlar, güncelleme, sorun giderme |
 | [Yakala](docs/v3/YAKALA.md) · [Telegram](docs/v3/TELEGRAM.md) | Yakalama ve telefondan gelen kutusu, ayrıntılarıyla |
+| [MCP](docs/v3/MCP.md) | Kasayı Claude Code, Codex, OpenCode gibi araçlara `beyin.py mcp` ile bağlamak; araçlar ve gizlilik |
 | [Güncelleme ve geri alma](docs/v3/UPDATE.md) | Sürüm paketi, doğrulama, kurtarma |
 | [Tercihler](docs/v3/PREFERENCES.md) · [Birden çok makine](docs/v3/MULTI-MACHINE.md) | Motorun ayarları; aynı kasayı birkaç bilgisayarda kullanmak |
 | [Kaynak formatı](docs/v3/MARKDOWN.md) · [Runtime](docs/v3/RUNTIME.md) | Notların ve motorun iç yapısı |
@@ -186,6 +189,9 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.59](docs/v3/releases/1.0.59.md) | Kasayı yapay zeka araçlarına masaüstünden bağlamak: Ayarlar Claude Code, Codex ve OpenCode için bu kasanın satırını kopyalanacak hâlde veriyor; Claude Code kuruluysa sorduktan sonra tek düğmeyle ekliyor, zaten bağlıysa söylüyor, motor eskiyse "Cortex'i güncelle" diyor. |
+| [1.0.58](docs/v3/releases/1.0.58.md) | Asistan kasaya not yazabiliyor: MCP'de `capture` bir sayfayı ya da mesajı gelen kutusuna "güvenilmeyen" işaretiyle yakalıyor, `note_create` `notes/` ya da `knowledge/` altına yeni not açıyor; ikisi de var olan notu değiştirmiyor, adresi indirmiyor, sırları maskeliyor. |
+| [1.0.57](docs/v3/releases/1.0.57.md) | Kasa yapay zeka araçlarına MCP ile bağlanıyor: `beyin.py mcp` ile Claude Code, Codex, OpenCode kasada kendisi arayabiliyor (`search`, `context`); yalnız okuyor, gizli notlar hiç dönmüyor, dışarıdan gelen içerik işaretli, sırlar maskeli. |
 | [1.0.56](docs/v3/releases/1.0.56.md) | İlk kurulum daha sağlam: sesli yazmanın modelleri kopan bağlantıda kaldığı yerden iniyor, disk yetmiyorsa en başta söyleniyor, "Hey Pyn"in küçük doğrulayıcısı inmezse uyarı çıkıyor; yarım kalan giriş nedenini söylüyor; şirket ağında Windows proxy'si kullanılıyor; geçici bir GitHub hatası bağlantıyı silmiyor. |
 | [1.0.55](docs/v3/releases/1.0.55.md) | Beyin'de alt yazılar ekrandakiyle uyuşuyor: Müdür ile Yazılımcı Tolga ayrı çiziliyor ve aynı adda rolleriyle yazılıyor, alt yazılar kesilmiyor, "yürüyor" yerine gidilen yer yazıyor. |
 | [1.0.54](docs/v3/releases/1.0.54.md) | GitHub ile bağlan: kasa birkaç tıkla GitHub'daki özel bir repoya yedeklenir, ikinci bilgisayar aynı kasaya bağlanır; aynı adlı farklı notta ikisi de kalır, hiçbir şey silinmez. Windows'ta Git yoksa Cortex kendisi getirir. |
