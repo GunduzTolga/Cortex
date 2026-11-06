@@ -302,3 +302,117 @@ export function untar(dest: string): Writable {
     },
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* cortex-tailnet: one pinned program from Cortex's own pre-release    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The small tailnet node "Kodla bağlan" needs (tools/cortex-tailnet, tailnet.ts), downloaded on the first pairing and
+ * never put in the installer. Built and published by .github/workflows/tailnet-helper.yml as the pre-release
+ * `cortex-tailnet-<version>`, never replaced once published; each platform's file is pinned here by its SHA-256, as
+ * MinGit is (gitTool.ts), and bytes that are not those are deleted before they are ever run.
+ *
+ * NOT PUBLISHED YET (2026-11-06): the pre-release has not been made, so its SHA-256 values are not known. Each is the
+ * placeholder UNPUBLISHED, which is no SHA-256 at all, and `downloadPinned` refuses to fetch anything while a pin holds
+ * it. Taking up the release means writing the 64 hex digits from its `.sha256` files here (and its size, read from the
+ * release), in the same change that may bump `version`.
+ */
+export const UNPUBLISHED = 'YAYIMLANMADI-sha256-bilinmiyor';
+
+export interface Pin {
+  file: string;
+  sha256: string;
+  /** The file's size in bytes, where known: a longer download is stopped before the disk fills with it. */
+  size?: number;
+}
+
+const TAILNET_TAG = 'cortex-tailnet-0.1.0';
+export const TAILNET_HELPER = {
+  version: '0.1.0',
+  releases: `https://github.com/GunduzTolga/Cortex/releases/download/${TAILNET_TAG}/`,
+  /** By `<GOOS>-<GOARCH>`, as the workflow names them: cortex-tailnet-<os>-<arch>[.exe]. */
+  pins: {
+    'windows-amd64': { file: 'cortex-tailnet-windows-amd64.exe', sha256: UNPUBLISHED },
+    'windows-arm64': { file: 'cortex-tailnet-windows-arm64.exe', sha256: UNPUBLISHED },
+    'darwin-amd64': { file: 'cortex-tailnet-darwin-amd64', sha256: UNPUBLISHED },
+    'darwin-arm64': { file: 'cortex-tailnet-darwin-arm64', sha256: UNPUBLISHED },
+    'linux-amd64': { file: 'cortex-tailnet-linux-amd64', sha256: UNPUBLISHED },
+  } as Record<string, Pin>,
+};
+
+/** The helper's pin for this computer (Node's platform and arch named as Go names them); null where none is built. */
+export function tailnetPin(platform: string = process.platform, arch: string = process.arch): Pin | null {
+  const os = platform === 'win32' ? 'windows' : platform;
+  const goArch = arch === 'x64' ? 'amd64' : arch;
+  return TAILNET_HELPER.pins[`${os}-${goArch}`] ?? null;
+}
+
+/** Whether a pin is a real SHA-256 (64 hex digits); UNPUBLISHED is not. */
+export const pinned = (pin: Pin): boolean => /^[0-9a-f]{64}$/.test(pin.sha256);
+
+/** The SHA-256 of a file on disk, in hex; null where it cannot be read. */
+export function sha256Of(file: string): string | null {
+  try {
+    return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/** Larger than any helper build (about 21 MB, tools/cortex-tailnet/README.md): not the file, and stopped. */
+const PINNED_MAX = 64 * 1024 * 1024;
+
+export type PinnedDownload = { ok: true; file: string } | { ok: false; reason: 'unpublished' | 'network' | 'mismatch' | 'place' };
+
+/**
+ * One pinned file downloaded to `target`: written beside it, kept only when all of it came and its SHA-256 is the pin's,
+ * then renamed into place (executable on macOS and Linux). Anything else leaves nothing behind. Says why rather than
+ * throwing, so the caller words it in the window's language. Nothing is fetched while the pin is UNPUBLISHED.
+ */
+export async function downloadPinned(url: string, pin: Pin, target: string, options: { fetch?: (url: string, init?: RequestInit) => Promise<Response>; limit?: number } = {}): Promise<PinnedDownload> {
+  if (!pinned(pin)) return { ok: false, reason: 'unpublished' };
+  const part = `${target}.indiriliyor`;
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.rmSync(part, { force: true });
+  const fail = (reason: 'network' | 'mismatch' | 'place'): PinnedDownload => {
+    fs.rmSync(part, { force: true });
+    return { ok: false, reason };
+  };
+  let answer: Response;
+  try {
+    answer = await (options.fetch ?? netFetch)(url, { signal: AbortSignal.timeout(options.limit ?? 15 * 60_000) });
+  } catch {
+    return fail('network');
+  }
+  if (!answer.ok || !answer.body) return fail('network');
+  const hash = createHash('sha256');
+  let size = 0;
+  const most = pin.size ?? PINNED_MAX;
+  let tooLong = false;
+  const tap = new Transform({
+    transform(chunk: Buffer, _encoding, done) {
+      size += chunk.length;
+      if (size > most) {
+        tooLong = true;
+        return done(new Error('longer than the pinned file'));
+      }
+      hash.update(chunk);
+      done(null, chunk);
+    },
+  });
+  try {
+    await pipeline(Readable.fromWeb(answer.body as Parameters<typeof Readable.fromWeb>[0]), tap, fs.createWriteStream(part, { mode: 0o700 }));
+  } catch {
+    return fail(tooLong ? 'mismatch' : 'network');
+  }
+  if ((pin.size !== undefined && size !== pin.size) || hash.digest('hex') !== pin.sha256) return fail('mismatch');
+  try {
+    fs.rmSync(target, { force: true });
+    fs.renameSync(part, target);
+    if (process.platform !== 'win32') fs.chmodSync(target, 0o700);
+  } catch {
+    return fail('place');
+  }
+  return { ok: true, file: target };
+}

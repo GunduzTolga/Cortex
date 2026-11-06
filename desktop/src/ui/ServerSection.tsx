@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Download, RefreshCw, Server } from 'lucide-react';
+import { Download, Link2, RefreshCw, Server, Unlink } from 'lucide-react';
+import { messageOf } from '@shared/ipcError';
+import type { TailnetStatus } from '@shared/pairing';
 import type { SyncStatus } from '@shared/vaultSync';
 import { useChat } from '../chat/chatStore';
 import { useT } from '../i18n/useT';
 import { GithubConnect } from './GithubConnect';
 import { Section } from './settingsParts';
-import { Button, Spinner, Switch } from './ui';
+import { Button, Spinner, Switch, inputClass } from './ui';
 
 /**
  * The vault kept in step with its git remote, and Pyn on a server (Settings › Sunucu): the one place for what lives on
@@ -141,6 +143,7 @@ export function ServerSection({ open, onClose }: { open: boolean; onClose: () =>
           ) : null}
         </>
       )}
+      <PairBlock open={open} />
       {/* Pyn on the server is set where the other AI tools are; its door is here too, beside the vault it shares. */}
       <div className="mt-2 px-3">
         <Button
@@ -156,5 +159,111 @@ export function ServerSection({ open, onClose }: { open: boolean; onClose: () =>
         </Button>
       </div>
     </Section>
+  );
+}
+
+/**
+ * "Kodla bağlan" (electron/services/tailnet.ts): the code from the phone's "Bilgisayar ekle" pasted here connects Pyn
+ * on the server with nothing installed. The code is a secret: typed into a password field, sent once, and cleared
+ * whatever the answer; the window never keeps it nor hears it back. What it hears is the connection's state and, where
+ * something is wrong, one sentence in its language.
+ */
+function PairBlock({ open }: { open: boolean }) {
+  const t = useT();
+  const [status, setStatus] = useState<TailnetStatus | null>(null);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) void window.cortex.tailnet.status().then(setStatus, () => setStatus(null));
+  }, [open]);
+  useEffect(() => window.cortex.on.tailnet(setStatus), []);
+
+  const pair = async () => {
+    const typed = code;
+    setCode('');
+    setBusy(true);
+    setRefused(null);
+    try {
+      setStatus(await window.cortex.tailnet.pair(typed));
+      // Offered in the chat's tool chip from now on.
+      void useChat.getState().refreshClis();
+    } catch (err) {
+      setRefused(messageOf(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const forget = async () => {
+    setBusy(true);
+    setRefused(null);
+    try {
+      setStatus(await window.cortex.tailnet.forget());
+      void useChat.getState().refreshClis();
+    } catch (err) {
+      setRefused(messageOf(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const state = status?.state ?? 'kapali';
+  const paired = state !== 'kapali';
+  return (
+    <div className="mt-3 border-t border-zinc-100 pt-3" data-server-pair>
+      <p className="px-3 text-[12px] font-semibold text-darkDelegation">{t('server.pair.title')}</p>
+      <p className="mb-1.5 px-3 text-[11.5px] leading-relaxed text-zinc-500">{t('server.pair.hint')}</p>
+      <div className="space-y-1" data-pair-state={state}>
+        {state === 'bagli' ? (
+          <Note tone="ok" data="pair-connected">{t(status?.direct ? 'server.pair.connected.direct' : 'server.pair.connected')}</Note>
+        ) : state === 'baglaniyor' ? (
+          <Note data="pair-connecting">
+            <span className="inline-flex items-center gap-1.5">
+              <Spinner size={11} /> {t('server.pair.connecting')}
+            </span>
+          </Note>
+        ) : state === 'hata' ? (
+          <Note tone="error" data="pair-error">{status?.message ?? t('server.pair.error')}</Note>
+        ) : (
+          <Note data="pair-none">{t('server.pair.none')}</Note>
+        )}
+        {state === 'kapali' || state === 'hata' ? (
+          <form
+            noValidate
+            className="flex flex-wrap gap-1.5 px-3 pt-1"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void pair();
+            }}
+          >
+            <input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={code}
+              onChange={(event) => setCode(event.target.value)}
+              placeholder={t('server.pair.placeholder')}
+              aria-label={t('server.pair.code')}
+              className={`${inputClass} min-w-0 flex-1`}
+              data-pair-code
+            />
+            <Button tone="primary" type="submit" disabled={busy || !code.trim()} data-pair-connect>
+              {busy ? <Spinner size={12} /> : <Link2 size={13} />}
+              {t(busy ? 'server.pair.connecting' : 'server.pair.connect')}
+            </Button>
+          </form>
+        ) : null}
+        {refused ? <Note tone="error" data="pair-refused">{refused}</Note> : null}
+        {paired ? (
+          <div className="px-3 pt-1">
+            <Button tone="ghost" disabled={busy} onClick={() => void forget()} data-pair-forget>
+              {busy ? <Spinner size={12} /> : <Unlink size={13} />}
+              {t('server.pair.forget')}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }

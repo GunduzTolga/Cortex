@@ -385,7 +385,7 @@ const windowAlone = await page.evaluate(async () => {
   });
   return { node: typeof require + typeof process, bridge: Object.keys(window.cortex).sort(), fetched, image, opened: window.open('https://example.com/') === null };
 });
-check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,github,hermes,notes,office,on,settings,setup,telegram,update,vault,vaultSync');
+check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,github,hermes,notes,office,on,settings,setup,tailnet,telegram,update,vault,vaultSync');
 check('it reaches nothing on the network: no request, no image', windowAlone.fetched === 'blocked' && windowAlone.image === 'blocked');
 check('and opens no window of its own', windowAlone.opened && app.windows().length === 1);
 
@@ -895,6 +895,22 @@ check(
   'the server section offers no switch for a vault that is no git repository, and offers to connect it to GitHub',
   (await shownSoon(page.locator('[data-github-start]'))) && (await page.locator('[data-server-sync]').count()) === 0 &&
     (await page.locator('[data-server-pyn]').count()) === 1,
+);
+// "Kodla bağlan" (src/ui/ServerSection.tsx, electron/services/tailnet.ts): nothing paired, the code goes in a field that
+// does not show it; a paste that is not a code is refused in one sentence, before any helper is downloaded or started,
+// and the field is emptied - the code is not kept in the window either.
+const pairBlock = page.locator('[data-server-pair]');
+check(
+  'the server section offers to connect with a code, nothing connected yet, in a field that hides what is pasted',
+  (await shownSoon(pairBlock.locator('[data-pair-state="kapali"]'))) && (await pairBlock.locator('[data-pair-code]').getAttribute('type')) === 'password',
+);
+await pairBlock.locator('[data-pair-code]').fill('https://pyn.example.ts.net:8642');
+await pairBlock.locator('[data-pair-connect]').click();
+check(
+  'a paste that is not a pairing code is refused in one sentence, and the field is emptied',
+  (await shownSoon(pairBlock.locator('[data-server-note="pair-refused"]', { hasText: "This is not a Cortex pairing code. Get a new code from 'Add a computer' on the phone." }))) &&
+    (await pairBlock.locator('[data-pair-code]').inputValue()) === '' &&
+    (await pairBlock.locator('[data-pair-state="kapali"]').count()) === 1,
 );
 await page.locator('[data-settings-name-icons]').click();
 await page.keyboard.press('Escape');
