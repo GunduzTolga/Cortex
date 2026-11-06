@@ -714,7 +714,7 @@ def main(argv=None):
             import beyin_v3_esitle as esitle
             return esitle.main(argv[1:] + (['--json'] if force_json and '--json' not in argv else []), vault=vault, state=state)
         if argv and argv[0] == 'mcp':
-            # The vault's MCP door for AI clients (stdio, read only); its own JSON-RPC loop, no index sync.
+            # The vault's MCP door for AI clients (stdio): reads, and writes only new notes (capture, note_create).
             import beyin_v3_mcp as mcp
             return mcp.main(argv[1:], vault=vault, state=state, version=installed_version)
         if argv and argv[0] == 'pyn':

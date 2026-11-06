@@ -1,5 +1,6 @@
 # `beyin.py mcp`: kasanın tek MCP kapısı — tasarım (taslak)
-Tarih: 2026-11-05 · Dal: `mcp/tasarim` · Durum: **1. aşama uygulandı (dal `mcp/asama-1-okuma`, 1.0.57); açık sorular öneriyle, onay bekliyor** · Kaynak: Tolga'nın 10. adam kararı
+Tarih: 2026-11-05 · Dal: `mcp/tasarim` · Durum: **1. aşama uygulandı (dal `mcp/asama-1-okuma`, 1.0.57); 2. aşama (yazma) uygulandı, onay bekliyor (dal
+`mcp/asama-2-yazma`, 1.0.58); açık sorular öneriyle, onay bekliyor** · Kaynak: Tolga'nın 10. adam kararı
 "`beyin.py mcp` Faz 1" (2026-11-03, kasa `projects/Cortex/Tecrube.md`), Cortex-Browser ADR-0006 "Cortex bağlayıcısı: tek
 hafıza, stdio üzerinden MCP" (2026-10-29), yol haritası incelemesi (kasa `projects/Cortex/yol-haritasi-inceleme-2026-11-03.md` §1)
 
@@ -34,6 +35,28 @@ Belgede öneri olarak; Tolga onaylayınca "kullanıcıyla alındı" diye işaret
   (Browser her yazmayı kullanıcıya sorar, ADR-0006 §3); sunucu yine de sınırları uygular.
 - **Ağa çıkmaz:** `capture` metni istemciden hazır alır; URL'yi yeniden indirmez (ADR-0006 §4, K-05).
 
+**2026-11-06, 2. aşama (yazma) uygulandı, onay bekliyor.** Uygulamanın netleştirdiği noktalar:
+- **`capture` notu bir Yakala kartıdır** (`tur: yakala`, `durum: bekliyor`, `arac: mcp`, `uygulama: <origin>`):
+  Yakala'nın klasörü, dosya adı, URL kuralı (`_safe_source_url`, ağsız) ve ön bilgi yazıcısı (`_dump`) kullanılır;
+  `yakala liste`/`isle` ve masaüstü onu görür. Web Clipper kartı gibi `visibility: internal` ve metin `## Icerik`
+  altında, ayrıca `untrusted: true` (gelen kutusunda olduğu için MCP onu zaten işaretli döndürürdü). `trust:
+  untrusted` konmaz: motorun kapısı o notu hiç vermez, yakalanan sayfa aranamazdı. Yakala'nın `capture()`'ı
+  doğrudan çağrılmadı: metinli kartı `private` yapıyor (aranamaz) ve aynı adresi var olan karta ekliyor (var olan
+  notu değiştirmek). ingest-server'ın `save_capture`'ı da değil: `trust: untrusted` yazıyor ve `Yakala/` dışına.
+- **Ezmeyen yazma:** dosya geçici adla yazılıp `fsync` edilir, sonra adını sabit bağla (POSIX) ya da `rename` ile
+  (Windows) alır; ikisi de dolu adı reddeder (kırık bağlantı da dolu sayılır). Sabit bağ olmayan dosya sisteminde
+  `open(..., 'xb')` (ingest-server'ın yolu). Ad doluysa `-2`, `-3`…
+- **`capture` not kilidini almaz:** var olan hiçbir dosyaya dokunmadığı ve yeni dosyayı tek adımda açtığı için
+  sıralamaya gerek yok; kilit klasörü (`.beyin-note-write/`) gelen kutusu dışına yazma olurdu. `note_create`
+  motorun yolu olduğu için kilidi alır.
+- **`note_create` sınırları:** motorun `note-create`'inden önce `note-edit`'in yol kuralları (`source_path`:
+  ters bölü, sürücü, gizli/yönetilen/dizin dışı klasör, symlink/junction) ve `metadata` için izin listesi
+  (`title`, `project`, `kind`, `status`, `tags`, `visibility`); `id` ve `supersedes` başka notun yerine geçebildiği
+  için yok. Var olan yol `isError` ("zaten var"), sınır dışı yol -32602. Sonuç `status: "created"`.
+- **200 KB `note_create`'e de uygulanır** (UTF-8 bayt; reddedilir, kesilmez).
+- **Sırlar yazılırken de maskelenir** (kasanın `secret_filter` tercihinden bağımsız); sır taşıyan `url` reddedilir
+  (motorun makbuz bağlantısı kuralı gibi). Maskeleme sayısı motorun sağlık sayacına (`secret-filter.sqlite3`) yazılır.
+
 ## Kapsam dışı
 - Uzak erişim (sunucudaki kasaya telefondan): Faz 2'nin "sunucu kapısı" ayrı iş.
 - Anlamsal (vektör) arama: bugünkü sözcük tabanlı arama kalır.
@@ -64,7 +87,8 @@ Belgede öneri olarak; Tolga onaylayınca "kullanıcıyla alındı" diye işaret
 - Kasa kurulu değil / motor eski → `initialize` hatası: "Bu kasada Cortex'in hafızası kurulu değil ya da eski; Cortex'i güncelle."
 - Bilinmeyen araç → JSON-RPC hata `-32601`; şema dışı argüman → `-32602`, hangi alan olduğu yazılır (değer yazılmaz).
 - `capture` metni sınırı aşıyor → reddedilir, kesilmez ("metin 200 KB'tan uzun").
-- Aynı anda iki istemci → her biri kendi süreci; yazmalar motorun not kilidiyle sıralanır (`note-edit` kilidi).
+- Aynı anda iki istemci → her biri kendi süreci; `note_create` motorun not kilidiyle sıralanır (`note-edit` kilidi);
+  `capture` yalnız yeni dosya açtığı için kilit gerekmez, aynı ad ikinci istemcide `-2` olur.
 - Bir satır JSON değil → hata cevabı, süreç sürer (tek bozuk mesaj oturumu düşürmez).
 - Çok büyük girdi satırı (>1 MB) → okunmaz, hata.
 
@@ -77,7 +101,7 @@ Belgede öneri olarak; Tolga onaylayınca "kullanıcıyla alındı" diye işaret
 
 ## Aşamalar
 1. Okuma: `search`, `context` + belge + Claude Code bağlama satırı. Kendi sürümü.
-2. Yazma: `capture`, `note_create`.
+2. Yazma: `capture`, `note_create`. Uygulandı (1.0.58), onay bekliyor.
 3. Masaüstünde "AI araçlarına bağla" düğmesi.
 4. Browser Engine'i istemci (Cortex-Browser reposunda).
 

@@ -1,9 +1,13 @@
-"""`beyin.py mcp` (stage 1, read only), spoken to as an MCP client does: a process on stdin/stdout.
+"""`beyin.py mcp`, spoken to as an MCP client does: a process on stdin/stdout.
 
-Design: docs/superpowers/specs/2026-11-05-beyin-mcp-design.md, its Test section. The vault is a temporary one
-installed from this source tree and indexed with the installed `beyin.py sync`; no person's vault or state is read.
-Every answer is awaited with a deadline on a reader thread, so a server that hangs fails its test, not the suite.
+Stage 1 reads (search, context), stage 2 writes (capture, note_create). Design:
+docs/superpowers/specs/2026-11-05-beyin-mcp-design.md, its Test section. Each vault is a temporary one installed from
+this source tree and indexed with the installed `beyin.py sync`; no person's vault or state is read. The writing
+tests have a vault of their own, so the reading tests' vault stays as its fixture left it. Every answer is awaited
+with a deadline on a reader thread, so a server that hangs fails its test, not the suite.
 """
+from datetime import datetime, timedelta
+import errno
 import hashlib
 import io
 import json
@@ -15,6 +19,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from v3_package_helpers import ROOT, inherited_env, install, run_python, snapshot
 
@@ -24,11 +29,13 @@ import beyin_v3_mcp as mcp
 # The tool contract clients pin (Cortex Browser hashes tools/list, ADR-0006 §3). A change to a name, description or
 # schema changes this value: update it together with docs/v3/MCP.md and a "MCP sözleşmesi değişti" line in the
 # release note.
-TOOLS_SHA256 = 'c27c7612bf9dd1533bcc7b00d5a03e2b2c45a79c7ae6532a461fd0061094305c'
+TOOLS_SHA256 = 'c283cfa0ada5e9ebbe6f891c8d0429bdc09c5380c39c0147a2364adb9e8d32d3'
 PRIVATE_CANARY = 'MCPPRIVATECANARY7d41'
 GATED_CANARY = 'MCPGATEDCANARY52ac'     # trust: untrusted, which the engine's gate never delivers
 FIELD_CANARY = 'MCPFIELDVALUECANARY'    # an argument's value, which a refusal must never repeat
 FAKE_TOKEN = 'ghp_' + 'Zq7' * 12       # GitHub's token shape, built here so no literal sits in the file
+WRITE_CANARY = 'MCPWRITTENPRIVATE93be'  # a private note written through note_create
+INBOX = '📥 000-Inbox/Yakala'
 TIMEOUT = 30
 INITIALIZE = {'protocolVersion': '2025-06-18', 'capabilities': {},
               'clientInfo': {'name': 'cortex-test', 'version': '0'}}
@@ -109,7 +116,36 @@ class Session:
         return self.process.returncode
 
 
-class McpProcessTest(unittest.TestCase):
+class McpCase(unittest.TestCase):
+    session_env = None  # the environment the server process gets; a class sets it in setUpClass
+
+    def session(self, initialize=True):
+        log = open(self.root / ('stderr-' + self.id().rsplit('.', 1)[-1] + '.log'), 'ab')
+        self.addCleanup(log.close)
+        session = Session(self.vault, self.session_env, log)
+        self.addCleanup(session.close)
+        if initialize:
+            answer = session.initialize()
+            self.assertIn('result', answer, answer)
+        return session
+
+    def structured(self, answer):
+        self.assertIn('result', answer, answer)
+        result = answer['result']
+        self.assertFalse(result['isError'], result)
+        self.assertEqual(json.loads(result['content'][0]['text']), result['structuredContent'])
+        return result['structuredContent']
+
+    def raw_call(self, session, name, arguments):
+        """The answer as bytes too, for what must never be in it."""
+        session.last_id += 1
+        session.send({'jsonrpc': '2.0', 'id': session.last_id, 'method': 'tools/call',
+                      'params': {'name': name, 'arguments': arguments}})
+        raw = session.receive()
+        return raw.decode('utf-8'), json.loads(raw)
+
+
+class McpProcessTest(McpCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory(prefix='v3-mcp-')
@@ -119,6 +155,7 @@ class McpProcessTest(unittest.TestCase):
         cls.vault.mkdir()
         cls.state = cls.root / 'state'
         cls.env = inherited_env(BEYIN_V3_NO_SPAWN='1', PYTHONDONTWRITEBYTECODE='1', PYTHONIOENCODING='utf-8')
+        cls.session_env = cls.env
         result = install(cls.vault, cls.state, cls.env)
         if result.returncode:
             raise AssertionError(result.stderr.decode('utf-8', 'replace'))
@@ -136,23 +173,6 @@ class McpProcessTest(unittest.TestCase):
         result = run_python(v / 'beyin.py', ['sync', '--json'], v, cls.env)
         if result.returncode or json.loads(result.stdout)['status'] != 'succeeded':
             raise AssertionError(result.stdout.decode('utf-8', 'replace') + result.stderr.decode('utf-8', 'replace'))
-
-    def session(self, initialize=True):
-        log = open(self.root / ('stderr-' + self.id().rsplit('.', 1)[-1] + '.log'), 'ab')
-        self.addCleanup(log.close)
-        session = Session(self.vault, self.env, log)
-        self.addCleanup(session.close)
-        if initialize:
-            answer = session.initialize()
-            self.assertIn('result', answer, answer)
-        return session
-
-    def structured(self, answer):
-        self.assertIn('result', answer, answer)
-        result = answer['result']
-        self.assertFalse(result['isError'], result)
-        self.assertEqual(json.loads(result['content'][0]['text']), result['structuredContent'])
-        return result['structuredContent']
 
     # --- lifecycle --------------------------------------------------------------------------------------------
     def test_initialize_reports_protocol_and_engine_version(self):
@@ -205,12 +225,24 @@ class McpProcessTest(unittest.TestCase):
     # --- the contract -----------------------------------------------------------------------------------------
     def test_tools_list_is_the_pinned_contract(self):
         tools = self.session().request('tools/list')['result']['tools']
-        self.assertEqual([tool['name'] for tool in tools], ['search', 'context'])
+        self.assertEqual([tool['name'] for tool in tools], ['search', 'context', 'capture', 'note_create'])
         self.assertEqual(tools_hash(tools), TOOLS_SHA256)
         self.assertIn(TOOLS_SHA256, (ROOT / 'docs/v3/MCP.md').read_text(encoding='utf-8'))
+
+        def objects(schema):
+            if schema['type'] == 'object':
+                yield schema
+                for member in schema['properties'].values():
+                    yield from objects(member)
+            elif schema['type'] == 'array':
+                yield from objects(schema['items'])
+
         for tool in tools:
-            self.assertTrue(tool['annotations']['readOnlyHint'])
-            self.assertFalse(tool['inputSchema']['additionalProperties'])
+            writes = tool['name'] in ('capture', 'note_create')
+            self.assertIs(tool['annotations']['readOnlyHint'], not writes, tool['name'])
+            self.assertIs(tool['annotations']['destructiveHint'], False, tool['name'])  # writes only add a file
+            for schema in objects(tool['inputSchema']):
+                self.assertIs(schema['additionalProperties'], False, tool['name'])
 
     # --- privacy ----------------------------------------------------------------------------------------------
     def test_search_never_returns_a_private_note(self):
@@ -275,10 +307,10 @@ class McpProcessTest(unittest.TestCase):
     # --- refusals ---------------------------------------------------------------------------------------------
     def test_unknown_tools_and_methods_are_refused(self):
         session = self.session()
-        for name in ('capture', 'note_create', 'task_create', 'Search', ''):
+        for name in ('task_create', 'note_edit', 'Search', 'Capture', 'note-create', ''):
             answer = session.call(name, {'title': 'x', 'text': 'y'})
             self.assertEqual(answer['error']['code'], -32601, name)
-            self.assertEqual(answer['error']['data'], {'tools': ['search', 'context']})
+            self.assertEqual(answer['error']['data'], {'tools': ['search', 'context', 'capture', 'note_create']})
         self.assertEqual(session.request('resources/list')['error']['code'], -32601)
         self.assertEqual(session.request('tools/call', {'arguments': {}})['error']['code'], -32601)
 
@@ -375,8 +407,315 @@ class McpProcessTest(unittest.TestCase):
         self.assert_refused_with_one_sentence('engine_outdated')
 
 
+# Loaded into the server process of the writing tests (PYTHONPATH): any name lookup or connection is refused and
+# written down, so a write that went to the network fails its test instead of passing where a network is up.
+NETWORK_GUARD = """import os
+import socket
+
+
+def _refused(*args, **kwargs):
+    with open(os.environ['CORTEX_TEST_NETWORK_LOG'], 'a', encoding='utf-8') as log:
+        log.write('network\\n')
+    raise OSError('the network is off in this test')
+
+
+socket.getaddrinfo = socket.create_connection = _refused
+socket.socket.connect = socket.socket.connect_ex = _refused
+"""
+
+
+def front(text):
+    """A written note's frontmatter and body, as the engine's own reader takes them."""
+    import beyin_v3_sync
+    return beyin_v3_sync.parse(text)
+
+
+class McpWriteTest(McpCase):
+    """capture and note_create in a vault of their own."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory(prefix='v3-mcp-yaz-')
+        cls.addClassCleanup(cls.tmp.cleanup)
+        cls.root = Path(cls.tmp.name)
+        cls.vault = cls.root / 'Yazma Kasası'
+        cls.vault.mkdir()
+        cls.state = cls.root / 'state'
+        cls.outside = cls.root / 'disari'  # next to the vault: what an escaping path would reach
+        note(cls.outside / 'hedef.md', 'outside the vault\n')
+        guard = cls.root / 'agsiz'
+        note(guard / 'sitecustomize.py', NETWORK_GUARD)
+        cls.network_log = cls.root / 'ag.log'
+        cls.env = inherited_env(BEYIN_V3_NO_SPAWN='1', PYTHONDONTWRITEBYTECODE='1', PYTHONIOENCODING='utf-8')
+        cls.session_env = dict(cls.env, PYTHONPATH=str(guard), CORTEX_TEST_NETWORK_LOG=str(cls.network_log))
+        result = install(cls.vault, cls.state, cls.env)
+        if result.returncode:
+            raise AssertionError(result.stderr.decode('utf-8', 'replace'))
+        (cls.vault / '.beyin-version').write_text('9.8.7\n', encoding='utf-8')
+        note(cls.vault / 'notes/kuvars.md', '---\ntitle: Kuvars planı\n---\nQuartz rollout plan, written by hand.\n')
+        note(cls.vault / 'notes/gizli.md', '---\nvisibility: private\n---\nZeppelin hangar ' + PRIVATE_CANARY + '\n')
+        cls.sync()
+
+    @classmethod
+    def sync(cls):
+        result = run_python(cls.vault / 'beyin.py', ['sync', '--json'], cls.vault, cls.env)
+        if result.returncode or json.loads(result.stdout)['status'] != 'succeeded':
+            raise AssertionError(result.stdout.decode('utf-8', 'replace') + result.stderr.decode('utf-8', 'replace'))
+
+    def setUp(self):
+        self.network_log.unlink(missing_ok=True)
+
+    def tearDown(self):
+        self.assertFalse(self.network_log.exists(), 'the server went to the network')
+
+    def capture(self, session, **arguments):
+        arguments.setdefault('origin', 'cortex-test')
+        return self.structured(session.call('capture', arguments))
+
+    def tool_error(self, answer):
+        self.assertIn('result', answer, answer)
+        self.assertTrue(answer['result']['isError'], answer)
+        self.assertNotIn('structuredContent', answer['result'])
+        return answer['result']['content'][0]['text']
+
+    def search_sources(self, session, query):
+        results = self.structured(session.call('search', {'query': query, 'limit': 20}))['results']
+        return {item['source']: item['untrusted'] for item in results}
+
+    # --- capture ----------------------------------------------------------------------------------------------
+    def test_capture_writes_one_untrusted_card_into_the_inbox_only(self):
+        import beyin_v3_yakala as yakala
+        before = snapshot(self.vault)
+        text = 'Zeppelins float on helium; the hangar opens at dawn.\n\n## A heading inside the page\n\nLast line.'
+        result = self.capture(self.session(), title='Zeplin sayfası', url='https://example.com/zeplin', text=text)
+        source = result['source']
+        self.assertEqual(set(result), {'source'})
+        self.assertTrue(source.startswith(INBOX + '/') and source.endswith('.md'), source)
+        after = snapshot(self.vault)
+        self.assertEqual({path: after.get(path) for path in before}, before)  # nothing changed, nothing removed
+        self.assertEqual(set(after) - set(before), {source})  # one new file, in the inbox: no lock file, no index
+        written = (self.vault / source).read_text(encoding='utf-8')
+        metadata, body = front(written)
+        self.assertIs(metadata['untrusted'], True)
+        self.assertEqual(metadata['visibility'], 'internal')
+        self.assertNotIn('trust', metadata)  # the engine's gate would keep it out of search altogether
+        card, _body = yakala.read_card(self.vault / source)
+        self.assertEqual((card['tur'], card['durum'], card['arac'], card['uygulama'], card['url']),
+                         ('yakala', 'bekliyor', 'mcp', 'cortex-test', 'https://example.com/zeplin'))
+        self.assertIn('## Icerik\n\n' + text + '\n', written)  # the whole text, as sent
+        listed = run_python(self.vault / 'beyin.py', ['yakala', 'liste', '--json'], self.vault, self.env)
+        self.assertIn(Path(source).stem, [row['id'] for row in json.loads(listed.stdout)['kartlar']])
+
+    def test_capture_never_goes_to_the_network(self):
+        probe = subprocess.run([sys.executable, '-c', 'import socket; socket.getaddrinfo("example.com", 443)'],
+                               env=self.session_env, capture_output=True, timeout=TIMEOUT)
+        self.assertNotEqual(probe.returncode, 0)  # the guard is in place: a lookup fails and is written down
+        self.assertTrue(self.network_log.exists())
+        self.network_log.unlink()
+        session = self.session()
+        for url in ('https://example.com/makale', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+                    'https://example.org/belge.pdf'):
+            source = self.capture(session, title='Ağsız yakalama', url=url, text='Offline capture.')['source']
+            self.assertEqual(front((self.vault / source).read_text(encoding='utf-8'))[0]['url'], url)
+        # tearDown: nothing was looked up or connected to
+
+    def test_capture_never_overwrites_on_a_name_clash(self):
+        import beyin_v3_yakala as yakala
+        title = 'Çakışan başlık'
+        folder = self.vault / INBOX
+        folder.mkdir(parents=True, exist_ok=True)
+        taken = {}
+        now = datetime.now().astimezone()
+        for moment in (now, now + timedelta(minutes=1)):  # the minute may turn during the test
+            stem = moment.strftime('%Y-%m-%d-%H%M') + '-' + yakala.slug(title)
+            path = folder / (stem + '.md')
+            path.write_text('elle yazılmış, ' + moment.isoformat() + '\n', encoding='utf-8')
+            taken[path] = path.read_bytes()
+            if os.name != 'nt':
+                link = folder / (stem + '-2.md')
+                link.symlink_to(self.root / ('yok-' + stem + '.md'))  # a dangling link
+                self.addCleanup(link.unlink)  # the next sync would warn about it
+        session = self.session()
+        first = self.capture(session, title=title, text='Birinci yakalama.')['source']
+        second = self.capture(session, title=title, text='İkinci yakalama.')['source']
+        for path, data in taken.items():
+            self.assertEqual(path.read_bytes(), data)
+        self.assertEqual(sorted(self.root.glob('yok-*')), [])  # nothing written through the dangling links
+        self.assertNotEqual(first, second)
+        for source, text in ((first, 'Birinci yakalama.'), (second, 'İkinci yakalama.')):
+            self.assertNotIn(self.vault / source, taken)
+            self.assertFalse((self.vault / source).is_symlink())
+            self.assertIn(text, (self.vault / source).read_text(encoding='utf-8'))
+
+    def test_capture_text_over_200_kb_is_refused_never_cut(self):
+        self.assertEqual(mcp.TEXT_BYTES, 200_000)  # "200 KB", as the design and docs/v3/MCP.md say
+        session = self.session()
+        before = snapshot(self.vault)
+        # 'ş' is two bytes in UTF-8: the second text is under 200 000 characters and still refused by its bytes.
+        for text in ('a' * (mcp.TEXT_BYTES + 1), 'ş' * (mcp.TEXT_BYTES // 2 + 1)):
+            for name, arguments in (('capture', {'title': 'Uzun', 'text': text, 'origin': 'cortex-test'}),
+                                    ('note_create', {'source': 'notes/mcp/uzun.md', 'text': text})):
+                answer = session.call(name, arguments)
+                self.assertEqual(answer['error']['code'], -32602, name)
+                self.assertEqual(answer['error']['data'], {'field': 'text'})
+                self.assertIn("metin 200 KB'tan uzun", answer['error']['message'])
+        self.assertEqual(snapshot(self.vault), before)
+        exact = 'ş' * (mcp.TEXT_BYTES // 2)  # exactly 200 KB
+        source = self.capture(session, title='Tam sınır', text=exact)['source']
+        self.assertIn('\n' + exact + '\n', (self.vault / source).read_text(encoding='utf-8'))  # whole, not cut
+
+    def test_writes_mask_secrets_and_a_secret_in_the_url_is_refused(self):
+        session = self.session()
+        source = self.capture(session, title='Anahtar ' + FAKE_TOKEN,
+                              text='deploy key ' + FAKE_TOKEN + '\npassword=hunter2hunter2\n')['source']
+        written = (self.vault / source).read_text(encoding='utf-8')
+        self.assertNotIn(FAKE_TOKEN, written)
+        self.assertNotIn('hunter2hunter2', written)
+        self.assertIn('[REDACTED]', written)
+        self.assertNotIn(FAKE_TOKEN[4:12].lower(), source)  # nor in the file name made from the title
+        before = snapshot(self.vault)
+        raw, answer = self.raw_call(session, 'capture', {'title': 'Bağlantı', 'text': 'x', 'origin': 'cortex-test',
+                                                         'url': 'https://example.com/a?token=' + FAKE_TOKEN})
+        self.assertEqual((answer['error']['code'], answer['error']['data']), (-32602, {'field': 'url'}))
+        self.assertNotIn(FAKE_TOKEN, raw)
+        self.assertEqual(snapshot(self.vault), before)
+        created = self.structured(session.call('note_create', {
+            'source': 'notes/mcp/sirli.md', 'text': 'The deploy key is ' + FAKE_TOKEN + '.',
+            'metadata': {'title': 'Sır ' + FAKE_TOKEN, 'tags': [FAKE_TOKEN, 'mcp']}}))
+        written = (self.vault / created['source']).read_text(encoding='utf-8')
+        self.assertNotIn(FAKE_TOKEN, written)
+        self.assertEqual(front(written)[0]['tags'], ['[REDACTED]', 'mcp'])
+
+    # --- note_create ------------------------------------------------------------------------------------------
+    def test_note_create_writes_a_new_note_and_never_overwrites(self):
+        session = self.session()
+        result = self.structured(session.call('note_create', {
+            'source': 'notes/mcp/gondol.md', 'text': '# Gondol\n\nGondolas cross the lagoon at noon.',
+            'metadata': {'title': 'Gondol', 'project': 'Deneme', 'tags': ['mcp'], 'kind': 'fact'}}))
+        self.assertEqual(result, {'source': 'notes/mcp/gondol.md', 'status': 'created'})
+        path = self.vault / 'notes/mcp/gondol.md'
+        written = path.read_bytes()
+        metadata, body = front(written.decode('utf-8'))
+        self.assertEqual({key: metadata.get(key) for key in ('title', 'project', 'tags', 'kind')},
+                         {'title': 'Gondol', 'project': 'Deneme', 'tags': ['mcp'], 'kind': 'fact'})
+        self.assertIn('Gondolas cross the lagoon at noon.', body)
+        existing = self.vault / 'notes/kuvars.md'
+        original = existing.read_bytes()
+        for source in ('notes/mcp/gondol.md', 'notes/kuvars.md', 'notes/gizli.md'):
+            raw, answer = self.raw_call(session, 'note_create', {'source': source, 'text': 'Üzerine yazma denemesi.'})
+            self.assertIn('üzerine yazmaz', self.tool_error(answer), source)
+            self.assertNotIn(PRIVATE_CANARY, raw)
+        self.assertEqual(path.read_bytes(), written)
+        self.assertEqual(existing.read_bytes(), original)
+
+    def test_note_create_refuses_path_escapes_and_other_folders(self):
+        sources = ['../kacak.md', '../../kacak.md', 'notes/../../kacak.md', 'notes/../tasks/kacak.md',
+                   'notes/../kacak.md', str(self.outside / 'kacak.md'), '/notes/kacak.md', 'C:/kacak.md',
+                   'notes/c:kacak.md', 'notes\\..\\..\\kacak.md', 'notes/alt\\kacak.md', 'kacak.md',
+                   'tasks/kacak.md', 'receipts/kacak.md', 'daily/kacak.md', INBOX + '/kacak.md',
+                   'knowledge/v3/kacak.md', 'notes/.gizli/kacak.md', 'notes/.kacak.md', 'notes/kacak.txt',
+                   'Notes/kacak.md', 'notes//kacak.md', 'notes/./kacak.md', 'notes/con.md', 'notes/alt /kacak.md',
+                   'notes/alt./kacak.md', 'notes/kacak.md/', 'notes/Şifreler/kacak.md']
+        try:
+            (self.vault / 'notes/disari').symlink_to(self.outside, target_is_directory=True)
+            self.addCleanup((self.vault / 'notes/disari').unlink)
+            (self.vault / 'notes/bag.md').symlink_to(self.outside / 'hedef.md')
+            self.addCleanup((self.vault / 'notes/bag.md').unlink)
+            (self.vault / 'notes/ic').symlink_to(self.vault / 'knowledge', target_is_directory=True)
+            self.addCleanup((self.vault / 'notes/ic').unlink)
+            sources += ['notes/disari/kacak.md', 'notes/bag.md', 'notes/ic/kacak.md']
+        except (OSError, NotImplementedError):  # Windows without the symlink privilege
+            pass
+        before = (snapshot(self.vault), snapshot(self.outside), snapshot(self.state))
+        session = self.session()
+        for source in sources:
+            answer = session.call('note_create', {'source': source, 'text': 'Kaçak not.'})
+            self.assertIn('error', answer, source)
+            self.assertEqual((answer['error']['code'], answer['error']['data']), (-32602, {'field': 'source'}),
+                             source)
+        self.assertEqual((snapshot(self.vault), snapshot(self.outside), snapshot(self.state)), before)
+        self.assertEqual([path for path in self.root.rglob('kacak*')], [])
+
+    def test_out_of_schema_write_arguments_name_the_field_never_the_value(self):
+        base = {'title': 'Başlık', 'text': 'Metin.', 'origin': 'cortex-test'}
+        note_base = {'source': 'notes/mcp/alan.md', 'text': 'Metin.'}
+        cases = [('capture', dict(base, **{FIELD_CANARY + 'name': FIELD_CANARY}), FIELD_CANARY + 'name'),
+                 ('capture', {'title': 'Başlık', 'text': 'Metin.'}, 'origin'),
+                 ('capture', dict(base, text='   '), 'text'),
+                 ('capture', dict(base, text='\ud800' + FIELD_CANARY), 'text'),
+                 ('capture', dict(base, title=FIELD_CANARY * 20), 'title'),
+                 ('capture', dict(base, origin=[FIELD_CANARY]), 'origin'),
+                 ('capture', dict(base, url='file:///etc/' + FIELD_CANARY), 'url'),
+                 ('capture', dict(base, url='http://127.0.0.1/' + FIELD_CANARY), 'url'),
+                 ('capture', dict(base, url='https://localhost/' + FIELD_CANARY), 'url'),
+                 ('capture', dict(base, url='https://kisi:' + FIELD_CANARY + '@example.com/'), 'url'),
+                 ('capture', dict(base, url='--' + FIELD_CANARY), 'url'),
+                 ('note_create', dict(note_base, metadata={'id': FIELD_CANARY}), 'metadata.id'),
+                 ('note_create', dict(note_base, metadata={'supersedes': [FIELD_CANARY]}), 'metadata.supersedes'),
+                 ('note_create', dict(note_base, metadata={'trust': FIELD_CANARY}), 'metadata.trust'),
+                 ('note_create', dict(note_base, metadata={'generated': True}), 'metadata.generated'),
+                 ('note_create', dict(note_base, metadata=FIELD_CANARY), 'metadata'),
+                 ('note_create', dict(note_base, metadata={'tags': FIELD_CANARY}), 'metadata.tags'),
+                 ('note_create', dict(note_base, metadata={'tags': [FIELD_CANARY] * 21}), 'metadata.tags'),
+                 ('note_create', dict(note_base, metadata={'tags': [7]}), 'metadata.tags'),
+                 ('note_create', dict(note_base, metadata={'visibility': FIELD_CANARY}), 'metadata.visibility'),
+                 ('note_create', dict(note_base, metadata={'kind': 'task'}), 'metadata.kind'),
+                 ('note_create', dict(note_base, metadata={'kind': 'Receipt'}), 'metadata.kind'),
+                 ('note_create', dict(note_base, text='---\ntitle: ' + FIELD_CANARY + '\n---\nbody'), 'text'),
+                 ('note_create', {'text': 'Metin.'}, 'source'),
+                 ('note_create', dict(note_base, source=['notes/' + FIELD_CANARY + '.md']), 'source'),
+                 ('note_create', dict(note_base, **{FIELD_CANARY + 'name': 1}), FIELD_CANARY + 'name')]
+        before = (snapshot(self.vault), snapshot(self.state))
+        session = self.session()
+        for name, arguments, field in cases:
+            raw, answer = self.raw_call(session, name, arguments)
+            self.assertIn('error', answer, (name, field))
+            self.assertEqual(answer['error']['code'], -32602, (name, field, raw))
+            self.assertEqual(answer['error']['data'], {'field': field}, raw)
+            self.assertIn(field, answer['error']['message'])
+            self.assertNotIn(FIELD_CANARY, raw.replace(FIELD_CANARY + 'name', ''), raw)
+        self.assertEqual((snapshot(self.vault), snapshot(self.state)), before)
+
+    # --- after writing ----------------------------------------------------------------------------------------
+    def test_written_notes_are_found_by_search_after_sync(self):
+        session = self.session()
+        created = self.structured(session.call('note_create', {
+            'source': 'notes/mcp/ornitopter.md', 'text': 'Ornitopter kanatları çırpar; ders notu.'}))
+        captured = self.capture(session, title='Ornitopter sayfası', url='https://example.com/ornitopter',
+                                text='Ornitopter: a machine that flies by flapping its wings.')['source']
+        self.assertEqual(self.search_sources(session, 'ornitopter'), {created['source']: False})
+        # capture writes a file and nothing else; the next sync (a hook, beyin.py sync, the app) indexes it
+        self.sync()
+        found = self.search_sources(session, 'ornitopter')
+        self.assertIs(found.get(captured), True)
+        self.assertIs(found.get(created['source']), False)
+        context = self.structured(session.call('context', {'query': 'ornitopter wings', 'budget_chars': 8000}))
+        self.assertIn({'source': captured, 'title': 'Ornitopter sayfası', 'untrusted': True}, context['sources'])
+
+    def test_private_notes_still_do_not_leak(self):
+        session = self.session()
+        created = self.structured(session.call('note_create', {
+            'source': 'notes/mcp/ozel.md', 'text': 'Zeppelin hangar secret ' + WRITE_CANARY + '.',
+            'metadata': {'visibility': 'private'}}))
+        self.assertEqual(created['status'], 'created')
+        self.assertEqual(front((self.vault / 'notes/mcp/ozel.md').read_text(encoding='utf-8'))[0].get('visibility'),
+                         'private')
+        self.capture(session, title='Zeppelin hangar', text='Zeppelin hangar, a captured page.')
+        self.sync()
+        for query in ('zeppelin hangar', WRITE_CANARY, PRIVATE_CANARY, 'ozel', 'gizli'):
+            for name, arguments in (('search', {'query': query, 'limit': 20}),
+                                    ('context', {'query': query, 'budget_chars': 8000})):
+                raw, answer = self.raw_call(session, name, arguments)
+                rest = raw.replace(json.dumps(query)[1:-1], '')
+                self.assertNotIn(WRITE_CANARY, rest, (name, query))
+                self.assertNotIn(PRIVATE_CANARY, rest, (name, query))
+                self.assertNotIn('notes/mcp/ozel.md', rest, (name, query))
+                self.assertNotIn('notes/gizli.md', rest, (name, query))
+        self.assertIn(True, self.search_sources(session, 'zeppelin hangar').values())  # the search itself works
+
+
 class McpUnitTest(unittest.TestCase):
-    """The two rules that must hold even if the engine changed under them."""
+    """The rules that must hold even if the engine changed under them."""
 
     def test_a_private_record_is_never_deliverable(self):
         base = {'source': 'notes/a.md', 'text': 'x'}
@@ -398,6 +737,26 @@ class McpUnitTest(unittest.TestCase):
         self.assertEqual(list(mcp.lines(stream, limit=100)), [(None, True), (b'{}', False), (b'y' * 101, True),
                                                                (b'z' * 100, False)])
         self.assertTrue(all(0 < size <= max(102, mcp.DRAIN_CHUNK) for size in Recorder.sizes), Recorder.sizes)
+
+    def test_create_new_never_replaces_a_file(self):
+        with tempfile.TemporaryDirectory(prefix='v3-mcp-yeni-') as tmp:
+            folder = Path(tmp)
+            path = folder / 'a.md'
+            self.assertTrue(mcp.create_new(path, 'bir\n'))
+            self.assertFalse(mcp.create_new(path, 'iki\n'))
+            with patch.object(mcp.os.path, 'lexists', return_value=False):  # the name taken after the look
+                self.assertFalse(mcp.create_new(path, 'üç\n'))
+                if os.name != 'nt':
+                    def no_hard_links(*args, **kwargs):
+                        raise PermissionError(errno.EPERM, 'no hard links on this file system')
+
+                    with patch.object(mcp.os, 'link', no_hard_links):
+                        self.assertTrue(mcp.create_new(folder / 'b.md', 'dört\n'))
+                        self.assertFalse(mcp.create_new(path, 'beş\n'))
+                        self.assertEqual((folder / 'b.md').read_text(encoding='utf-8'), 'dört\n')
+            self.assertEqual(path.read_text(encoding='utf-8'), 'bir\n')
+            self.assertEqual(sorted(entry.name for entry in folder.iterdir()),
+                             ['a.md'] + (['b.md'] if os.name != 'nt' else []))  # no temporary file is left
 
     def test_render_never_exceeds_its_budget(self):
         records = [{'source': 'notes/' + str(i) + '.md', 'title': 'T' * (i * 7 % 50),
