@@ -717,6 +717,10 @@ def main(argv=None):
             # The vault's MCP door for AI clients (stdio): reads, and writes only new notes (capture, note_create).
             import beyin_v3_mcp as mcp
             return mcp.main(argv[1:], vault=vault, state=state, version=installed_version)
+        if argv and argv[0] == 'eslestir':
+            # A one-off pairing code for a desktop Cortex to reach this server with nothing installed; its own small CLI.
+            import beyin_v3_eslestir as eslestir
+            return eslestir.main(argv[1:], vault=vault, state=state)
         if argv and argv[0] == 'pyn':
             # Open Pyn in a chosen AI client inside this vault; its own small CLI.
             import beyin_v3_pyn as pyn

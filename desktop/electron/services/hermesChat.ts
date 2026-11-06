@@ -6,6 +6,7 @@ import { HERMES_PROFILE, type HermesStatus, hermesAddress } from '../../shared/h
 import { type Backend, OUTPUT_MAX, STOP_GRACE, Stopped, type Turn, TurnFailure, cutSaid, scrubberFor, textOf, unlessStopped } from './chatKit';
 import { forgetKey, keptHere, keptReadable, keyEnv, saveKey } from './keys';
 import { readSettings, updateSettings } from './settings';
+import { tailnetRoute } from './tailnet';
 
 /**
  * The chat with a Hermes Agent running on another machine, through its
@@ -65,6 +66,11 @@ interface Server {
   /** The address with the profile's path: what every route is put after. */
   base: string;
   key: string;
+  /**
+   * Paired by code (tailnet.ts): the requests go to the helper's proxy on this computer, with its token, and the proxy
+   * puts them on the address; `path` is what follows the address in `base` (the profile's).
+   */
+  via?: { port: number; token: string; path: string };
 }
 
 interface Running {
@@ -140,7 +146,11 @@ function serverOf(): Server {
   // An address with a key kept that this computer cannot read back (kept on another, or under another account).
   if (hermesUrl && !key && keptHere('hermes')) throw new TurnFailure('The key kept for Pyn on the server cannot be read on this computer. Give its API key again in the AI tools window.', 'auth');
   if (!hermesUrl || !key) throw new TurnFailure('Pyn on the server is not set up: give its address and its API key in the AI tools window.', 'auth');
-  return { base: hermesUrl + (hermesProfile ? `/p/${encodeURIComponent(hermesProfile)}` : ''), key };
+  const path = hermesProfile ? `/p/${encodeURIComponent(hermesProfile)}` : '';
+  // An address paired by code is reached through the helper; while the helper is not up, its own sentence says why.
+  const route = tailnetRoute(hermesUrl);
+  if (route && 'trouble' in route) throw new TurnFailure(route.trouble, null);
+  return { base: hermesUrl + path, key, ...(route ? { via: { port: route.port, token: route.token, path } } : {}) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -154,9 +164,10 @@ interface Reply {
 
 /** A request sent, its key in its header; the answer to `onResponse`. */
 function open(server: Server, method: 'GET' | 'POST', route: string, body: unknown, signal: AbortSignal | undefined, timeout: number, onResponse: (response: http.IncomingMessage) => void): http.ClientRequest {
-  const url = new URL(server.base + route);
+  const url = new URL(server.via ? `http://127.0.0.1:${server.via.port}${server.via.path}${route}` : server.base + route);
   const payload = body === undefined ? undefined : JSON.stringify(body);
   const headers: Record<string, string | number> = { authorization: `Bearer ${server.key}`, accept: 'application/json, text/event-stream' };
+  if (server.via) headers['x-cortex-tailnet'] = server.via.token;
   if (payload !== undefined) {
     headers['content-type'] = 'application/json';
     headers['content-length'] = Buffer.byteLength(payload);

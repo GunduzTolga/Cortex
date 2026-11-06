@@ -121,6 +121,8 @@ const TURKISH_ALREADY = new Set([
   // Says each sentence in the window's language itself (`say(tr, en)`), as telegram.ts does.
   path.join('electron', 'services', 'github.ts'),
   path.join('electron', 'services', 'gitTool.ts'),
+  // "Kodla bağlan": each sentence in the window's language (`say(tr, en)`); its helper's failures are codes, caught inside.
+  path.join('electron', 'services', 'tailnet.ts'),
 ]);
 
 /**
@@ -135,6 +137,8 @@ const NEVER_SHOWN = new Set([
   'no items',
   // acpChat.ts, codexChat.ts: the JSON-RPC answer to a request the program made, never the window's.
   'Cortex does not answer HOLE.',
+  // toolPackages.ts, downloadPinned: stops the download's pipeline, and is caught there as a "mismatch".
+  'longer than the pinned file',
 ]);
 
 const HOLE = 'HOLE';

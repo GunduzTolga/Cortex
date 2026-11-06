@@ -7,6 +7,7 @@ import { readSettings } from './services/settings';
 import { settleVault, setupBusy, whenSetupIdle } from './services/setup';
 import { startTelegram } from './services/telegram';
 import { startVaultSync, syncBeforeQuit } from './services/vaultSync';
+import { startTailnet } from './services/tailnet';
 import { startMicrophoneWord, stopMicrophoneWord } from './services/microphone';
 import { startMicCapture, stopMicCapture } from './services/micWindow';
 import { keepStartWithWindows, listeningNow, startTray, trayNotice } from './services/tray';
@@ -466,6 +467,8 @@ if (!app.requestSingleInstanceLock()) {
     // from the phone then keep coming in while Cortex runs, in the notification area too. Yakala, where it was left
     // on a vault no longer there (this one, before it moved), comes to this one.
     const settled = settleVault();
+    // Pyn's server paired by code (services/tailnet.ts): its helper back up as the same device, or the address reached straight.
+    void startTailnet();
     if (!HIDDEN) {
       void settled.then(() => {
         startTelegram();

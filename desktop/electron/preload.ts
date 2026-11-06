@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { CortexApi } from '../shared/api';
 import type { CliId } from '../shared/chat';
 import type { GithubStatus } from '../shared/github';
+import type { TailnetStatus } from '../shared/pairing';
 import type { SyncStatus } from '../shared/vaultSync';
 import { plainIpcMessage, rejectionText } from '../shared/ipcError';
 
@@ -110,6 +111,11 @@ const api: CortexApi = {
     status: () => invoke('mcp:status'),
     addToClaude: () => invoke('mcp:addToClaude'),
   },
+  tailnet: {
+    status: () => invoke('tailnet:status'),
+    pair: (code) => invoke('tailnet:pair', code),
+    forget: () => invoke('tailnet:forget'),
+  },
   github: {
     status: () => invoke('github:status'),
     start: () => invoke('github:start'),
@@ -151,6 +157,7 @@ const api: CortexApi = {
     notesChanged: (handler) => subscribe('notes:changed', handler),
     vaultSync: (handler) => listen<SyncStatus>('vaultSync:status', handler),
     github: (handler) => listen<GithubStatus>('github:status', handler),
+    tailnet: (handler) => listen<TailnetStatus>('tailnet:status', handler),
     chat: (handler) => listen('chat:event', handler),
     authChanged: (handler) => listen<CliId | null>('chat:authChanged', (cli) => handler(typeof cli === 'string' ? cli : null)),
     setup: (handler) => listen('setup:event', handler),

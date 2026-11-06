@@ -10,6 +10,7 @@ import * as chat from './services/chat';
 import { keepAttachment } from './services/attachments';
 import * as github from './services/github';
 import * as hermes from './services/hermesChat';
+import * as tailnet from './services/tailnet';
 import { captureToInbox } from './services/inbox';
 import * as mcp from './services/mcp';
 import * as officeTalk from './services/officeTalk';
@@ -340,6 +341,12 @@ export function registerIpc(): void {
   handle('hermes:save', (setup) => hermes.saveHermes(setup));
   handle('hermes:forget', () => hermes.forgetHermes());
   handle('hermes:test', () => hermes.testHermes());
+  // The same server reached by a pairing code, with nothing installed (services/tailnet.ts, Settings › Sunucu): the
+  // code goes in once and is dropped; the window hears the connection's state and one sentence.
+  handle('tailnet:status', () => tailnet.tailnetStatus());
+  handle('tailnet:pair', (code) => tailnet.pairTailnet(code));
+  handle('tailnet:forget', () => tailnet.forgetTailnet());
+  tailnet.onTailnet((status) => broadcast('tailnet:status', status));
 
   // Notes from the phone through the person's own Telegram bot (services/telegram.ts): a key goes in and is never sent back.
   handle('telegram:status', () => telegram.telegramStatus());
@@ -397,4 +404,5 @@ export function stopWatching(): void {
   // No CLI outlives the app, nor the Telegram listener. A turn still answering is stopped, not failed.
   chat.shutdownChats(true);
   void telegram.stopTelegram();
+  tailnet.stopTailnet();
 }

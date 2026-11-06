@@ -189,7 +189,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
-| [1.0.59](docs/v3/releases/1.0.59.md) | Kasayı yapay zeka araçlarına masaüstünden bağlamak: Ayarlar Claude Code, Codex ve OpenCode için bu kasanın satırını kopyalanacak hâlde veriyor; Claude Code kuruluysa sorduktan sonra tek düğmeyle ekliyor, zaten bağlıysa söylüyor, motor eskiyse "Cortex'i güncelle" diyor. |
+| [1.0.59](docs/v3/releases/1.0.59.md) | Kasayı yapay zeka araçlarına masaüstünden bağlamak (Ayarlar hazır satırı veriyor, Claude Code'a tek düğmeyle ekliyor) ve sunucuya kodla bağlanmak: Ayarlar › Sunucu'ya tek kullanımlık kodu yapıştırınca Cortex kendi küçük bağlantı aracıyla tailnet'e katılıyor, Tailscale kurmak ya da adres yazmak gerekmiyor. 1.0.57 ve 1.0.58 bu sürümle geliyor. |
 | [1.0.58](docs/v3/releases/1.0.58.md) | Asistan kasaya not yazabiliyor: MCP'de `capture` bir sayfayı ya da mesajı gelen kutusuna "güvenilmeyen" işaretiyle yakalıyor, `note_create` `notes/` ya da `knowledge/` altına yeni not açıyor; ikisi de var olan notu değiştirmiyor, adresi indirmiyor, sırları maskeliyor. |
 | [1.0.57](docs/v3/releases/1.0.57.md) | Kasa yapay zeka araçlarına MCP ile bağlanıyor: `beyin.py mcp` ile Claude Code, Codex, OpenCode kasada kendisi arayabiliyor (`search`, `context`); yalnız okuyor, gizli notlar hiç dönmüyor, dışarıdan gelen içerik işaretli, sırlar maskeli. |
 | [1.0.56](docs/v3/releases/1.0.56.md) | İlk kurulum daha sağlam: sesli yazmanın modelleri kopan bağlantıda kaldığı yerden iniyor, disk yetmiyorsa en başta söyleniyor, "Hey Pyn"in küçük doğrulayıcısı inmezse uyarı çıkıyor; yarım kalan giriş nedenini söylüyor; şirket ağında Windows proxy'si kullanılıyor; geçici bir GitHub hatası bağlantıyı silmiyor. |

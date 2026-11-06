@@ -1,6 +1,7 @@
 import type { ChatApi, ChatPush, CliId } from './chat';
 import type { GithubApi, GithubStatus } from './github';
 import type { HermesApi } from './hermes';
+import type { TailnetApi, TailnetStatus } from './pairing';
 import type { AppLanguage } from './language';
 import type { McpApi } from './mcp';
 import type { NoteBacklinks, NoteRead, NoteSaved, SearchHit, TextRead, TrashItem, VaultIndex } from './notes';
@@ -134,6 +135,8 @@ export interface CortexApi {
   hermes: HermesApi;
   /** The vault connected to the person's AI tools through its MCP gate (shared/mcp.ts, Settings). */
   mcp: McpApi;
+  /** The same server reached with a pairing code and nothing installed (shared/pairing.ts, Settings › Sunucu). */
+  tailnet: TailnetApi;
   /** The app's own update from the releases (electron/services/updater.ts). */
   update: {
     /** The one downloaded and waiting, if any: a window opened after it was told asks. */
@@ -147,6 +150,8 @@ export interface CortexApi {
     /** The vault's sync with its git remote: every change of its status. */
     vaultSync(handler: (status: SyncStatus) => void): () => void;
     github(handler: (status: GithubStatus) => void): () => void;
+    /** The pairing's connection: every change of its state. */
+    tailnet(handler: (status: TailnetStatus) => void): () => void;
     /** A chat going on: an event, its state, its list entry. */
     chat(handler: (push: ChatPush) => void): () => void;
     /** A sign-in window was closed, or a sign-in done (the tool's), or an install ended (null): ask the tools' statuses again. */
