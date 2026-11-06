@@ -6,6 +6,7 @@ import { useApp } from '../store/app';
 import { useSaved } from '../store/saved';
 import { useSetup } from '../store/setup';
 import { LanguageSwitch } from './LanguageSwitch';
+import { McpSection } from './McpSection';
 import { OfficeTalkSection } from './OfficeTalkSection';
 import { SetupSections } from './SetupSections';
 import { ServerSection } from './ServerSection';
@@ -17,7 +18,8 @@ import { Button, Modal, Switch, inputClass } from './ui';
  * The app's settings, from the gear in the top bar or Ctrl+,: the language
  * and the vault, how the notes tree shows the vault, the AI tools' sign-ins,
  * and Cortex's own setup, its engine in the vault and voice typing
- * (SetupSections), so that nothing is installed from a terminal, and notes
+ * (SetupSections), so that nothing is installed from a terminal, the vault
+ * connected to the person's AI tools through its MCP gate (McpSection), and notes
  * from the phone through Telegram (TelegramSection). Each change is the main process's to keep (electron/services/settings.ts)
  * and takes effect at once; there is nothing to save.
  */
@@ -88,6 +90,7 @@ export function SettingsDialog() {
         </Section>
         <OfficeTalkSection />
         <SetupSections open={open} />
+        <McpSection open={open} />
         <ServerSection open={open} onClose={close} />
         <TelegramSection open={open} />
         <Section title={t('settings.onboarding')} data="onboarding">

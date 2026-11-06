@@ -37,6 +37,9 @@ test('the channels are the ones the preload names, no more and no fewer', () => 
   assert.deepEqual([...handlers.keys()].sort(), named);
   assert.deepEqual(named.filter((channel) => channel.startsWith('chat:')), ['chat:addTool', 'chat:answer', 'chat:attach', 'chat:auth', 'chat:begin', 'chat:cancel', 'chat:clis', 'chat:install', 'chat:list', 'chat:login', 'chat:offer', 'chat:open', 'chat:remove', 'chat:removeTool', 'chat:rename', 'chat:send', 'chat:setKey', 'chat:setOption', 'chat:toInbox']);
   assert.deepEqual(named.filter((channel) => channel.startsWith('hermes:')), ['hermes:forget', 'hermes:save', 'hermes:status', 'hermes:test']);
+  // The vault given to the AI tools (services/mcp.ts): its lines, and Claude Code's add; neither takes anything.
+  assert.deepEqual(named.filter((channel) => channel.startsWith('mcp:')), ['mcp:addToClaude', 'mcp:status']);
+  assert.match(preload, /addToClaude: \(\) => invoke\('mcp:addToClaude'\)/);
   const notes = named.filter((channel) => channel.startsWith('notes:'));
   assert.deepEqual(notes, ['notes:asset', 'notes:backlinks', 'notes:binDelete', 'notes:binEmpty', 'notes:binList', 'notes:binRestore', 'notes:create', 'notes:createFolder', 'notes:index', 'notes:move', 'notes:open', 'notes:read', 'notes:rename', 'notes:save', 'notes:search', 'notes:text', 'notes:trash']);
 });
