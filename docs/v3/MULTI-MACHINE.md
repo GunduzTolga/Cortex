@@ -181,11 +181,32 @@ yolu (`hook_script_missing`, `other_vault`, `python_missing`) verir (upstream #2
 
 Çözüm, kurucuyu bu makinede yeni vault yoluyla yeniden çalıştırmaktır. Eski state klasörünü
 (ya da kopyasını) `--state` ile ver; kurulum kaydı oradadır ve kurucu yolları taşıyan bütün
-dosyaları yeniden üretir:
+dosyaları yeniden üretir. State'teki indeks (`memory.sqlite3`) de kurulduğu vault yoluna bağlıdır;
+bu bağı `--rebind-state` açıkça yeni yola çeker:
 
 ```text
-py -3 scripts/install_v3.py --vault "C:\Users\<yeni>\Beynim" --state "<eski state klasörünün kopyası>"
+py -3 scripts/install_v3.py --vault "C:\Users\<yeni>\Beynim" --state "<eski state klasörü ya da kopyası>" --rebind-state
 ```
+
+Bayrak verilmezse ve indeks başka bir yola bağlıysa kurucu hiçbir dosyayı değiştirmeden durur
+(`vault_moved`), eski ve yeni yolu gösterip bayrağı önerir. Bayrakla kurucu şu kuralları uygular:
+
+- Kayıtlı eski yol artık yoksa ya da aynı klasörün başka bir adıysa (eski yolda bırakılmış bir
+  bağlantı gibi) bağ yeni yola çekilir.
+- Eski yolda hâlâ bir klasör varsa ve onun `.beyin-runtime.json` dosyası bu state'i gösteriyorsa,
+  okunamıyorsa ya da yoksa kurucu reddeder: bu taşıma değil kopya olabilir ve iki vault aynı
+  state'i paylaşırdı. İkisini de tutacaksan yenisini state klasörünün bir **kopyasıyla** kur.
+- Vault'taki `.beyin-runtime.json` bu state'in kurulum kaydının yazdığı dosya olmalıdır; başka bir
+  vault'un state'i bu yolla bağlanamaz. Kayıtlı yol bu makinede mutlak bir yol değilse de reddeder.
+
+Eski yolun yok görünmesi taşımayı tek başına kanıtlamaz (çıkarılmış disk, bağlı olmayan ağ
+klasörü); bayrağı yalnız vault'u gerçekten taşıdıysan ver. Kurucu bütün çakışma kontrollerini
+bitirdikten sonra indeksin tam kopyasını state klasörüne `memory-before-rebind.sqlite3` adıyla
+yazar (sonrakiler `.1`, `.2`; eskisi silinmez) ve bağı tek bir SQLite işleminde değiştirir.
+Kayıtlar ve olay geçmişi korunur; sonuç `rebound` alanında (`from`, `to`, `backup`) görünür.
+`--plan --rebind-state` aynı kontrolleri yapar, değişecek bağı `rebind` alanında gösterir, hiçbir
+şey yazmaz. Yedek hassas not metni taşıyabilir: eşitleme ve Git dışında kalsın, `doctor` ve
+`sync` sağlıklıysa silebilirsin.
 
 Aynı makinede vault yalnız başka bir klasöre taşındıysa kurucuya gerek yoktur: vault klasöründe
 `beyin.py relocate` çalıştır ([UPDATE](UPDATE.md#vaultu-taşımak-ya-da-kopyalamak)); masaüstü
