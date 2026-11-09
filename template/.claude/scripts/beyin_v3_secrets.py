@@ -8,9 +8,19 @@ import re
 import sqlite3
 
 
+# A credential assignment name may carry an ASCII environment prefix (OPENAI_, DB_,
+# MY_): OPENAI_API_KEY=... and export DB_PASSWORD=... are as secret as API_KEY=...
+# The secret word must still end the name, so configuration names such as
+# API_KEY_COUNT, PUBLIC_API_KEY_NAME or TOKENIZER_MODEL stay readable. The prefix is
+# ASCII only (?a), so a non-ASCII letter cannot turn into an identifier character.
+_SECRET_NAME = (r"(?a:(?:[a-z_][a-z0-9_]*_|_)?)"
+                r"(?:api[_ -]?key|access[_ -]?token|token|secret|password|passwd)")
+
+
 BUILTIN_PATTERNS = (
-    re.compile(r"(?i)(?<=[?&])(?:api[_ -]?key|access[_ -]?token|token|secret|password|passwd)=[^&\s]{8,}"),
-    re.compile(r"""(?i)(?<![a-zA-Z0-9_])(?:\\{0,8}["\']?(?:api[_ -]?key|access[_ -]?token|token|secret|password|passwd)\\{0,8}["\']?)\s*[:=]\s*(?:\\{0,8}["\']\S{8,}\\{0,8}["\']|[^"\'\s,;][^\s,;]{7,})"""),
+    re.compile(r"(?i)(?<=[?&])" + _SECRET_NAME + r"=[^&\s]{8,}"),
+    re.compile(r"""(?i)(?<![a-zA-Z0-9_])(?:\\{0,8}["\']?""" + _SECRET_NAME +
+               r"""\\{0,8}["\']?)\s*[:=]\s*(?:\\{0,8}["\']\S{8,}\\{0,8}["\']|[^"\'\s,;][^\s,;]{7,})"""),
     re.compile(r"(?<=://)[^/\s?#:]*:[^/\s?#]*(?=@[^/\s?#@]+)"),
     re.compile(r"\bgh(?:p|o|u|s|r)_[A-Za-z0-9]{20,255}\b"),
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,255}\b"),
