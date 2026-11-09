@@ -80,6 +80,20 @@ başka projelere ortak not gibi açılmaması için kapsam sınırı olarak koru
 dosyasını düzenler. `prune` yalnız artık bulunamayan klasör girdilerini çıkarır. Bozuk
 veya symlink yapılandırma üzerine yazılmaz; önce dosyayı onar.
 
+`--shared-unscoped on|off` yalnız `add` ile kullanılabilir. Eylemsiz çağrı `list`
+sayılır; bayrak eylemsiz, `list`, `remove` veya `prune` ile verilirse komut hiçbir
+kapsam veya runtime dosyasını değiştirmeden açık hata ve çıkış kodu 1 döndürür.
+Mevcut eşlemeyi koruyarak ayarı değiştirmek için aynı klasör ve proje adıyla yeniden
+`add` kullan:
+
+```sh
+python3 beyin.py project-scope add --folder "Projeler/Deneme" --project deneme --shared-unscoped on
+```
+
+Windows'ta `python3` yerine `py -3` kullan. Kapatmak için `off` ver; bayrağı
+vermezsen mevcut değer korunur, yeni dosyada varsayılan `false` olur. Yalnız mevcut
+değeri görmek için bayraksız `project-scope list` kullan.
+
 ## Receipt görünümü çakışması ve kurtarma
 
 `daily/v3/YYYY-MM-DD.md` ve `knowledge/v3/outcomes.md` değişmez receipt kaynaklarından
