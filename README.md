@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.59" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.59-E8B23A">
+  <img alt="Sürüm 1.0.60" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.60-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -189,6 +189,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.60](docs/v3/releases/1.0.60.md) | Yakala bozuk karakterli sayfada takılmıyor, doktor bayat kuralları ayırt ediyor, Jev başlıksız kayıtta hata vermiyor |
 | [1.0.59](docs/v3/releases/1.0.59.md) | Kasayı yapay zeka araçlarına masaüstünden bağlamak (Ayarlar hazır satırı veriyor, Claude Code'a tek düğmeyle ekliyor) ve sunucuya kodla bağlanmak: Ayarlar › Sunucu'ya tek kullanımlık kodu yapıştırınca Cortex kendi küçük bağlantı aracıyla tailnet'e katılıyor, Tailscale kurmak ya da adres yazmak gerekmiyor. 1.0.57 ve 1.0.58 bu sürümle geliyor. |
 | [1.0.58](docs/v3/releases/1.0.58.md) | Asistan kasaya not yazabiliyor: MCP'de `capture` bir sayfayı ya da mesajı gelen kutusuna "güvenilmeyen" işaretiyle yakalıyor, `note_create` `notes/` ya da `knowledge/` altına yeni not açıyor; ikisi de var olan notu değiştirmiyor, adresi indirmiyor, sırları maskeliyor. |
 | [1.0.57](docs/v3/releases/1.0.57.md) | Kasa yapay zeka araçlarına MCP ile bağlanıyor: `beyin.py mcp` ile Claude Code, Codex, OpenCode kasada kendisi arayabiliyor (`search`, `context`); yalnız okuyor, gizli notlar hiç dönmüyor, dışarıdan gelen içerik işaretli, sırlar maskeli. |

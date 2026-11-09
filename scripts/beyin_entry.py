@@ -406,6 +406,8 @@ def human_result(result, command, installed_version=None):
                          '). Ajanina "' + ('py -3' if sys.platform == 'win32' else 'python3') +
                          ' beyin.py companion-compact" calistirmasini soyle; eski kayitlar arsive tasinir, metin silinmez.')
         rules_opening = result.get('companion_rules_opening') or {}
+        if rules_opening.get('status') == 'stale':
+            lines.append('Kurallar.md kaynak dogrulamasi guncel degil (bilgi); acilis olcumu icin beyin.py sync calistir.')
         if rules_opening.get('status') == 'clipped':
             lines.append('Kurallar.md acilista kirpiliyor (bilgi): kural metni ' + str(rules_opening['chars']) +
                          ' karakter; Claude Code acilisi bu ayarlarla (' + str(rules_opening['budget']) +

@@ -1089,6 +1089,18 @@ def _earlier_raw(vault, meta):
         return None
 
 
+def _extracted_unicode(text):
+    """Keep Unicode scalars; combine adjacent UTF-16 pairs and visibly replace lone halves.
+
+    An extractor (e.g. a page whose text uses split "mathematical bold" letters) can hand back lone surrogates, which
+    cannot be written as UTF-8: the card failed and the rest of the queue stopped. Do not guess where a Markdown
+    marker belonged between separated halves.
+    """
+    if not isinstance(text, str) or not re.search(r'[\ud800-\udfff]', text):
+        return text
+    return text.encode('utf-16-le', 'surrogatepass').decode('utf-16-le', 'replace')
+
+
 def process(vault, card_ids=None, allow_audio=True, retry=False):
     vault = Path(vault)
     found = tools()
@@ -1123,7 +1135,15 @@ def process(vault, card_ids=None, allow_audio=True, retry=False):
             info = {}
             text, method, note = extract(vault, card, found, allow_audio, info)
         except Exception as exc:  # one broken source must not stop the queue
-            text, method, note, info = None, None, type(exc).__name__ + ': ' + str(exc)[:200], {}
+            text, method, note, info = None, None, type(exc).__name__ + ': ' + _extracted_unicode(str(exc))[:200], {}
+        cleaned = _extracted_unicode(text)
+        clean_info = {key: _extracted_unicode(value) for key, value in info.items()}
+        clean_note = _extracted_unicode(note)
+        if cleaned != text or clean_info != info or clean_note != note:
+            notice = 'Kaynakta gecersiz Unicode bulundu; eslesmeyen karakterler \ufffd ile degistirildi.'
+            clean_info['uyari'] = ' '.join(filter(None, (clean_info.get('uyari'), notice)))
+            clean_note = ' '.join(filter(None, (clean_note, notice)))
+        text, info, note = cleaned, clean_info, clean_note
         try:
             if info.get('title') and (not meta.get('baslik') or str(meta.get('baslik')).startswith(('http://', 'https://'))):
                 body = re.sub(r'^# .*$', lambda _m: '# ' + _first_line(info['title'], 160), body, count=1, flags=re.M)
@@ -1155,7 +1175,7 @@ def process(vault, card_ids=None, allow_audio=True, retry=False):
                                             'Tam metin ham dosyaya tasindi: `' + raw.relative_to(vault).as_posix() + '`')
                 meta.update(durum='cikarildi', yontem=method, ham=raw.relative_to(vault).as_posix())
                 meta.pop('hata', None)
-                for key in ('dil', 'altyazi', 'uyari'):  # only the video path reports these; a rerun replaces its own
+                for key in ('dil', 'altyazi', 'uyari'):  # extraction warnings/language; a rerun replaces its own
                     if key in info:
                         meta.pop(key, None)
                         if info[key]:
