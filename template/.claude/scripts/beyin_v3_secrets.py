@@ -13,13 +13,18 @@ import sqlite3
 # The secret word must still end the name, so configuration names such as
 # API_KEY_COUNT, PUBLIC_API_KEY_NAME or TOKENIZER_MODEL stay readable. The prefix is
 # ASCII only (?a), so a non-ASCII letter cannot turn into an identifier character.
+# SECRET_KEY, AWS_SECRET_ACCESS_KEY, SSH_PRIVATE_KEY and DB_PASS end in KEY or PASS rather than in
+# the bare word, so those endings are listed too; the name must still end there (SECRET_KEY_ID stays).
 _SECRET_NAME = (r"(?a:(?:[a-z_][a-z0-9_]*_|_)?)"
-                r"(?:api[_ -]?key|access[_ -]?token|token|secret|password|passwd)")
+                r"(?:api[_ -]?key|access[_ -]?token|token|secret[_ -]?(?:access[_ -]?)?key|"
+                r"private[_ -]?key|secret|password|passwd|pass)")
 
 
 BUILTIN_PATTERNS = (
     re.compile(r"(?i)(?<=[?&])" + _SECRET_NAME + r"=[^&\s]{8,}"),
-    re.compile(r"""(?i)(?<![a-zA-Z0-9_])(?:\\{0,8}["\']?""" + _SECRET_NAME +
+    # The left boundary is case-sensitive ASCII: under (?i) the class would also match İ, ı and the
+    # Kelvin sign, so OPENAİ_API_KEY=... (Caps Lock on a Turkish keyboard) slipped through.
+    re.compile(r"""(?i)(?-i:(?<![a-zA-Z0-9_]))(?:\\{0,8}["\']?""" + _SECRET_NAME +
                r"""\\{0,8}["\']?)\s*[:=]\s*(?:\\{0,8}["\']\S{8,}\\{0,8}["\']|[^"\'\s,;][^\s,;]{7,})"""),
     re.compile(r"(?<=://)[^/\s?#:]*:[^/\s?#]*(?=@[^/\s?#@]+)"),
     re.compile(r"\bgh(?:p|o|u|s|r)_[A-Za-z0-9]{20,255}\b"),

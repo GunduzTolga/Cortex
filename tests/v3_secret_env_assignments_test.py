@@ -59,6 +59,27 @@ class SecretEnvAssignmentsTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(redact(text, self.state), (text, 0))
 
+    def test_common_secret_key_names_redact(self):
+        # Framework and cloud names that end in KEY or PASS rather than in the bare secret word.
+        for name in ('SECRET_KEY', 'AWS_SECRET_ACCESS_KEY', 'STRIPE_SECRET_KEY', 'DJANGO_SECRET_KEY',
+                     'SSH_PRIVATE_KEY', 'private_key', 'DB_PASS', 'SMTP_PASS'):
+            with self.subTest(name=name):
+                self.assertEqual(redact(f'{name}={VALUE}', self.state), ('[REDACTED]', 1))
+        for name in ('SECRET_KEY_ID', 'PRIVATE_KEY_PATH', 'BYPASS', 'COMPASS', 'PASS_COUNT'):
+            text = f'{name}={VALUE}'
+            with self.subTest(name=name):
+                self.assertEqual(redact(text, self.state), (text, 0))
+
+    def test_non_ascii_letter_before_the_name_does_not_hide_the_secret(self):
+        # Caps Lock on a Turkish keyboard turns i into İ; case-insensitive matching must not treat
+        # İ, ı or the Kelvin sign as an ASCII letter that blocks the match.
+        for text in ('OPENAİ_API_KEY=' + VALUE, 'GİTHUB_TOKEN=' + VALUE, 'ıTOKEN=' + VALUE,
+                     '\u212aEY_PASSWORD='.encode().decode('unicode_escape') + VALUE):
+            with self.subTest(text=text):
+                masked, count = redact(text, self.state)
+                self.assertEqual(count, 1)
+                self.assertNotIn(VALUE, masked)
+
     def test_existing_unprefixed_key_forms_still_redact(self):
         for name in ('api_key', 'api-key', 'API KEY', 'access_token', 'token',
                      'secret', 'password', 'passwd'):
