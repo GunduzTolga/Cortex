@@ -31,7 +31,7 @@ from beyin_v3_projections import (is_receipt_view_source, is_receipt_view_confli
 from beyin_v3_preferences import read as read_preferences
 from beyin_v3_secrets import redact as redact_secrets, record as record_redactions
 from beyin_v3_notes import (NoteConflict, locked as note_locked,
-                            validate_source_name,
+                            validate_source_name, require_utf8_text, require_utf8_values,
                             read as note_read_source, apply as note_apply_edits)
 
 
@@ -1475,6 +1475,10 @@ class SyncEngine:
     def note_create(self, source, text, metadata=None):
         if not isinstance(text, str) or not text.strip() or (metadata is not None and not isinstance(metadata, dict)):
             raise ValueError('note text and metadata required')
+        # Before the note lock and the journal intent: invalid text writes nothing.
+        # The source name gets the same check in validate_source_name below.
+        require_utf8_text(text, 'text')
+        require_utf8_values(metadata, 'metadata')
         if text.lstrip().startswith('---'):
             raise ValueError('text must be body only; put frontmatter fields in metadata')
         validate_source_name(source)  # Before the journal intent: nothing is written.
@@ -1543,6 +1547,9 @@ class SyncEngine:
         validate_source_name(source)  # Before the journal intent: nothing is written.
         if not isinstance(text, str) or not text.strip() or not isinstance(metadata, dict):
             raise ValueError('task body and metadata required')
+        # Same rule as note-create, before the journal intent.
+        require_utf8_text(text, 'text')
+        require_utf8_values(metadata, 'metadata')
         if text.lstrip().startswith('---'):
             raise ValueError('text must be body only; put frontmatter fields in metadata')
         self._refuse_excluded(source)
