@@ -45,18 +45,53 @@ def _unlinked(path):
         raise ValueError('symlink or junction path rejected')
 
 
-def _checked_source(engine, source):
-    from beyin_v3_sync import EXCLUDED_DIRS, EXCLUDED_FILES
-    if not isinstance(source, str) or not source or '\\' in source or ':' in source:
+# Superscript digits count too: Windows opens COM\u00b9 and LPT\u00b2 as ports.
+_DEVICE_DIGITS = '1-9\u00b9\u00b2\u00b3'
+_DEVICE_NAME = re.compile(r'(?i)(?:con|prn|aux|nul|conin\$|conout\$|com[%s]|lpt[%s])(?:\..*)?'
+                          % (_DEVICE_DIGITS, _DEVICE_DIGITS))
+_LEGACY_DEVICE_NAME = re.compile(r'(?i)(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?')
+
+
+def _windows_device(part):
+    # Windows drops trailing dots and spaces before the extension: "con .md" is CON.
+    stem, dot, rest = part.partition('.')
+    return _DEVICE_NAME.fullmatch(stem.rstrip(' .') + dot + rest) is not None
+
+
+def _source_name(source, *, creating):
+    """The name rules every note path shares; creating adds the stricter portable set.
+
+    A new note or task must open on every client of a synced vault (Windows, macOS,
+    Linux). Reading and editing an existing note keeps the looser set, so a file
+    already named knowledge/Neden?.md on macOS or Linux stays readable and editable.
+    """
+    if (not isinstance(source, str) or not source or '\\' in source or ':' in source or
+            (creating and any(ord(char) < 32 or ord(char) == 127 or char in '<>"|?*'
+                              for char in source))):
         raise ValueError('use a vault-relative Markdown path with / separators')
     parts = source.split('/')
     if any(not part or part in ('.', '..') or part.startswith('.') or
            part.endswith((' ', '.')) for part in parts):
         raise ValueError('only visible vault-relative sources are supported')
     # Windows trims trailing dots/spaces and treats these names as device paths.
-    if any(re.fullmatch(r'(?i)(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?', part)
-           for part in parts):
+    device = _windows_device if creating else _LEGACY_DEVICE_NAME.fullmatch
+    if any(device(part) for part in parts):
         raise ValueError('device paths are not sources')
+    return parts
+
+
+def validate_source_name(source):
+    """Refuse a name Windows cannot hold before note-create or task-create journals it.
+
+    On Linux CON.md or a.md:akis.md is an ordinary file; written there, it is synced
+    to a Windows client where it cannot be checked out or opens a device instead.
+    """
+    _source_name(source, creating=True)
+
+
+def _checked_source(engine, source):
+    from beyin_v3_sync import EXCLUDED_DIRS, EXCLUDED_FILES
+    parts = _source_name(source, creating=False)
     folded = [part.casefold() for part in parts]
     if Path(source).suffix.lower() != '.md':
         raise ValueError('only Markdown sources are supported')
@@ -255,6 +290,8 @@ def _apply(engine, request, committed):
         if actual != expected:
             raise NoteConflict('source changed; note-read again and rebuild the targeted edits')
         if raw is None:
+            # A missing note is created here: the same portable name rule as note-create.
+            validate_source_name(source)
             if 'edits' in request or not isinstance(request.get('content'), str):
                 raise ValueError('new source requires content and expected_sha256:null')
             text = request['content']
