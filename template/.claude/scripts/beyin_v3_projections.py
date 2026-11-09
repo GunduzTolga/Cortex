@@ -54,9 +54,19 @@ def _hidden_ref_sources(db, refs):
     A path under an excluded directory has no record, so nothing says whether it is private.
     Excluding a directory must not turn a withheld ref into a shown one, so such a path is
     withheld like a private one, whatever the file says.
+
+    A ref is matched to its record by folded path, not only by exact spelling: an old receipt
+    may name a private note as KNOWLEDGE/OZEL.MD or in NFD form (macOS, case-insensitive
+    volumes), and that spelling must stay as withheld as the indexed one.
     """
     refs = sorted(set(refs))
     from beyin_v3_hygiene import sensitive_source
+    from beyin_v3_index import dir_key
+
+    def ref_key(ref):
+        # The same fold as excluded directory names: NFC, case and Turkish dotted/dotless i.
+        return '/'.join(dir_key(part) for part in ref.replace('\\', '/').split('/'))
+
     hidden = {ref for ref in refs if sensitive_source(ref)}
     # View provenance survives removal of its indexed privacy/trust metadata.
     # All claimed paths and proven aliases are withheld, including in fresh state.
@@ -67,21 +77,34 @@ def _hidden_ref_sources(db, refs):
         pass
     excluded = _excluded_dir_keys(db)
     if excluded:
-        from beyin_v3_index import dir_key
         hidden.update(ref for ref in refs
                       if any(dir_key(part) in excluded for part in ref.replace('\\', '/').split('/')[:-1]))
     for start in range(0, len(refs), 500):
         chunk = refs[start:start + 500]
         try:
-            rows = db.execute('SELECT r.payload FROM markdown_sources m JOIN records r ON r.id = m.id WHERE m.source IN (' +
-                              ','.join('?' * len(chunk)) + ')', chunk).fetchall()
+            rows = db.execute('SELECT m.source, r.payload FROM markdown_sources m JOIN records r ON r.id = m.id '
+                              'WHERE m.source IN (' + ','.join('?' * len(chunk)) + ')', chunk).fetchall()
         except sqlite3.OperationalError:  # a bare receipts-only database has no source index
             return hidden
-        for (payload,) in rows:
+        # Exact spellings stay on the indexed SQL path; only refs without an exact record are
+        # folded, and that fold runs in Python: SQLite refuses to register a function while a
+        # caller (latest_receipts) still has a statement open on this connection.
+        aliases = defaultdict(set)
+        for ref in set(chunk) - {source for source, _ in rows} - hidden:
+            aliases[ref_key(ref)].add(ref)
+        if aliases:
+            matched = [source for (source,) in db.execute('SELECT source FROM markdown_sources')
+                       if ref_key(source) in aliases]
+            for begin in range(0, len(matched), 500):
+                part = matched[begin:begin + 500]
+                folded = db.execute('SELECT m.source, r.payload FROM markdown_sources m JOIN records r ON r.id = m.id '
+                                    'WHERE m.source IN (' + ','.join('?' * len(part)) + ')', part).fetchall()
+                rows.extend((ref, payload) for source, payload in folded for ref in aliases[ref_key(source)])
+        for source, payload in rows:
             record = json.loads(payload)
             if (record.get('visibility', 'internal') not in ('public', 'internal') or record.get('trust') == 'untrusted' or
                     record.get('trusted') is False or record.get('status') == 'untrusted' or record.get('kind') == 'untrusted'):
-                hidden.add(record.get('source'))
+                hidden.add(source)
     return hidden
 
 
