@@ -41,6 +41,11 @@ const hasGit = (() => {
 })();
 setVaultSyncEngine(path.resolve('..', 'template', '.claude', 'scripts', 'beyin_v3_esitle.py'));
 const temp = (prefix: string) => fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+// The computer's own git identity is not the test's: git reads the person's settings from an empty file here. Where one
+// was set (a developer's computer, 10 November), the vault's first commit took it, as the engine means it to
+// (beyin_v3_esitle.py, _identity), and the commit was not the account's.
+process.env.GIT_CONFIG_GLOBAL = path.join(temp('cortex-github-git-'), 'gitconfig');
+fs.writeFileSync(process.env.GIT_CONFIG_GLOBAL, '');
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 const NL = String.fromCharCode(10);
 
