@@ -1,9 +1,10 @@
 """Doctor warns when git can rewrite receipt line endings in the vault (#205).
 
-Receipts are compared byte for byte. With core.autocrlf=true (the Git for Windows
-default) a receipt pulled from another machine is checked out as CRLF unless the vault
-pins receipts/ with `-text` or `eol=lf`. These tests pin that git behaviour, the report
-shape for each attribute and the doctor wiring. Information only: the status is untouched.
+With core.autocrlf=true (the Git for Windows default) a receipt pulled from another
+machine is checked out as CRLF unless the vault pins receipts/ with `-text` or `eol=lf`.
+Receipt identity tolerates that conversion, but pinning still avoids byte churn and
+collisions in older releases. These tests pin that git behaviour, the report shape for
+each attribute and the doctor wiring. Information only: the status is untouched.
 """
 import importlib.util
 import json

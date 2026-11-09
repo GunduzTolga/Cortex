@@ -111,11 +111,10 @@ receipts/** -text
 **/Arşiv/*.md merge=union
 ```
 
-**`receipts/** -text`:** Beyin receipt dosyasını bayt bayt karşılaştırır. Git for Windows
-kurulumunun varsayılan seçeneği `core.autocrlf=true`'dur ve bu ayar öbür makineden gelen receipt'in satır
-sonlarını CRLF'ye çevirir. Bu satır olmadan o makinede receipt özetine `\r` karışır, günlük
-görünüm öbür makinedekinden farklı çıkar ve aynı receipt yeniden gönderilince
-`ReceiptConflict: event id collision` hatası alınır.
+**`receipts/** -text`:** Git for Windows kurulumunun varsayılanı `core.autocrlf=true`, eşitlenen
+receipt dosyalarını CRLF'ye çevirebilir. Güncel motor yalnız satır sonu farkını aynı receipt
+sayar; eski sürümler bayt karşılaştırdığı için `event id collision` bildirebilir. Bu satır
+gereksiz bayt değişikliklerini ve eski sürümlerle sorunu önler; `eol=lf` de kullanılabilir.
 
 **`merge=union`:** Git iki tarafın satırlarını da tutar, çakışma çıkarmaz. Satır silmez ama
 çift bırakabilir. Bu yüzden yalnız yeni kaydın eklendiği dosyalar için uygundur:
@@ -227,27 +226,25 @@ depo ve iki vault; Beyin her birine ayrı `--state` ile kuruldu.
 
 ## Satır sonu: `core.autocrlf=true` ve receipt'ler
 
-Bu kontrol upstream #205 için eklendi. Git for Windows
-varsayılanı `core.autocrlf=true`'dur ve `receipts/** -text` satırı yoksa bu makine öbür makineden gelen
-receipt'i CRLF olarak çıkarır. Sonuç sessizdir: `sync` ve `doctor` hata vermez, ama aynı receipt'in
-bayt özeti iki makinede farklı olur ve receipt öbür makineden yeniden gönderilince
-`ReceiptConflict: event id collision` hatası gelir. Yukarıdaki [`.gitattributes`](#önerilen-gitattributes)
-satırı bunu önler; `eol=lf` de aynı işi görür.
+Bu kontrol upstream #205 için eklendi. Git for Windows varsayılanı `core.autocrlf=true`,
+`.gitattributes` ile sabitlenmemiş receipt ve görünüm dosyalarını CRLF olarak çıkarabilir.
+Güncel motor yeni özetleri LF ile yazar, CRLF/CR/LF farkını aynı receipt sayar (yeniden
+gönderim çakışmaz, `sync` `receipt_divergence` bildirmez, günlük görünümler durmaz) ve eski
+receipt kaynaklarını yeniden yazmaz. Gerçek özet, refs ya da links değişikliği yine
+çakışmadır. Eski sürümlerde satır sonu farkı `event id collision` hatasına yol açabilir.
 
-`doctor` artık vault bir git deposuysa ve `core.autocrlf=true` iken `receipts/` için `-text` ya da
+`doctor`, vault bir git deposuysa ve `core.autocrlf=true` iken `receipts/` için `-text` ya da
 `eol=lf` yoksa `receipt_line_endings` alanında `warning` bildirir (insan çıktısında bir "Receipt satir
 sonu (bilgi)" satırı). Bu yalnız bilgidir, `doctor` durumunu değiştirmez ve hiçbir şeyi düzeltmez.
+Bayt değişikliklerini ve eski sürümlerle sorunu önlemek için `.gitattributes` dosyasına
+`receipts/** -text` ya da `receipts/** eol=lf` ekleyebilirsin. Kontrol:
+`git check-attr text eol -- receipts/x.md`.
 
-Uyarıyı gördüysen:
-
-1. `.gitattributes` dosyasına `receipts/** -text` ekle ve commit'le.
-2. Bu makinede receipt dosyalarını LF olarak yeniden çıkar (çalışma ağacın temizken):
-   `git rm -r receipts` ardından `git checkout HEAD -- receipts`.
-3. Dosyalar düzelse de bu makinenin yerel indeksi CRLF'li özeti tutmaya devam eder ve aynı receipt
-   yine `event id collision` verir. State klasöründeki `memory.sqlite3` dosyasını yedeğe taşı ve
-   `python3 beyin.py sync` çalıştır; indeks Markdown'dan yeniden kurulur.
-
-Kontrol: `git check-attr text -- receipts/x.md` çıktısı `text: unset` olmalıdır.
+Satır sonu değişmiş eski kaynaklar için yerel veritabanını silmek gerekmez;
+`python3 beyin.py sync --full` karşılaştırmayı yeniler. Eski bir görünümün ham hash'i
+receipt'lerden yeniden üretilemezse dosya korunur; o zaman
+[arşivleyerek görünüm kurtarma](RUNTIME.md) komutunu (`sync --recover-views`) kullan,
+receipt kaynaklarını silme.
 
 Presence eşitlemesi varsayılan olarak kapalıdır. Her cihazda `preferences --parallel-sessions on`
 ile açılır. Yerel `<state>/parallel-presence-device.json` dosyası rastgele bir cihaz kimliği

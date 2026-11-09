@@ -116,6 +116,17 @@ def _plain_link(value):
         return False
 
 
+def _receipt_lf(text):
+    """Receipt text identity: CRLF, CR and LF are one line ending; every other byte still counts.
+
+    Git for Windows (core.autocrlf=true) checks receipts out as CRLF and older writers kept a
+    CRLF summary as typed. Neither is an edit, so receipt identity compares this folded form.
+    """
+    if isinstance(text, bytes):
+        return text.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+    return text.replace('\r\n', '\n').replace('\r', '\n')
+
+
 def _json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -1137,6 +1148,7 @@ class MemoryStore:
             raise ValueError("unsupported harness")
         if not isinstance(refs, list) or not refs:
             raise ValueError("source refs required")
+        summary = _receipt_lf(summary)
         event = {"event_id": event_id, "summary": summary, "refs": [self._source(ref) for ref in refs], "harness": harness}
         if links:
             if not isinstance(links, list) or len(links) > MAX_RECEIPT_LINKS or not all(
@@ -1149,7 +1161,7 @@ class MemoryStore:
             old = db.execute("SELECT payload FROM receipts WHERE id=?", (event_id,)).fetchone()
             if old:
                 previous = json.loads(old[0])
-                if (previous["summary"], previous["refs"], previous.get("links")) != (summary, event["refs"], event.get("links")):
+                if (_receipt_lf(previous["summary"]), previous["refs"], previous.get("links")) != (summary, event["refs"], event.get("links")):
                     raise ReceiptConflict("event_id reused with different payload")
                 event = previous
             db.execute("INSERT OR IGNORE INTO receipts VALUES (?,?)", (event_id, payload))

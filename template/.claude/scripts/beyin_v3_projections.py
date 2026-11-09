@@ -663,8 +663,13 @@ def receipt_day(created_at, zone=None):
         return None
 
 
-def _receipt_view_contents(engine, db, warnings=None):
-    """Desired views from immutable receipts, without writing files or tracking state."""
+def _receipt_view_contents(engine, db, warnings=None, receipt_sources=None):
+    """Desired views from immutable receipts, without writing files or tracking state.
+
+    The render keeps each summary's stored bytes, legacy CRLF included, so an old view can be
+    rebuilt exactly; project_receipts writes the LF form. receipt_sources limits the render to
+    those receipt files (ownership proof for a view that lags behind the receipts).
+    """
     _hash, _, render = engine.projection_helpers()
     migration = engine.state/'v2-migration.json'
     previous = json.loads(migration.read_text(encoding='utf-8')) if migration.exists() else {}
@@ -674,6 +679,8 @@ def _receipt_view_contents(engine, db, warnings=None):
     for row in db.execute('SELECT payload FROM receipts ORDER BY id'):
         event = json.loads(row[0])
         source = 'receipts/' + _hash(event['event_id']) + '.md'
+        if receipt_sources is not None and source not in receipt_sources:
+            continue
         if source in historical or not event.get('created_at'):
             continue
         day = receipt_day(event['created_at'], zone)
@@ -724,7 +731,32 @@ def quarantine_receipt_view_history(db, sources):
                    [(source, sequence) for source in sorted(sources)])
 
 
+def _receipt_view_matches(engine, db, relative, raw, tracked, _hash):
+    """True when raw differs from the view this state last wrote (tracked) only in line endings.
+
+    Two cases. The view was written LF and git checked it out as CRLF: its LF form hashes to
+    the tracked value. Or an older writer left a mixed view (CRLF summary in LF lines) that was
+    then saved as LF: the receipt links in the file only pick which receipts to render again,
+    and the full raw render of that subset must hash to the tracked value and equal the file up
+    to line endings. Links never grant ownership on their own; a changed time zone, renderer or
+    missing receipt fails closed and the view stays a visible conflict.
+    """
+    if not tracked:
+        return False
+    from beyin_v3 import _receipt_lf
+    normalized = _receipt_lf(raw)
+    if _hash(normalized) == tracked:
+        return True
+    sources = {item.decode('ascii') for item in re.findall(rb'\[\[(receipts/[0-9a-f]{64}\.md)(?:\||\]\])', raw)}
+    if not sources:
+        return False
+    candidate = _receipt_view_contents(engine, db, receipt_sources=sources).get(relative)
+    return (candidate is not None and _hash(candidate) == tracked and
+            normalized == _receipt_lf(candidate.encode('utf-8')))
+
+
 def project_receipts(engine, db, warnings=None, recover_views=False, recovered=None, desired=None):
+    from beyin_v3 import _receipt_lf
     _hash, atomic, _ = engine.projection_helpers()
     _record_excluded_dirs(engine, db)
     db.execute('CREATE TABLE IF NOT EXISTS receipt_views(path TEXT PRIMARY KEY, hash TEXT NOT NULL)')
@@ -733,11 +765,19 @@ def project_receipts(engine, db, warnings=None, recover_views=False, recovered=N
     conflicts = []
     tracked_views = dict(db.execute('SELECT path, hash FROM receipt_views'))
     for relative, content in desired.items():
+        # Generated output is always LF, even for a legacy CRLF summary; the receipt sources and
+        # their indexed rows keep their bytes.
+        content = _receipt_lf(content)
         path = engine._path(relative)
-        old = _hash(path.read_bytes()) if path.exists() else None
+        raw = path.read_bytes() if path.exists() else None
+        old = _hash(raw) if raw is not None else None
         desired_hash = _hash(content)
         tracked = tracked_views.get(relative)
-        if old != desired_hash and old is not None and (tracked is None or old != tracked):
+        # A view that differs from the desired one or from the tracked one only in line endings
+        # is still this state's view (git autocrlf, an editor's LF save); anything else is an edit.
+        if (old != desired_hash and old is not None and old != tracked and
+                _receipt_lf(raw) != _receipt_lf(content.encode('utf-8')) and
+                not _receipt_view_matches(engine, db, relative, raw, tracked, _hash)):
             if recover_views:
                 try:
                     archive_path = _archive_receipt_view(engine, path, old, _hash)
@@ -781,14 +821,15 @@ def _retire_stale_views(engine, db, desired, _hash, recover_views=False, recover
             continue
         try:
             path = engine._path(relative)
-            current = _hash(path.read_bytes()) if path.is_file() else None
+            raw = path.read_bytes() if path.is_file() else None
+            current = _hash(raw) if raw is not None else None
         except (ValueError, OSError):
             conflicts.append({'source': relative, 'reason': 'stale receipt view unreadable; preserved'})
             continue
         if current is None and not path.exists():
             db.execute('DELETE FROM receipt_views WHERE path=?', (relative,))
             continue
-        if current != tracked:
+        if current != tracked and (raw is None or not _receipt_view_matches(engine, db, relative, raw, tracked, _hash)):
             if recover_views:
                 try:
                     archive_path = _archive_receipt_view(engine, path, current, _hash)
@@ -804,6 +845,10 @@ def _retire_stale_views(engine, db, desired, _hash, recover_views=False, recover
             conflicts.append({'source': relative, 'reason': 'manual receipt view edit preserved; view no longer generated'})
             continue
         try:
+            # Recheck immediately before removal: an edit since the read above must survive.
+            if _hash(path.read_bytes()) != current:
+                conflicts.append({'source': relative, 'reason': 'receipt view changed during projection'})
+                continue
             path.unlink()
         except FileNotFoundError:
             pass
