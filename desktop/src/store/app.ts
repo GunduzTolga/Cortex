@@ -60,7 +60,7 @@ export function refusal(message: string): string {
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
   bootError: null,
-  settings: { theme: 'system', language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false },
+  settings: { theme: 'system', language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, autoUpdate: true },
   vault: { vault: null, missing: false },
   vaultSeq: 0,
   settingsUnreadable: null,

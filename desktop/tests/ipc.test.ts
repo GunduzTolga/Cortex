@@ -4,8 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { app, dialogAnswer, handlers, nativeTheme, sent } from 'electron';
-import { registerIpc, trustPagesWhere } from '../electron/ipc';
-import { forgetSettings, readSettings, settingsPath, updateSettings } from '../electron/services/settings';
+import { registerIpc, startAppUpdates, trustPagesWhere } from '../electron/ipc';
+import { forgetUpdates, startUpdates, type Updater } from '../electron/services/updater';
+import { forgetSettings, readSettings, settingsPath, settingsUnsaved, updateSettings } from '../electron/services/settings';
 import { pythonOf } from '../electron/services/localChat';
 import { listenerRestarting } from '../electron/services/microphone';
 import { repointYakala, setYakalaPlatform } from '../electron/services/setup';
@@ -55,14 +56,14 @@ test('a frame that is not the page, or a page that is not the app’s, is refuse
 
 test('the window may set the language and how the tree shows the vault, and never the vault', async () => {
   firstRun();
-  const off = { theme: 'system', allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false };
+  const off = { theme: 'system', allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, autoUpdate: true };
   assert.deepEqual(await call('settings:set', { language: 'en', vault: '/etc' }), { language: 'en', ...off });
   assert.equal(readSettings().vault, null);
   assert.deepEqual(await call('settings:set', { language: 'de' }), { language: 'en', ...off }, 'a language the app does not have changes nothing');
   assert.deepEqual(await call('settings:set', { language: null }), { language: null, ...off });
-  assert.deepEqual(await call('settings:set', { allFiles: true }), { theme: 'system', language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false }, 'one setting changed leaves the others');
-  assert.deepEqual(await call('settings:set', { nameIcons: 'yes', allFiles: 0 }), { theme: 'system', language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false }, 'what is not a yes or a no changes nothing');
-  assert.deepEqual(await call('settings:set', null), { theme: 'system', language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false });
+  assert.deepEqual(await call('settings:set', { allFiles: true }), { theme: 'system', language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, autoUpdate: true }, 'one setting changed leaves the others');
+  assert.deepEqual(await call('settings:set', { nameIcons: 'yes', allFiles: 0 }), { theme: 'system', language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, autoUpdate: true }, 'what is not a yes or a no changes nothing');
+  assert.deepEqual(await call('settings:set', null), { theme: 'system', language: null, allFiles: true, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, autoUpdate: true });
   // How Pyn addresses the person, and the first-run screen gone through: from the window, as values they can be.
   const named = (await call('settings:set', { userName: '  Tolga   Bey ', onboarded: true })) as { userName: string | null; onboarded: boolean };
   assert.deepEqual([named.userName, named.onboarded], ['Tolga Bey', true]);
@@ -267,3 +268,80 @@ test('the theme is set from the window as one of its three values, and turned at
   fs.rmSync(settingsPath(), { recursive: true, force: true });
 });
 
+
+test('downloading updates unasked is switched from the window, as a yes or a no and nothing else (G2)', async () => {
+  firstRun();
+  assert.equal(((await call('app:bootstrap')) as { settings: { autoUpdate: boolean } }).settings.autoUpdate, true, 'on until the person turns it off');
+  assert.equal(((await call('settings:set', { autoUpdate: false })) as { autoUpdate: boolean }).autoUpdate, false);
+  assert.equal(readSettings().autoUpdate, false);
+  assert.equal(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')).autoUpdate, false, 'kept for the next start');
+  assert.equal(((await call('settings:set', { autoUpdate: 'yes' })) as { autoUpdate: boolean }).autoUpdate, false, 'what is not a yes or a no changes nothing');
+  assert.equal(((await call('settings:set', { autoUpdate: true })) as { autoUpdate: boolean }).autoUpdate, true);
+});
+
+test('settings that cannot be written are said to the window once, with the folder, and again to a page that starts after (K10)', async () => {
+  firstRun();
+  await call('app:bootstrap');
+  const notices = () => sent.filter(([channel, word]) => channel === 'app:notice' && (word as { title?: string }).title === 'Ayarlar kaydedilemedi') as Array<[string, { tone: string; detail: string }]>;
+  const before = notices().length;
+  const folder = path.dirname(settingsPath());
+  // The temporary's name taken by a folder: the write fails on any system.
+  fs.mkdirSync(`${settingsPath()}.tmp`, { recursive: true });
+  try {
+    // The first-run screen gone through: before, this was lost at the next start without a word.
+    assert.equal(((await call('settings:set', { onboarded: true })) as { onboarded: boolean }).onboarded, true);
+    assert.equal(settingsUnsaved(), folder);
+    assert.equal(notices().length, before + 1);
+    const [, word] = notices().at(-1)!;
+    assert.equal(word.tone, 'error');
+    assert.ok(word.detail.includes(folder), word.detail);
+    assert.match(word.detail, /klasörüne yazılamıyor/);
+    await call('settings:set', { allFiles: true });
+    assert.equal(notices().length, before + 1, 'once, not at every change');
+    // The page loaded again (or a window made after): it is told too, since the toast went with the old page.
+    await call('app:bootstrap');
+    assert.equal(notices().length, before + 2);
+  } finally {
+    fs.rmSync(`${settingsPath()}.tmp`, { recursive: true, force: true });
+  }
+  // Writable again: a page starting now hears nothing.
+  await call('settings:set', { allFiles: false });
+  assert.equal(settingsUnsaved(), null);
+  await call('app:bootstrap');
+  assert.equal(notices().length, before + 2);
+});
+
+test('an update that will not come down is said in the window and the notification area, with what to do, in the person’s language (G4)', async () => {
+  // Before, only the console heard: a person never learnt why Cortex stayed on the version it was.
+  firstRun();
+  forgetUpdates();
+  const tray: string[][] = [];
+  startAppUpdates((title, body) => void tray.push([title, body]), () => false);
+  const listeners = new Map<string, (arg: unknown) => void>();
+  const updater = { autoDownload: false, autoInstallOnAppQuit: false, logger: undefined, on: (event: string, listener: (arg: unknown) => void) => listeners.set(event, listener), checkForUpdates: async () => null, quitAndInstall: () => undefined } as unknown as Updater;
+  await startUpdates(() => undefined, null, async () => updater, { after: () => undefined, every: () => undefined });
+  const notices = () => sent.filter(([channel]) => channel === 'app:notice').map(([, word]) => word as { tone: string; title: string; detail: string });
+  const before = notices().length;
+  try {
+    for (let round = 0; round < 2; round += 1) {
+      listeners.get('update-available')!({ version: '1.0.62' });
+      listeners.get('error')!(new Error('net::ERR_INTERNET_DISCONNECTED at C:\\Users\\x'));
+    }
+    assert.equal(notices().length, before + 1);
+    const word = notices().at(-1)!;
+    assert.deepEqual([word.tone, word.title], ['error', 'Cortex 1.0.62 indirilemedi']);
+    assert.match(word.detail, /bağlantını kontrol et ya da kurulum dosyasını .*sürümler sayfasından elle indir/);
+    assert.doesNotMatch(`${word.title} ${word.detail}`, /ERR_|net::|C:\\/, 'the library’s own words stay in the console');
+    assert.deepEqual(tray, [[word.title, word.detail]]);
+    // In English where that is the language chosen.
+    await call('settings:set', { language: 'en' });
+    for (let round = 0; round < 2; round += 1) {
+      listeners.get('update-available')!({ version: '1.0.63' });
+      listeners.get('error')!(new Error('sha512 checksum mismatch'));
+    }
+    assert.equal(notices().at(-1)!.title, 'Cortex 1.0.63 could not be downloaded');
+  } finally {
+    forgetUpdates();
+    firstRun();
+  }
+});

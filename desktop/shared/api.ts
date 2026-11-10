@@ -40,6 +40,8 @@ export interface WindowSettings {
   voiceConsent: boolean;
   /** The person let the microphone listen all the time for the wake phrase while Cortex runs; until then it does not. */
   wakeConsent: boolean;
+  /** A newer Cortex is asked for on GitHub and downloaded unasked; on by default. Off, nothing is asked at all (Settings › Hakkında). */
+  autoUpdate: boolean;
 }
 
 /** A word from the main process for a toast, from work the window did not ask for and does not wait on (yakala moved to another vault). */
@@ -48,6 +50,9 @@ export interface AppNotice {
   title: string;
   detail?: string;
 }
+
+/** Where the installers are, for a person who fetches one themselves (Settings › Hakkında, README). */
+export const RELEASES_PAGE = 'https://github.com/GunduzTolga/Cortex/releases/latest';
 
 /** A newer Cortex downloaded from the releases and checked, waiting to be installed (electron/services/updater.ts). */
 export interface AppUpdate {

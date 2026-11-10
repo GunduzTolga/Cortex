@@ -88,6 +88,8 @@ Terminal gerekmez; uygulama gerekeni kendisi kurar.
    - yapay zeka aracını ve girişini (Claude Code kurulu değilse uygulamadan kurulur),
    - isteğe bağlı sesle yazmayı.
 
+   > **Claude Code ücretli bir Claude planı ister** (Pro, Max vb.). Planın yoksa aynı ekrandan Codex, OpenCode, Gemini CLI ya da Qwen Code'u kurup onunla giriş yapabilirsin (ücretini ve varsa ücretsiz kullanım payını her aracın kendi sağlayıcısı belirler) ya da bilgisayarında çalışan yerel bir modeli seçebilirsin: LM Studio ya da Ollama'yı kendin kurarsın, Cortex onu bulur; ücretsizdir ve hiçbir şey bilgisayardan çıkmaz.
+
    İsteğe bağlı adımlar **Atla** ile geçilir ve sonra Ayarlar'dan yapılır.
 
    <img src="docs/gorseller/ilk-kurulum.png" width="640" alt="İlk kurulum ekranı: Memnun oldum, Tolga Bey. Notların nerede dursun?">
@@ -162,7 +164,11 @@ Hafızayı model değil istemci taşır; ücretsiz, uygun fiyatlı ya da yerel m
 
 Cortex notlarını kendi başına hiçbir yere göndermez ve telemetri toplamaz.
 
-- **Tek otomatik ağ isteği:** GitHub'a sorulan "yeni sürüm var mı?" sorusu; not ya da hesap bilgisi taşımaz ve kapatılabilir. Geri kalan her istek senin başlattığın bir işten gelir (Yakala, sesle yazma kurulumu, güncelleme, Telegram).
+- **Kendiliğinden yapılan ağ istekleri yalnız güncelleme içindir;** not ya da hesap bilgisi taşımaz ve ikisi de kapatılır:
+  - **Hafıza motoru** asistan oturumu açılırken GitHub'a "yeni sürüm var mı?" diye sorar (günde en çok bir kez); bir şey indirmez. `beyin.py preferences --update-notifications off` kapatır.
+  - **Windows masaüstü uygulaması** açıldıktan yarım dakika sonra ve çalıştığı sürece 6 saatte bir GitHub'a sorar; yeni sürüm varsa kurulum dosyasını (yaklaşık 160 MB) sormadan arka planda indirir, hazır olunca haber verir. **Ayarlar › Hakkında › Güncellemeleri kendiliğinden indir** kapalıyken ne sorar ne indirir; yeni sürümü sürümler sayfasından kendin kurarsın.
+
+  Geri kalan her istek senin başlattığın bir işten gelir (Yakala, sesle yazma kurulumu, terminalden güncelleme, Telegram, kasa eşitleme).
 - **Asıl akış:** mesajınla eşleşen notlar asistanın bağlamına eklenir ve böylece kullandığın yapay zeka sağlayıcısına gider. Yerel bir model kullanırsan hiçbir şey bilgisayardan çıkmaz.
 - **Neyin gitmeyeceğini sen seçersin:**
   - `visibility: private` işaretli notlar otomatik bağlama girmez.
@@ -244,7 +250,7 @@ Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama ya da her s
 - **Take a note anywhere:** `Ctrl+Alt+C` opens a small window over any app; on Windows, "Pyn, not al" or "Hey Pyn" opens it too. Speech is transcribed locally by Whisper (CUDA, Vulkan or CPU) and never leaves the computer.
 - **Capture:** save the open browser page, a screenshot, a video, an article or a file with one key; your assistant extracts the text and links the lessons into your notes.
 - **From your phone:** send a text, link, photo, file or voice note to your own Telegram bot and it lands in the vault's inbox.
-- **Privacy:** notes marked `visibility: private` and folders named like "Private", "Secret" or "Passwords" never enter automatic context. The only automatic network request is an update check against GitHub, which can be turned off.
+- **Privacy:** notes marked `visibility: private` and folders named like "Private", "Secret" or "Passwords" never enter automatic context. The only automatic network requests are for updates, against GitHub: the engine asks whether a newer version exists (at most daily), and the Windows app asks half a minute after it starts and every 6 hours, then downloads a newer installer (about 160 MB) in the background. Both can be turned off: `beyin.py preferences --update-notifications off`, and Settings › About › "Download updates by itself".
 
 The documentation is in Turkish; the desktop app also has an English interface. Download the Windows installer from the [latest release](https://github.com/GunduzTolga/Cortex/releases/latest). On macOS and Linux, install the engine with `python3 scripts/install_v3.py --vault <folder>` from the release package. The installer is not code-signed yet, so Windows SmartScreen may ask you to confirm (**More info → Run anyway**).
 
