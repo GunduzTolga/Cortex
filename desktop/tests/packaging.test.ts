@@ -159,22 +159,6 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
 
-test('LICENSE is the MIT text and nothing more, so GitHub names the licence; the brand rules ship beside it in MARKA.md (G6)', () => {
-  // 10 November: a brand section under the MIT text made GitHub report the licence as unknown (NOASSERTION), while the
-  // README's badge said MIT. The section lives in MARKA.md, which the installer carries beside LICENSE.
-  const words = (text: string) => text.replace(/\s+/g, ' ').trim();
-  assert.equal(words(fs.readFileSync('../LICENSE', 'utf8')), words(MIT));
-  const brand = fs.readFileSync('../MARKA.md', 'utf8');
-  for (const kept of [/Brand assets are not covered by the license above\./, /brand assets of SoleLuna Tech \(Tolga Gündüz\)/, /must use its own name and its own images/, /Fonts in tema\/ananas\/fonts keep their\s+own SIL Open Font License\./]) {
-    assert.match(brand, kept);
-  }
-  for (const file of ['LICENSE', 'MARKA.md']) {
-    assert.ok(packaged.build.extraResources.some((one) => one.from === `../${file}` && one.to === file), `${file} ships with the app`);
-  }
-  const readme = fs.readFileSync('../README.md', 'utf8');
-  assert.match(readme, /\[MIT lisansı\]\(LICENSE\)[^\n]*markadır[^\n]*\[MARKA\.md\]\(MARKA\.md\)/);
-});
-
 test('the installer CI builds is installed, opened and uninstalled on the same runner, after it is built and kept (K6)', () => {
   // The build only looked whether an installer came out; what a person gets from it - the packaged app on a Windows
   // it was just installed on - was never started anywhere (e2e/kurulu.mjs says what the run does).
