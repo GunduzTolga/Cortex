@@ -246,7 +246,7 @@ export const tr: Record<keyof typeof en, string> = {
   'server.title': 'Sunucu',
   'server.hint': 'Kasayı bağlı olduğu git deposuyla (örneğin GitHub) eşitler: burada yazılanlar sunucuya ve öbür cihazlara gider, oradakiler buraya gelir. Kapalıyken hiçbir şey bu bilgisayardan çıkmaz.',
   'server.missing.git': 'Eşitleme için Git gerekiyor; bu bilgisayarda bulunamadı.',
-  'server.missing.git.bring': "Eşitleme için Git gerekiyor; bu bilgisayarda yok. Cortex kendisi indirebilir (38 MB, yalnız Cortex kullanır).",
+  'server.missing.git.bring': "Eşitleme için Git gerekiyor; bu bilgisayarda yok. Cortex kendisi indirebilir (40 MB, yalnız Cortex kullanır).",
   'server.git.bring': "Git'i indir",
   'server.git.bringing': "Git indiriliyor…",
   'github.result.missing': "Bu bilgisayarda Git yok; önce Git'i kur.",

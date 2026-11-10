@@ -252,7 +252,7 @@ export const en = {
   'server.title': 'Server',
   'server.hint': 'Keeps the vault in step with the git repository it is tied to (GitHub, for one): what is written here goes to the server and the other devices, and theirs comes here. Off, nothing leaves this computer.',
   'server.missing.git': 'Syncing needs Git, and it was not found on this computer.',
-  'server.missing.git.bring': "Syncing needs Git, and this computer has none. Cortex can download its own (38 MB, used by Cortex alone).",
+  'server.missing.git.bring': "Syncing needs Git, and this computer has none. Cortex can download its own (40 MB, used by Cortex alone).",
   'server.git.bring': "Download Git",
   'server.git.bringing': "Downloading Git…",
   'github.result.missing': "This computer has no Git; install Git first.",
