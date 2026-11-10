@@ -118,7 +118,9 @@ export function sentenceOf(message: string): string {
 /** What a failed turn is, for the window to say plainly. */
 function kindOf(info: unknown, sentence: string): string | null {
   if (info === 'unauthorized') return 'auth';
-  if (info === 'usageLimitExceeded' || info === 'rateLimitExceeded' || info === 'sessionBudgetExceeded') return 'provider.quota';
+  // A plan's allowance used up comes back by itself: said as a limit, not as a balance run out (S10).
+  if (info === 'usageLimitExceeded') return 'limit';
+  if (info === 'rateLimitExceeded' || info === 'sessionBudgetExceeded') return 'provider.quota';
   if (/model is not supported|model .*not (available|found)|unsupported model/i.test(sentence)) return 'model';
   return null;
 }

@@ -8,7 +8,7 @@
 // and never heeds an interrupt (it goes on talking after one, and asks leave
 // for a command: at once, and again once its chat's next turn has begun on its
 // thread), "geç" answers its turn/start late, "hata" fails as a sign-in that
-// has gone does, "model" fails as a model the account may not use does. Every
+// has gone does, "limit" as a plan's allowance used up does, "model" fails as a model the account may not use does. Every
 // method it is sent is written to FAKE_AGENT_LOG, when set, with its process
 // id, and so is every answer an interrupted turn is given ("answered").
 import fs from 'node:fs';
@@ -48,6 +48,8 @@ async function turn(threadId, turnId, text) {
   };
   notify('turn/started', { threadId, turn: { id: turnId, status: 'inProgress' } });
   if (text.includes('hata')) return finish('failed', { message: 'unexpected status 401 Unauthorized', codexErrorInfo: 'unauthorized' });
+  // A ChatGPT plan's allowance used up, as Codex names it.
+  if (text.includes('limit')) return finish('failed', { message: "You've hit your usage limit. Try again at 3:00 PM.", codexErrorInfo: 'usageLimitExceeded' });
   if (text.includes('model'))
     return finish('failed', { message: JSON.stringify({ type: 'error', status: 400, error: { type: 'invalid_request_error', message: "The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account." } }), codexErrorInfo: 'other' });
   const note = path.join(cwd, 'Notes', 'Plan.md');

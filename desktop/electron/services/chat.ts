@@ -381,7 +381,7 @@ async function run(chat: Live, message: string, files: readonly HeldAttachment[]
     emit(chat, { type: 'done', reason: stop.signal.aborted ? 'cancelled' : reason });
   } catch (err) {
     // A program ended under a stopped turn (Stop, or the app closing: shutdownChats) did not fail: it was stopped.
-    emit(chat, stop.signal.aborted ? { type: 'done', reason: 'cancelled' } : failureEvent(err, scrubberFor(chat.stored.vault)));
+    emit(chat, stop.signal.aborted ? { type: 'done', reason: 'cancelled' } : failureEvent(err, scrubberFor(chat.stored.vault), !isServer(chat.stored.cli)));
   } finally {
     if (chat.stop === stop) chat.stop = null;
     for (const answer of chat.permissions.values()) answer(null);

@@ -45,8 +45,12 @@ export function chatModel(name: string, family = ''): boolean {
   return family !== 'bert' && family !== 'nomic-bert' && !EMBEDDING.some((mark) => text.includes(mark));
 }
 
-/** JSON from a server on this machine that is already up, or null when nothing answers in time. No proxy: the request never leaves 127.0.0.1. */
-export function getJson(url: string, timeout = 400): Promise<unknown> {
+/**
+ * JSON from a server on this machine that is already up, or null when nothing answers in time. No proxy: the request
+ * never leaves 127.0.0.1. The wait is short for what is only shown (the list of tools, a status); a turn waits longer
+ * (localChat.ts), and is told through `late` when the server was there and did not answer in time: busy, not off.
+ */
+export function getJson(url: string, timeout = 400, late?: () => void): Promise<unknown> {
   return new Promise((resolve) => {
     const request = http.get(url, { timeout, agent: false }, (response) => {
       if (response.statusCode !== 200) {
@@ -68,7 +72,10 @@ export function getJson(url: string, timeout = 400): Promise<unknown> {
         }
       });
     });
-    request.on('timeout', () => request.destroy());
+    request.on('timeout', () => {
+      late?.();
+      request.destroy();
+    });
     request.on('error', () => resolve(null));
   });
 }

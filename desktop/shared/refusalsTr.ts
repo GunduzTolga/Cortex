@@ -59,11 +59,13 @@ const RULES: Rule[] = [
   // electron/services/acpChat.ts, codexChat.ts, claudeChat.ts, chat.ts, auth.ts
   { pattern: /^([\s\S]+?) is not installed on this machine\.$/, say: ([cli]) => `${cli} bu bilgisayarda kurulu değil.` },
   { pattern: /^The program did not start a session\.$/, say: () => 'Program bir oturum başlatmadı.' },
+  { pattern: /^The AI tool did not answer within (\S+) seconds of starting, and was closed\.$/, say: ([seconds]) => `Yapay zeka aracı açıldıktan sonra ${seconds} saniye içinde cevap vermedi ve kapatıldı.` },
   { pattern: /^The chat is not connected; write to it first\.$/, say: () => 'Sohbet bağlı değil; önce bir mesaj yaz.' },
   { pattern: /^Claude Code was stopped\.$/, say: () => 'Claude Code durduruldu.' },
   { pattern: /^Claude Code stopped\.$/, say: () => 'Claude Code durdu.' },
   { pattern: /^Claude Code stopped: ([\s\S]*)$/, say: ([words]) => `Claude Code durdu: ${words}` },
-  { pattern: /^Claude Code could not start: ([\s\S]*)$/, say: ([words]) => `Claude Code başlatılamadı: ${words}` },
+  { pattern: /^Claude Code could not start\.$/, say: () => 'Claude Code başlatılamadı.' },
+  { pattern: /^Claude Code could not start \(([^)]*)\)\.$/, say: ([code]) => `Claude Code başlatılamadı (sistem hatası: ${code}).` },
   { pattern: /^(Claude Code|Codex) could not answer\.$/, say: ([tool]) => `${tool} cevap veremedi.` },
   { pattern: /^Codex did not start a thread\.$/, say: () => 'Codex bir konuşma başlatmadı.' },
   { pattern: /^Codex stopped\.$/, say: () => 'Codex durdu.' },
@@ -72,6 +74,7 @@ const RULES: Rule[] = [
   // electron/services/localChat.ts: LM Studio, Ollama
   { pattern: /^([\s\S]+?) is not running\. Open it, load a model, and write again\.$/, say: ([server]) => `${server} çalışmıyor. Uygulamayı aç, bir model yükle ve yeniden yaz.` },
   { pattern: /^([\s\S]+?) is not running, or has no model\. Open it, load a model, and write again\.$/, say: ([server]) => `${server} çalışmıyor ya da yüklü bir modeli yok. Uygulamayı aç, bir model yükle ve yeniden yaz.` },
+  { pattern: /^([\s\S]+?) did not answer in time: it may be busy\. Wait a moment and write again\.$/, say: ([server]) => `${server} zamanında cevap vermedi: meşgul olabilir. Biraz bekleyip yeniden yaz.` },
   { pattern: /^([\s\S]+?) has no model\.$/, say: ([server]) => `${server}: yüklü bir model yok.` },
 
   // electron/services/hermesChat.ts: a Hermes Agent on another computer

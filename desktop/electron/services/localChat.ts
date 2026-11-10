@@ -9,7 +9,7 @@ import { type Backend, Stopped, type Turn, TurnFailure, scrubberFor, unlessStopp
 import { onPathFile, onPathFiles } from './clis';
 import { writeWhole } from './fileWrite';
 import { captureToInbox } from './inbox';
-import { LOCAL, type LocalId, type LocalModels, baseOf, findLocal, localModel } from './localModels';
+import { LOCAL, type LocalId, type LocalModels, baseOf, findLocal, getJson, localModel } from './localModels';
 import { readSettings } from './settings';
 
 /**
@@ -96,6 +96,13 @@ const sessions = new Map<string, Session>();
 /** Choices made on a chat's chip before it was run in this start. */
 const pendingChoice = new Map<string, string>();
 const running = new Map<string, AbortController>();
+
+/**
+ * How long a server is given to say what models it has when a message is sent to it: in an object, so a test can wait
+ * less. The 400 ms of the tools' list is for what is only shown; a server loading a model, or answering another
+ * request, takes longer, and the turn ended as "the model server is not running" while it was (S6).
+ */
+export const TURN_WAIT = { ms: 4000 };
 
 const SESSION_ID = /^[0-9a-f-]{36}$/;
 const MESSAGES_MAX = 400;
@@ -626,7 +633,10 @@ export const localBackend: Backend = {
     running.set(turn.chatId, stop);
     let session: Session | null = null;
     try {
-      const found = await unlessStopped(stop.signal, findLocal(id));
+      // Refused at once where the server is off; `late` where it is there and did not answer in time.
+      let late = false;
+      const found = await unlessStopped(stop.signal, findLocal(id, (url) => getJson(url, TURN_WAIT.ms, () => (late = true))));
+      if (!found.models.length && late) throw new TurnFailure(`${LOCAL[id].name} did not answer in time: it may be busy. Wait a moment and write again.`, 'local-busy');
       if (!found.models.length) throw new TurnFailure(`${LOCAL[id].name} is not running, or has no model. Open it, load a model, and write again.`, 'local-off');
       // The conversation is the chat's, by its id: the hook's session and the file it is kept in.
       session = sessions.get(turn.chatId) ?? loadSession(turn.chatId);

@@ -4,7 +4,9 @@
 // 2.1.296 was recorded writing them (14 October). What it does is chosen by
 // words in the message: "izin" asks leave for a step, "plan" writes a todo
 // list, "yavaş" waits to be interrupted, "inatçı" waits and never heeds an
-// interrupt, "hata" fails as a sign-in that has expired does, "çök" dies. A session named in FAKE_CLAUDE_GONE is one it no
+// interrupt, "hata" fails as a sign-in that has expired does, "çök" dies, "kopuk" tries its request again twice as
+// with no internet (`api_retry`, as Claude Code 2.1.322 writes it) and gives up, "yoğun" tries again once for a
+// provider that is busy and then answers, "limit" fails as a subscription's allowance used up does. A session named in FAKE_CLAUDE_GONE is one it no
 // longer has: told to resume it, it says so and ends, as Claude Code does, at
 // its start or (FAKE_CLAUDE_GONE_AT=turn) at the first message. It answers
 // `initialize` FAKE_INIT_DELAY milliseconds late. Its arguments, its process
@@ -58,6 +60,24 @@ async function turn(text) {
     process.stderr.write('fake claude: boom\n');
     process.exit(3);
   }
+  const retry = (attempt, status, error) => send({ type: 'system', subtype: 'api_retry', attempt, max_retries: 10, retry_delay_ms: 500 * attempt, error_status: status, error, session_id: session });
+  if (text.includes('kopuk')) {
+    retry(1, null, 'unknown');
+    retry(2, null, 'unknown');
+    // Held here while FAKE_CLAUDE_HOLD names a file that is not there: the test looks at the chat while it tries again.
+    while (process.env.FAKE_CLAUDE_HOLD && !fs.existsSync(process.env.FAKE_CLAUDE_HOLD)) await sleep(20);
+    const failed = 'API Error: Connection error.';
+    send({ type: 'assistant', message: { id: 'synthetic-2', model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: failed }] }, parent_tool_use_id: null, session_id: session });
+    result({ is_error: true, result: failed, terminal_reason: 'api_error', modelUsage: {} });
+    return;
+  }
+  if (text.includes('limit')) {
+    const failed = 'You\u2019ve hit your session limit \u00b7 resets 3pm (Europe/Istanbul)';
+    send({ type: 'assistant', message: { id: 'synthetic-3', model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: failed }] }, parent_tool_use_id: null, session_id: session });
+    result({ is_error: true, result: failed, terminal_reason: 'api_error', modelUsage: {} });
+    return;
+  }
+  if (text.includes('yoğun')) retry(1, 529, 'overloaded');
   const note = path.join(cwd, 'Notes', 'Plan.md');
   stream({ type: 'message_start', message: { id: 'msg_1' } });
   stream({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } });

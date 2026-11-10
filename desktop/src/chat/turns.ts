@@ -38,10 +38,18 @@ export interface Turn {
   plan: Array<{ content: string; status: string }> | null;
   /** What the person should know about this answer (`new-session`: the CLI began the conversation anew). */
   notices: string[];
+  /**
+   * A request the tool is making again, said while it does (`retry-network`: no connection; `retry-busy`: its provider
+   * not answering): null once the answer goes on, or ends.
+   */
+  retrying: 'network' | 'busy' | null;
   end: { kind: 'done'; reason: string } | { kind: 'error'; message: string; error: string | null } | null;
 }
 
-const empty = (user: Turn['user']): Turn => ({ user, thought: '', steps: [], text: '', asked: [], plan: null, notices: [], end: null });
+const empty = (user: Turn['user']): Turn => ({ user, thought: '', steps: [], text: '', asked: [], plan: null, notices: [], retrying: null, end: null });
+
+/** The notices that say a retry going on: a state of the answer while it lasts, not a line kept on it. */
+const RETRIES: Record<string, Turn['retrying']> = { 'retry-network': 'network', 'retry-busy': 'busy' };
 
 export function turnsOf(events: readonly ChatEvent[]): Turn[] {
   const turns: Turn[] = [];
@@ -55,6 +63,8 @@ export function turnsOf(events: readonly ChatEvent[]): Turn[] {
     return turn;
   };
   for (const event of events) {
+    // Anything the tool says after a retry is the answer going on (or its end): the retry is over.
+    if (turn && turn.retrying && event.type !== 'notice' && event.type !== 'usage') turn.retrying = null;
     switch (event.type) {
       case 'user':
         turn = empty({ text: event.text, at: event.at, ...(event.attachments?.length ? { attachments: event.attachments } : {}) });
@@ -98,7 +108,8 @@ export function turnsOf(events: readonly ChatEvent[]): Turn[] {
         current().plan = event.entries;
         break;
       case 'notice':
-        if (!current().notices.includes(event.notice)) current().notices.push(event.notice);
+        if (event.notice in RETRIES) current().retrying = RETRIES[event.notice];
+        else if (!current().notices.includes(event.notice)) current().notices.push(event.notice);
         break;
       case 'done':
         current().end = { kind: 'done', reason: event.reason };
