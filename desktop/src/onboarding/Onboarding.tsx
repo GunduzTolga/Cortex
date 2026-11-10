@@ -17,6 +17,7 @@ import { LanguageSwitch } from '../ui/LanguageSwitch';
 import { HotkeyBusy, Progress, VoiceHelperBar, engineButtonText, pythonWantingText } from '../ui/SetupSections';
 import { GithubConnect } from '../ui/GithubConnect';
 import { Button, Spinner, Switch, inputClass } from '../ui/ui';
+import { atMostEvery } from './focusRefresh';
 import { Heading } from './Heading';
 import { type Installing, ToolsStep, serving } from './ToolsStep';
 
@@ -41,6 +42,9 @@ const TITLE: Record<StepId, Key> = {
   backup: 'onboarding.step.backup',
   done: 'onboarding.step.done',
 };
+
+/** Coming back to the window asks again what is installed and signed in, at most this often. */
+const FOCUS_REFRESH_EVERY = 10_000;
 
 /** The vault and the name are the person's to give; the rest can wait for the settings. */
 const OPTIONAL = new Set<StepId>(['name', 'python', 'engine', 'tools', 'voice', 'backup']);
@@ -116,17 +120,20 @@ export function Onboarding() {
         }),
     );
     // Back from a terminal or the browser, where a tool or Python was installed or signed in to: asked again,
-    // and a sign-in that ended there counted as done here.
-    const back = () => {
+    // and a sign-in that ended there counted as done here. At most once in a while (focusRefresh.ts): each asking
+    // starts a program per tool, PowerShell and the vault's engine, and the focus comes and goes with every click
+    // between the window and a browser.
+    const back = atMostEvery(() => {
       void reread().then((signed) => {
         if (signed.length) setSigningIn((before) => new Set([...before].filter((id) => !signed.includes(id))));
       });
       void useSetup.getState().refresh();
-    };
-    window.addEventListener('focus', back);
+    }, FOCUS_REFRESH_EVERY);
+    window.addEventListener('focus', back.ask);
     return () => {
       stop();
-      window.removeEventListener('focus', back);
+      back.stop();
+      window.removeEventListener('focus', back.ask);
     };
   }, []);
   const login = (id: CliId) => {
@@ -138,6 +145,18 @@ export function Onboarding() {
       setSigningIn((before) => new Set([...before].filter((one) => one !== id)));
       setUnfinished((before) => new Set(before).add(id));
     });
+  };
+  // "Vazgeç" on a sign-in going on: over on its row at once, said unfinished; its hidden console is ended by the main
+  // process, which tells how to sign in from a terminal with the statuses it sends after.
+  const cancel = (id: CliId) => {
+    trying.current.delete(id);
+    signingRef.current = new Set([...signingRef.current].filter((one) => one !== id));
+    setSigningIn((before) => new Set([...before].filter((one) => one !== id)));
+    setUnfinished((before) => new Set(before).add(id));
+    void window.cortex.chat.cancelLogin(id).then(
+      () => useChat.getState().loadAuth(),
+      () => undefined,
+    );
   };
   const install = (id: CliId) => {
     trying.current.add(id);
@@ -266,7 +285,7 @@ export function Onboarding() {
           {at === 'vault' ? <VaultStep name={vault?.name ?? null} missing={kept.missing ? (kept.vault?.name ?? null) : null} /> : null}
           {at === 'python' ? <PythonStep status={status} /> : null}
           {at === 'engine' ? <EngineStep status={status} /> : null}
-          {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} signingIn={signingIn} unfinished={unfinished} installing={installing} onLogin={login} onInstall={install} /> : null}
+          {at === 'tools' ? <ToolsStep auth={auth} fresh={fresh} signingIn={signingIn} unfinished={unfinished} installing={installing} onLogin={login} onCancel={cancel} onInstall={install} /> : null}
           {at === 'voice' ? <VoiceStep status={status} onStarted={next} /> : null}
           {at === 'backup' ? <BackupStep status={status} /> : null}
           {at === 'done' ? <DoneStep order={order} done={done} skipped={skipped} canFinish={Boolean(vault)} /> : null}

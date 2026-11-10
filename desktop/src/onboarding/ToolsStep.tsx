@@ -1,6 +1,6 @@
 import { Download, KeyRound, LogIn } from 'lucide-react';
 import type { CliAuth, CliId } from '@shared/chat';
-import { LoginEnded, TOOL_NAMES } from '../chat/AuthDialog';
+import { InstallProgressLine, LoginEnded, LoginSlow, TOOL_NAMES, installFailedKey } from '../chat/AuthDialog';
 import { useChat } from '../chat/chatStore';
 import type { Key } from '../i18n';
 import { useT } from '../i18n/useT';
@@ -30,7 +30,9 @@ export function ToolsStep({
   unfinished,
   installing,
   onLogin,
+  onCancel,
   onInstall,
+  slowAfter,
 }: {
   auth: CliAuth[] | null;
   fresh: Set<CliId>;
@@ -38,7 +40,11 @@ export function ToolsStep({
   unfinished: Set<CliId>;
   installing: Installing;
   onLogin: (id: CliId) => void;
+  /** "Vazgeç" on a sign-in going on. */
+  onCancel: (id: CliId) => void;
   onInstall: (id: CliId) => void;
+  /** After how long a sign-in going on is said to be slow (AuthDialog's LOGIN_SLOW_AFTER; the tests'). */
+  slowAfter?: number;
 }) {
   const t = useT();
   const refused = useChat((s) => s.authFailed);
@@ -98,10 +104,15 @@ export function ToolsStep({
                       {t('onboarding.tools.install')}
                     </Button>
                   </div>
-                  {mine && !mine.failed ? <p className="mt-1.5 text-[12px] text-zinc-500" data-onboarding-installing>{t('onboarding.tools.installing')}</p> : null}
+                  {mine && !mine.failed ? (
+                    <p className="mt-1.5 text-[12px] text-zinc-500" data-onboarding-installing>
+                      {t('onboarding.tools.installing')}
+                      <InstallProgressLine tool={tool.id} />
+                    </p>
+                  ) : null}
                   {mine?.failed ? (
-                    <p className="mt-1.5 text-[12px] font-semibold text-bad" data-onboarding-install-failed>
-                      {mine.why || t('onboarding.tools.installFailed', { name: TOOL_NAMES[tool.id] ?? tool.id })}
+                    <p className="mt-1.5 text-[12px] font-semibold text-bad" data-onboarding-install-failed={tool.installEnded ?? 'unknown'}>
+                      {mine.why || t(installFailedKey(tool.installEnded), { name: TOOL_NAMES[tool.id] ?? tool.id })}
                     </p>
                   ) : null}
                 </li>
@@ -109,6 +120,13 @@ export function ToolsStep({
             })}
           </ul>
         </div>
+      ) : null}
+      {/* Not asked yet, or each tool still being asked how it is (seconds, where an antivirus reads every program started): said, not a blank step (K5). */}
+      {auth === null ? (
+        <p className="mt-5 flex items-center gap-2 text-[13px] text-zinc-500" data-onboarding-tools-looking>
+          <Spinner size={12} />
+          {t('onboarding.tools.looking')}
+        </p>
       ) : null}
       {auth && !tools.length && !installable.length ? (
         <p className="mt-5 text-[13px] text-zinc-600">{t('onboarding.tools.none')}</p>
@@ -123,7 +141,8 @@ export function ToolsStep({
               <span className="min-w-[7rem] flex-1 break-words text-[13px] font-semibold text-darkDelegation">
                 {TOOL_NAMES[tool.id] ?? tool.id}
                 {going ? <span className="mt-0.5 block text-[11.5px] font-normal text-zinc-500">{t('onboarding.tools.signingIn.note')}</span> : null}
-                {!going && tool.loginEnded && tool.signedIn !== true && !fresh.has(tool.id) ? <span className="block font-normal"><LoginEnded ended={tool.loginEnded} /></span> : null}
+                {going ? <LoginSlow tool={tool.id} after={slowAfter} /> : null}
+                {!going && tool.loginEnded && tool.signedIn !== true && !fresh.has(tool.id) ? <span className="block font-normal"><LoginEnded ended={tool.loginEnded} tool={tool.id} /></span> : null}
                 {tool.local?.shortContext && tool.signedIn ? (
                   <span className="mt-0.5 block text-[11.5px] font-normal text-zinc-500" data-onboarding-tool-short>
                     {t('auth.local.short', { tokens: tool.local.shortContext })}
@@ -145,6 +164,19 @@ export function ToolsStep({
                   <LogIn size={12} />
                   {t(tool.signedIn === true ? 'onboarding.tools.again' : 'onboarding.tools.signIn')}
                 </Button>
+              ) : null}
+              {/* While its sign-in goes on: begun again (the browser opened once more), or given up. The row had no button
+                  at all for the sign-in's ten minutes, whatever had happened to the browser (K2). */}
+              {tool.canLogin && going ? (
+                <>
+                  <Button tone="ghost" className="h-8 shrink-0" onClick={() => onLogin(tool.id)} data-onboarding-tool-retry={tool.id}>
+                    <LogIn size={12} />
+                    {t('auth.login.retry')}
+                  </Button>
+                  <Button tone="quiet" className="h-8 shrink-0" onClick={() => onCancel(tool.id)} data-onboarding-tool-cancel={tool.id}>
+                    {t('auth.cancel')}
+                  </Button>
+                </>
               ) : null}
               {/* A tool whose only way in is its key (OpenCode, Gemini CLI, Qwen Code): its field, a click away. */}
               {!tool.canLogin && tool.key === 'cortex' && tool.signedIn !== true ? (

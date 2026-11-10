@@ -35,7 +35,7 @@ test('the channels are the ones the preload names, no more and no fewer', () => 
   const preload = fs.readFileSync('electron/preload.ts', 'utf8');
   const named = [...preload.matchAll(/invoke\('([^']+)'/g)].map((match) => match[1]).sort();
   assert.deepEqual([...handlers.keys()].sort(), named);
-  assert.deepEqual(named.filter((channel) => channel.startsWith('chat:')), ['chat:addTool', 'chat:answer', 'chat:attach', 'chat:auth', 'chat:begin', 'chat:cancel', 'chat:clis', 'chat:install', 'chat:list', 'chat:login', 'chat:offer', 'chat:open', 'chat:remove', 'chat:removeTool', 'chat:rename', 'chat:send', 'chat:setKey', 'chat:setOption', 'chat:toInbox']);
+  assert.deepEqual(named.filter((channel) => channel.startsWith('chat:')), ['chat:addTool', 'chat:answer', 'chat:attach', 'chat:auth', 'chat:begin', 'chat:cancel', 'chat:cancelLogin', 'chat:clis', 'chat:install', 'chat:installProgress', 'chat:list', 'chat:login', 'chat:offer', 'chat:open', 'chat:remove', 'chat:removeTool', 'chat:rename', 'chat:send', 'chat:setKey', 'chat:setOption', 'chat:toInbox']);
   assert.deepEqual(named.filter((channel) => channel.startsWith('hermes:')), ['hermes:forget', 'hermes:save', 'hermes:status', 'hermes:test']);
   // The vault given to the AI tools (services/mcp.ts): its lines, and Claude Code's add; neither takes anything.
   assert.deepEqual(named.filter((channel) => channel.startsWith('mcp:')), ['mcp:addToClaude', 'mcp:status']);
