@@ -1,5 +1,17 @@
 ; Cortex's own steps in the NSIS installer electron-builder makes (package.json, build.nsis.include).
 
+; Installed for the person who runs it, never for the whole computer, and without a question (G7, 10 November). The
+; assisted installer (oneClick: false) otherwise opens on a page asking "only for me / for everybody", and "everybody"
+; asks for an administrator, while the README says no administrator is needed. electron-builder's page reads
+; $isForceCurrentInstall before it draws itself (templates/nsis/multiUserUi.nsh) and is skipped when it is set.
+; Left alone where an earlier Cortex is installed for the whole computer (someone chose "everybody" on that page):
+; that one is then updated in place, as before, rather than a second Cortex put beside it.
+!macro customInstallMode
+  ${if} $hasPerMachineInstallation != "1"
+    StrCpy $isForceCurrentInstall "1"
+  ${endif}
+!macroend
+
 ; Uninstalled, Cortex no longer starts with Windows. The "Background" setting writes a Run value under the app's id
 ; (com.soleluna.cortex, electron/services/tray.ts), and Windows keeps whether it is turned on beside it
 ; (StartupApproved); neither went with the app, and a broken "Cortex" stayed in the start-up list (desktop-shell-6).

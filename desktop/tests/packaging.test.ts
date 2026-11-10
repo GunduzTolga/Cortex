@@ -126,6 +126,28 @@ test('uninstalled, the person is asked whether everything Cortex kept goes too; 
   assert.match(states, /LOCALAPPDATA/);
 });
 
+test('a first install asks nobody "only me or everybody": it is for the person who runs it, with no administrator (G7)', () => {
+  // The assisted installer shows that page unless the build is for the whole computer, and "everybody" asks for an
+  // administrator; the README says none is needed.
+  const nsis = (packaged.build as unknown as { nsis: { oneClick?: boolean; perMachine?: boolean } }).nsis;
+  assert.deepEqual([nsis.oneClick, nsis.perMachine], [false, false]);
+  const script = fs.readFileSync(packaged.build.nsis.include!, 'utf8');
+  const macro = /!macro customInstallMode([\s\S]*?)!macroend/.exec(script)?.[1] ?? '';
+  assert.match(macro, /StrCpy \$isForceCurrentInstall "1"/);
+  assert.doesNotMatch(macro, /isForceMachineInstall/);
+  // Only where no Cortex is installed for the whole computer already: that one is updated where it is.
+  assert.match(macro, /\$\{if\} \$hasPerMachineInstallation != "1"\s+StrCpy \$isForceCurrentInstall "1"\s+\$\{endif\}/);
+  // What it leans on in electron-builder's own script, so that an upgrade that renames either is caught here: the
+  // page is there for this build, reads the macro before it draws, and is skipped for the current user when told.
+  const templates = path.join('node_modules', 'app-builder-lib', 'templates', 'nsis');
+  const assisted = fs.readFileSync(path.join(templates, 'assistedInstaller.nsh'), 'utf8');
+  assert.match(assisted, /!ifndef INSTALL_MODE_PER_ALL_USERS\s+!insertmacro PAGE_INSTALL_MODE/);
+  const page = fs.readFileSync(path.join(templates, 'multiUserUi.nsh'), 'utf8');
+  assert.match(page, /!ifmacrodef customInstallmode\s+!insertmacro customInstallMode\s+!endif/i);
+  assert.match(page, /\$\{if\} \$isForceCurrentInstall == "1"[\s\S]{0,200}?!insertmacro setInstallModePerUser\s+Abort/);
+  assert.match(fs.readFileSync(path.join(templates, 'multiUser.nsh'), 'utf8'), /Var hasPerMachineInstallation/);
+});
+
 /** The MIT License as GitHub's licence detection knows it (choosealicense.com), with this repository's copyright line. */
 const MIT = `MIT License
 

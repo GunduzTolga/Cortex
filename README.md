@@ -78,7 +78,7 @@ Cortex'le birlikte bir düşünme ortağı gelir: ananas **Pyn**. Seni tanır, f
 Terminal gerekmez; uygulama gerekeni kendisi kurar.
 
 1. **İndir.** [Son sürüm sayfasından](https://github.com/GunduzTolga/Cortex/releases/latest) `Cortex-Setup-X.Y.Z.exe` dosyasını indir.
-2. **Kur.** Yönetici izni istemez; yalnız senin kullanıcın için kurulur.
+2. **Kur.** Yönetici izni istemez ve "kimin için" diye sormaz; yalnız senin kullanıcın için kurulur.
    > Kurulum dosyası henüz kodla imzalı değil. Windows **"Windows bilgisayarınızı korudu"** ekranını gösterirse **Ek bilgi** → **Yine de çalıştır**.
 3. **İlk kurulum ekranını izle.** Pyn sırayla sorar ve kurar:
    - sana nasıl hitap edeceğini,
