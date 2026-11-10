@@ -87,6 +87,25 @@ export type { HelperState, ListenerWord } from '../../shared/setup';
 const HELPER_STATES: readonly HelperState[] = ['yok', 'yukleniyor', 'hazir', 'hata', 'kapali'];
 const WAKE_TROUBLES: readonly WakeTrouble[] = ['mikrofon', 'sessiz', 'model'];
 
+/**
+ * The wake phrase heard and no window open for it yet (the helper's `duydu`): Whisper is checking it (`bakiyor`), or
+ * its model is still loading and the check waits for it (`hazirlaniyor`).
+ */
+export type WakeHeard = 'bakiyor' | 'hazirlaniyor';
+const WAKE_HEARD: readonly WakeHeard[] = ['bakiyor', 'hazirlaniyor'];
+
+/** Why the voice model did not load, as the helper sorts it (beyin_v3_ses.load_trouble). */
+export type LoadTrouble = 'ag' | 'disk' | 'bellek' | 'bozuk' | 'bilinmeyen';
+const LOAD_TROUBLES: readonly LoadTrouble[] = ['ag', 'disk', 'bellek', 'bozuk', 'bilinmeyen'];
+
+/** The listener's word with what the tray alone says of it: the phrase just heard, and the kind of a failed load. */
+export interface ListenerWordNow extends ListenerWord {
+  /** Not there when no phrase is being checked, or from an engine that does not say. */
+  duydu?: WakeHeard;
+  /** Not there while nothing failed, or from an engine that does not sort its failures. */
+  hata_turu?: LoadTrouble;
+}
+
 /** The listener's word, beside the app's own. */
 export function listenerFile(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(path.dirname(microphoneFile(env)), 'dinleyici.json');
@@ -110,7 +129,7 @@ function running(pid: number): boolean {
 }
 
 /** What the listener last said of its voice; null without a listener running (none, or one that died without a word). */
-export function readListener(file: string = listenerFile(), alive: (pid: number) => boolean = running): ListenerWord | null {
+export function readListener(file: string = listenerFile(), alive: (pid: number) => boolean = running): ListenerWordNow | null {
   let said: Record<string, unknown>;
   try {
     said = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
@@ -131,6 +150,8 @@ export function readListener(file: string = listenerFile(), alive: (pid: number)
     uyandirma_sorun: WAKE_TROUBLES.includes(said.uyandirma_sorun as WakeTrouble) ? (said.uyandirma_sorun as WakeTrouble) : null,
     uyandirma_mesaj: typeof said.uyandirma_mesaj === 'string' ? said.uyandirma_mesaj.slice(0, 300) : '',
     kisayol: said.kisayol === 'tamam' || said.kisayol === 'mesgul' ? said.kisayol : null,
+    ...(WAKE_HEARD.includes(said.duydu as WakeHeard) ? { duydu: said.duydu as WakeHeard } : {}),
+    ...(LOAD_TROUBLES.includes(said.hata_turu as LoadTrouble) ? { hata_turu: said.hata_turu as LoadTrouble } : {}),
   };
 }
 

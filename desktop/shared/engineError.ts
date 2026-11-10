@@ -99,8 +99,8 @@ const SAID: Record<EngineCode, { tr: string; en: string }> = {
     en: 'The vault was moved or copied, and Cortex’s memory is still tied to its old place; the app could not mend this by itself.',
   },
   voice_network: {
-    tr: 'Sesle yazma kurulamadı: indirirken internete bağlanılamadı ya da bağlantı koptu. Bağlantını denetleyip yeniden dene; inenler korunur.',
-    en: 'Voice typing could not be set up: the internet could not be reached while downloading, or the connection broke. Check the connection and try again; what came down is kept.',
+    tr: 'Sesle yazma kurulamadı: indirirken internete bağlanılamadı ya da bağlantı koptu. Bağlantını denetleyip yeniden dene (inenler korunur); şirket ağındaysan pypi.org, files.pythonhosted.org, huggingface.co ve alphacephei.com adreslerine izin, proxy ayarı ya da şirketin güvenlik sertifikası gerekebilir.',
+    en: 'Voice typing could not be set up: the internet could not be reached while downloading, or the connection broke. Check the connection and try again (what came down is kept); on a company network, pypi.org, files.pythonhosted.org, huggingface.co and alphacephei.com must be allowed, and a proxy setting or the company’s security certificate may be needed.',
   },
   voice_disk_full: {
     tr: 'Sesle yazma kurulamadı: diskte yer kalmadı (yaklaşık 3 GB gerekir). Yer açıp yeniden dene.',
