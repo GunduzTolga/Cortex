@@ -162,3 +162,33 @@ test('a tool a chat was refused for is said refused until its own sign-in ends; 
   authChanged('claude');
   assert.ok(!useChat.getState().authFailed.includes('claude'), 'its own sign-in ended');
 });
+
+test('the tools that could not be asked for are not looked for for ever: what was known stays, or none (K5)', async () => {
+  // "Bu bilgisayardaki araçlar aranıyor…" is shown while the tools are null; a question that failed left them null,
+  // and the line turned until the app was closed.
+  const cortex = (globalThis as unknown as { window: { cortex: { chat: { auth: () => Promise<CliAuth[]> } } } }).window.cortex;
+  const asked = cortex.chat.auth;
+  cortex.chat.auth = async () => {
+    throw new Error('The tools could not be read.');
+  };
+  try {
+    useChat.setState({ auth: null, error: null });
+    await useChat.getState().loadAuth();
+    assert.deepEqual(useChat.getState().auth, [], 'none, not "being looked for"');
+    assert.ok(useChat.getState().error, 'and the failure is said');
+    const known = [claudeAuth()];
+    useChat.setState({ auth: known, error: null });
+    await useChat.getState().loadAuth();
+    assert.equal(useChat.getState().auth, known, 'what was known is kept');
+  } finally {
+    cortex.chat.auth = asked;
+    useChat.setState({ error: null });
+  }
+});
+
+test('a tool that could not be installed says why on the empty chat screen too, as in the first setup (K3)', async () => {
+  const fs = await import('node:fs');
+  const view = fs.readFileSync('src/chat/ChatView.tsx', 'utf8');
+  assert.match(view, /installing\.failed \? installFailedKey\(state\.auth\?\.find\(\(one\) => one\.id === installing\.id\)\?\.installEnded\)/);
+  assert.doesNotMatch(view, /installing\.failed \? 'onboarding\.tools\.installFailed'/, 'the one sentence for every reason is gone');
+});

@@ -193,7 +193,8 @@ export const useChat = create<ChatState>((set, get) => {
       try {
         set({ auth: await window.cortex.chat.auth() });
       } catch (err) {
-        set({ error: messageOf(err) });
+        // Not left at null: "the tools are being looked for" would turn for ever (K5); what was known stays, or none.
+        set({ error: messageOf(err), auth: get().auth ?? [] });
       }
     },
 

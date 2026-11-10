@@ -13,7 +13,7 @@ import { useApp } from '../store/app';
 import { useSetup } from '../store/setup';
 import { useView } from '../store/view';
 import { Button, Spinner } from '../ui/ui';
-import { toolName } from './AuthDialog';
+import { installFailedKey, toolName } from './AuthDialog';
 import { useChat, waitingChats } from './chatStore';
 import { closeMemoryNote, memoryNoteClosed, memoryOff } from './memoryNote';
 import { Composer } from './Composer';
@@ -409,7 +409,7 @@ export function ChatView({ visible }: { visible: boolean }) {
                   </div>
                   {installing ? (
                     <p className={`mt-2 text-[12px] ${installing.failed ? 'text-bad' : 'text-zinc-500'}`} data-chat-install-state={installing.failed ? 'failed' : 'running'}>
-                      {t(installing.failed ? 'onboarding.tools.installFailed' : 'auth.install.waiting', { name: toolName(installing.id, t) ?? installing.id })}
+                      {t(installing.failed ? installFailedKey(state.auth?.find((one) => one.id === installing.id)?.installEnded) : 'auth.install.waiting', { name: toolName(installing.id, t) ?? installing.id })}
                     </p>
                   ) : null}
                 </div>
