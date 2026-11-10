@@ -2,8 +2,9 @@ name: desktop
 
 # Cortex's desktop app (desktop/): the type checker, the tests and the app run
 # end to end, then the Windows installer built and kept for a week so it can be
-# tried on a real machine. Windows only, as every job of this repository: it is
-# the platform the app is for.
+# tried on a real machine, and tried here first: installed on the runner, the
+# installed app opened, and uninstalled again. Windows only, as every job of
+# this repository: it is the platform the app is for.
 #
 # Only when the app or what it reads changes: desktop/ itself, this file, the
 # template the end-to-end run lays its vault out from, the engine the installer
@@ -37,7 +38,8 @@ concurrency:
 jobs:
   desktop:
     runs-on: windows-latest
-    timeout-minutes: 30
+    # Ten minutes more than before the installed app was tried here too (the last steps).
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: desktop
@@ -133,4 +135,26 @@ jobs:
           name: cortex-setup-windows
           path: desktop/release/*.exe
           if-no-files-found: error
+          retention-days: 7
+
+      # The installer just built, tried as a person's first day goes (e2e/kurulu.mjs): installed silently for this
+      # user, the installed Cortex.exe opened and its first screen seen, a vault made and the engine set up in it
+      # from the package the installed app carries (--motor), closed, and uninstalled silently with the person's
+      # data left alone. Until now the build only looked whether an installer came out, and the app was only ever
+      # started from the source tree (the review before the public release, K6). After the installer is kept: a
+      # run that fails here does not take the week's copy with it.
+      - name: Kurulu uygulama
+        run: node e2e/kurulu.mjs --motor
+        timeout-minutes: 15
+        env:
+          BEYIN_PYTHON: ${{ steps.python.outputs.python-path }}
+
+      # What that run saw, kept whether it passed or not: pictures of the installed app's window and uygulama.log
+      # (its checks, what the app wrote to its console, what its page logged). A Windows runner cannot be watched.
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: desktop-kurulu-uygulama
+          path: desktop/e2e/screenshots/kurulu/
+          if-no-files-found: ignore
           retention-days: 7
