@@ -173,4 +173,31 @@ test('LICENSE is the MIT text and nothing more, so GitHub names the licence; the
   }
   const readme = fs.readFileSync('../README.md', 'utf8');
   assert.match(readme, /\[MIT lisansı\]\(LICENSE\)[^\n]*markadır[^\n]*\[MARKA\.md\]\(MARKA\.md\)/);
+
+test('the installer CI builds is installed, opened and uninstalled on the same runner, after it is built and kept (K6)', () => {
+  // The build only looked whether an installer came out; what a person gets from it - the packaged app on a Windows
+  // it was just installed on - was never started anywhere (e2e/kurulu.mjs says what the run does).
+  const workflow = fs.readFileSync(path.join('..', '.github', 'workflows', 'desktop.yml'), 'utf8').replace(/\r\n/g, '\n');
+  const names = [...workflow.matchAll(/^      - (?:name: (.+)|uses: (\S+))$/gm)].map((found) => found[1] ?? found[2]);
+  const built = names.indexOf('Kurulum dosyasi');
+  const tried = names.indexOf('Kurulu uygulama');
+  assert.ok(built >= 0 && tried > built, names.join(' | '));
+  const step = workflow.slice(workflow.indexOf('- name: Kurulu uygulama'));
+  const own = step.slice(0, step.indexOf('\n      - ', 1));
+  // With the engine set up from the package the installed app carries, by the Python the other steps use; the window
+  // shown as a person's is, or hidden (--gizli) where a runner will not show one.
+  assert.match(own, /^\s+run: node e2e\/kurulu\.mjs --motor( --gizli)?$/m);
+  assert.match(own, /BEYIN_PYTHON: \$\{\{ steps\.python\.outputs\.python-path \}\}/);
+  // It cannot hold the job for ever, and what it saw is kept whether it passed or not: a Windows runner cannot be watched.
+  assert.match(own, /^\s+timeout-minutes: \d+$/m);
+  const kept = step.slice(own.length);
+  assert.match(kept, /^\n      - uses: actions\/upload-artifact@v4\n\s+if: \$\{\{ !cancelled\(\) \}\}\n\s+with:\n\s+name: desktop-kurulu-uygulama\n\s+path: desktop\/e2e\/screenshots\/kurulu\/\n/);
+  // The installer itself is kept before the run, as it was: a run that fails does not take the week's copy with it.
+  const uploads = [...workflow.matchAll(/name: (cortex-setup-windows|desktop-kurulu-uygulama|desktop-smoke-screenshots)/g)].map((found) => found[1]);
+  assert.deepEqual(uploads, ['desktop-smoke-screenshots', 'cortex-setup-windows', 'desktop-kurulu-uygulama']);
+  assert.ok(workflow.indexOf('name: cortex-setup-windows') < workflow.indexOf('- name: Kurulu uygulama'));
+  // The run is there to be run, and reads the installer's name from where the build writes it.
+  const run = fs.readFileSync(path.join('e2e', 'kurulu.mjs'), 'utf8');
+  assert.match(run, /path\.join\('release', layout\.installer\)/);
+  assert.equal((packaged.build.nsis as { artifactName?: string }).artifactName, 'Cortex-Setup-${version}.${ext}');
 });
