@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type { ChatEvent, ConfigOption, ToolStatus } from '../../shared/chat';
 import { fileLines, IMAGE_INLINE_MAX, type HeldAttachment } from './attachments';
 import { childEnv } from './acp';
-import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
+import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, networkTrouble, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
 import { launchFor } from './clis';
 import { readSettings } from './settings';
 
@@ -30,6 +30,10 @@ import { readSettings } from './settings';
  * Code no longer has - it deletes transcripts after a month
  * (`cleanupPeriodDays`) - is not resumed for ever: the message goes to a new
  * one, and the chat says so.
+ *
+ * A program no message was written to for a while (IDLE) is ended, as one whose setting changed is: a chat left open
+ * kept its `claude` running until the chat was deleted or the app closed, one for every chat written to (S9). The
+ * next message starts it again on the same session.
  */
 
 interface Proc {
@@ -51,6 +55,12 @@ interface Proc {
   streamed: Set<string>;
   /** The last real message's usage, which says how full the context is. */
   lastUsage: { used: number } | null;
+  /** Why it could not be started at all (startFailure), kept for the start that was waiting on it. */
+  notStarted: TurnFailure | null;
+  /** The retry the chat was last told of, so a run of them is said once; null once the answer goes on. */
+  retrySaid: string | null;
+  /** Ends the program left without a message for IDLE. */
+  idleTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const procs = new Map<string, Proc>();
@@ -62,6 +72,8 @@ const SESSION_GONE = /no conversation found/i;
 /** After its exit, how long the program's last words on standard error are waited for. */
 const DRAIN_MS = 1000;
 const EFFORTS = ['default', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+/** How long a chat's program is kept with no message written to it, before it is ended: in an object, so a test can wait less. */
+export const IDLE = { ms: 12 * 60_000 };
 
 /** The models offered before Claude Code says which it has, as its own `initialize` named them on 14 October. */
 const FALLBACK_MODELS = [
@@ -182,11 +194,31 @@ function resultText(content: unknown): string {
     .join('\n');
 }
 
-/** What a failed turn's sentence says it is. */
-function kindOfFailure(text: string): string | null {
+/**
+ * What a failed turn's sentence says it is. A server not reached, by the system's own code, is that whatever else the
+ * sentence names (a sign-in that could not be renewed for want of a connection is not a sign-in to make again). A
+ * subscription's allowance used up (`limit`: "5-hour limit reached · resets 3pm", "You've hit your … limit", read from
+ * Claude Code 2.1.322) comes back by itself, where a balance or a quota (`provider.quota`) does not (S10).
+ */
+export function kindOfFailure(text: string): string | null {
+  const network = networkTrouble(text);
+  if (network === 'code') return 'network';
   if (/\b401\b|authenticat|log ?in|oauth/i.test(text)) return 'auth';
-  if (/\b429\b|rate.?limit|usage limit|quota|credit balance/i.test(text)) return 'provider.quota';
-  return null;
+  if (/\b429\b|rate.?limit/i.test(text)) return 'provider.quota';
+  if (/usage limit|limit reached|hit your (?:[\w-]+ )*limit|out of (?:extra )?usage/i.test(text)) return 'limit';
+  if (/quota|credit balance/i.test(text)) return 'provider.quota';
+  return network ? 'network' : null;
+}
+
+/**
+ * Why Claude Code could not be started at all - Windows or an antivirus refusing its program (EPERM, EACCES), the
+ * program or the vault's folder gone (ENOENT): the system's code, not its sentence, which names the program's path.
+ * Its sentence goes to the log.
+ */
+export function startFailure(err: unknown): TurnFailure {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  console.warn('[chat] Claude Code could not start:', err instanceof Error ? err.message : err);
+  return new TurnFailure(typeof code === 'string' && /^[A-Z0-9_]{2,40}$/.test(code) ? `Claude Code could not start (${code}).` : 'Claude Code could not start.', 'not-started');
 }
 
 function write(proc: Proc, message: unknown): void {
@@ -209,11 +241,24 @@ function control(proc: Proc, request: Record<string, unknown>, ms = 30_000): Pro
   });
 }
 
+/** The program's time without a message begins (again): ended after IDLE unless a turn began meanwhile. */
+function idleFrom(proc: Proc): void {
+  if (proc.idleTimer) clearTimeout(proc.idleTimer);
+  proc.idleTimer = setTimeout(() => {
+    proc.idleTimer = null;
+    if (!proc.turn) close(proc);
+  }, IDLE.ms);
+  // Never what keeps the app from closing.
+  proc.idleTimer.unref();
+}
+
 function end(proc: Proc, why: TurnFailure): void {
   if (!proc.alive) return;
   proc.alive = false;
   if (proc.stopTimer) clearTimeout(proc.stopTimer);
   proc.stopTimer = null;
+  if (proc.idleTimer) clearTimeout(proc.idleTimer);
+  proc.idleTimer = null;
   if (procs.get(proc.chatId) === proc) procs.delete(proc.chatId);
   for (const answer of proc.controls.values()) answer(null);
   proc.controls.clear();
@@ -266,8 +311,17 @@ function receive(proc: Proc, line: string): void {
   switch (message.type) {
     case 'system':
       if (message.subtype === 'init' && typeof message.session_id === 'string') turn.setSession(message.session_id);
+      // A request to the API that failed and is tried again (read from Claude Code 2.1.322: `api_retry` with `attempt`,
+      // `retry_delay_ms`, and `error_status`, null where no answer came at all). Nothing was told of it: with no
+      // internet the chat read "working" for minutes (S3). Said once for a run of them, as what it is.
+      if (message.subtype === 'api_retry') {
+        const notice = typeof message.error_status === 'number' ? 'retry-busy' : 'retry-network';
+        if (proc.retrySaid !== notice) turn.emit({ type: 'notice', notice });
+        proc.retrySaid = notice;
+      }
       break;
     case 'stream_event': {
+      proc.retrySaid = null;
       const event = message.event as { type?: unknown; message?: { id?: unknown }; delta?: { type?: unknown; text?: unknown; thinking?: unknown } } | undefined;
       if (event?.type === 'message_start' && typeof event.message?.id === 'string') proc.messageId = event.message.id;
       if (event?.type === 'content_block_delta' && proc.messageId) {
@@ -333,8 +387,10 @@ function receive(proc: Proc, line: string): void {
       proc.finish = null;
       proc.fail = null;
       proc.streamed.clear();
+      proc.retrySaid = null;
       if (proc.stopTimer) clearTimeout(proc.stopTimer);
       proc.stopTimer = null;
+      idleFrom(proc);
       if (proc.cancelled) finish?.('cancelled');
       else if (message.is_error) {
         const text = textOf(message.result, 1000) || textOf(message.terminal_reason, 100) || 'Claude Code could not answer.';
@@ -389,8 +445,32 @@ async function answerControl(proc: Proc, message: Record<string, unknown>): Prom
 async function start(turn: Turn, options: ConfigOption[]): Promise<Proc> {
   const launch = launchFor(turn.cli);
   if (!launch) throw new ChatRefusal('Claude Code is not installed on this machine.');
-  const child = spawn(launch.command, claudeArgs(launch.args, options, turn.sessionId), { cwd: turn.vault, env: childEnv(launch.env), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false });
-  const proc: Proc = { chatId: turn.chatId, child, alive: true, buffer: '', stderr: '', controls: new Map(), turn: null, finish: null, fail: null, cancelled: false, stopTimer: null, messageId: null, streamed: new Set(), lastUsage: null };
+  let child: ChildProcessWithoutNullStreams;
+  try {
+    child = spawn(launch.command, claudeArgs(launch.args, options, turn.sessionId), { cwd: turn.vault, env: childEnv(launch.env), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false });
+  } catch (err) {
+    // Refused at once: Node throws what the system says of a start it would not make (EPERM under an antivirus), where a program not found comes as an `error` event.
+    throw startFailure(err);
+  }
+  const proc: Proc = {
+    chatId: turn.chatId,
+    child,
+    alive: true,
+    buffer: '',
+    stderr: '',
+    controls: new Map(),
+    turn: null,
+    finish: null,
+    fail: null,
+    cancelled: false,
+    stopTimer: null,
+    messageId: null,
+    streamed: new Set(),
+    lastUsage: null,
+    notStarted: null,
+    retrySaid: null,
+    idleTimer: null,
+  };
   procs.set(turn.chatId, proc);
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
@@ -412,7 +492,13 @@ async function start(turn: Turn, options: ConfigOption[]): Promise<Proc> {
     proc.stderr = (proc.stderr + chunk).slice(-STDERR_KEPT);
   });
   const stopped = () => new TurnFailure(proc.stderr.trim() ? `Claude Code stopped: ${proc.stderr.trim().split('\n').slice(-3).join(' ').slice(0, 500)}` : 'Claude Code stopped.', 'stopped');
-  child.on('error', (err) => end(proc, new TurnFailure(`Claude Code could not start: ${err.message}`, 'stopped')));
+  // Never started (no process id): no turn is waiting to be failed yet, so the reason is kept for the start below. It
+  // was dropped, and the chat said only "Claude Code stopped." (S1). An error of a program that did start is its stop.
+  child.on('error', (err) => {
+    if (!proc.alive) return;
+    if (child.pid === undefined) proc.notStarted = startFailure(err);
+    end(proc, proc.notStarted ?? stopped());
+  });
   // Why it stopped is read once its output is closed: at its exit, Node may not have handed over all
   // it wrote to standard error, and the reason was cut to "Claude Code stopped.". A program it left
   // holding the pipes open is not waited for long.
@@ -426,7 +512,9 @@ async function start(turn: Turn, options: ConfigOption[]): Promise<Proc> {
     if (err instanceof Stopped) close(proc);
     throw err;
   }
-  if (!proc.alive) throw stopped();
+  if (!proc.alive) throw proc.notStarted ?? stopped();
+  // Left with no message - a start whose turn was given up - it is ended as any other.
+  idleFrom(proc);
   if (Array.isArray(ready?.models)) {
     const models = (ready.models as Array<{ value?: unknown; displayName?: unknown }>)
       .filter((one) => typeof one.value === 'string')
@@ -465,6 +553,9 @@ function send(proc: Proc, turn: Turn, message: string): Promise<string> {
     proc.turn = turn;
     proc.cancelled = false;
     proc.lastUsage = null;
+    proc.retrySaid = null;
+    if (proc.idleTimer) clearTimeout(proc.idleTimer);
+    proc.idleTimer = null;
     proc.finish = resolve;
     proc.fail = reject;
     write(proc, { type: 'user', message: { role: 'user', content: contentOf(message, turn.attachments) }, parent_tool_use_id: null });

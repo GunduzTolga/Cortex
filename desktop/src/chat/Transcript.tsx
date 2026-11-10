@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Brain, Check, ChevronRight, FileText, Globe, Image as ImageIcon, Info, ListChecks, PencilLine, Search, Terminal, Wrench, X } from 'lucide-react';
+import { AlertTriangle, Brain, Check, ChevronRight, FileText, Globe, Image as ImageIcon, Info, ListChecks, PencilLine, Search, Terminal, WifiOff, Wrench, X } from 'lucide-react';
 // Pyn beside its answers, the logo's small copy (drawn for 24-36 px). While Pyn is still writing, it pulses.
 import face from '../../../tema/ananas/marka/pyn-logo-96.png';
 import { turkishOf } from '@shared/refusalsTr';
@@ -88,6 +88,11 @@ function Fold({ icon, label, busy, children, data }: { icon: React.ReactNode; la
 
 const ERRORS: Record<string, Key> = {
   'provider.quota': 'chat.error.quota',
+  limit: 'chat.error.limit',
+  network: 'chat.error.network',
+  'not-started': 'chat.error.notStarted',
+  'start-timeout': 'chat.error.startTimeout',
+  'local-busy': 'chat.error.localBusy',
   auth: 'chat.error.auth',
   'provider-auth': 'chat.error.providerAuth',
   'provider-key': 'chat.error.providerKey',
@@ -158,10 +163,17 @@ function Answer({ turn, live, onSignIn, onRetry }: { turn: Turn; live: boolean; 
           <div className="kg-chat text-[14px]" data-chat-text>
             <AnswerText text={turn.text} />
           </div>
-        ) : working && !turn.thought && !turn.steps.length ? (
+        ) : working && !turn.retrying && !turn.thought && !turn.steps.length ? (
           <p className="flex items-center gap-2 text-[12.5px] text-zinc-400" data-chat-working>
             <Spinner size={12} />
             {t('chat.working')}
+          </p>
+        ) : null}
+        {/* The tool asking its provider again: said while it does, where "working" stood for minutes with no internet (S3). */}
+        {working && turn.retrying ? (
+          <p className="mt-1 flex items-center gap-2 text-[12.5px] text-zinc-500" data-chat-retrying={turn.retrying}>
+            <WifiOff size={13} className="shrink-0" />
+            {t(turn.retrying === 'network' ? 'chat.retry.network' : 'chat.retry.busy')}
           </p>
         ) : null}
         {turn.end?.kind === 'error' ? (

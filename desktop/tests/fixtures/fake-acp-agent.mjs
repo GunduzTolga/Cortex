@@ -5,7 +5,7 @@
 // waits and never heeds a cancel, "hata" fails as a provider out of quota
 // does, "anahtarsız" as OpenCode without a key for the model's provider,
 // "yetkisiz" as an agent not signed in does by the protocol's code
-// alone, "çök" dies. With FAKE_ACP_HANG_INIT set it never answers
+// alone, "ağsız" as one whose provider was not reached (no internet), "çök" dies. With FAKE_ACP_HANG_INIT set it never answers
 // `initialize`, with FAKE_ACP_FAIL_INIT it refuses it. Every method it is sent
 // is written to FAKE_AGENT_LOG, when set, as one JSON line. With FAKE_AGENT_GATE
 // set, "kapı" holds the leave it asks until a file is at that path (and takes
@@ -54,6 +54,10 @@ async function prompt(id, params) {
   if (text.includes('anahtarsız')) {
     // As OpenCode refuses a model whose provider's key it cannot load (its LoadAPIKeyError): the provider not named.
     send({ jsonrpc: '2.0', id, error: { code: -32000, message: 'Authentication required: provider authentication required', data: {} } });
+    return;
+  }
+  if (text.includes('ağsız')) {
+    send({ jsonrpc: '2.0', id, error: { code: -32603, message: 'Internal error: Unable to connect. Is the computer able to access the url? (getaddrinfo ENOTFOUND api.example.com)' } });
     return;
   }
   if (text.includes('yetkisiz')) {
