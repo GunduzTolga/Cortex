@@ -188,6 +188,23 @@ export const installedDirs = (): string[] => [
 let refreshing: Promise<void> | null = null;
 let refreshedAt = 0;
 const REFRESH_EVERY = 10_000;
+/** How long whoever asks for the tools waits on the PATH being read again; `now` waits it out. */
+const REFRESH_WAIT = 1_500;
+
+/**
+ * Work waited for at most this long: over when the work is, or when the time is up, whichever comes first. The work
+ * goes on either way, and its failure is nobody's here.
+ */
+export function waitedAtMost(work: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    work.then(done, done);
+  });
+}
 
 /**
  * The PATH as a program started now would have it. Windows hands a program the PATH of the
@@ -197,25 +214,31 @@ const REFRESH_EVERY = 10_000;
  * process lacks are added to its own, so every tool found and started after sees them; the
  * installer's folder with them. At most every ten seconds unless `now`; elsewhere a no-op.
  *
+ * Read by PowerShell, which an antivirus can hold up for seconds: whoever asks without `now` - the chat's list of
+ * tools, the tools' sign-ins, the setup's status - waits a moment for it and then goes on with the PATH as it is known,
+ * the reading finished behind them for the next to ask. They waited it out, up to its fifteen seconds, with an empty
+ * list on screen (the review before 1.0.62, K9 and S7). After an install (`now`) it is waited out, as before.
+ *
  * CORTEX_NO_PATH_REFRESH=1 (tests only): the PATH a test set is kept as it is. Tests used to point SystemRoot at an
  * empty folder so PowerShell was not found, but a node started from that environment could not start on Windows, and a
  * stand-in CLI run by node answered nothing (6 November, the MCP section's tests on Windows CI).
  */
 export function refreshPath(now = false): Promise<void> {
   if (!WINDOWS || process.env.CORTEX_NO_PATH_REFRESH === '1') return Promise.resolve();
-  if (refreshing) return refreshing;
-  if (!now && Date.now() - refreshedAt < REFRESH_EVERY) return Promise.resolve();
-  refreshing = new Promise<void>((resolve) => {
-    execFile(powerShellExe(), ['-NoProfile', '-NonInteractive', '-Command', READ_PATH], { windowsHide: true, timeout: 15_000, encoding: 'utf8' }, (err, stdout) => {
-      const fresh = err ? [] : pathOutput(String(stdout));
-      const dirs = [...fresh, ...installedDirs().filter((dir) => fs.existsSync(dir))];
-      process.env.PATH = withDirs(process.env.PATH ?? '', dirs, ';');
-      refreshedAt = Date.now();
-      refreshing = null;
-      resolve();
+  if (!refreshing) {
+    if (!now && Date.now() - refreshedAt < REFRESH_EVERY) return Promise.resolve();
+    refreshing = new Promise<void>((resolve) => {
+      execFile(powerShellExe(), ['-NoProfile', '-NonInteractive', '-Command', READ_PATH], { windowsHide: true, timeout: 15_000, encoding: 'utf8' }, (err, stdout) => {
+        const fresh = err ? [] : pathOutput(String(stdout));
+        const dirs = [...fresh, ...installedDirs().filter((dir) => fs.existsSync(dir))];
+        process.env.PATH = withDirs(process.env.PATH ?? '', dirs, ';');
+        refreshedAt = Date.now();
+        refreshing = null;
+        resolve();
+      });
     });
-  });
-  return refreshing;
+  }
+  return now ? refreshing : waitedAtMost(refreshing, REFRESH_WAIT);
 }
 
 /** The first of these names in a folder of the PATH. */

@@ -305,7 +305,9 @@ export function registerIpc(): void {
   });
   handle('chat:auth', () => auth.authStatuses());
   handle('chat:login', (cli) => auth.startLogin(cli));
+  handle('chat:cancelLogin', (cli) => auth.cancelLogin(cli));
   handle('chat:install', (cli) => auth.installTool(cli));
+  handle('chat:installProgress', (cli) => auth.installProgressOf(cli));
   handle('chat:setKey', async (cli, key, baseUrl) => {
     await auth.setToolKey(cli, key, baseUrl);
     chat.restartIdleChats();

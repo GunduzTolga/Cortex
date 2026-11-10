@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -192,6 +192,105 @@ test('a download whose SHA-512 is not the registry’s, or a package without the
   } finally {
     await tampered.close();
     await empty.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('K4: a download from which nothing comes any more is given up and said so, not waited on for its half hour', async () => {
+  // A connection gone quiet (a proxy, a Wi-Fi that dropped): the window said "installing" for thirty minutes.
+  const dir = temp();
+  // Not to be squeezed small: the first piece is sent, the rest never comes.
+  const tgz = gzipSync(tarOf([{ name: 'package/bin/opencode.exe', data: randomBytes(60_000) }]));
+  const server = http.createServer((req, res) => {
+    const { port } = server.address() as AddressInfo;
+    if (req.url === '/files/paket.tgz') {
+      res.writeHead(200, { 'content-length': String(tgz.length) });
+      res.write(tgz.subarray(0, 2000));
+      return;
+    }
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ name: 'paket', version: '1.2.3', dist: { tarball: `http://127.0.0.1:${port}/files/paket.tgz`, integrity: `sha512-${createHash('sha512').update(tgz).digest('base64')}` } }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  const heard: number[] = [];
+  try {
+    const began = Date.now();
+    const ended = await Promise.race([
+      installPackage('opencode', { dir, registry: `http://127.0.0.1:${port}/`, arch: 'x64', idle: 400, progress: (got) => heard.push(got) }).then(
+        () => 'installed',
+        (err: unknown) => err,
+      ),
+      new Promise((resolve) => setTimeout(() => resolve('still waiting after 6 s'), 6_000)),
+    ]);
+    assert.ok(ended instanceof PackageRefusal, String(ended));
+    assert.match(ended.message, /^The download stalled: nothing came for a while\./);
+    assert.ok(Date.now() - began < 5_000, 'given up a moment after it went quiet');
+    assert.ok(heard.length > 0 && heard.at(-1) === 2000, 'what did come was counted');
+    assert.ok(!fs.existsSync(path.join(dir, 'opencode-indiriliyor')), 'nothing half-done left');
+    assert.ok(!fs.existsSync(path.join(dir, 'opencode')));
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('K4: a download tells how far it is: the bytes come so far, of how many', async () => {
+  const dir = temp();
+  const tar = tarOf([{ name: 'package/bin/opencode.exe', data: randomBytes(300_000) }]);
+  const size = gzipSync(tar).length;
+  const served = await registry(tar);
+  const steps: Array<[number, number | null]> = [];
+  try {
+    await installPackage('opencode', { dir, registry: served.url, arch: 'x64', progress: (got, total) => steps.push([got, total]) });
+    assert.ok(steps.length > 0, 'told as the download comes');
+    assert.deepEqual(steps.at(-1), [size, size], 'all of it at the end, of the length the server gave');
+    assert.ok(steps.every(([got], at) => at === 0 || got > steps[at - 1][0]), 'only ever further');
+    assert.ok(steps.every(([, total]) => total === size));
+  } finally {
+    await served.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('K4: Windows refusing the last rename for a moment (an antivirus reading the new program) is tried again; refused for good, it is said as that', async () => {
+  const dir = temp();
+  const served = await registry(tarOf([{ name: 'package/bin/opencode.exe', data: 'MZ yeni' }]));
+  const rename = fs.renameSync;
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  let refusals = 2;
+  let tried = 0;
+  // As Windows refuses it while a scanner holds a file in the folder; only there is it tried again (fileWrite.ts).
+  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+  (fs as { renameSync: typeof fs.renameSync }).renameSync = ((from: fs.PathLike, to: fs.PathLike) => {
+    if (String(to) !== path.join(dir, 'opencode')) return rename(from, to);
+    tried += 1;
+    if (tried <= refusals) throw Object.assign(new Error(`EPERM: operation not permitted, rename '${String(from)}' -> '${String(to)}'`), { code: 'EPERM' });
+    return rename(from, to);
+  }) as typeof fs.renameSync;
+  try {
+    const program = await installPackage('opencode', { dir, registry: served.url, arch: 'x64' });
+    assert.equal(tried, 3, 'refused twice, in place at the third');
+    assert.equal(fs.readFileSync(program, 'utf8'), 'MZ yeni');
+    assert.ok(!fs.existsSync(path.join(dir, 'opencode-indiriliyor')));
+
+    // Held for good: not "close it where it is open" - it is not open anywhere, it was never there.
+    fs.rmSync(path.join(dir, 'opencode'), { recursive: true, force: true });
+    refusals = Infinity;
+    tried = 0;
+    await assert.rejects(installPackage('opencode', { dir, registry: served.url, arch: 'x64' }), (err: unknown) => {
+      assert.ok(err instanceof PackageRefusal);
+      assert.match(err.message, /another program \(an antivirus, perhaps\) is holding its new files\. Try again in a moment\.$/);
+      assert.doesNotMatch(err.message, /EPERM|rename/);
+      return true;
+    });
+    assert.ok(tried > 3, 'after trying for a moment');
+    assert.ok(!fs.existsSync(path.join(dir, 'opencode-indiriliyor')), 'nothing half-done left');
+  } finally {
+    (fs as { renameSync: typeof fs.renameSync }).renameSync = rename;
+    if (platform) Object.defineProperty(process, 'platform', platform);
+    await served.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

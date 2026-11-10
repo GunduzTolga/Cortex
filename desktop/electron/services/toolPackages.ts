@@ -7,6 +7,7 @@ import { Readable, Transform, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip } from 'node:zlib';
 import type { CliId } from '../../shared/chat';
+import { renameRetrying } from './fileWrite';
 import { netFetch } from './netFetch';
 
 /**
@@ -57,6 +58,12 @@ export const REGISTRY = 'https://registry.npmjs.org/';
 const RECORD = 'cortex-tool.json';
 /** A download this slow is given up: 30 minutes is under 100 kB/s for Codex's 173 MB. */
 const DOWNLOAD_LIMIT = 30 * 60_000;
+/**
+ * And one from which nothing has come for this long: a connection that went quiet was waited on for those 30 minutes,
+ * the window saying "installing" all the while (the review before 1.0.62, K4).
+ */
+const DOWNLOAD_IDLE = 60_000;
+const STALLED = 'The download stalled: nothing came for a while. Check the internet connection and try again.';
 
 /** Where the tools Cortex installs are kept: one folder each. */
 export function toolsDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -127,8 +134,13 @@ async function manifestOf(url: string): Promise<Manifest> {
 /**
  * A tool's package downloaded, checked and unpacked: into a folder beside where it goes, put in its place only once all
  * of it is there and its SHA-512 is the registry's. Returns the program. The registry and the folder are the tests'.
+ * `progress` is told how many of the download's bytes have come, and of how many where the server says; `idle`, how long
+ * the download may stay quiet (the tests').
  */
-export async function installPackage(id: CliId, options: { dir?: string; registry?: string; arch?: Arch; older?: boolean } = {}): Promise<string> {
+export async function installPackage(
+  id: CliId,
+  options: { dir?: string; registry?: string; arch?: Arch; older?: boolean; idle?: number; progress?: (got: number, total: number | null) => void } = {},
+): Promise<string> {
   const spec = PACKAGES[id];
   if (!spec) throw new PackageRefusal('Cortex does not install this tool.');
   const arch = options.arch ?? archOf();
@@ -141,27 +153,46 @@ export async function installPackage(id: CliId, options: { dir?: string; registr
   const part = path.join(dir, `${id}-indiriliyor`);
   fs.rmSync(part, { recursive: true, force: true });
   fs.mkdirSync(part, { recursive: true });
+  // Quiet for too long, the download is ended: the request, and what is being read of it.
+  const stalled = new AbortController();
+  let source: Readable | null = null;
+  let quiet: ReturnType<typeof setTimeout> | undefined;
+  const heard = () => {
+    clearTimeout(quiet);
+    quiet = setTimeout(() => {
+      stalled.abort();
+      source?.destroy();
+    }, options.idle ?? DOWNLOAD_IDLE);
+  };
   try {
     let answer: Response;
+    heard();
     try {
-      answer = await netFetch(manifest.tarball, { signal: AbortSignal.timeout(DOWNLOAD_LIMIT) });
+      answer = await netFetch(manifest.tarball, { signal: AbortSignal.any([AbortSignal.timeout(DOWNLOAD_LIMIT), stalled.signal]) });
     } catch {
-      throw new PackageRefusal('The download did not start: check the internet connection and try again.');
+      throw new PackageRefusal(stalled.signal.aborted ? STALLED : 'The download did not start: check the internet connection and try again.');
     }
     if (!answer.ok || !answer.body) throw new PackageRefusal(`The package was not found (${answer.status}). Try again later.`);
+    const total = Number(answer.headers.get('content-length')) || null;
+    let got = 0;
     const hash = createHash('sha512');
     const tap = new Transform({
       transform(chunk: Buffer, _encoding, done) {
+        heard();
+        got += chunk.length;
+        options.progress?.(got, total);
         hash.update(chunk);
         done(null, chunk);
       },
     });
     try {
-      await pipeline(Readable.fromWeb(answer.body as Parameters<typeof Readable.fromWeb>[0]), tap, createGunzip(), untar(part));
+      source = Readable.fromWeb(answer.body as Parameters<typeof Readable.fromWeb>[0]);
+      await pipeline(source, tap, createGunzip(), untar(part));
     } catch (err) {
       if (err instanceof PackageRefusal) throw err;
-      throw new PackageRefusal('The download did not finish: check the internet connection and try again.');
+      throw new PackageRefusal(stalled.signal.aborted ? STALLED : 'The download did not finish: check the internet connection and try again.');
     }
+    clearTimeout(quiet);
     if (`sha512-${hash.digest('base64')}` !== manifest.integrity) {
       throw new PackageRefusal('The download was not the package its maker published (its SHA-512 differs). Nothing was installed; try again.');
     }
@@ -169,13 +200,20 @@ export async function installPackage(id: CliId, options: { dir?: string; registr
     fs.writeFileSync(path.join(part, RECORD), `${JSON.stringify({ name: manifest.name, version: manifest.version, program }, null, 2)}\n`);
     try {
       fs.rmSync(target, { recursive: true, force: true });
-      fs.renameSync(part, target);
     } catch {
       throw new PackageRefusal('The tool could not be put in place: close it where it is open, then try again.');
+    }
+    try {
+      // Tried again for a moment: an antivirus opens a program just unpacked, and Windows then refuses the rename.
+      renameRetrying(part, target);
+    } catch {
+      throw new PackageRefusal('The tool could not be put in place: another program (an antivirus, perhaps) is holding its new files. Try again in a moment.');
     }
   } catch (err) {
     fs.rmSync(part, { recursive: true, force: true });
     throw err;
+  } finally {
+    clearTimeout(quiet);
   }
   return path.join(target, ...program.split('/'));
 }

@@ -134,6 +134,7 @@ const RULES: Rule[] = [
   // electron/services/toolPackages.ts: OpenCode, Codex, Gemini CLI and Qwen Code installed by Cortex
   { pattern: /^The download did not start: check the internet connection and try again\.$/, say: () => 'İndirme başlamadı: internet bağlantını denetleyip yeniden dene.' },
   { pattern: /^The download did not finish: check the internet connection and try again\.$/, say: () => 'İndirme bitmedi: internet bağlantını denetleyip yeniden dene.' },
+  { pattern: /^The download stalled: nothing came for a while\. Check the internet connection and try again\.$/, say: () => 'İndirme takıldı: bir süredir veri gelmiyor; internet bağlantını denetleyip yeniden dene.' },
   { pattern: /^The package was not found \((.+)\)\. Try again later\.$/, say: ([status]) => `Paket bulunamadı (${status}). Biraz sonra yeniden dene.` },
   { pattern: /^The package was not found\. Try again later\.$/, say: () => 'Paket bulunamadı. Biraz sonra yeniden dene.' },
   { pattern: /^The download was not the package its maker published \(its SHA-512 differs\)\. Nothing was installed; try again\.$/, say: () => 'İnen dosya, aracı yapanın yayımladığı paket değil (SHA-512 tutmuyor). Hiçbir şey kurulmadı; yeniden dene.' },
@@ -141,6 +142,10 @@ const RULES: Rule[] = [
   { pattern: /^The package names a file outside its folder\. Nothing was installed\.$/, say: () => 'Paket kendi klasörünün dışına dosya yazmak istiyor. Hiçbir şey kurulmadı.' },
   { pattern: /^The package is not one Cortex can open\.$/, say: () => 'Cortex bu paketi açamıyor.' },
   { pattern: /^The tool could not be put in place: close it where it is open, then try again\.$/, say: () => 'Araç yerine konamadı: açık olduğu yerde kapatıp yeniden dene.' },
+  {
+    pattern: /^The tool could not be put in place: another program \(an antivirus, perhaps\) is holding its new files\. Try again in a moment\.$/,
+    say: () => 'Araç yerine konamadı: yeni dosyalarını başka bir program (belki antivirüs) tutuyor; birazdan yeniden dene.',
+  },
   { pattern: /^This tool keeps its keys in its own sign-in\.$/, say: () => 'Bu araç anahtarlarını kendi girişinde saklar.' },
   { pattern: /^That is not a key\.$/, say: () => 'Bu bir anahtar değil.' },
   { pattern: /^Codex did not take the key\.$/, say: () => 'Codex anahtarı kabul etmedi.' },
@@ -175,6 +180,10 @@ const RULES: Rule[] = [
 
   // electron/services/vault.ts: choosing the vault
   { pattern: /^No folder could be made for the vault in Documents\. Choose one\.$/, say: () => 'Belgeler içinde kasa için klasör açılamadı. Bir klasör seç.' },
+  {
+    pattern: /^Cortex could not make a folder for the vault in Documents: Windows did not allow it \(the folder may be protected\)\. Choose another folder\.$/,
+    say: () => 'Cortex, Belgeler içinde kasa için klasör açamadı: Windows izin vermedi (klasör korumalı olabilir); Kasayı seç ile başka bir klasör seç.',
+  },
   { pattern: /^([\s\S]+?) cannot be the vault: the app keeps its own files in or around it\. Choose the folder your notes are in\.$/, say: ([name]) => `${name} kasa olamaz: uygulama kendi dosyalarını onun içinde ya da çevresinde tutuyor. Notlarının durduğu klasörü seç.` },
   { pattern: /^The vault ([\s\S]+?) leads elsewhere through a link now\. Choose it again\.$/, say: ([name]) => `${name} kasası artık bir bağlantı üzerinden başka bir yere çıkıyor. Onu yeniden seç.` },
   { pattern: /^([\s\S]+?) leads elsewhere through a link\. Choose the folder itself\.$/, say: ([name]) => `${name} bir bağlantı üzerinden başka bir yere çıkıyor. Klasörün kendisini seç.` },

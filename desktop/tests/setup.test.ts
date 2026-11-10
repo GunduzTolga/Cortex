@@ -7,7 +7,7 @@ import test from 'node:test';
 import { ENGINE_SENTENCES } from '../shared/engineError';
 import { engineAction, type SetupPush } from '../shared/setup';
 import { pythonOf } from '../electron/services/localChat';
-import { updateSettings } from '../electron/services/settings';
+import { readSettings, updateSettings } from '../electron/services/settings';
 import {
   bundledPackage,
   changeHotkey,
@@ -23,6 +23,7 @@ import {
   isPredecessor,
   onSetupPush,
   onVoiceStatus,
+  pythonInstallFailure,
   readLine,
   repointYakala,
   restartListener,
@@ -325,6 +326,40 @@ test('the Python that came with the app is run only as python.org signed it: a f
     delete process.env.CORTEX_PYTHON_INSTALLERS;
   }
   assert.ok(PYTHON_INSTALL_ARGS.includes('InstallAllUsers=0') && PYTHON_INSTALL_ARGS.includes('PrependPath=0'), 'for this user only, the PATH left alone');
+});
+
+test('K8: Python’s installer ending without Python says what happened and what to do, not only its exit code', () => {
+  // "Python kurulamadı (çıkış kodu 1618)" told nobody that another installation was going on and to try again after it.
+  const before = readSettings().language;
+  try {
+    updateSettings((settings) => {
+      settings.language = 'tr';
+    });
+    assert.equal(pythonInstallFailure(0), null, 'installed');
+    assert.equal(pythonInstallFailure(3010), null, 'installed; a restart asked for');
+    assert.match(pythonInstallFailure(1618) ?? '', /başka bir Windows kurulumu ya da güncellemesi sürüyor; bitmesini bekleyip .* yeniden dene\.$/);
+    assert.match(pythonInstallFailure(1602) ?? '', /iptal edildi; .* yeniden bas\.$/);
+    assert.match(pythonInstallFailure(1603) ?? '', /1603.*yeniden başlatıp yeniden dene.*python\.org\/downloads/);
+    // One nobody has a sentence for: its code, and the way round it.
+    assert.match(pythonInstallFailure(1638) ?? '', /çıkış kodu 1638\); python\.org\/downloads adresinden Python 3\.11 ya da sonrasını kurup buraya dön\.$/);
+    assert.match(pythonInstallFailure(-1) ?? '', /python\.org\/downloads/);
+    // Ended here for taking too long, whatever its code: minutes, not the three hours of a model's download.
+    const late = pythonInstallFailure(-1, true) ?? '';
+    assert.match(late, /^Python kurulumu (\d+) dakikada bitmedi ve durduruldu; .*python\.org\/downloads/);
+    assert.ok(Number(/(\d+) dakikada/.exec(late)?.[1]) <= 30, late);
+    assert.match(pythonInstallFailure(0, true) ?? '', /durduruldu/);
+    // Every one of them one sentence, with nothing of the system's own in it.
+    for (const code of [1602, 1603, 1618, 1638]) assert.doesNotMatch(pythonInstallFailure(code) ?? '', /\.\s+\S|Error|exit code/, String(code));
+    updateSettings((settings) => {
+      settings.language = 'en';
+    });
+    assert.match(pythonInstallFailure(1618) ?? '', /^Another Windows installation or update is going on; wait for it to finish, then try the Python setup again\.$/);
+    assert.match(pythonInstallFailure(5) ?? '', /exit code 5\); install Python 3\.11 or newer from python\.org\/downloads/);
+  } finally {
+    updateSettings((settings) => {
+      settings.language = before;
+    });
+  }
 });
 
 test('the engine’s Turkish steps are said in English in an English window, the numbers kept, and left alone in Turkish', () => {

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -47,6 +47,11 @@ const VERSION_FILE = '.beyin-version';
 const PACKAGE = /^beyin-v3-(\d+)\.(\d+)\.(\d+)\.zip$/;
 const STATUS_TIMEOUT = 60_000;
 const JOB_TIMEOUT = 3 * 60 * 60_000;
+/**
+ * Python's installer takes a minute to three; one still running after this long is stuck (waiting on another
+ * installation, or on a window nobody sees) and is ended. It had the three hours of a 2 GB download (K8).
+ */
+const PYTHON_TIMEOUT = 15 * 60_000;
 
 let current: SetupJob | null = null;
 /** Who waits for the job going on to end: the app, asked to quit when it is done (electron/main.ts). */
@@ -225,20 +230,63 @@ export function sha256Of(file: string): Promise<string> {
   });
 }
 
-/** The installer run and waited for; its exit code (python.org's: 0 done, 3010 done after a restart, 1602 cancelled). */
-function runInstaller(file: string, args: string[], timeout: number): Promise<number> {
+/**
+ * The installer run and waited for; its exit code (python.org's: 0 done, 3010 done after a restart, 1602 cancelled),
+ * and whether it was ended here for taking too long.
+ */
+function runInstaller(file: string, args: string[], timeout: number): Promise<{ code: number; timedOut: boolean }> {
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, { windowsHide: true, stdio: 'ignore' });
-    const timer = setTimeout(() => child.kill(), timeout);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // With what it started: python.org's installer is a launcher for the installers inside it, which outlive it.
+      if (process.platform === 'win32' && child.pid !== undefined) {
+        execFile(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => undefined);
+      } else child.kill();
+    }, timeout);
     child.on('error', (err) => {
       clearTimeout(timer);
       reject(err);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
-      resolve(code ?? -1);
+      resolve({ code: code ?? -1, timedOut });
     });
   });
+}
+
+/**
+ * What to say when python.org's installer did not install it, and what to do about it; null where it did (0, or 3010:
+ * done, a restart asked for). Its exit codes are Windows Installer's: 1602 the person said no, 1618 another
+ * installation is going on (Windows runs one at a time: an update, another setup), 1603 it failed. Only "Python
+ * kurulamadı (çıkış kodu 1618)" was said, which told nobody to wait and try again (the review before 1.0.62, K8).
+ */
+export function pythonInstallFailure(code: number, timedOut = false): string | null {
+  if (timedOut) {
+    return say(
+      `Python kurulumu ${PYTHON_TIMEOUT / 60_000} dakikada bitmedi ve durduruldu; bilgisayarı yeniden başlatıp yeniden dene, olmazsa python.org/downloads adresinden Python 3.11 ya da sonrasını kur.`,
+      `The Python setup did not finish in ${PYTHON_TIMEOUT / 60_000} minutes and was stopped; restart the computer and try again, or install Python 3.11 or newer from python.org/downloads.`,
+    );
+  }
+  if (code === 0 || code === 3010) return null;
+  if (code === 1602) return say('Python kurulumu iptal edildi; kurmak için düğmeye yeniden bas.', 'The Python setup was cancelled; press the button again to install it.');
+  if (code === 1618) {
+    return say(
+      'Şu an başka bir Windows kurulumu ya da güncellemesi sürüyor; bitmesini bekleyip Python kurulumunu yeniden dene.',
+      'Another Windows installation or update is going on; wait for it to finish, then try the Python setup again.',
+    );
+  }
+  if (code === 1603) {
+    return say(
+      'Python kurulamadı (Windows kurulum hatası 1603); bilgisayarı yeniden başlatıp yeniden dene, olmazsa python.org/downloads adresinden Python 3.11 ya da sonrasını kur.',
+      'Python could not be installed (Windows Installer error 1603); restart the computer and try again, or install Python 3.11 or newer from python.org/downloads.',
+    );
+  }
+  return say(
+    `Python kurulamadı (çıkış kodu ${code}); python.org/downloads adresinden Python 3.11 ya da sonrasını kurup buraya dön.`,
+    `Python could not be installed (exit code ${code}); install Python 3.11 or newer from python.org/downloads and come back here.`,
+  );
 }
 
 /** The version the vault's engine says it is, from the stamp its installer writes; null without an engine. */
@@ -643,17 +691,17 @@ export function installPython(): Promise<SetupStatus> {
     step(say(`Python ${pythonPin.version} kuruluyor (yalnız senin kullanıcın için)…`, `Installing Python ${pythonPin.version} (for you only)…`));
     // Run under its own name from a folder of its own: the bytes just checked, as python.org signed them.
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-python-'));
-    let code: number;
+    let ended: { code: number; timedOut: boolean };
     try {
       const runnable = path.join(folder, pythonPin.file);
       fs.copyFileSync(file, runnable);
       if ((await sha256Of(runnable)) !== pythonPin.sha256) throw new Error(say('Python kurucusu kopyalanırken değişti; çalıştırılmadı.', 'The Python installer changed while copied; it was not run.'));
-      code = await runInstaller(runnable, PYTHON_INSTALL_ARGS, JOB_TIMEOUT);
+      ended = await runInstaller(runnable, PYTHON_INSTALL_ARGS, PYTHON_TIMEOUT);
     } finally {
       fs.rmSync(folder, { recursive: true, force: true });
     }
-    if (code === 1602) throw new Error(say('Python kurulumu iptal edildi.', 'The Python setup was cancelled.'));
-    if (code !== 0 && code !== 3010) throw new Error(say(`Python kurulamadı (çıkış kodu ${code}).`, `Python could not be installed (exit code ${code}).`));
+    const failure = pythonInstallFailure(ended.code, ended.timedOut);
+    if (failure) throw new Error(failure);
     // Each Python is asked again: a `py` that had nothing behind it finds this one now.
     forgetPythonVerdicts();
     await refreshPath(true);

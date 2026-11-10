@@ -2,7 +2,7 @@ import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { CliAuth, CliId } from '../../shared/chat';
+import type { CliAuth, CliId, InstallProgress } from '../../shared/chat';
 import { childEnv } from './acp';
 import { LOCAL_IDS, onPathAny, powerShellExe, programOf, refreshPath, type Launch } from './clis';
 import { LOCAL, type LocalId, findLocal, localModel, shortContext } from './localModels';
@@ -46,7 +46,9 @@ import { PACKAGES, PackageRefusal, archOf, installPackage, ownProgram, starts, t
  * code.claude.com/docs/en/setup, 21 October) in a console window, and its
  * sign-in opened when that ends: nobody has to find a terminal first. A
  * sign-in going on is asked after every few seconds, so the window updates when
- * it is done, not only when its console is closed.
+ * it is done, not only when its console is closed. The installer is given
+ * twenty minutes; how it ended without the tool is read from what its console
+ * wrote down, and said in the window (CliAuth.installEnded).
  *
  * Nothing here runs through a shell, and no key is written anywhere but the
  * system's own encrypted store (keys.ts) or, for Codex, Codex's.
@@ -66,6 +68,13 @@ const showConsole = (): boolean => process.env.CORTEX_HIDDEN !== '1';
 /** While a sign-in is going on: asked this often whether it is done, for at most this long. */
 const LOGIN_POLL = 4_000;
 const LOGIN_WATCH = 10 * 60_000;
+/**
+ * Claude Code's installer in its console: looked at this often for its end, and ended itself after this long. It had no
+ * limit: behind a proxy or an antivirus its console showed PowerShell's own error and waited, and the window went on
+ * saying "installing" (the review before 1.0.62, K3).
+ */
+const INSTALL_POLL = 2_000;
+const INSTALL_LIMIT = 20 * 60_000;
 
 /**
  * Claude Code, installed by Anthropic's own installer run by Windows' PowerShell in a console window, and where it
@@ -171,6 +180,8 @@ async function statusNow(tool: (typeof TOOLS)[number]): Promise<CliAuth> {
     own: ownProgram(tool.id) !== null,
     // One not installed has no sign-in to speak of (removed by hand, or this was another machine's).
     loginEnded: installed ? (loginEnds.get(tool.id) ?? null) : null,
+    // And one installed, by any way, no failed install.
+    installEnded: installed ? null : (installEnds.get(tool.id) ?? null),
   };
   if (!installed) return base;
   // A key kept here that this computer cannot read back (kept on another one, or under another Windows account) is not
@@ -359,6 +370,20 @@ export function startLogin(id: unknown): void {
 }
 
 /**
+ * "Vazgeç" on a sign-in going on: its hidden console ended, and the sign-in said closed, with the command that does the
+ * same in a terminal - what is left to try where the browser never opened. The window is told when the console is gone
+ * (startLogin's `ended`), as for any sign-in ended from here. Before, such a sign-in could only be waited out, for ten
+ * minutes (the review before 1.0.62, K2).
+ */
+export function cancelLogin(id: unknown): void {
+  const tool = toolOf(id);
+  // None going on (it ended by itself a moment ago): how that one ended stands.
+  if (!logins.has(tool.id)) return;
+  noteLoginEnd(tool, null, false);
+  endLogin(tool.id);
+}
+
+/**
  * A sign-in going on, asked after until it is done: the browser's sign-in ends with the tool still running, and the
  * window said nothing changed until the app was opened again (21 October). Signed in, the window is told and the tool
  * given a moment to end by itself before its hidden console is ended; left unfinished for ten minutes, it is ended.
@@ -389,6 +414,12 @@ async function watchLogin(tool: (typeof TOOLS)[number], open: () => boolean): Pr
  * What the installer's console runs: the installer as its maker gives it, and, where the
  * program is not where it puts it after, the console kept open until Enter so what went wrong
  * can be read. Single quotes only: a double quote does not survive Windows' command line.
+ *
+ * What the console shows is also kept in a file (CORTEX_INSTALL_LOG, PowerShell's own transcript), and how the
+ * installer ended is written to another (CORTEX_INSTALL_RESULT) before the console waits for Enter: `ran`, or `error`
+ * with PowerShell's own name for it and, for a request that failed, .NET's name for why and the server's answer.
+ * Names, not sentences: the sentences come in Windows' language. Cortex reads it while the console is still open
+ * (installEndOf), so the window says why in its own language instead of waiting on a console in English.
  */
 export function installScript(id: CliId, turkish: boolean): string {
   const installer = INSTALLERS[id];
@@ -397,11 +428,68 @@ export function installScript(id: CliId, turkish: boolean): string {
   const [going, failed] = turkish
     ? [`${name} kuruluyor (${installer.from})...`, `${name} kurulamadı. Yukarıda ne yazdığına bak; kapatmak için Enter`]
     : [`Installing ${name} (${installer.from})...`, `${name} was not installed. See what is written above; press Enter to close`];
-  return `Write-Host '${going}'; try { ${installer.run} } catch { Write-Host $_ -ForegroundColor Red }; if (-not (Test-Path ${installer.puts})) { Read-Host '${failed}' }`;
+  const web =
+    "$cortexWeb = $_.Exception; while ($cortexWeb -and -not ($cortexWeb -is [System.Net.WebException])) { $cortexWeb = $cortexWeb.InnerException }; " +
+    "if ($cortexWeb) { $cortexEnd = $cortexEnd + ' status ' + $cortexWeb.Status; if ($cortexWeb.Response) { $cortexEnd = $cortexEnd + ' http ' + [int]$cortexWeb.Response.StatusCode } }";
+  return [
+    `Write-Host '${going}'`,
+    'try { Start-Transcript -LiteralPath $env:CORTEX_INSTALL_LOG -Force | Out-Null } catch { }',
+    "$cortexEnd = 'ran'",
+    `try { ${installer.run} } catch { Write-Host $_ -ForegroundColor Red; $cortexEnd = 'error ' + $_.FullyQualifiedErrorId; ${web} }`,
+    'try { Stop-Transcript | Out-Null } catch { }',
+    'try { Set-Content -LiteralPath $env:CORTEX_INSTALL_RESULT -Value $cortexEnd -Encoding UTF8 } catch { }',
+    `if (-not (Test-Path ${installer.puts})) { Read-Host '${failed}' }`,
+  ].join('; ');
 }
+
+/** How an install from here ended without its tool, by tool (CliAuth.installEnded). */
+const installEnds = new Map<CliId, NonNullable<CliAuth['installEnded']>>();
+
+/** .NET's names (WebExceptionStatus) for a request that never reached its server, or lost it on the way. */
+const NOT_REACHED = /^(NameResolutionFailure|ProxyNameResolutionFailure|ConnectFailure|ReceiveFailure|SendFailure|ConnectionClosed|KeepAliveFailure|PipelineFailure|Timeout)$/;
+/** And for one that was stopped: a certificate that is not the server's (a proxy or an antivirus reading the traffic), or a proxy's refusal. */
+const STOPPED = /^(TrustFailure|SecureChannelFailure|RequestProhibitedByProxy|RequestProhibitedByCachePolicy)$/;
+
+/**
+ * Why an install ended without its tool, from what its console wrote down (installScript's CORTEX_INSTALL_RESULT):
+ * the server not reached, the download or the script blocked - a proxy that asks for a sign-in or refuses (407, 403),
+ * a certificate replaced on the way, an antivirus or a company's rules stopping the script - or not known: the
+ * installer ran and left no program, or wrote nothing down.
+ */
+export function installEndOf(result: string | null, timedOut: boolean): NonNullable<CliAuth['installEnded']> {
+  if (timedOut) return 'timeout';
+  const said = (result ?? '').replace(/^\uFEFF/, '').trim();
+  if (!said.startsWith('error')) return 'unknown';
+  const status = /\bstatus (\w+)/.exec(said)?.[1] ?? '';
+  const http = Number(/\bhttp (\d+)/.exec(said)?.[1] ?? 0);
+  if (STOPPED.test(status) || http === 407 || http === 403 || http === 451) return 'blocked';
+  if (NOT_REACHED.test(status)) return 'network';
+  // PowerShell's own names: a script its antivirus stopped (AMSI), or one a company's rules do not let run whole.
+  if (/ScriptContainedMaliciousContent|ConstrainedLanguage|PSSecurityException|UnauthorizedAccess/i.test(said)) return 'blocked';
+  return 'unknown';
+}
+
+/** The last lines of a file a console wrote, for the log; nothing where it cannot be read. */
+function lastLines(file: string, count = 15): string[] {
+  try {
+    return fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').split(/\r?\n/).map((line) => line.trimEnd()).filter(Boolean).slice(-count).map((line) => line.slice(0, 300));
+  } catch {
+    return [];
+  }
+}
+
+/** Where an installer's console keeps what it shows, and how it ended (installScript). */
+const installFiles = (id: CliId) => ({ log: path.join(os.tmpdir(), `cortex-kurulum-${id}.log`), result: path.join(os.tmpdir(), `cortex-kurulum-${id}-sonuc.txt`) });
 
 /** The tools being installed by Cortex itself: a second click while one is downloading is not a second download. */
 const installing = new Set<CliId>();
+/** How far each of those downloads has come, for the window to ask (chat:installProgress). */
+const installProgress = new Map<CliId, InstallProgress>();
+
+/** How far the download of a tool being installed by Cortex has come; null where none is going on. */
+export function installProgressOf(id: unknown): InstallProgress | null {
+  return installProgress.get(toolOf(id).id) ?? null;
+}
 
 /**
  * A tool installed: Claude Code by Anthropic's own installer, in a console window of its own; the others by Cortex,
@@ -415,37 +503,72 @@ export async function installTool(id: unknown): Promise<void> {
   if (process.platform !== 'win32') throw new KeyRefusal('Installing from Cortex opens a console window, which only Windows does here.');
   if (programOf(tool.id)) throw new KeyRefusal('This tool is installed already.');
   chooseChatTool(tool.id);
+  installEnds.delete(tool.id);
   if (PACKAGES[tool.id]) {
     if (installing.has(tool.id)) throw new KeyRefusal('This tool is being installed already.');
     installing.add(tool.id);
+    const progress = (got: number, total: number | null) => void installProgress.set(tool.id, { got, total });
     try {
-      await installPackage(tool.id);
+      await installPackage(tool.id, { progress });
       // A program built for a newer processor ends at once on an older one: its maker's build for those instead.
       const own = ownProgram(tool.id);
-      if (own && PACKAGES[tool.id]?.older?.(archOf()) && !(await starts(own))) await installPackage(tool.id, { older: true });
+      if (own && PACKAGES[tool.id]?.older?.(archOf()) && !(await starts(own))) await installPackage(tool.id, { older: true, progress });
     } catch (err) {
       throw err instanceof PackageRefusal ? new KeyRefusal(err.message) : err;
     } finally {
       installing.delete(tool.id);
+      installProgress.delete(tool.id);
     }
     await afterInstall(tool);
     return;
   }
   const script = installScript(tool.id, readSettings().language !== 'en');
-  const child = spawn(powerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { cwd: os.homedir(), env: childEnv(), detached: true, stdio: 'ignore', windowsHide: !showConsole(), shell: false });
+  const files = installFiles(tool.id);
+  for (const file of [files.log, files.result]) fs.rmSync(file, { force: true });
+  const env = { ...childEnv(), CORTEX_INSTALL_LOG: files.log, CORTEX_INSTALL_RESULT: files.result };
+  const child = spawn(powerShellExe(), ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { cwd: os.homedir(), env, detached: true, stdio: 'ignore', windowsHide: !showConsole(), shell: false });
   let ended = false;
-  const after = () => {
+  // Over when its console closes, when the console has written down how it ended (it may then wait for Enter with
+  // the installer's own words on it), or when its time is up: whichever comes first, once.
+  const after = (timedOut = false) => {
     if (ended) return;
     ended = true;
-    void afterInstall(tool);
+    clearInterval(looking);
+    clearTimeout(limit);
+    if (timedOut && child.pid !== undefined && child.exitCode === null) {
+      execFile(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => undefined);
+    }
+    void afterInstall(tool, { ...files, timedOut });
   };
-  child.on('error', after);
-  child.on('exit', after);
+  const looking = setInterval(() => {
+    if (fs.existsSync(files.result)) after();
+  }, INSTALL_POLL);
+  const limit = setTimeout(() => after(true), INSTALL_LIMIT);
+  looking.unref();
+  limit.unref();
+  child.on('error', () => after());
+  child.on('exit', () => after());
   child.unref();
 }
 
-async function afterInstall(tool: (typeof TOOLS)[number]): Promise<void> {
+/**
+ * An install over. `ran`: its maker's installer ran in a console (Claude Code), which wrote down how it ended; where it
+ * left no program, why is kept for the window (CliAuth.installEnded) and the console's last lines go to the log.
+ */
+async function afterInstall(tool: (typeof TOOLS)[number], ran?: { log: string; result: string; timedOut: boolean }): Promise<void> {
   await refreshPath(true);
+  if (ran && !programOf(tool.id)) {
+    let result: string | null = null;
+    try {
+      result = fs.readFileSync(ran.result, 'utf8').replace(/^\uFEFF/, '').trim();
+    } catch {
+      /* The console closed before it wrote how it ended: not known. */
+    }
+    const end = installEndOf(result, ran.timedOut);
+    installEnds.set(tool.id, end);
+    console.warn(`[install] ${TOOL_NAMES[tool.id] ?? tool.id} was not installed (${end}${result ? `: ${result.slice(0, 300)}` : ''}). Its console's last lines (${ran.log}):\n${lastLines(ran.log).join('\n')}`);
+  }
+  if (ran) fs.rmSync(ran.result, { force: true });
   changed(null);
   if (!programOf(tool.id) || !tool.login) return;
   if ((await statusOf(tool)).signedIn === true) return;
