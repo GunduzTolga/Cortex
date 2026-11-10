@@ -87,7 +87,8 @@ export interface Moved {
 }
 
 export interface NotesApi {
-  index(): Promise<VaultIndex>;
+  /** `whole`: the folders walked again (the window come back to), not only what was said changed. */
+  index(whole?: boolean): Promise<VaultIndex>;
   read(path: string): Promise<NoteRead>;
   /** A file that is not a note, as text to be shown: read only, never run. */
   text(path: string): Promise<TextRead>;

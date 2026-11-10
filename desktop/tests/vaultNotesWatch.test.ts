@@ -170,6 +170,26 @@ test('a note the watcher says changed is asked about alone: the vault is not wal
   }
 });
 
+test('the window come back to: the folders are walked again, and a note the watcher has not said yet is the new one', async () => {
+  // Another program wrote a note and the person came back before the watcher said so: the list was the old one, and
+  // the note on screen stayed as it was until the watcher's word came (the end-to-end run, 11 November).
+  const { write } = await watched();
+  try {
+    write('Ev/Tadilat.md', '# Tadilat\n\nObsidian wrote this meanwhile, to [[Liste]].\n');
+    // Nothing told: what only says what changed asks nothing, and keeps the links it knew.
+    const quiet = await asked(() => vaultIndex());
+    assert.deepEqual([quiet.readdir, quiet.lstat], [0, 0]);
+    const back = await asked(() => vaultIndex(true));
+    assert.ok(back.readdir > 0, 'the folders are read again');
+    assert.deepEqual(back.result.notes.find((one) => one.path === 'Ev/Tadilat.md')!.links, ['Ev/Liste.md'], 'the note as it is on disk');
+    // And only that once: the next reading is cheap again.
+    const after = await asked(() => vaultIndex());
+    assert.deepEqual([after.readdir, after.lstat], [0, 0]);
+  } finally {
+    realWatchAgain();
+  }
+});
+
 test('a note made, a note deleted and a note that names one not written are each taken from what the watcher said', async () => {
   const { dir, watcher, write } = await watched();
   try {

@@ -234,9 +234,9 @@ export function registerIpc(): void {
     broadcast('notes:changed', null);
     vaultSync.vaultFilesChanged();
   };
-  handle('notes:index', () => {
+  handle('notes:index', (whole) => {
     vaultNotes.watchVault(vaultTouched);
-    return vaultNotes.vaultIndex();
+    return vaultNotes.vaultIndex(whole === true);
   });
   handle('notes:read', (file) => vaultNotes.readVaultNote(file));
   handle('notes:text', (file) => vaultNotes.readVaultText(file));

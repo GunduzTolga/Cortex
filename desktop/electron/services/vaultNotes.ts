@@ -475,7 +475,15 @@ async function build(): Promise<VaultIndex> {
 }
 
 /** The vault as the notes screen draws it, read again where a file changed since the last time. One build at a time. */
-export function vaultIndex(): Promise<VaultIndex> {
+export function vaultIndex(whole = false): Promise<VaultIndex> {
+  // The window come back to (whole): the folders are walked, not only what a watcher said changed. A file written by
+  // another program a moment before was not yet said changed, and the note on screen stayed the old one until the
+  // watcher's word came (the end-to-end run, 11 November); a watcher that missed a change is caught here too. What
+  // is cheap stays cheap: a note saved or a file changing asks for no walk.
+  if (whole) {
+    walkWhole = true;
+    if (building) return building.then(() => vaultIndex());
+  }
   if (!building) {
     building = build().finally(() => {
       building = null;

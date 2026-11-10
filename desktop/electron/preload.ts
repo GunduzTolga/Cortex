@@ -58,7 +58,7 @@ const api: CortexApi = {
     createDefault: () => invoke('vault:createDefault'),
   },
   notes: {
-    index: () => invoke('notes:index'),
+    index: (whole?: boolean) => invoke('notes:index', whole === true),
     read: (path) => invoke('notes:read', path),
     text: (path) => invoke('notes:text', path),
     save: (path, text, base) => invoke('notes:save', path, text, base),

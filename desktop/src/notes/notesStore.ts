@@ -77,7 +77,8 @@ interface NotesState {
   modeSwitch: number;
   /** A note shown over the page while a link to it is hovered (peek.tsx), by where the link is on screen. */
   peek: { path: string; subpath: string | null; x: number; y: number; below: number } | null;
-  refresh(): Promise<void>;
+  /** `whole`: asked as the window is come back to, when the folders are walked again (vaultNotes.ts). */
+  refresh(whole?: boolean): Promise<void>;
   /** Read the vault's bin again: after something went in or came out of it. */
   refreshBin(): Promise<void>;
   open(path: string, options?: { newTab?: boolean; line?: number | null; subpath?: string | null; edit?: boolean }): void;
@@ -174,10 +175,10 @@ export const useNotes = create<NotesState>((set, get) => {
     modeSwitch: 0,
     peek: null,
 
-    async refresh() {
+    async refresh(whole) {
       let index: VaultIndex;
       try {
-        index = await window.cortex.notes.index();
+        index = await window.cortex.notes.index(whole === true);
       } catch (err) {
         set({ error: refusal(messageOf(err)) });
         return;

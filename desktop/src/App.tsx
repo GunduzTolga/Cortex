@@ -272,12 +272,14 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
   useEffect(() => {
     if (missing) return;
     const again = () => void useNotes.getState().refresh();
+    // The window come back to: another program may have written a moment ago, before the watcher said so.
+    const back = () => void useNotes.getState().refresh(true);
     if (!useNotes.getState().index) again();
     const stop = window.cortex.on.notesChanged(again);
-    window.addEventListener('focus', again);
+    window.addEventListener('focus', back);
     return () => {
       stop();
-      window.removeEventListener('focus', again);
+      window.removeEventListener('focus', back);
     };
   }, [missing]);
   const turnsEnded = useChat((s) => s.turnsEnded);
