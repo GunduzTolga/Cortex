@@ -173,6 +173,7 @@ test('LICENSE is the MIT text and nothing more, so GitHub names the licence; the
   }
   const readme = fs.readFileSync('../README.md', 'utf8');
   assert.match(readme, /\[MIT lisansı\]\(LICENSE\)[^\n]*markadır[^\n]*\[MARKA\.md\]\(MARKA\.md\)/);
+});
 
 test('the installer CI builds is installed, opened and uninstalled on the same runner, after it is built and kept (K6)', () => {
   // The build only looked whether an installer came out; what a person gets from it - the packaged app on a Windows
