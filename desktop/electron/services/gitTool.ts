@@ -114,7 +114,14 @@ export async function installGit(step: (text: string) => void = () => undefined,
     try {
       await runPython(['-I', '-c', UNPACK, zip, part], { cwd: part, timeout: 5 * 60_000 });
     } catch (err) {
-      throw new GitToolRefusal(say(`Git paketi açılamadı: ${(err as Error).message}`, `The Git package could not be unpacked: ${(err as Error).message}`));
+      // What Python said (a traceback's last line, a path) is the developer's: the person is told what to do.
+      console.warn('[git] the package could not be unpacked', err);
+      throw new GitToolRefusal(
+        say(
+          'Git paketi açılamadı; diskte yer olduğunu ve Python’un kurulu olduğunu (Ayarlar → Cortex) kontrol edip yeniden dene.',
+          'The Git package could not be unpacked; check that the disk has room and that Python is installed (Settings → Cortex), then try again.',
+        ),
+      );
     }
     if (!fs.existsSync(path.join(part, ...PROGRAM))) throw new GitToolRefusal(say('Git paketinde git.exe yok; hiçbir şey kurulmadı.', 'The Git package has no git.exe in it; nothing was installed.'));
     fs.writeFileSync(path.join(part, RECORD), `${JSON.stringify({ name: 'MinGit', version: MINGIT.version, program: PROGRAM.join('/') }, null, 2)}\n`);

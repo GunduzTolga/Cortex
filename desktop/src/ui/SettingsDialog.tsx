@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, FolderOpen, KeyRound, ListChecks } from 'lucide-react';
+import { RELEASES_PAGE } from '@shared/api';
 import { useChat } from '../chat/chatStore';
 import { useT } from '../i18n/useT';
 import { useApp } from '../store/app';
@@ -111,6 +112,13 @@ export function SettingsDialog() {
         </Section>
         <Section title={t('settings.about')} data="about">
           <p className="px-3 font-mono text-[12px] text-zinc-500">{t('settings.version', { version })}</p>
+          {/* The app's own update (electron/services/updater.ts): off, nothing is asked of GitHub; the installers' page is always a click away. */}
+          <Switch checked={settings.autoUpdate} onChange={(on) => void set({ autoUpdate: on })} label={t('settings.autoUpdate')} hint={t('settings.autoUpdate.hint')} data-settings-auto-update />
+          <p className="px-3 pt-1 text-[11.5px]">
+            <a className="font-semibold text-zinc-600 underline" href={RELEASES_PAGE} target="_blank" rel="noreferrer" data-settings-releases>
+              {t('settings.releases')}
+            </a>
+          </p>
         </Section>
       </div>
     </Modal>

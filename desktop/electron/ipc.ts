@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { AppNotice, AppUpdate, BootstrapPayload, WindowSettings } from '../shared/api';
-import { readSettings, settingsUnreadable, tidyName, updateSettings } from './services/settings';
+import { onSettingsUnsaved, readSettings, settingsUnreadable, settingsUnsaved, tidyName, updateSettings } from './services/settings';
 import { applyTheme } from './services/theme';
 import { restartingListener, sayMicrophone } from './services/microphone';
 import { currentListener, expectVoiceTurn, onHelperChange, startWithWindows, trayChanged } from './services/tray';
@@ -18,7 +18,7 @@ import * as setup from './services/setup';
 import * as telegram from './services/telegram';
 import * as vaultSync from './services/vaultSync';
 import * as vaultNotes from './services/vaultNotes';
-import { installUpdate, pendingUpdate, quietFile, startUpdates, updatesWanted } from './services/updater';
+import { installUpdate, onUpdateTrouble, pendingUpdate, quietFile, startUpdates, updatesSwitchedOn, updatesWanted } from './services/updater';
 import { isMicWindow } from './services/micWindow';
 
 /**
@@ -92,6 +92,25 @@ export function moveYakala(onlyWhereGone = false): void {
  * it since it started with Windows (`unseen`), and no setup or answer is going on, it is installed without a word.
  */
 export function startAppUpdates(trayWord: (title: string, body: string) => void, unseen: () => boolean): void {
+  // A newer version that would not come down twice running, or was begun unasked and did not install: said once, in
+  // the window (it stays until closed) and in the notification area. Before, only the console heard (G4).
+  onUpdateTrouble(({ kind, version }) => {
+    const say = (tr: string, en: string) => (readSettings().language === 'en' ? en : tr);
+    const title = kind === 'download' ? say(`Cortex ${version} indirilemedi`, `Cortex ${version} could not be downloaded`) : say(`Cortex ${version} kendiliğinden kurulamadı`, `Cortex ${version} could not be installed by itself`);
+    const detail =
+      kind === 'download'
+        ? say(
+            'Güncelleme indirilemedi; bağlantını kontrol et ya da kurulum dosyasını Ayarlar › Hakkında’daki sürümler sayfasından elle indir.',
+            'The update could not be downloaded; check your connection, or download the installer yourself from the releases page in Settings › About.',
+          )
+        : say(
+            '“Yeniden başlat”a basıp yeniden dene; yine olmazsa kurulum dosyasını Ayarlar › Hakkında’daki sürümler sayfasından elle indir.',
+            'Press “Restart” to try again; if that fails too, download the installer yourself from the releases page in Settings › About.',
+          );
+    notice({ tone: 'error', title, detail });
+    // In the notification area too where nothing else is said there: "ready" follows a failed install by itself.
+    if (kind === 'download') trayWord(title, detail);
+  });
   if (!updatesWanted()) return;
   const quiet = { unseen: () => unseen() && setup.setupBusy() === null && !chat.chatsRunning(), file: quietFile() };
   void startUpdates((update: AppUpdate) => {
@@ -105,8 +124,30 @@ export function startAppUpdates(trayWord: (title: string, body: string) => void,
 }
 
 function windowSettings(): WindowSettings {
-  const { theme, language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent } = readSettings();
-  return { theme, language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent };
+  const { theme, language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent, autoUpdate } = readSettings();
+  return { theme, language, allFiles, nameIcons, userName, onboarded, background, voiceConsent, wakeConsent, autoUpdate };
+}
+
+/**
+ * The settings file would not be written (services/settings.ts): said once to each page, with the folder, so that a
+ * first run coming back at every start is not a riddle (K10). Not before a page has asked for its start: a word sent
+ * to a window still loading is lost.
+ */
+let pageAsked = false;
+let unsavedSaid = false;
+function sayUnsaved(): void {
+  const folder = settingsUnsaved();
+  if (!folder || unsavedSaid || !pageAsked) return;
+  unsavedSaid = true;
+  const say = (tr: string, en: string) => (readSettings().language === 'en' ? en : tr);
+  notice({
+    tone: 'error',
+    title: say('Ayarlar kaydedilemedi', 'The settings could not be saved'),
+    detail: say(
+      `${folder} klasörüne yazılamıyor; klasörün yazma iznini ve diskte yer olduğunu kontrol et, yoksa seçimlerin Cortex kapanınca kaybolur.`,
+      `Nothing can be written into ${folder}; check that the folder can be written to and the disk has room, or your choices are lost when Cortex closes.`,
+    ),
+  });
 }
 
 export function registerIpc(): void {
@@ -114,12 +155,15 @@ export function registerIpc(): void {
   handle('update:ready', () => pendingUpdate());
   handle('update:install', () => installUpdate(setup.setupBusy() !== null));
 
-  handle('app:bootstrap', async (): Promise<BootstrapPayload> => ({
-    settings: windowSettings(),
-    vault: await vaultStatus(),
-    settingsUnreadable: settingsUnreadable(),
-    version: app.getVersion(),
-  }));
+  onSettingsUnsaved(sayUnsaved);
+  handle('app:bootstrap', async (): Promise<BootstrapPayload> => {
+    const payload = { settings: windowSettings(), vault: await vaultStatus(), settingsUnreadable: settingsUnreadable(), version: app.getVersion() };
+    // A page starting: a write that failed before it was there (or before a reload) is said to it.
+    pageAsked = true;
+    unsavedSaid = false;
+    sayUnsaved();
+    return payload;
+  });
 
   // The language and how the tree shows the vault, each only as a value it can have: the vault is not the window's to set.
   handle('settings:set', (patch: unknown) => {
@@ -134,7 +178,10 @@ export function registerIpc(): void {
     if (typeof asked.background === 'boolean') change.background = asked.background;
     if (typeof asked.voiceConsent === 'boolean') change.voiceConsent = asked.voiceConsent;
     if (typeof asked.wakeConsent === 'boolean') change.wakeConsent = asked.wakeConsent;
+    if (typeof asked.autoUpdate === 'boolean') change.autoUpdate = asked.autoUpdate;
     if (Object.keys(change).length) updateSettings((settings) => Object.assign(settings, change));
+    // Turned on: asked of GitHub now (services/updater.ts). Turned off, the next check finds it off and asks nothing.
+    if (change.autoUpdate === true) updatesSwitchedOn();
     if (change.background !== undefined) startWithWindows(change.background);
     if (change.theme !== undefined) applyTheme(change.theme);
     // The listener hears it within two seconds: allowed, the microphone listens; taken back, it lets go. Yakala's

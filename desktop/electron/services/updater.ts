@@ -3,6 +3,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { AppUpdate, UpdateInstall } from '../../shared/api';
 import { writeWhole } from './fileWrite';
+import { readSettings } from './settings';
 
 /**
  * The app keeping itself up to date from the repository's releases, as the vault's engine already does with its
@@ -11,8 +12,12 @@ import { writeWhole } from './fileWrite';
  * background, checks its SHA-512 against that file, and runs it when the app quits.
  *
  * Only an installed app on Windows asks: a build run from the source tree has no release to follow, and the
- * end-to-end run (CORTEX_HIDDEN) must not reach the network. CORTEX_NO_UPDATE turns it off for a person who
- * installs by hand. A check that cannot reach GitHub is quiet: the next one is in a few hours.
+ * end-to-end run (CORTEX_HIDDEN) must not reach the network. A person who installs by hand turns it off in the
+ * settings ("Güncellemeleri kendiliğinden indir", `autoUpdate`; CORTEX_NO_UPDATE does the same from outside): off,
+ * nothing is asked of GitHub at all, and nothing fetched - 10 November: the installer (some 160 MB) came down unasked
+ * and only an environment variable stopped it, while the README said it could be turned off. A check that cannot
+ * reach GitHub is quiet: the next one is in a few hours. A newer version found and not fetched twice running is said
+ * once (`onUpdateTrouble`): before, a person never learnt why Cortex stayed as it was.
  *
  * What it is told is said once it is ready to install, not while it downloads: the person decides when to restart.
  * Unanswered, the installer runs the next time the app quits (autoInstallOnAppQuit), or, for an app that starts with
@@ -22,12 +27,29 @@ import { writeWhole } from './fileWrite';
 /** The first look a while after the start, not in its busiest seconds; then a few times a day. */
 export const FIRST_CHECK = 30_000;
 export const CHECK_EVERY = 6 * 60 * 60_000;
+/** A version found and not fetched this many times running is said to the person. */
+export const TROUBLE_AFTER = 2;
+/**
+ * A version found whose download failed is tried once more after this long, not at the next round six hours on: a
+ * passing fault mends itself, and a lasting one is said while the person is still at the computer.
+ */
+export const RETRY_AFTER = 10 * 60_000;
+
+/**
+ * What the person is told went wrong, once for a version: it was found on GitHub and could not be fetched or checked
+ * (`download`), or it had been begun unasked at a start with Windows and Cortex is still the older one (`install`).
+ */
+export interface UpdateTrouble {
+  kind: 'download' | 'install';
+  version: string;
+}
 
 /** What of electron-updater's AppUpdater this uses: the tests stand in for it. */
 export interface Updater {
   autoDownload: boolean;
   autoInstallOnAppQuit: boolean;
   logger: unknown;
+  on(event: 'update-available', listener: (info: { version: string }) => void): unknown;
   on(event: 'update-downloaded', listener: (info: { version: string }) => void): unknown;
   on(event: 'error', listener: (err: Error) => void): unknown;
   checkForUpdates(): Promise<unknown>;
@@ -93,6 +115,16 @@ export function startedByQuietInstall(argv: readonly string[] = process.argv, ve
 
 let updater: Updater | null = null;
 let ready: AppUpdate | null = null;
+let checkNow: () => void = () => undefined;
+let trouble: (word: UpdateTrouble) => void = () => undefined;
+
+/** Where a version that would not come down, or would not install, is heard: once for each (electron/ipc.ts says it). */
+export function onUpdateTrouble(listener: (word: UpdateTrouble) => void): void {
+  trouble = listener;
+}
+
+/** Whether the person lets Cortex ask GitHub and fetch a newer one by itself (Settings › Hakkında); read at every check. */
+const allowed = (): boolean => readSettings().autoUpdate;
 
 /** Installed now, unasked, where nobody is interrupted and this version was not begun so before; whether it was begun. */
 function installQuietly(quiet: QuietInstall, version: string): boolean {
@@ -136,19 +168,50 @@ export async function startUpdates(
   updater.autoInstallOnAppQuit = true;
   // Its own log goes to the console: a person never sees a failed check, the developer can.
   updater.logger = { info: () => undefined, warn: console.warn, error: console.warn, debug: () => undefined };
-  updater.on('update-downloaded', (info) => {
-    ready = { version: String(info.version) };
-    if (quiet && installQuietly(quiet, ready.version)) return;
-    tell(ready);
-  });
-  updater.on('error', (err) => console.warn('[updates]', err.message));
   const check = (): void => {
-    // Once one is waiting there is nothing more to fetch until it is installed.
-    if (ready || !updater) return;
+    // Once one is waiting there is nothing more to fetch until it is installed. Turned off, nothing is asked at all.
+    if (ready || !updater || !allowed()) return;
     void updater.checkForUpdates().catch((err: unknown) => console.warn('[updates]', err instanceof Error ? err.message : err));
   };
+  checkNow = check;
+  // The newer version GitHub named, and how many times running it then failed to come down; said once for a version.
+  let found: string | null = null;
+  let failures = 0;
+  let saidFor: string | null = null;
+  let retriedFor: string | null = null;
+  updater.on('update-available', (info) => {
+    const version = String(info.version);
+    if (version !== found) failures = 0;
+    found = version;
+  });
+  updater.on('update-downloaded', (info) => {
+    ready = { version: String(info.version) };
+    failures = 0;
+    if (quiet && installQuietly(quiet, ready.version)) return;
+    // Begun unasked at an earlier start and Cortex is still the older one (startedByQuietInstall wrote it down): said.
+    if (quiet && readQuiet(quiet.file)?.version === ready.version) trouble({ kind: 'install', version: ready.version });
+    tell(ready);
+  });
+  updater.on('error', (err) => {
+    console.warn('[updates]', err.message);
+    // With no newer version known, a check that failed stays quiet: there may be nothing to fetch.
+    if (!found || ready) return;
+    failures += 1;
+    if (retriedFor !== found) {
+      retriedFor = found;
+      schedule.after(check, RETRY_AFTER);
+    }
+    if (failures < TROUBLE_AFTER || saidFor === found) return;
+    saidFor = found;
+    trouble({ kind: 'download', version: found });
+  });
   schedule.after(check, FIRST_CHECK);
   schedule.every(check, CHECK_EVERY);
+}
+
+/** The switch turned on (Settings › Hakkında): asked now, not at the next round hours away. */
+export function updatesSwitchedOn(): void {
+  checkNow();
 }
 
 /** The update downloaded and waiting, if one is: asked by a window opened after it was told. */
@@ -172,4 +235,6 @@ export function installUpdate(busy: boolean): UpdateInstall {
 export function forgetUpdates(): void {
   updater = null;
   ready = null;
+  checkNow = () => undefined;
+  trouble = () => undefined;
 }

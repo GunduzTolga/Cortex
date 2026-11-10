@@ -24,6 +24,7 @@ import { useView, type View } from './store/view';
 import { LanguageSwitch } from './ui/LanguageSwitch';
 import { SettingsDialog } from './ui/SettingsDialog';
 import { MicConsent } from './ui/MicConsent';
+import { RenderGuard } from './ui/RenderGuard';
 import { escapeLayers } from './ui/escapeLayers';
 import { Toasts } from './ui/Toasts';
 import { Button, Spinner } from './ui/ui';
@@ -37,7 +38,16 @@ import { retryKeptAside } from './notes/NotePane';
  * (src/store/view.ts), so the graph is not laid out again at every switch.
  */
 
+/** The window, inside the guard that says so when drawing it throws (src/ui/RenderGuard.tsx): a blank page before. */
 export function App() {
+  return (
+    <RenderGuard beforeReload={leaveOpenNotes}>
+      <AppWindow />
+    </RenderGuard>
+  );
+}
+
+function AppWindow() {
   const t = useT();
   const ready = useApp((s) => s.ready);
   const bootError = useApp((s) => s.bootError);

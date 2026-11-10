@@ -125,3 +125,52 @@ test('uninstalled, the person is asked whether everything Cortex kept goes too; 
   const states = /def default_state[\s\S]*?return base \/ "beyin-v3"/.exec(fs.readFileSync('../template/.claude/scripts/beyin_v3.py', 'utf8'))?.[0] ?? '';
   assert.match(states, /LOCALAPPDATA/);
 });
+
+test('a first install asks nobody "only me or everybody": it is for the person who runs it, with no administrator (G7)', () => {
+  // The assisted installer shows that page unless the build is for the whole computer, and "everybody" asks for an
+  // administrator; the README says none is needed.
+  const nsis = (packaged.build as unknown as { nsis: { oneClick?: boolean; perMachine?: boolean } }).nsis;
+  assert.deepEqual([nsis.oneClick, nsis.perMachine], [false, false]);
+  const script = fs.readFileSync(packaged.build.nsis.include!, 'utf8');
+  const macro = /!macro customInstallMode([\s\S]*?)!macroend/.exec(script)?.[1] ?? '';
+  assert.match(macro, /StrCpy \$isForceCurrentInstall "1"/);
+  assert.doesNotMatch(macro, /isForceMachineInstall/);
+  // Only where no Cortex is installed for the whole computer already: that one is updated where it is.
+  assert.match(macro, /\$\{if\} \$hasPerMachineInstallation != "1"\s+StrCpy \$isForceCurrentInstall "1"\s+\$\{endif\}/);
+  // What it leans on in electron-builder's own script, so that an upgrade that renames either is caught here: the
+  // page is there for this build, reads the macro before it draws, and is skipped for the current user when told.
+  const templates = path.join('node_modules', 'app-builder-lib', 'templates', 'nsis');
+  const assisted = fs.readFileSync(path.join(templates, 'assistedInstaller.nsh'), 'utf8');
+  assert.match(assisted, /!ifndef INSTALL_MODE_PER_ALL_USERS\s+!insertmacro PAGE_INSTALL_MODE/);
+  const page = fs.readFileSync(path.join(templates, 'multiUserUi.nsh'), 'utf8');
+  assert.match(page, /!ifmacrodef customInstallmode\s+!insertmacro customInstallMode\s+!endif/i);
+  assert.match(page, /\$\{if\} \$isForceCurrentInstall == "1"[\s\S]{0,200}?!insertmacro setInstallModePerUser\s+Abort/);
+  assert.match(fs.readFileSync(path.join(templates, 'multiUser.nsh'), 'utf8'), /Var hasPerMachineInstallation/);
+});
+
+/** The MIT License as GitHub's licence detection knows it (choosealicense.com), with this repository's copyright line. */
+const MIT = `MIT License
+
+Copyright (c) 2026 Tolga Gündüz
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
+
+test('LICENSE is the MIT text and nothing more, so GitHub names the licence; the brand rules ship beside it in MARKA.md (G6)', () => {
+  // 10 November: a brand section under the MIT text made GitHub report the licence as unknown (NOASSERTION), while the
+  // README's badge said MIT. The section lives in MARKA.md, which the installer carries beside LICENSE.
+  const words = (text: string) => text.replace(/\s+/g, ' ').trim();
+  assert.equal(words(fs.readFileSync('../LICENSE', 'utf8')), words(MIT));
+  const brand = fs.readFileSync('../MARKA.md', 'utf8');
+  for (const kept of [/Brand assets are not covered by the license above\./, /brand assets of SoleLuna Tech \(Tolga Gündüz\)/, /must use its own name and its own images/, /Fonts in tema\/ananas\/fonts keep their\s+own SIL Open Font License\./]) {
+    assert.match(brand, kept);
+  }
+  for (const file of ['LICENSE', 'MARKA.md']) {
+    assert.ok(packaged.build.extraResources.some((one) => one.from === `../${file}` && one.to === file), `${file} ships with the app`);
+  }
+  const readme = fs.readFileSync('../README.md', 'utf8');
+  assert.match(readme, /\[MIT lisansı\]\(LICENSE\)[^\n]*markadır[^\n]*\[MARKA\.md\]\(MARKA\.md\)/);
+});

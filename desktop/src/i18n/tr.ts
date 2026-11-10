@@ -8,6 +8,9 @@ import type { en } from './en';
 export const tr: Record<keyof typeof en, string> = {
   /* The app around the notes: the first opening, the header. */
   'app.loading': 'Açılıyor…',
+  'app.crash.title': 'Cortex bu ekranı gösteremedi',
+  'app.crash.detail': 'Yeniden yükle; sürerse Cortex\'i kapatıp aç, yine olmazsa yeniden kur. Kaydedilmiş notların yerinde duruyor.',
+  'app.crash.reload': 'Yeniden yükle',
   'common.close': 'Kapat',
   'notes.code.copy': 'Kopyala',
   'notes.large.plain': 'Bu not uzun, bu yüzden biçimlenmeden metin olarak gösteriliyor. Ctrl+E ile düzenleyebilirsin.',
@@ -118,6 +121,9 @@ export const tr: Record<keyof typeof en, string> = {
   'settings.ai.hint': 'Pyn\'in konuştuğu araçlara giriş yap ya da onlara bir API anahtarı ver.',
   'settings.about': 'Hakkında',
   'settings.version': 'Cortex {version}',
+  'settings.autoUpdate': 'Güncellemeleri kendiliğinden indir',
+  'settings.autoUpdate.hint': 'Açıkken Cortex açıldıktan yarım dakika sonra ve 6 saatte bir GitHub\'a yeni sürüm var mı diye sorar; varsa kurulum dosyasını (yaklaşık 160 MB) arka planda indirir ve hazır olunca haber verir. Kapalıyken GitHub\'a hiç sormaz; yeni sürümü sürümler sayfasından kendin indirirsin.',
+  'settings.releases': 'Sürümler sayfası (kurulum dosyasını elle indir)',
   'setup.update.title': 'Cortex güncellemesi hazır: {installed} → {bundled}',
   'setup.update.detail': 'Kasadaki Cortex eski; uygulama yenisini getirdi. Tek tıkla güncellenir, notlarına dokunulmaz.',
   'setup.update.action': 'Güncelle',

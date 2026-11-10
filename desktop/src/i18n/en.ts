@@ -14,6 +14,9 @@
 export const en = {
   /* The app around the notes: the first opening, the header. */
   'app.loading': 'Opening…',
+  'app.crash.title': 'Cortex could not show this screen',
+  'app.crash.detail': 'Reload it; if it goes on, quit Cortex and open it again, and if that fails too, install it again. Your saved notes are where they were.',
+  'app.crash.reload': 'Reload',
   'common.close': 'Close',
   'notes.code.copy': 'Copy',
   'notes.large.plain': 'This note is long, so it is shown as text rather than drawn. Ctrl+E edits it.',
@@ -124,6 +127,9 @@ export const en = {
   'settings.ai.hint': 'Sign in to the tools Pyn talks through, or give them an API key.',
   'settings.about': 'About',
   'settings.version': 'Cortex {version}',
+  'settings.autoUpdate': 'Download updates by itself',
+  'settings.autoUpdate.hint': 'On, Cortex asks GitHub for a newer version half a minute after it starts and every 6 hours; when there is one it downloads the installer (about 160 MB) in the background and tells you once it is ready. Off, it asks GitHub nothing; you download a new version from the releases page yourself.',
+  'settings.releases': 'Releases page (download the installer yourself)',
   'setup.update.title': 'A Cortex update is ready: {installed} → {bundled}',
   'setup.update.detail': 'The Cortex in your vault is older; the app brought a newer one. One click updates it; your notes are not touched.',
   'setup.update.action': 'Update',
