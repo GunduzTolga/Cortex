@@ -32,6 +32,8 @@ sys.path.insert(0, str(SCRIPTS))
 import beyin_v3_ses as ses  # noqa: E402
 import beyin_v3_yakala as yakala  # noqa: E402
 
+REAL_REACHES = ses._reaches  # the tests that install stand in for it (setUp): the real one is tried on a stand-in urlopen
+
 
 def popen_from(run):
     """A Popen stand-in made of a test's `run`: the command's output, there at once (pip's step)."""
@@ -343,6 +345,10 @@ class SetupTest(unittest.TestCase):
         disk = mock.patch.object(ses.shutil, 'disk_usage', lambda _path: types.SimpleNamespace(free=int(1e12)))
         disk.start()
         self.addCleanup(disk.stop)
+        # And the addresses it downloads from (unreachable_hosts): never the real network's answer.
+        reach = mock.patch.object(ses, '_reaches', lambda _host, timeout=None: True)
+        reach.start()
+        self.addCleanup(reach.stop)
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-')
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / 'state'
@@ -875,6 +881,10 @@ class InstallRobustnessTest(unittest.TestCase):
         disk = mock.patch.object(ses.shutil, 'disk_usage', lambda _path: types.SimpleNamespace(free=int(1e12)))
         disk.start()
         self.addCleanup(disk.stop)
+        # And the addresses it downloads from (unreachable_hosts): never the real network's answer.
+        reach = mock.patch.object(ses, '_reaches', lambda _host, timeout=None: True)
+        reach.start()
+        self.addCleanup(reach.stop)
         self.tmp = tempfile.TemporaryDirectory(prefix='v3-ses-kurulum-')
         self.addCleanup(self.tmp.cleanup)
         self.state = Path(self.tmp.name) / 'state'
@@ -1342,6 +1352,241 @@ class InstallRobustnessTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             ses._trial_load(self.state, {'motor': 'islemci'}, said.append, lambda *_a, **_k: broken.pop(0), None, pause=paused.append)
         self.assertEqual((len(broken), len(paused)), (2, 4))
+
+    def recording_run(self, seen=None):
+        """An installer's commands recorded, not run; `seen` is given how things stand while the model is fetched."""
+        def run(command, **_options):
+            if '-m' in command and 'venv' in command:
+                python = ses.venv_python(self.state)
+                python.parent.mkdir(parents=True, exist_ok=True)
+                python.write_text('')
+            if '--indir' in command:
+                if seen is not None:
+                    marker = json.loads((ses.ses_dir(self.state) / ses.MARKER).read_text(encoding='utf-8'))
+                    seen.append((ses.installed(self.state), ses.status(self.state)['kurulu'], marker['motor']))
+                return subprocess.CompletedProcess(command, 0, 'small (işlemci)\n', '')
+            return subprocess.CompletedProcess(command, 0, '', '')
+        return run
+
+    def test_a_first_install_counts_as_set_up_only_once_it_has_finished(self):
+        # N6: the marker was written before the model was fetched (the helper reads its engine from it). A `kur`
+        # closed or killed while it downloaded left it behind, and the voice read as set up with no model.
+        folder = ses.ses_dir(self.state)
+        (folder / ses.VOSK_DIR).mkdir(parents=True)
+        seen = []
+        run = self.recording_run(seen)
+        ses.install(self.state, say=lambda _text: None, run=run, which={}.get, system=self.tmp.name, popen=popen_from(run))
+        self.assertEqual(seen, [(False, False, 'islemci')], 'stopped here, it is not set up; the helper still reads its engine')
+        self.assertTrue(ses.installed(self.state), 'finished: set up')
+        self.assertNotIn('tamam', json.loads((folder / ses.MARKER).read_text(encoding='utf-8')))
+        # A second `kur` over a finished install: set up all the while, as it stays if this one is stopped.
+        seen.clear()
+        ses.install(self.state, say=lambda _text: None, run=run, which={}.get, system=self.tmp.name, popen=popen_from(run))
+        self.assertEqual(seen, [(True, True, 'islemci')])
+        # A marker from before the field counts as it did; one that says it did not finish does not.
+        (folder / ses.MARKER).write_text(json.dumps({'schema': 1, 'motor': 'islemci'}), encoding='utf-8')
+        self.assertTrue(ses.installed(self.state))
+        (folder / ses.MARKER).write_text('not json', encoding='utf-8')
+        self.assertTrue(ses.installed(self.state), 'there and unreadable: as before')
+        (folder / ses.MARKER).write_text(json.dumps({'schema': 1, 'motor': 'islemci', 'tamam': False}), encoding='utf-8')
+        self.assertFalse(ses.installed(self.state))
+        self.assertFalse(ses.usable(self.state), 'the listener starts no helper on it')
+        self.assertEqual(ses.installed_engine(self.state), 'islemci', 'its engine is still read: the helper loads on it')
+        # And a `kur` after one that was stopped finishes it.
+        seen.clear()
+        ses.install(self.state, say=lambda _text: None, run=run, which={}.get, system=self.tmp.name, popen=popen_from(run))
+        self.assertEqual(seen, [(False, False, 'islemci')])
+        self.assertTrue(ses.installed(self.state))
+
+    def test_a_model_download_that_stopped_coming_is_ended_asked_again_and_then_said(self):
+        # N4: its only limit was two hours a try. A connection that hung without closing left `kur` at one
+        # percentage for hours; nobody was told.
+        folder = ses.ses_dir(self.state)
+        folder.mkdir(parents=True)
+        ended, said, paused = [], [], []
+
+        def run(command, **_options):
+            # A helper that says it downloads, as the real one does every second, until it is ended; nothing comes.
+            before, deadline = len(ended), time.monotonic() + 10
+            while len(ended) == before and time.monotonic() < deadline:
+                temp = folder / 'indirme.tmp'
+                temp.write_text(json.dumps({'mb': 3, 'toplam': 484, 'pid': 4242, 'at': time.time()}), encoding='utf-8')
+                os.replace(temp, folder / ses.PROGRESS_FILE)
+                time.sleep(0.01)
+            return subprocess.CompletedProcess(command, 1, '', '')
+        with mock.patch.object(ses, 'STALL_SN', 0.15), mock.patch.object(ses, 'STALL_EVERY_SN', 0.01), \
+                mock.patch.object(ses, '_stop_process', ended.append):
+            with self.assertRaises(ses.DownloadStalled) as caught:
+                ses._trial_load(self.state, {'motor': 'islemci'}, said.append, run, None, pause=paused.append)
+        self.assertEqual((ended, len(paused)), ([4242] * ses.FETCH_TRIES, ses.FETCH_TRIES - 1), 'the helper ended each time, by its number')
+        self.assertTrue(any('ilerlemiyor' in line and '(2/3)' in line for line in said), said)
+        self.assertFalse((folder / ses.MARKER).exists(), 'a first install that failed leaves no marker')
+        error = ses.setup_error(caught.exception, self.state)
+        self.assertEqual(error.code, 'voice_network')
+        for part in ('indirmesi takıldı', 'bağlantını kontrol edip yeniden dene', 'şirket ağındaysan huggingface.co engelli olabilir'):
+            self.assertIn(part, str(error))
+
+    def watched(self, script):
+        """stall_watch with a clock that moves 50 seconds a look; `script(look, moment)` sets, before each look, what
+        the helper says and what has come. (whether the helper was ended, how many looks it took.)"""
+        folder = ses.ses_dir(self.state)
+        (folder / 'hf').mkdir(parents=True, exist_ok=True)
+        looks, ended, over = [0], [], threading.Event()
+
+        def clock():
+            looks[0] += 1
+            if looks[0] > 1:  # the first call is the watch's own start
+                if looks[0] - 1 > 30:
+                    over.set()
+                else:
+                    script(looks[0] - 1, looks[0] * 50.0)
+            return looks[0] * 50.0
+
+        def end(pid):
+            ended.append(pid)
+            over.set()
+        with mock.patch.object(ses, 'STALL_EVERY_SN', 0.001), mock.patch.object(ses, '_stop_process', end):
+            with ses.stall_watch(folder / ses.PROGRESS_FILE, folder / 'hf', clock=clock) as stalled:
+                self.assertTrue(over.wait(10), 'the watch looks')
+        return ended, bool(stalled), looks[0] - 1
+
+    def test_a_download_is_ended_only_once_nothing_has_come_for_the_whole_wait(self):
+        folder = ses.ses_dir(self.state)
+        self.assertEqual(ses.STALL_SN, 150.0)
+
+        def says(moment):
+            (folder / ses.PROGRESS_FILE).write_text(json.dumps({'mb': 1, 'toplam': 9, 'pid': 4242, 'at': moment}), encoding='utf-8')
+
+        def comes(size):
+            (folder / 'hf' / 'model.bin.incomplete').write_bytes(b'x' * size)
+
+        def slow_then_stuck(look, moment):
+            says(moment)
+            if look <= 6 or look == 9:
+                comes(look)  # something new at each of the first six looks, and once more after two without
+        self.assertEqual(self.watched(slow_then_stuck), ([4242], True, 12),
+                         'however slowly it comes it is left alone; ended 150 seconds after the last of it came')
+
+        def loading(look, moment):
+            (folder / ses.PROGRESS_FILE).unlink(missing_ok=True)  # a card's pipelines being built: no download is said
+        self.assertEqual(self.watched(loading)[:2], ([], False), 'a load that is not a download is never ended')
+
+        def said_long_ago(look, moment):
+            says(moment - 3600)  # a helper's last word left behind
+        self.assertEqual(self.watched(said_long_ago)[:2], ([], False))
+
+    def test_a_download_the_network_refuses_or_changes_is_said_with_its_address(self):
+        # N8: a 4xx was "beklenmeyen bir hata (HTTPError)", a sign-in page instead of the archive "SHA-256 tutmadı: vosk.zip".
+        from urllib.error import HTTPError
+        asked, target = [], Path(self.tmp.name) / 'vosk.zip'
+
+        def refused(request, timeout):
+            asked.append(request.full_url)
+            raise HTTPError(request.full_url, 403, 'Forbidden', {}, None)
+        with mock.patch('urllib.request.urlopen', refused), self.assertRaises(ses.DownloadRefused) as caught:
+            ses._download_checked(ses.VOSK_MODEL_URL, target, ses.VOSK_MODEL_SHA256, lambda _line: None, pause=lambda _seconds: None)
+        self.assertEqual(asked, [ses.VOSK_MODEL_URL], 'a refusal is not asked again')
+        said = str(ses.setup_error(caught.exception, self.state))
+        for part in ('alphacephei.com adresinden indirilemedi', 'HTTP 403', 'ağın bu adresi engelliyor ya da değiştiriyor olabilir',
+                     'şirket ağı', 'misafir ağının giriş sayfası'):
+            self.assertIn(part, said)
+        self.assertNotIn('beklenmeyen', said)
+        self.assertEqual(ses.setup_error(caught.exception, self.state).code, 'voice_network')
+
+        class Page(io.BytesIO):
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+        with mock.patch('urllib.request.urlopen', lambda request, timeout: Page(b'<html>Misafir girisi</html>')), \
+                self.assertRaises(ses.DownloadRefused) as caught:
+            ses._download_checked(ses.VOSK_MODEL_URL, target, ses.VOSK_MODEL_SHA256, lambda _line: None)
+        said = str(ses.setup_error(caught.exception, self.state))
+        for part in ('alphacephei.com', 'beklenen dosya değil', 'ağın bu adresi engelliyor ya da değiştiriyor olabilir'):
+            self.assertIn(part, said)
+        self.assertFalse(target.exists() or target.with_name('vosk.zip.part').exists(), 'what came is not kept')
+
+    def test_addresses_out_of_reach_stop_the_install_before_anything_long_begins(self):
+        # N9: a network that keeps one address away was found out after pip's minutes.
+        commands, asked, said = [], [], []
+
+        def run(command, **_options):
+            commands.append(command)
+            return subprocess.CompletedProcess(command, 0, '', '')
+        with mock.patch.object(ses, '_reaches', lambda host, timeout=None: asked.append(host) or host not in ('huggingface.co', 'alphacephei.com')):
+            with self.assertRaises(ses.Unreachable) as caught:
+                ses.install(self.state, say=said.append, run=run, which={}.get, system=self.tmp.name, popen=popen_from(run))
+        self.assertEqual(sorted(asked), sorted(ses.PIP_HOSTS + (ses.MODEL_HOST, ses.VOSK_HOST)))
+        self.assertEqual(caught.exception.hosts, ['huggingface.co', 'alphacephei.com'])
+        self.assertEqual([c for c in commands if 'pip' in c or 'venv' in c], [], 'nothing was begun')
+        error = ses.setup_error(caught.exception, self.state)
+        self.assertEqual(error.code, 'voice_network')
+        for part in ('huggingface.co, alphacephei.com adreslerine ulaşılamıyor', 'şirket ya da misafir ağındaysan', 'proxy', 'sertifika'):
+            self.assertIn(part, str(error))
+        one = str(ses.setup_error(ses.Unreachable(['pypi.org']), self.state))
+        self.assertIn('pypi.org adresine ulaşılamıyor', one)
+        # What is on the disk already is not asked for again.
+        folder = ses.ses_dir(self.state)
+        (folder / ses.VOSK_DIR).mkdir(parents=True)
+        (folder / 'hf' / 'hub' / 'models--Systran--faster-whisper-small').mkdir(parents=True)
+        self.assertEqual(ses.needed_hosts(folder), list(ses.PIP_HOSTS))
+        # An address that answers with a refusal has answered; one that does not answer has not.
+        from urllib.error import HTTPError, URLError
+
+        def refusing(request, timeout):
+            raise HTTPError(request.full_url, 405, 'Method Not Allowed', {}, None)
+
+        def silent(request, timeout):
+            raise URLError('[Errno 11001] getaddrinfo failed')
+        with mock.patch('urllib.request.urlopen', refusing):
+            self.assertTrue(REAL_REACHES('pypi.org'))
+        with mock.patch('urllib.request.urlopen', silent):
+            self.assertFalse(REAL_REACHES('pypi.org'))
+            with mock.patch.object(ses, '_reaches', REAL_REACHES):
+                self.assertEqual(ses.unreachable_hosts(['pypi.org', 'huggingface.co']), ['pypi.org', 'huggingface.co'])
+
+    def test_a_network_failure_names_the_addresses_a_company_network_must_allow(self):
+        # N5: "internete bağlanılamadı" alone sent a person on a company network to check a connection that worked.
+        from urllib.error import URLError
+        try:
+            raise URLError('[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate in certificate chain')
+        except URLError as raised:
+            error = ses.setup_error(raised, self.state)
+        self.assertEqual(error.code, 'voice_network')
+        for part in ('pypi.org', 'files.pythonhosted.org', 'huggingface.co', 'alphacephei.com', 'şirket ağındaysan', 'proxy', 'sertifika'):
+            self.assertIn(part, str(error))
+        self.assertLess(len(str(error)), 400, 'the desktop app shows at most that much')
+
+    def test_a_model_that_would_not_load_is_sorted_and_said_in_a_sentence(self):
+        # N7: the tray's notification showed the exception's own English.
+        from urllib.error import URLError
+        kinds = {
+            'ag': [URLError('[Errno 11001] getaddrinfo failed'),
+                   RuntimeError('LocalEntryNotFoundError: Cannot find an appropriate cached snapshot folder'),
+                   RuntimeError('httpx.ReadTimeout: The read operation timed out')],
+            'disk': [OSError(28, 'No space left on device'), RuntimeError('[WinError 112] There is not enough space on the disk')],
+            'bellek': [MemoryError(), RuntimeError('std::bad_alloc'), OSError('[WinError 1455] The paging file is too small')],
+            'bozuk': [RuntimeError("Unable to open file 'model.bin' in model 'C:\\Users\\x\\ses\\hf'"),
+                      RuntimeError('File model.bin is incomplete: failed to read a buffer of size 4')],
+            'bilinmeyen': [KeyError('x'), RuntimeError('whisper.cpp hazır olmadı: ')],
+        }
+        for kind, errors in kinds.items():
+            for error in errors:
+                got, sentence = ses.load_trouble(error)
+                self.assertEqual(got, kind, error)
+                self.assertEqual(sentence, ses.LOAD_TROUBLE[kind])
+                self.assertNotIn(str(error)[:12] or 'x' * 12, sentence, 'never the library\'s own words')
+        for sentence in ses.LOAD_TROUBLE.values():
+            self.assertTrue(sentence.startswith('Ses model') and len(sentence) < 180, sentence)
+        # The listener carries the kind to the desktop app, which says it in the window's language.
+        link = yakala.VoiceLink(types.SimpleNamespace(send=lambda *_a, **_k: True), start=lambda: None)
+        link.heard({'olay': 'hata', 'neden': 'model', 'tur': 'bozuk', 'mesaj': ses.LOAD_TROUBLE['bozuk']}, 0.0)
+        self.assertEqual((link.error_kind, link.error), ('bozuk', ses.LOAD_TROUBLE['bozuk']))
+        link.heard({'olay': 'hazir', 'aciklama': 'small (işlemci)'}, 1.0)
+        self.assertEqual((link.error_kind, link.error), (None, ''))
 
     def test_the_vulkan_build_is_pinned_to_a_tag_the_workflow_never_replaces(self):
         workflow = (ROOT / '.github/workflows/whisper-vulkan.yml').read_text(encoding='utf-8')
@@ -2338,6 +2583,7 @@ class ServeTest(unittest.TestCase):
         for name, value in (('Recorder', lambda _config: self.recorder), ('Wake', lambda _state, _config: self.wake),
                             ('load_model', lambda _state, _config, _report=None: ('model', 'sahte')), ('release', lambda _model: None),
                             ('transcribe', transcribe), ('_device_name', lambda _config: 'Mikrofon'),
+                            ('warm', lambda *_args: True),
                             ('join_audio', lambda *parts: Sound('+'.join(part.name for part in parts if part.name))),
                             ('split_clip', lambda clip: (clip, Sound(''))),
                             ('out', lambda **event: self.events.put(event)), ('log', lambda text: None if text.startswith('süre:') else self.logged.append(text)),
@@ -2346,7 +2592,7 @@ class ServeTest(unittest.TestCase):
             setattr(helper, name, value)
         self.helper, self.lines = helper, queue.Queue()
 
-    def serve(self, **config):
+    def serve(self, _until='hazir', **config):
         def lines():
             while True:
                 line = self.lines.get()
@@ -2357,7 +2603,8 @@ class ServeTest(unittest.TestCase):
         thread = threading.Thread(target=self.helper.serve, args=(Path(self.tmp.name) / 'state', settings, lines()), daemon=True)
         thread.start()
         self.addCleanup(lambda: (self.send('kapat'), self.hold.set(), thread.join(5)))
-        self.until('hazir')
+        if _until:
+            self.until(_until)
 
     def send(self, command, **values):
         self.lines.put(json.dumps(dict(values, komut=command)) + '\n')
@@ -2877,6 +3124,184 @@ class ServeTest(unittest.TestCase):
         self.until('denetci', hazir=True)
 
 
+    # ---- the review of 1.0.61: a weak laptop's window came a minute after "Hey Pyn" ----
+
+    def test_a_model_on_the_processor_is_warmed_once_and_one_that_will_not_warm_is_still_the_model(self):
+        # N1: only a CUDA model was written with once after it loaded. On the processor the first check or
+        # sentence read the whole model in and loaded the voice detector: the first "Hey Pyn" paid for it.
+        helper = importlib.util.module_from_spec(importlib.util.spec_from_file_location('isci_isitma_testi', self.helper.__file__))
+        helper.__spec__.loader.exec_module(helper)
+        logged, asked = [], []
+        helper.ses, helper.log, helper._silence = ses, logged.append, lambda: 'sessizlik'
+
+        class Model:
+            def transcribe(self, audio, **options):
+                asked.append((audio, options.get('vad_filter', False), options.get('language')))
+                return iter(['parca']), None
+        lock = threading.Lock()
+        self.assertTrue(helper.warm(Model(), dict(ses.DEFAULTS), 'small (işlemci)', lock))
+        self.assertEqual(asked, [('sessizlik', False, 'tr'), ('sessizlik', True, 'tr')],
+                         'the whole window once, then once as a sentence is asked for: with the voice detector')
+        self.assertFalse(lock.locked())
+        self.assertTrue(logged[-1].startswith('süre: small (işlemci) ısıtıldı'))
+        asked.clear()
+        self.assertFalse(helper.warm(Model(), dict(ses.DEFAULTS), 'large-v3-turbo (ekran kartı, CUDA)', lock), 'warmed where it loads')
+        self.assertEqual(asked, [])
+
+        class Broken:
+            def transcribe(self, audio, **options):
+                raise RuntimeError('onnxruntime: cannot load silero_vad')
+        self.assertFalse(helper.warm(Broken(), dict(ses.DEFAULTS), 'small (işlemci)', lock), 'not an error: it is still the model')
+        self.assertIn('ısıtma: small (işlemci) ısıtılamadı', logged[-1])
+        self.assertFalse(lock.locked())
+
+    def test_the_model_and_the_wake_checker_are_warmed_before_each_is_said_ready(self):
+        order = []
+        said = self.helper.out
+        self.helper.out = lambda **event: (order.append(event['olay']), said(**event))[1]
+        self.helper.warm = lambda model, _config, what, _lock: order.append('ısıt:%s:%s' % (model, what)) or True
+        self.helper.load_model = lambda _state, _config, _report=None: ('yazi-modeli', 'small (işlemci)')
+        self.helper._open = lambda name, device, compute, _report=None: 'denetci'
+        self.serve()
+        self.until('denetci', hazir=True)
+        wanted = ['ısıt:yazi-modeli:small (işlemci)', 'hazir', 'ısıt:denetci:%s (işlemci)' % ses.CHECK_MODEL, 'denetci']
+        self.assertEqual([one for one in order if one in wanted], wanted)
+
+    def test_the_wake_phrase_is_listened_for_before_the_dictations_model_is_ready_and_its_check_waits_for_it(self):
+        # N2: the wake listener was not begun until the large model had loaded, and a phrase said in that
+        # minute was never heard.
+        ready = threading.Event()
+        self.addCleanup(ready.set)
+        self.helper.load_model = lambda _state, _config, _report=None: ready.wait(10) and ('model', 'sahte')
+        self.serve(_until='yukleniyor', uyandirma=True)
+        self.assertTrue(self.wait_for(lambda: self.wake.running), 'listening while the model still loads')
+        self.until('uyandirma', durum='dinliyor')
+        self.written.update({'once': 'Hey Pyn.'})
+        self.wake.verdicts = ['aday']
+        self.assertEqual(self.until('duydu')['durum'], 'hazirlaniyor', 'heard: said at once, with what it waits for')
+        self.until_recording()
+        self.pause(ses.WAKE_AFTER_SN)
+        self.assertFalse([e for e in self.quiet(0.3) if e['olay'] in ('duydu', 'uyandi', 'dinliyor')], 'waiting, not dropped')
+        self.assertEqual((self.asked, self.recorder.stream), ([], 'open'), 'nothing to check it with yet; what is said is kept')
+        ready.set()
+        self.until('hazir')
+        self.assertEqual(self.until('uyandi')['mikrofon'], 'Mikrofon', 'checked as soon as the model is there: the window opens')
+        self.assertEqual(self.asked, ['once'])
+
+    def test_a_phrase_heard_long_before_the_model_is_ready_is_let_go_without_a_word(self):
+        ready = threading.Event()
+        self.addCleanup(ready.set)
+        self.helper.load_model = lambda _state, _config, _report=None: ready.wait(10) and ('model', 'sahte')
+        self.serve(_until='yukleniyor', uyandirma=True)
+        self.assertTrue(self.wait_for(lambda: self.wake.running))
+        self.wake.verdicts = ['aday']
+        self.assertEqual(self.until('duydu')['durum'], 'hazirlaniyor')
+        self.pause(self.helper.WAKE_MODEL_WAIT_SN + 1)  # a first download takes minutes: no window by itself that late
+        self.assertEqual(self.until('duydu')['durum'], 'yok')
+        self.assertIsNone(self.recorder.stream)
+        self.assertTrue(any('hazır olmadı' in line for line in self.logged), self.logged)
+        self.assertTrue(self.wait_for(lambda: self.wake.running and self.wake.starts >= 2), 'listening for the phrase again')
+
+    def test_the_wake_listeners_model_loads_without_keeping_commands_waiting(self):
+        # N2: its small model was loaded in the loop itself, and nothing was answered until it had.
+        gate = threading.Event()
+        self.addCleanup(gate.set)
+        built = []
+        self.helper.Wake = lambda _state, _config: built.append(1) or (gate.wait(10) and self.wake)
+        self.serve(uyandirma=True)
+        self.assertTrue(self.wait_for(lambda: built == [1]))
+        self.send('dinle', surekli=True)
+        self.until('dinliyor', wait=2.0)
+        self.send('iptal')
+        gate.set()
+        self.assertTrue(self.wait_for(lambda: self.wake.running), 'loaded meanwhile: listening once the dictation is over')
+        self.assertEqual(built, [1], 'loaded once')
+
+    def test_a_heard_phrase_is_said_lightly_at_once_and_taken_back_when_it_was_not_the_phrase(self):
+        # N1: until Whisper had confirmed the phrase the person was shown nothing, however long that took.
+        self.serve(uyandirma=True)
+        self.written.update({'once': 'Bunu not al.'})
+        self.hold.clear()  # Whisper is slow
+        self.wake.verdicts = ['aday']
+        heard = self.until('duydu')
+        self.assertEqual((heard['durum'], heard['tur']), ('bakiyor', 1))
+        self.pause(ses.WAKE_AFTER_SN)
+        self.until_asked('once')
+        self.assertFalse([e for e in self.quiet(0.3) if e['olay'] in ('duydu', 'uyandi', 'dinliyor')], 'still being checked')
+        self.hold.set()
+        self.assertEqual(self.until('duydu')['durum'], 'yok', 'not the phrase: the sign goes, without a word')
+        # Confirmed, the window's own events end it: nothing is taken back.
+        self.written.update({'once': 'Hey Pyn.'})
+        self.wake.verdicts = ['soz']
+        self.assertEqual(self.until('duydu')['durum'], 'bakiyor')
+        self.pause(ses.WAKE_AFTER_SN)
+        self.until('uyandi')
+        self.assertFalse([e for e in self.quiet(0.3) if e['olay'] == 'duydu'])
+        # A recording given up that was never a candidate takes nothing back either.
+        self.send('iptal')
+        self.send('dinle', surekli=True)
+        self.until('dinliyor')
+        self.send('iptal')
+        self.assertFalse([e for e in self.quiet(0.3) if e['olay'] == 'duydu'])
+
+    def test_the_listener_carries_a_heard_phrase_until_its_window_or_its_end(self):
+        link = yakala.VoiceLink(types.SimpleNamespace(send=lambda *_a, **_k: True), start=lambda: None)
+        self.assertTrue(link.heard({'olay': 'uyandirma', 'durum': 'dinliyor'}, 0.0))
+        self.assertTrue(link.listens(), 'the microphone is open while the model still loads: said as open')
+        self.assertFalse(link.heard({'olay': 'dinliyor', 'tur': 1}, 0.5), 'a recording alone changes nothing it says')
+        self.assertTrue(link.heard({'olay': 'duydu', 'durum': 'hazirlaniyor', 'tur': 1}, 1.0))
+        self.assertEqual(link.candidate, 'hazirlaniyor')
+        self.assertFalse(link.heard({'olay': 'duydu', 'durum': 'hazirlaniyor', 'tur': 1}, 1.5), 'nothing new')
+        self.assertTrue(link.heard({'olay': 'uyandi', 'tur': 1}, 2.0))
+        self.assertIsNone(link.candidate, 'the window opened')
+        link.heard({'olay': 'duydu', 'durum': 'bakiyor', 'tur': 2}, 3.0)
+        self.assertTrue(link.heard({'olay': 'duydu', 'durum': 'yok', 'tur': 2}, 4.0))
+        self.assertIsNone(link.candidate, 'not the phrase')
+        link.heard({'olay': 'duydu', 'durum': 'bakiyor', 'tur': 3}, 5.0)
+        link.heard({'olay': 'bitti'}, 6.0)
+        self.assertIsNone(link.candidate, 'the helper ended')
+        word = Path(self.tmp.name) / 'dinleyici.json'
+        ses.say_listener(word, ses='yukleniyor', duydu='hazirlaniyor', hata_turu=None, uyandirma=True)
+        self.assertEqual(json.loads(word.read_text(encoding='utf-8'))['duydu'], 'hazirlaniyor')
+
+    def test_a_model_that_would_not_load_is_said_as_a_sentence_and_its_own_words_are_logged(self):
+        # N7: `mesaj` was the exception's text, and the tray's notification showed it.
+        def broken(_state, _config, _report=None):
+            raise RuntimeError("Unable to open file 'model.bin' in model 'C:\\Users\\x\\ses\\hf\\hub'")
+        self.helper.load_model = broken
+        self.serve(_until=None)
+        event = self.until('hata', neden='model')
+        self.assertEqual((event['tur'], event['mesaj']), ('bozuk', ses.LOAD_TROUBLE['bozuk']))
+        self.assertTrue(any('Unable to open file' in line for line in self.logged), 'the log keeps what the library said')
+
+    def test_the_hub_is_asked_what_a_model_weighs_with_a_limit(self):
+        # N4: asked without one, a network that never answers held the download before it began.
+        asked = {}
+
+        class Api:
+            def model_info(self, repo, **options):
+                asked.update(options, repo=repo)
+                raise TimeoutError('timed out')
+        with mock.patch.dict(sys.modules, {'huggingface_hub': types.SimpleNamespace(HfApi=Api)}):
+            size = self.helper._model_size('Systran/faster-whisper-small', 'small')
+        self.assertEqual((asked.get('repo'), asked.get('timeout')), ('Systran/faster-whisper-small', self.helper.SIZE_ASK_SN))
+        self.assertTrue(0 < self.helper.SIZE_ASK_SN <= 30)
+        self.assertEqual(size, int(ses.DOWNLOAD_GB['small'] * 1e9), 'no answer: about what it weighs')
+
+    def test_the_apps_recording_window_is_waited_for_longer_until_its_first_sound(self):
+        # N3: the hidden window is made when sound is first asked for; cold, it took longer than five seconds,
+        # and "mikrofondan ses gelmiyor" was said over a microphone about to open.
+        stall = self.helper.wake_stall
+        self.assertIsNone(stall(6.0, 0.0, 0.0, False, True), 'the app\'s stream has not sounded yet: waited for')
+        self.assertIsNone(stall(self.helper.WAKE_FIRST_SN, 0.0, 0.0, False, True))
+        self.assertEqual(stall(self.helper.WAKE_FIRST_SN + 1, 0.0, 0.0, False, True), 'mikrofon', 'not for ever')
+        self.assertEqual(stall(106.0, 100.0, 100.0, True, True), 'mikrofon', 'once it has sounded, five seconds as before')
+        self.assertEqual(stall(6.0, 0.0, 0.0, False, False), 'mikrofon', 'the helper\'s own microphone gives sound at once or not at all')
+        self.assertIsNone(stall(104.0, 100.0, 100.0, True, True))
+        self.assertEqual(stall(131.0, 130.0, 100.0, True, False), 'sessiz')
+        self.assertGreater(self.helper.WAKE_FIRST_SN, self.helper.WAKE_STALL_SN)
+
+
 class RecorderTest(unittest.TestCase):
     """The helper's microphone on real sample arrays (numpy, which the engine's own Python may lack)."""
 
@@ -3065,6 +3490,35 @@ class RecorderTest(unittest.TestCase):
         self.assertEqual(wake.stalled(self.clock.t), 'sessiz')
         self.clock.t += 6  # and nothing at all: the device went away
         self.assertEqual(wake.stalled(self.clock.t), 'mikrofon')
+        wake.stop()
+
+    def test_the_wake_listener_waits_for_the_apps_first_sound_longer_than_for_a_stream_that_stopped(self):
+        # N3: with the desktop app recording, the first sound comes once its hidden window is made.
+        vosk = types.SimpleNamespace(KaldiRecognizer=lambda *_a: types.SimpleNamespace(Reset=lambda: None), Model=lambda _path: None,
+                                     SetLogLevel=lambda _level: None)
+        taken, can_record = [], [True]
+        self.helper.FEED = types.SimpleNamespace(
+            usable=lambda: can_record[0], device='',
+            stream=lambda callback, microphone=None: types.SimpleNamespace(start=lambda: taken.append(callback), stop=lambda: None,
+                                                                            close=lambda: None))
+        with mock.patch.dict(sys.modules, {'vosk': vosk}):
+            wake = self.helper.Wake(Path(self.tmp.name) / 'state', dict(ses.DEFAULTS))
+        wake.start()
+        self.assertEqual((len(taken), self.streams), (1, []), 'the app records: no microphone of the helper\'s own')
+        self.clock.t += 8
+        self.assertIsNone(wake.stalled(self.clock.t), 'the window is still being made')
+        can_record[0] = False  # the app said it cannot record, or went away: not waited for any longer
+        self.assertEqual(wake.stalled(self.clock.t), 'mikrofon')
+        can_record[0] = True
+        taken[0](self.np.full((160, 1), 0.01, dtype='float32'), 160, None, None)
+        self.clock.t += 4
+        self.assertIsNone(wake.stalled(self.clock.t))
+        self.clock.t += 2
+        self.assertEqual(wake.stalled(self.clock.t), 'mikrofon', 'six seconds after its last sound: gone, as before')
+        wake.stop()
+        wake.start()
+        self.clock.t += self.helper.WAKE_FIRST_SN + 1
+        self.assertEqual(wake.stalled(self.clock.t), 'mikrofon', 'a window that never sends anything is not waited for for ever')
         wake.stop()
 
     def test_a_dictation_opened_on_the_phrase_has_each_moment_once(self):

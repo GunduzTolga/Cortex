@@ -184,8 +184,32 @@ def _shared_home(state):
     return user_base() / SES_DIR if _beside_others(state) else None
 
 
+def _marker_says_done(text):
+    """Whether an install's marker, as written, says the install finished. `kur` writes it before the
+    model is fetched, for the helper to read its engine from, and says `tamam: false` in it until
+    the install ends (_trial_load): a `kur` closed or killed while it downloaded left a marker
+    behind, and the voice read as set up with no model (the review of 1.0.61). A marker from before
+    the field, or one that is not JSON, counts as it always did."""
+    try:
+        said = json.loads(text)
+    except ValueError:
+        return True
+    return not (isinstance(said, dict) and said.get('tamam') is False)
+
+
+def _marker_done(path):
+    """Whether the marker file is there and says its install finished (_marker_says_done)."""
+    path = Path(path)
+    if not path.is_file():
+        return False
+    try:
+        return _marker_says_done(path.read_text(encoding='utf-8'))
+    except OSError:
+        return True  # there, and not readable just now (a scanner holds it): as before
+
+
 def _installed_in(folder):
-    return (folder / 'venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')).is_file() and (folder / MARKER).is_file()
+    return (folder / 'venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')).is_file() and _marker_done(folder / MARKER)
 
 
 # A state's own install this process could not move to the person's folder: used where it is.
@@ -391,8 +415,8 @@ def save_config(state, config):
 
 
 def installed(state):
-    """The environment and the wake model are there, as `kur` left them."""
-    return venv_python(state).is_file() and (ses_dir(state) / MARKER).is_file()
+    """The environment and the wake model are there, as a `kur` that finished left them (_marker_done)."""
+    return venv_python(state).is_file() and _marker_done(ses_dir(state) / MARKER)
 
 
 def usable(state):
@@ -426,9 +450,11 @@ def listener_file():
 
 def say_listener(path=None, **fields):
     """The listener's word on its voice, written whole: `ses` (yok, yukleniyor, hazir, hata, kapali),
-    `model`, `mesaj`, a download's `mb` and `toplam`; `uyandirma` true only while the wake phrase is
-    really listened for, else `uyandirma_sorun` (None, 'mikrofon', 'sessiz', 'model') and
-    `uyandirma_mesaj` say why; `kisayol` 'tamam', or 'mesgul' when another app holds the key."""
+    `model`, `mesaj` and what kind of trouble it is (`hata_turu`: LOAD_TROUBLE), a download's `mb`
+    and `toplam`; `uyandirma` true only while the wake phrase is really listened for, else
+    `uyandirma_sorun` (None, 'mikrofon', 'sessiz', 'model') and `uyandirma_mesaj` say why; `duydu`
+    while the phrase was heard and no window has opened yet ('bakiyor': Whisper checks it,
+    'hazirlaniyor': its model still loads); `kisayol` 'tamam', or 'mesgul' when another app holds the key."""
     import time
     path = Path(path) if path is not None else listener_file()
     word = dict(fields, surum=1, pid=os.getpid(), at=time.time())
@@ -961,6 +987,20 @@ def _download(url, target, say=print):
     return _download_checked(url, target, VOSK_MODEL_SHA256 if url == VOSK_MODEL_URL else None, say=say)
 
 
+class DownloadRefused(ValueError):
+    """A download the network would not give as it is: the address refused it (HTTP 403, 404, 407…),
+    or what came is not the file (its digest). On a company network, or a guest network before its
+    sign-in page, that is the network's doing more often than the address's own: said with the
+    address by name (setup_error), where the person read "beklenmeyen bir hata (HTTPError)" or
+    "SHA-256 tutmadı: vosk.zip" (the review of 1.0.61). Asking again does not help, so it is not."""
+
+    def __init__(self, url, why):
+        from urllib.parse import urlsplit
+        self.host = urlsplit(url).hostname or url
+        self.why = why
+        super().__init__('%s: %s' % (self.host, why))
+
+
 def network_error(exc):
     """Whether an error is the network's: no connection, one cut, a server that could not answer."""
     import http.client
@@ -1012,6 +1052,7 @@ def _download_checked(url, target, sha256, say=print, tries=4, pause=None):
     A dropped connection (1.6 GB over a home line) does not start it over: it is asked again a
     few times from where it stopped, and a later `kur` goes on from the part already there."""
     import time
+    from urllib.error import HTTPError
     if not url.startswith('https://'):
         raise ValueError('Yalnız HTTPS adresinden indirilir: ' + url)
     target = Path(target)
@@ -1022,13 +1063,16 @@ def _download_checked(url, target, sha256, say=print, tries=4, pause=None):
             _fetch_part(url, part, say)  # the address asked again each time: a CDN's redirect expires
             break
         except Exception as exc:
+            if isinstance(exc, HTTPError) and 400 <= exc.code < 500 and exc.code != 429:
+                exc.close()
+                raise DownloadRefused(url, 'adres isteği reddetti (HTTP %d)' % exc.code) from exc
             if attempt == tries - 1 or not network_error(exc):
                 raise
             say('  Bağlantı koptu; kaldığı yerden yeniden deneniyor (%d/%d)…' % (attempt + 2, tries))
             (pause or time.sleep)(min(30, 3 * 2 ** attempt))
     if sha256 and _sha256(part) != sha256:
         part.unlink(missing_ok=True)
-        raise ValueError('İndirilen dosya beklenen dosya değil (SHA-256 tutmadı): ' + target.name)
+        raise DownloadRefused(url, 'gelen dosya beklenen dosya değil (SHA-256 tutmadı: %s)' % target.name)
     _replace_retrying(part, target)
     return target
 
@@ -1169,6 +1213,83 @@ def relayed_progress(path, say, every=1.0):
         thread.join(every * 2)
 
 
+# A model download that has stopped coming: nothing new in Hugging Face's folder for this long while
+# the helper says it downloads (PROGRESS_FILE, written every second with the moment and its pid).
+# Its only limit was two hours a try, three tries: a connection that hung without closing left
+# `kur` at one percentage for hours, and nobody was told (the review of 1.0.61). The helper is
+# ended and asked again, from where the download stopped; a load that is not a download (a card's
+# pipelines being built) writes no progress and is never taken for one.
+STALL_SN = 150.0
+STALL_EVERY_SN = 5.0
+PROGRESS_FRESH_SN = 15.0
+
+
+class DownloadStalled(RuntimeError):
+    """The model's download stopped coming, each time it was asked again (stall_watch)."""
+
+
+def _tree_bytes(folder):
+    """What a folder's files weigh together; 0 where there is none."""
+    total = 0
+    try:
+        for one in Path(folder).rglob('*'):
+            try:
+                if one.is_file() and not one.is_symlink():
+                    total += one.stat().st_size
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return total
+
+
+def _stop_process(pid):
+    """A process ended by its number (Windows: TerminateProcess); one already gone is no error."""
+    import signal
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (OSError, ValueError):
+        pass
+
+
+@contextlib.contextmanager
+def stall_watch(progress, folder, clock=None):
+    """While the helper fetches a model, a download that stopped coming is ended (STALL_SN): the
+    helper says every second that it downloads (`at` in PROGRESS_FILE) and who it is (`pid`), and
+    what has come is weighed here (`folder`, Hugging Face's own). Yields a list, empty until the
+    helper was ended for it."""
+    import time
+    clock = clock or time.time
+    stop, stalled = threading.Event(), []
+
+    def watch():
+        most, since = -1, clock()
+        while not stop.wait(STALL_EVERY_SN):
+            moment = clock()
+            try:
+                said = json.loads(Path(progress).read_text(encoding='utf-8'))
+                pid, at = said.get('pid'), said.get('at')
+            except FileNotFoundError:
+                pid = at = None  # nothing is being downloaded
+            except (OSError, ValueError, AttributeError):
+                continue  # read as it was being written, or held for a moment: the next look reads it
+            numbers = all(isinstance(one, (int, float)) and not isinstance(one, bool) for one in (pid, at))
+            size = _tree_bytes(folder) if numbers and abs(moment - at) <= PROGRESS_FRESH_SN else None
+            if size is None or size > most:
+                most, since = (-1 if size is None else size), moment  # no download now, or one that comes
+            elif moment - since >= STALL_SN:
+                stalled.append(True)
+                _stop_process(int(pid))
+                return
+    thread = threading.Thread(target=watch, daemon=True)
+    thread.start()
+    try:
+        yield stalled
+    finally:
+        stop.set()
+        thread.join(STALL_EVERY_SN * 2)
+
+
 # A card that took longer than this for a second of sound, its pipelines already built (`--indir`
 # measures it), writes slower than the processor's quick model does: a Radeon inside a laptop's
 # processor (Vega, 610M), an NVIDIA MX250. `kur` sets up the processor there instead.
@@ -1305,22 +1426,33 @@ def _trial_load(state, marker, say, run, previous, pause=None):
     the first word: (what it loaded, how long a second of sound took on a card, or None). Failed,
     the marker is put back as it was: a working install stays working."""
     folder = ses_dir(state)
-    (folder / MARKER).write_text(json.dumps(marker, ensure_ascii=False) + '\n', encoding='utf-8')
+    # The helper reads its engine from the marker, so it is written first; until the install ends
+    # it says it has not (`tamam`: _marker_says_done), unless a finished install was there before:
+    # that one is still set up while this one runs, as it is again if this one fails.
+    unfinished = previous is None or not _marker_says_done(previous)
+    (folder / MARKER).write_text(json.dumps(dict(marker, tamam=False) if unfinished else marker, ensure_ascii=False) + '\n',
+                                 encoding='utf-8')
     say('Whisper modeli hazırlanıyor' + (' (ilk seferde yaklaşık %s GB iner)…' % download_size(marker['motor'], load_config(state))
                                          if marker['motor'] != 'vulkan' else '…'))
     import time
     try:
         for attempt in range(FETCH_TRIES):
             env = dict(worker_env(state), **({LAST_TRY_ENV: '1'} if attempt == FETCH_TRIES - 1 else {}))
-            with relayed_progress(folder / PROGRESS_FILE, say):
+            (folder / PROGRESS_FILE).unlink(missing_ok=True)  # a helper that was ended left its last word behind
+            with relayed_progress(folder / PROGRESS_FILE, say), stall_watch(folder / PROGRESS_FILE, folder / 'hf') as stalled:
                 done = run(worker_command(state, '--indir'), capture_output=True, text=True, encoding='utf-8', errors='replace',
                            timeout=7200, env=env, creationflags=NO_WINDOW)
             output = (done.stderr or done.stdout or '').strip()
             # A dropped connection over 0.5-1.6 GB asked the person to start the whole `kur` again (2026-11-05).
-            if not done.returncode or attempt == FETCH_TRIES - 1 or not any(word in output.lower() for word in CUT_WORDS):
+            cut = bool(stalled) or any(word in output.lower() for word in CUT_WORDS)
+            if not done.returncode or attempt == FETCH_TRIES - 1 or not cut:
                 break
-            say('  Bağlantı koptu; model indirmesi kaldığı yerden yeniden deneniyor (%d/%d)…' % (attempt + 2, FETCH_TRIES))
+            say(('  İndirme %d saniyedir ilerlemiyor; kaldığı yerden yeniden deneniyor (%d/%d)…' % (STALL_SN, attempt + 2, FETCH_TRIES))
+                if stalled else
+                '  Bağlantı koptu; model indirmesi kaldığı yerden yeniden deneniyor (%d/%d)…' % (attempt + 2, FETCH_TRIES))
             (pause or time.sleep)(10 * (attempt + 1))
+        if done.returncode and stalled:
+            raise DownloadStalled('Whisper modelinin indirmesi %d denemede de takıldı: ' % FETCH_TRIES + output[-2000:])
         if done.returncode:
             raise RuntimeError('Whisper modeli hazırlanamadı: ' + output[-4000:])
     except Exception:
@@ -1344,6 +1476,69 @@ def _trial_load(state, marker, say, run, previous, pause=None):
     return (lines[-1] if lines else ''), seconds
 
 
+# Where `kur` downloads from: pip's packages, the Whisper models, the wake phrase's small model.
+PIP_HOSTS = ('pypi.org', 'files.pythonhosted.org')
+MODEL_HOST = 'huggingface.co'
+VOSK_HOST = 'alphacephei.com'
+REACH_SN = 6.0
+
+
+class Unreachable(RuntimeError):
+    """Addresses `kur` needs that could not be reached before it began (`hosts`)."""
+
+    def __init__(self, hosts):
+        self.hosts = list(hosts)
+        super().__init__('ulaşılamayan adresler: ' + ', '.join(self.hosts))
+
+
+def _reaches(host, timeout=None):
+    """Whether an address answers over HTTPS, asked the way the downloads are (the system's proxy
+    and certificates): any answer, a refusal too, is one. No name found, no connection in a few
+    seconds, a certificate that is not the address's own (a guest network's sign-in page) is not."""
+    from urllib.error import HTTPError
+    from urllib.request import Request, urlopen
+    try:
+        with urlopen(Request('https://%s/' % host, method='HEAD'), timeout=timeout or REACH_SN):
+            return True
+    except HTTPError as answer:
+        answer.close()
+        return True
+    except Exception:
+        return False
+
+
+def needed_hosts(folder):
+    """The addresses this `kur` will download from: pip's always (it looks for newer packages each
+    time), the wake model's until it is unpacked, Hugging Face's until a model of its is on disk."""
+    hosts = list(PIP_HOSTS)
+    try:
+        fetched = any((Path(folder) / 'hf' / 'hub').glob('models--*'))
+    except OSError:
+        fetched = False
+    if not fetched:
+        hosts.append(MODEL_HOST)
+    if not (Path(folder) / VOSK_DIR).is_dir():
+        hosts.append(VOSK_HOST)
+    return hosts
+
+
+def unreachable_hosts(hosts):
+    """Those of the addresses that do not answer, asked at once, each for a few seconds (_reaches)."""
+    answers = {}
+
+    def ask(host):
+        try:
+            answers[host] = bool(_reaches(host))
+        except Exception:
+            answers[host] = False
+    threads = [threading.Thread(target=ask, args=(host,), daemon=True) for host in hosts]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(REACH_SN * 2)
+    return [host for host in hosts if not answers.get(host)]
+
+
 def install(state, say=print, run=subprocess.run, download=_download, which=shutil.which, download_checked=_download_checked,
             system=None, popen=subprocess.Popen):
     """Build the environment, install the packages, fetch the models. Each step says what it does."""
@@ -1353,6 +1548,12 @@ def install(state, say=print, run=subprocess.run, download=_download, which=shut
     say('Python: ' + plan['python'])
     say('Motor: ' + ENGINE_NAMES[plan['motor']])
     _disk_enough(state, plan['motor'], load_config(state))  # before anything is downloaded, the Vulkan build too
+    # A network that keeps one of the addresses away (a company's, a guest network before its sign-in
+    # page) was found out only after pip's minutes, or after 40 MB of the wake model: asked first.
+    say('İnternet bağlantısı denetleniyor…')
+    away = unreachable_hosts(needed_hosts(folder))
+    if away:
+        raise Unreachable(away)
     if plan['motor'] == 'vulkan' and not _vulkan_ready(state, say, download_checked):
         say('İşlemciye geçiliyor.')
         plan.update(motor='islemci', paketler=packages_for('islemci'), ekran_karti=False)
@@ -1455,11 +1656,26 @@ def setup_error(exc, state):
     if isinstance(exc, PermissionError) and 'antivirüs' in str(exc):
         # _replace_retrying's own sentence: said as it is, not as "beklenmeyen bir hata (PermissionError)".
         return SetupError('Sesle yazma kurulamadı: ' + str(exc), 'voice_failed')
+    if isinstance(exc, Unreachable):
+        return SetupError('Sesle yazma kurulamadı: %s %s ulaşılamıyor; internet bağlantını denetle, şirket ya da misafir '
+                          'ağındaysan bu %s izin verilmesi gerekir (proxy ya da güvenlik sertifikası engelliyor olabilir).'
+                          % (', '.join(exc.hosts), 'adresine' if len(exc.hosts) == 1 else 'adreslerine',
+                             'adrese' if len(exc.hosts) == 1 else 'adreslere'), 'voice_network')
+    if isinstance(exc, DownloadRefused):
+        return SetupError('Sesle yazma kurulamadı: %s adresinden indirilemedi, %s; ağın bu adresi engelliyor ya da değiştiriyor '
+                          'olabilir (şirket ağı, misafir ağının giriş sayfası), başka bir ağda yeniden dene.'
+                          % (exc.host, exc.why), 'voice_network')
+    if isinstance(exc, DownloadStalled):
+        return SetupError('Sesle yazma kurulamadı: model indirmesi takıldı (%d saniye boyunca hiç veri gelmedi); bağlantını '
+                          'kontrol edip yeniden dene (inenler korunur), şirket ağındaysan %s engelli olabilir.'
+                          % (STALL_SN, MODEL_HOST), 'voice_network')
     timed_out = isinstance(exc, subprocess.TimeoutExpired)
     building = timed_out and 'venv' in [str(part) for part in (exc.cmd or [])]
     if not building and (timed_out or network_error(exc) or any(word in text for word in NETWORK_WORDS)):
-        return SetupError('Sesle yazma kurulamadı: indirirken internete bağlanılamadı ya da bağlantı koptu; bağlantını '
-                          'denetleyip yeniden dene, inenler korunur.', 'voice_network')
+        return SetupError('Sesle yazma kurulamadı: indirirken internete bağlanılamadı ya da bağlantı koptu; bağlantını denetleyip '
+                          'yeniden dene (inenler korunur), şirket ağındaysan %s, %s ve %s adreslerine izin, proxy ayarı ya da '
+                          'şirketin güvenlik sertifikası gerekebilir.' % (', '.join(PIP_HOSTS), MODEL_HOST, VOSK_HOST),
+                          'voice_network')
     first = (str(exc).strip().splitlines() or [''])[0]
     if 'no matching distribution' in text:
         what = 'bu bilgisayardaki Python için ses paketleri bulunamadı (Python 3.10-3.13 gerekir)'
@@ -1474,6 +1690,44 @@ def setup_error(exc, state):
     if not what.startswith('Whisper'):
         what = tr_lower(what[:1]) + what[1:]
     return SetupError('Sesle yazma kurulamadı: %s; ayrıntılar %s dosyasında.' % (what, log), 'voice_failed')
+
+
+# How a model that does not fit in memory is said (CTranslate2, onnxruntime, Windows), and one whose
+# file on disk is cut or not a model (CTranslate2's own words, Vosk's).
+MEMORY_WORDS = ('out of memory', 'bad_alloc', 'bad allocation', 'memoryerror', 'cannot allocate memory', 'failed to allocate',
+                'not enough memory', 'winerror 8]', 'winerror 1455]', 'paging file is too small')
+BROKEN_WORDS = ('is incomplete', 'unable to open file', 'unsupported model binary version', 'invalid model', 'corrupt',
+                'unexpected end of file', 'failed to create a model', 'invalid file', 'bad magic', 'model.bin')
+# Why the listener's voice model did not load, as the helper names it (`tur` of its 'hata') and the
+# desktop app knows it (services/tray.ts), and each as a sentence that says what to do.
+LOAD_TROUBLE = {
+    'ag': ('Ses modeli indirilemedi: internete bağlanılamadı; bağlantını denetle, şirket ağındaysan %s engelli olabilir.'
+           % MODEL_HOST),
+    'disk': 'Ses modeli açılamadı: diskte yer kalmadı; biraz yer aç.',
+    'bellek': 'Ses modeli için bellek yetmedi; açık programlardan birkaçını kapat.',
+    'bozuk': 'Ses modelinin dosyası eksik ya da bozuk; Ayarlar → Sesle yazma\'dan yeniden kur.',
+    'bilinmeyen': 'Ses modeli yüklenemedi; ayrıntılar ses klasöründeki %s dosyasında.' % LOG,
+}
+
+
+def load_trouble(exc):
+    """(what kind, a sentence for a person) for a model that would not load in the listener's helper:
+    the tray's notification showed the exception's own English ("Unable to open file 'model.bin' in
+    model …"); that goes to isci.log. Sorted as a failed `kur` is (network_error, NETWORK_WORDS,
+    DISK_WORDS), the full disk first: a download that ran out of room speaks of the network too."""
+    text = ('%s: %s' % (type(exc).__name__, exc)).lower()
+    if (isinstance(exc, OSError) and (exc.errno == 28 or getattr(exc, 'winerror', None) in (39, 112))) or \
+            any(word in text for word in DISK_WORDS):
+        kind = 'disk'
+    elif isinstance(exc, MemoryError) or any(word in text for word in MEMORY_WORDS):
+        kind = 'bellek'
+    elif network_error(exc) or any(word in text for word in NETWORK_WORDS + CUT_WORDS):
+        kind = 'ag'
+    elif any(word in text for word in BROKEN_WORDS):
+        kind = 'bozuk'
+    else:
+        kind = 'bilinmeyen'
+    return kind, LOAD_TROUBLE[kind]
 
 
 def reads_files(state):
@@ -2026,13 +2280,18 @@ def _cuda_dirs():
                 os.environ['PATH'] = str(binary) + os.pathsep + os.environ.get('PATH', '')
 
 
+# How long the Hub is waited for when asked what a model weighs: it had no limit, and a network that
+# takes the question and never answers held the download before it began, with no progress to watch.
+SIZE_ASK_SN = 15
+
+
 def _model_size(repo, name):
     """What a model's files weigh, in bytes: as the Hub says, else about (ses.DOWNLOAD_GB)."""
     import fnmatch
     wanted = ('config.json', 'preprocessor_config.json', 'model.bin', 'tokenizer.json', 'vocabulary.*')
     try:
         import huggingface_hub
-        info = huggingface_hub.HfApi().model_info(repo, files_metadata=True)
+        info = huggingface_hub.HfApi().model_info(repo, files_metadata=True, timeout=SIZE_ASK_SN)
         size = sum(one.size or 0 for one in info.siblings if any(fnmatch.fnmatch(one.rfilename, w) for w in wanted))
         if size:
             return size
@@ -2331,6 +2590,28 @@ def release(model):
         model.close()
 
 
+def warm(model, config, what, lock):
+    """A model on the processor written with once, on silence, as soon as it is loaded: its first
+    pass reads the whole model in, starts its threads and loads the voice detector, and that was
+    paid by the first "Hey Pyn" or the first sentence (a weak laptop: the window a minute after
+    the phrase; the review of 1.0.61). A CUDA model and whisper.cpp's server are warmed where they
+    load (load_model, Server._start). One that will not warm is still the model: said in isci.log."""
+    if isinstance(model, Server) or '(ekran kartı, CUDA)' in what:
+        return False
+    started = now()
+    try:
+        with lock:
+            # The whole 30-second window once, as every check and sentence reads it (card_seconds),
+            # then once the way `transcribe` asks, which loads the voice detector and finds no speech.
+            list(model.transcribe(_silence(), language=config['dil'] or None, beam_size=BEAM_SIZE)[0])
+            list(model.transcribe(_silence(), language=config['dil'] or None, vad_filter=True, beam_size=BEAM_SIZE)[0])
+    except Exception as exc:
+        log('ısıtma: %s ısıtılamadı (%s)' % (what, str(exc)[:200]))
+        return False
+    log('süre: %s ısıtıldı, %.1f sn' % (what, now() - started))
+    return True
+
+
 # How Whisper writes, on either engine: the five best guesses weighed, not the first one taken.
 BEAM_SIZE = 5
 
@@ -2428,6 +2709,15 @@ def transcribe_path(state, config, path):
 # The wake listener's microphone: no sound for this long and it is opened again. Nothing at all
 # comes from a stream whose device went away; only exact zeros come from one that is not a microphone.
 WAKE_STALL_SN, WAKE_SILENT_SN = 5.0, 30.0
+# Until the first sound of a stream the desktop app records: its hidden recording window is made
+# when sound is first asked for, and on a cold start (Windows signing in, a scanner reading every
+# file) that took longer than WAKE_STALL_SN: "mikrofondan ses gelmiyor" was said over a microphone
+# about to open, and the helper recorded by itself for a minute (the review of 1.0.61). Once a
+# stream has sounded, the five seconds count as before.
+WAKE_FIRST_SN = 20.0
+# A phrase heard while the dictation's model still loads waits for it, and its check with it, this
+# long; past that (a first download takes minutes) a window opening by itself would only surprise.
+WAKE_MODEL_WAIT_SN = 120.0
 # The wake listener's trouble as the listener says it (after "Uyandırma açılamadı: ").
 WAKE_TROUBLE = {
     'mikrofon': 'mikrofondan ses gelmiyor; bağlı ve seçili mi?',
@@ -2437,6 +2727,18 @@ WAKE_TROUBLE = {
 # How often Windows' list of microphones is looked at while the wake listener listens.
 INPUTS_EVERY_SN = 3.0
 CAPTURE_KEY = r'SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Capture'
+
+
+def wake_stall(moment, last_audio, last_sound, came, from_app):
+    """How a wake listener's microphone has gone quiet, if it has (Wake.stalled): 'mikrofon' when
+    nothing came from its stream for WAKE_STALL_SN - WAKE_FIRST_SN while the app's stream has not
+    sent its first sound (`came`, `from_app`) - 'sessiz' when only exact zeros came for
+    WAKE_SILENT_SN, None while it hears."""
+    if moment - last_audio > (WAKE_FIRST_SN if from_app and not came else WAKE_STALL_SN):
+        return 'mikrofon'
+    if moment - last_sound > WAKE_SILENT_SN:
+        return 'sessiz'
+    return None
 
 
 def _inputs_now():
@@ -2818,6 +3120,7 @@ class Recorder:
         use_feed = FEED is not None and FEED.usable()
         if not use_feed:
             import sounddevice as sd
+        self.from_app = use_feed  # the wake listener waits longer for the app's first sound (wake_stall)
         self.level, self.floor, self.loud = 0.0, 1.0, 0
         self._sentence(now())
         self.on_chunk = on_chunk
@@ -2947,6 +3250,7 @@ class Wake:
         self.kept = 0
         self.last_audio = self.last_sound = now()
         self.sounded = False  # more than digital silence has come since it opened: it really hears
+        self.came = False  # anything at all has come from this stream
         self.recorder.start(on_chunk=self._took)
 
     def _took(self, chunk):
@@ -2954,6 +3258,7 @@ class Wake:
         # Each block is kept with the moment it came (clip's `until`).
         moment = now()
         self.last_audio = moment
+        self.came = True
         if len(chunk) and float(abs(chunk).max()) > 0.0:
             self.last_sound = moment
             self.sounded = True
@@ -2961,14 +3266,14 @@ class Wake:
 
     def stalled(self, moment):
         """Whether its microphone has gone quiet in a way no room is, and how: 'mikrofon' when nothing
-        came from the stream for WAKE_STALL_SN (its device went away), 'sessiz' when only exact zeros
-        came for WAKE_SILENT_SN (Windows' privacy setting keeps desktop apps from the microphone, or
-        a muted one); None while it hears."""
-        if moment - self.last_audio > WAKE_STALL_SN:
-            return 'mikrofon'
-        if moment - self.last_sound > WAKE_SILENT_SN:
-            return 'sessiz'
-        return None
+        came from the stream for WAKE_STALL_SN (its device went away; WAKE_FIRST_SN until the desktop
+        app's stream sends its first sound: wake_stall), 'sessiz' when only exact zeros came for
+        WAKE_SILENT_SN (Windows' privacy setting keeps desktop apps from the microphone, or a muted
+        one); None while it hears."""
+        # The app's stream is waited for only while the app can still record: one that said it cannot,
+        # or went away, is given up as quickly as before, and the helper opens the microphone itself.
+        from_app = getattr(self.recorder, 'from_app', False) and FEED is not None and FEED.usable()
+        return wake_stall(moment, self.last_audio, self.last_sound, self.came, from_app)
 
     def stop(self):
         self.recorder.stop()
@@ -3089,22 +3394,40 @@ def serve(state, config, lines=None):
     def load():
         try:
             started = now()
-            loaded['model'], what = load_model(state, config, downloading)
+            model, what = load_model(state, config, downloading)
+            warm(model, config, what, lock)  # ready means its first sentence does not pay for the load
+            loaded['model'] = model
             # How long it took, for a slow machine to be seen in isci.log (never what is said).
             log('süre: model hazır, %s, %.1f sn' % (what, now() - started))
             out(olay='hazir', aciklama=what)
         except Exception as exc:
-            log('model açılamadı: %s' % str(exc)[:300])
-            out(olay='hata', neden='model', mesaj=str(exc)[:300])
+            # What the exception says is the library's English: the log's. The person is told what
+            # kind of trouble it is and what to do (ses.load_trouble), by the listener and the tray.
+            log('model açılamadı: %s: %s' % (type(exc).__name__, str(exc)[:300]))
+            kind, sentence = ses.load_trouble(exc)
+            out(olay='hata', neden='model', tur=kind, mesaj=sentence)
             return
         # The wake phrase's own small checker after it: dictation does not wait for it (nor for its
         # download), and until it is there the dictation's model checks the phrase.
         started = now()
         checker = checker_for(config, what, downloading)
         if checker is not None:
+            warm(checker, config, ses.CHECK_MODEL + ' (işlemci)', lock)  # nor does the first "Hey Pyn" pay for its
             loaded['checker'] = checker
             log('süre: uyandırmayı %s doğrular, %.1f sn' % (ses.CHECK_MODEL, now() - started))
         out(olay='denetci', hazir=checker is not None)
+
+    # The wake listener's small model, loaded on a thread of its own: loading it here kept every
+    # command waiting, and it was not begun until the dictation's model was ready (the review of
+    # 1.0.61). What it made, or why it could not, comes back with the phrase it was asked for.
+    wake_made, wake_loading = queue.Queue(), [None]
+
+    def load_wake(phrase):
+        try:
+            made = Wake(state, config)
+        except Exception as exc:
+            made = exc
+        wake_made.put((phrase, made))
 
     def write():
         while True:
@@ -3191,6 +3514,11 @@ def serve(state, config, lines=None):
         turns[turn] = {'continuous': continuous, 'woke': woke, 'first': True, 'checking': checking}
         if checking is None:
             out(olay='dinliyor', mikrofon=_device_name(config), tur=turn)
+        else:
+            # Heard, and being checked: a light word at once, for the tray to show while the check
+            # takes its time. 'hazirlaniyor' while the model is still loading: the check waits for
+            # it. Not the window: that opens only once Whisper has confirmed the phrase.
+            out(olay='duydu', durum='bakiyor' if 'model' in loaded else 'hazirlaniyor', tur=turn)
         return True
 
     def confirmed():
@@ -3227,7 +3555,9 @@ def serve(state, config, lines=None):
         nonlocal mode
         if recorder.stream is not None:
             recorder.stop()
-        turns.pop(turn, None)
+        gone = turns.pop(turn, None)
+        if gone is not None and gone['checking'] is not None:
+            out(olay='duydu', durum='yok', tur=turn)  # not the phrase after all: its sign goes, without a word
         mode = 'bos'
 
     def back(result):
@@ -3342,9 +3672,16 @@ def serve(state, config, lines=None):
                     wake_retry['broken'] = False
         moment = now()
         if mode == 'kayit' and checking is not None:
-            if not checking['sent'] and moment - recorder.started >= ses.WAKE_AFTER_SN:
+            if 'audio' not in checking and moment - recorder.started >= ses.WAKE_AFTER_SN:
+                checking['audio'] = join_audio(checking['clip'], recorder.peek())
+            if not checking['sent'] and 'audio' in checking and 'model' in loaded:
+                # Heard before the model was ready, the check waited here for it: sent before, it
+                # came back empty and the phrase was dropped as not said.
                 checking['sent'] = True
-                jobs.put({'is': 'dogrula', 'turn': turn, 'audio': join_audio(checking['clip'], recorder.peek()), 'son': False})
+                jobs.put({'is': 'dogrula', 'turn': turn, 'audio': checking['audio'], 'son': False})
+            elif not checking['sent'] and moment - recorder.started > WAKE_MODEL_WAIT_SN:
+                log('uyandırma: söz duyuldu, model %d sn içinde hazır olmadı; bırakıldı' % WAKE_MODEL_WAIT_SN)
+                drop()
         elif mode == 'kayit':
             if moment - last_level >= 0.1:
                 last_level = moment
@@ -3361,17 +3698,31 @@ def serve(state, config, lines=None):
                 end()
             elif not recorder.spoke and moment - recorder.started > 12:
                 end(keep=False)  # nothing said: let the microphone go
-        elif mode == 'bos' and wake_on and 'model' in loaded and moment >= wake_retry['at'] and not wake_retry['broken']:
+        elif mode == 'bos' and wake_on and moment >= wake_retry['at'] and not wake_retry['broken']:
+            # Not waited for the dictation's model: the phrase is listened for as soon as its own
+            # small model is loaded, and one heard before Whisper is ready waits for it (above).
+            if wake is None and wake_loading[0] is None:
+                wake_loading[0] = config.get('uyandirma_sozu')
+                threading.Thread(target=load_wake, args=(wake_loading[0],), daemon=True).start()
+            made = None
             if wake is None:
                 try:
-                    wake = Wake(state, config)
-                except Exception as exc:
-                    # The small model would not load (its folder damaged, or a path its library
-                    # cannot open): no microphone is to blame and trying again changes nothing.
-                    # Said, and tried again when the wake phrase or always-listen changes.
-                    log('uyandırma: model açılamadı (%s)' % str(exc)[:200])
-                    wake_retry['broken'] = True
-                    wake_health('sorun', 'model', 'uyandırma modeli açılamadı (%s)' % str(exc)[:160])
+                    asked_for, made = wake_made.get_nowait()
+                except queue.Empty:
+                    pass
+                else:
+                    wake_loading[0] = None
+                    if asked_for != config.get('uyandirma_sozu'):
+                        made = None  # the phrase changed while it loaded: loaded again, with its grammar
+            if isinstance(made, Exception):
+                # The small model would not load (its folder damaged, or a path its library
+                # cannot open): no microphone is to blame and trying again changes nothing.
+                # Said, and tried again when the wake phrase or always-listen changes.
+                log('uyandırma: model açılamadı (%s)' % str(made)[:200])
+                wake_retry['broken'] = True
+                wake_health('sorun', 'model', 'uyandırma modeli açılamadı; Ayarlar → Sesle yazma\'dan yeniden kur')
+            elif made is not None:
+                wake = made
             try:
                 if wake is None:
                     pass  # its small model would not load: said above
@@ -3422,7 +3773,7 @@ def serve(state, config, lines=None):
                     pass
                 _refresh_audio()
                 wake_retry.update(at=moment + wake_retry['wait'], wait=min(60.0, wake_retry['wait'] * 2), failed=True)
-                wake_health('sorun', 'mikrofon', 'mikrofon açılamadı (%s)' % str(exc)[:160])
+                wake_health('sorun', 'mikrofon', 'mikrofon açılamadı; bağlı ve seçili mi?')
         elif wake is not None and wake.running and not wake_on:
             wake.stop()
             wake_health('kapali')
@@ -3482,9 +3833,11 @@ def main(argv=None):
         progress = ses.ses_dir(state) / ses.PROGRESS_FILE
 
         def downloading(done, total):
-            # For `kur`, which reads it while this runs (its steps say "%40 (210 / 484 MB)").
+            # For `kur`, which reads it while this runs (its steps say "%40 (210 / 484 MB)"); the moment
+            # and this helper's number, for it to end a download that has stopped coming (ses.stall_watch).
             try:
-                progress.write_text(json.dumps({'mb': done >> 20, 'toplam': total >> 20}), encoding='utf-8')
+                progress.write_text(json.dumps({'mb': done >> 20, 'toplam': total >> 20, 'pid': os.getpid(), 'at': time.time()}),
+                                    encoding='utf-8')
             except OSError:
                 pass
         try:
