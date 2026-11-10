@@ -778,6 +778,7 @@ export const tr: Record<keyof typeof en, string> = {
   'notes.graph.fit': 'Hepsini sığdır',
   'notes.graph.empty': 'Henüz birbirine bağlanan not yok.',
   'notes.graph.localEmpty': 'Bu nota henüz ne bir şey bağlanıyor ne de o bir yere bağlanıyor.',
+  'notes.graph.capped': 'Kasa büyük olduğu için en çok bağlantısı olan {shown} nokta gösteriliyor; {hidden} nokta çizilmedi.',
   'notes.graph.links': '{count} bağlantı',
   'notes.graph.guide.title': 'Notlarının haritası',
   'notes.graph.guide.what': 'Her nokta bir not, her çizgi bir notun ötekine verdiği [[bağlantı]]. Birlikte düşünülen notlar bir araya toplanır; kenarda kalanlar dışarıda görünür.',

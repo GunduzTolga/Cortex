@@ -784,6 +784,7 @@ export const en = {
   'notes.graph.fit': 'Fit everything',
   'notes.graph.empty': 'No note links to another yet.',
   'notes.graph.localEmpty': 'Nothing links to or from this note yet.',
+  'notes.graph.capped': 'The vault is large, so its {shown} most linked points are shown; {hidden} are not drawn.',
   'notes.graph.links': 'Links: {count}',
   'notes.graph.guide.title': 'Your notes as a map',
   'notes.graph.guide.what': 'Each point is a note, each line a [[link]] from one note to another. Notes thought about together gather together; the ones left at the edge show up on their own.',
