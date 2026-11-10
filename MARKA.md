@@ -8,6 +8,8 @@ Cortex'in kodu [MIT lisansıyla](LICENSE) açıktır: kullanabilir, değiştireb
 - Pyn'in **logosu** (açılan başından ananas çıkan Pyn), **mührü** (aynı logo krem dairede), **çizimleri** (not alan, oturan ve ananas Pyn) ve **yüzü**
 - `tema/ananas/marka/` altındaki kaynak çizimler (`kaynak/`), logo, ikon ve mühür dosyaları ile aynı görsellerin `template/.claude/scripts/beyin_v3_marka.py` içindeki gömülü kopyaları
 
+`tema/ananas/fonts/` altındaki yazı tipleri marka unsuru değildir, MIT kapsamında da değildir: her biri kendi SIL Open Font License'ıyla gelir (yanlarındaki `*-OFL.txt` dosyaları).
+
 ## Serbest olanlar
 
 - Cortex'i olduğu gibi kullanmak, kurmak, paylaşmak ve bağlantısını vermek.
@@ -30,5 +32,15 @@ Cortex'in kodu [MIT lisansıyla](LICENSE) açıktır: kullanabilir, değiştireb
 3. LICENSE dosyasındaki telif satırlarını koru; MIT bunu şart koşar.
 
 Emin olmadığın bir durum ya da izin isteği için GitHub'da bir issue aç.
+
+## In English
+
+This notice stood at the end of the `LICENSE` file until November 2026; it was moved here unchanged so that `LICENSE` is the plain MIT text.
+
+> Brand assets are not covered by the license above.
+>
+> The names "Cortex" (for this software) and "Pyn", the Pyn seal and face, the logo and icon files in tema/ananas/marka/ and the same images embedded in template/.claude/scripts/beyin_v3_marka.py are brand assets of SoleLuna Tech (Tolga Gündüz). The MIT License grants rights to the code, not to these names or images. A modified or redistributed version must use its own name and its own images. See MARKA.md for what is allowed. Fonts in tema/ananas/fonts keep their own SIL Open Font License.
+
+"The license above" is the MIT License in [LICENSE](LICENSE).
 
 Bu metin bir hukuki görüş değildir; marka hakları ülkeden ülkeye değişir.
