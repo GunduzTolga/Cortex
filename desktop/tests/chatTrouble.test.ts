@@ -90,6 +90,22 @@ test('S1: why Claude Code could not be started is said by the system’s code, n
   assert.match(en['chat.error.notStarted'], /antivirus/i);
 });
 
+test('R2S: a limit of the conversation is not said to be the subscription’s, and a proxy’s refusal is not a sign-in to make', () => {
+  // "limit reached" alone took every limit for the subscription's: a full context was answered with "wait for the
+  // limit to come back", and the person waited for nothing (the second review, R2S-1).
+  assert.equal(kindOfFailure('Context limit reached · /compact or /clear to continue'), null);
+  assert.equal(kindOfFailure('Output token limit reached'), null);
+  assert.equal(kindOfFailure('5-hour limit reached · resets 3pm'), 'limit');
+  assert.equal(kindOfFailure('Weekly limit reached · resets Monday'), 'limit');
+  assert.equal(kindOfFailure("You've hit your session limit · resets 4:40am"), 'limit');
+  assert.equal(kindOfFailure('Claude usage limit reached.'), 'limit');
+  // A company's proxy asking for its own password is the network's trouble, not Claude's sign-in (R2S-2).
+  assert.equal(kindOfFailure('API Error: 407 Proxy Authentication Required'), 'network');
+  assert.equal(kindOfFailure('OAuth token refresh failed: fetch failed'), 'network');
+  assert.equal(kindOfFailure('OAuth token has expired. Please run /login'), 'auth', 'a sign-in that ended is still one to make');
+  assert.equal(kindOfFailure('Not logged in · Please run /login'), 'auth');
+});
+
 test('S1: a Claude Code that cannot be started says so in the chat, not that it "stopped"', async () => {
   const { vault } = useVault();
   // The folder it is started in is gone: the system refuses the start, and tells it as an `error` after the start was asked for.
@@ -97,8 +113,13 @@ test('S1: a Claude Code that cannot be started says so in the chat, not that it 
   const { id } = sendChat(null, 'test-claude', 'merhaba');
   const failed = await doneOf(id);
   assert.ok(failed.type === 'error', JSON.stringify(failed));
-  assert.equal(failed.kind, 'not-started', JSON.stringify(failed));
-  assert.match(failed.message, /^Claude Code could not start \([A-Z0-9_]+\)\.$/);
+  // Not "an antivirus may be blocking it": nothing is blocked, the folder is not there (the second review, R2S-7).
+  assert.equal(failed.kind, 'not-found', JSON.stringify(failed));
+  assert.match(failed.message, /^Claude Code could not start \(ENOENT\)\.$/);
+  assert.match(tr['chat.error.notFound'], /kasa/i);
+  assert.match(tr['chat.error.notFound'], /yeniden kur/);
+  assert.doesNotMatch(tr['chat.error.notFound'], /antivirüs/i);
+  assert.match(en['chat.error.notFound'], /vault/i);
   assert.notEqual(turkishOf(failed.message), failed.message, 'said in Turkish in a Turkish window');
   assert.equal(openChat(id).running, false);
 });
@@ -392,6 +413,9 @@ test('S8: the chat says its memory is off while the vault has no engine or no Py
   assert.equal(memoryOff(null, 'claude'), false, 'not before the setup’s status is known');
   assert.equal(memoryOff({ ...ready, vault: false, python: false }, 'claude'), false, 'no vault yet: the first-run screen’s to say');
   assert.equal(memoryOff({ ...ready, python: false }, 'hermes'), false, 'Pyn on a server has the server’s memory');
+  // While the app itself is setting the engine up, "finish the setup in Settings" is not said (R2S-8).
+  assert.equal(memoryOff({ ...ready, engine: { ...engine, installed: null }, job: 'engine' }, 'claude'), false, 'being set up now');
+  assert.equal(memoryOff({ ...ready, engine: { ...engine, installed: null }, job: null }, 'claude'), true);
   assert.match(tr['chat.notice.memoryOff'], /^Hafıza kapalı: kurulum tamamlanmamış/);
   assert.match(tr['chat.notice.memoryOff'], /Ayarlar › Cortex/);
   assert.match(en['chat.notice.memoryOff'], /^Memory is off/);

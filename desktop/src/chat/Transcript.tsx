@@ -91,6 +91,7 @@ const ERRORS: Record<string, Key> = {
   limit: 'chat.error.limit',
   network: 'chat.error.network',
   'not-started': 'chat.error.notStarted',
+  'not-found': 'chat.error.notFound',
   'start-timeout': 'chat.error.startTimeout',
   'local-busy': 'chat.error.localBusy',
   auth: 'chat.error.auth',

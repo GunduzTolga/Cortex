@@ -8,8 +8,10 @@ import type { SetupStatus } from '@shared/setup';
  * after every setup job: nothing is asked again for it. Not said before the status is known, nor of Pyn on a server,
  * whose memory is the server's.
  */
-export function memoryOff(status: Pick<SetupStatus, 'python' | 'vault' | 'engine'> | null, cli: CliId | null): boolean {
+export function memoryOff(status: (Pick<SetupStatus, 'python' | 'vault' | 'engine'> & Partial<Pick<SetupStatus, 'job'>>) | null, cli: CliId | null): boolean {
   if (!status || !status.vault || cli === 'hermes') return false;
+  // Being set up now (the app brings the engine up to date by itself): "finish the setup" would send the person to do what is being done.
+  if (status.job) return false;
   return !status.python || status.engine.installed === null;
 }
 

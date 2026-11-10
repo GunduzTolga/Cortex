@@ -93,13 +93,19 @@ export async function learnSystemProxy(resolve: (url: string) => Promise<string>
  * starts do not: the AI tool and the voice setup's Python could not reach the internet where the browser could, and
  * the chat only waited (the review of 10 November, S4 and N5). Windows' proxy is handed on as HTTPS_PROXY and
  * HTTP_PROXY, unless the person's environment already names one; this computer itself is reached without it (a
- * model server, a hook's port).
+ * model server, a hook's port). CORTEX_NO_SYSTEM_PROXY in the person's environment turns this off, for a proxy in
+ * Windows' settings that no longer answers. Known limits: one proxy is asked for (the one for the AI provider's
+ * address), so a proxy file (PAC) that sends some addresses straight is not followed for those; a program already
+ * running keeps the proxy it was started with until it is started again.
  */
 export function withSystemProxy(env: NodeJS.ProcessEnv, proxy: string | null = systemProxy): NodeJS.ProcessEnv {
-  if (!proxy || Object.keys(env).some((key) => PROXY_NAMES.test(key) && env[key])) return env;
-  const local = 'localhost,127.0.0.1,::1';
-  const noProxyKey = Object.keys(env).find((key) => /^no_proxy$/i.test(key));
-  return { ...env, HTTPS_PROXY: proxy, HTTP_PROXY: proxy, ...(noProxyKey && env[noProxyKey] ? {} : { NO_PROXY: local }) };
+  if (!proxy || env.CORTEX_NO_SYSTEM_PROXY || Object.keys(env).some((key) => PROXY_NAMES.test(key) && env[key])) return env;
+  // This computer is added to the person's own list too, under the name they used: a model server here is not asked
+  // for through the proxy because they listed their company's addresses (the second review, R2S-3).
+  const noProxyKey = Object.keys(env).find((key) => /^no_proxy$/i.test(key) && env[key]) ?? 'NO_PROXY';
+  const listed = (env[noProxyKey] ?? '').split(',').map((one) => one.trim()).filter(Boolean);
+  for (const local of ['localhost', '127.0.0.1', '::1']) if (!listed.some((one) => one.toLowerCase() === local)) listed.push(local);
+  return { ...env, HTTPS_PROXY: proxy, HTTP_PROXY: proxy, [noProxyKey]: listed.join(',') };
 }
 
 export class AcpConnection {

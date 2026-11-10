@@ -510,6 +510,7 @@ export const en = {
   'chat.error.limit': 'Your subscription\'s usage limit is used up; you can go on when it resets, or choose another tool or model now.',
   'chat.error.network': 'The internet, or the AI tool\'s server, could not be reached; check your connection and try again, and on a company network a proxy may be blocking it.',
   'chat.error.notStarted': 'The AI tool could not be started; an antivirus or Windows permissions may be blocking it: close Cortex and open it again, and if it goes on, allow the tool in your antivirus or install it again from Settings › AI tools.',
+  'chat.error.notFound': 'The AI tool or the vault\'s folder was not found where it should be; if you moved the vault, choose it again in Settings, otherwise install the tool again from Settings › AI tools.',
   'chat.error.startTimeout': 'The AI tool hung while starting and was closed; write again, and if it goes on, check its sign-in in Settings › AI tools.',
   'chat.error.providerKey': 'OpenCode could not reach the chosen model\'s provider; OpenCode\'s own words are below. If the key has expired or is not valid, create a new API key on the provider\'s site (opencode.ai for OpenCode Go), then press Sign in and paste it into the API key field.',
   'chat.error.providerAuth': 'The chosen model\'s provider is not signed in, or its key cannot be read. Pick a model of a provider you signed in to from the model list below (for OpenCode Go, those starting opencode-go/), or press Sign in and enter OpenCode\'s API key (from opencode.ai for OpenCode Go and Zen).',

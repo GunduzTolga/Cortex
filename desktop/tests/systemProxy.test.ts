@@ -31,15 +31,23 @@ test('a proxy the person set themselves is left as it is, whatever its case; so 
   for (const mine of [{ HTTPS_PROXY: 'http://benim:1' }, { https_proxy: 'http://benim:1' }, { ALL_PROXY: 'socks5://benim:1' }, { Http_Proxy: 'http://benim:1' }]) {
     assert.deepEqual(withSystemProxy({ ...mine }, 'http://proxy:8080'), mine, JSON.stringify(mine));
   }
+  // Their list is kept and this computer added to it: a model server here is not asked for through the proxy
+  // because the person listed their company's own addresses (the second review, R2S-3).
   const listed = withSystemProxy({ no_proxy: 'ic.sirket.local' }, 'http://proxy:8080');
-  assert.equal(listed.no_proxy, 'ic.sirket.local');
-  assert.equal(listed.NO_PROXY, undefined, 'their list is not replaced');
+  assert.equal(listed.no_proxy, 'ic.sirket.local,localhost,127.0.0.1,::1');
+  assert.equal(listed.NO_PROXY, undefined, 'under the name they used');
+  assert.equal(withSystemProxy({ NO_PROXY: 'localhost,ic.sirket.local' }, 'http://proxy:8080').NO_PROXY, 'localhost,ic.sirket.local,127.0.0.1,::1', 'nothing said twice');
   assert.deepEqual(withSystemProxy({ HTTPS_PROXY: '' }, 'http://proxy:8080').HTTPS_PROXY, 'http://proxy:8080', 'an empty one is none');
 });
 
 test('no proxy in Windows: the environment is the person\'s own, as before', () => {
   const env = { PATH: 'p' };
   assert.equal(withSystemProxy(env, null), env);
+});
+
+test('a person who wants none of it says so once: CORTEX_NO_SYSTEM_PROXY', () => {
+  const env = { PATH: 'p', CORTEX_NO_SYSTEM_PROXY: '1' };
+  assert.equal(withSystemProxy(env, 'http://proxy:8080'), env);
 });
 
 test('what Chromium answered is what childEnv hands on; an answer that fails keeps what was known', async () => {

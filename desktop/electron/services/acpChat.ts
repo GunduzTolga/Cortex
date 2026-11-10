@@ -35,7 +35,7 @@ interface Conn {
  * object, so a test can wait less. A first start under a virus scan takes tens of seconds; one that never answers
  * held every chat of its CLI until the app was closed (S5).
  */
-export const READY_MAX = { ms: 90_000 };
+export const READY_MAX = { ms: 180_000 };
 
 const conns = new Map<CliId, Conn>();
 /** Each chat's session, in the program it lives in. */
@@ -534,7 +534,17 @@ export const acpBackend: Backend = {
     const going = probing.get(cli);
     if (going) return going;
     const asked = (async () => {
-      const conn = await connectionFor(cli, vault);
+      // Counted among those waiting for the program, as a turn is: a chat's Stop while this asks does not end the
+      // program under it (the second review, R2S-6).
+      const ready = connectionFor(cli, vault);
+      const starting = conns.get(cli);
+      if (starting) starting.waiting += 1;
+      let conn: Conn;
+      try {
+        conn = await ready;
+      } finally {
+        if (starting) starting.waiting -= 1;
+      }
       const had = spares.get(cli);
       if (had && had.conn === conn) return had.options;
       const made = (await conn.acp.request('session/new', { cwd: conn.vault, mcpServers: [] })) as { sessionId?: unknown; configOptions?: unknown } | null;

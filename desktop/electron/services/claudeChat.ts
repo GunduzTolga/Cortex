@@ -203,9 +203,15 @@ function resultText(content: unknown): string {
 export function kindOfFailure(text: string): string | null {
   const network = networkTrouble(text);
   if (network === 'code') return 'network';
+  // A company's proxy asking for its own password, and a sign-in that could not be renewed because nothing was
+  // reached, are the network's trouble: signing in to Claude again changes nothing (the second review, R2S-2).
+  if (/\b407\b|proxy authentication/i.test(text)) return 'network';
+  if (network && /refresh|renew/i.test(text)) return 'network';
   if (/\b401\b|authenticat|log ?in|oauth/i.test(text)) return 'auth';
   if (/\b429\b|rate.?limit/i.test(text)) return 'provider.quota';
-  if (/usage limit|limit reached|hit your (?:[\w-]+ )*limit|out of (?:extra )?usage/i.test(text)) return 'limit';
+  // The subscription's own limits, by their names: "limit reached" alone is also a conversation that is full
+  // ("Context limit reached"), which waiting does not help (R2S-1).
+  if (/usage limit|(?:session|weekly|daily|monthly|\d+[- ]?hour) limit reached|hit your (?:[\w-]+ )*limit|out of (?:extra )?usage/i.test(text)) return 'limit';
   if (/quota|credit balance/i.test(text)) return 'provider.quota';
   return network ? 'network' : null;
 }
@@ -218,7 +224,8 @@ export function kindOfFailure(text: string): string | null {
 export function startFailure(err: unknown): TurnFailure {
   const code = (err as NodeJS.ErrnoException | null)?.code;
   console.warn('[chat] Claude Code could not start:', err instanceof Error ? err.message : err);
-  return new TurnFailure(typeof code === 'string' && /^[A-Z0-9_]{2,40}$/.test(code) ? `Claude Code could not start (${code}).` : 'Claude Code could not start.', 'not-started');
+  // Not there (the program, or the vault's folder it is started in) is not "blocked": another thing to do (R2S-7).
+  return new TurnFailure(typeof code === 'string' && /^[A-Z0-9_]{2,40}$/.test(code) ? `Claude Code could not start (${code}).` : 'Claude Code could not start.', code === 'ENOENT' ? 'not-found' : 'not-started');
 }
 
 function write(proc: Proc, message: unknown): void {
