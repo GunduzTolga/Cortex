@@ -162,6 +162,7 @@ const api: CortexApi = {
     tailnet: (handler) => listen<TailnetStatus>('tailnet:status', handler),
     chat: (handler) => listen('chat:event', handler),
     authChanged: (handler) => listen<CliId | null>('chat:authChanged', (cli) => handler(typeof cli === 'string' ? cli : null)),
+    toolsFound: (handler) => subscribe('chat:toolsFound', handler),
     setup: (handler) => listen('setup:event', handler),
     voiceStatus: (handler) => listen('setup:voice', handler),
     voiceHelper: (handler) => listen('setup:helper', handler),

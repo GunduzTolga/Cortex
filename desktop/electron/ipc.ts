@@ -304,9 +304,10 @@ export function registerIpc(): void {
     chat.restartIdleChats();
     broadcast('chat:authChanged', cli);
   });
-  // The PATH read again behind an answer already given, and found changed: the statuses are asked once more. Nothing
-  // is started again for it, as nothing was signed in to or installed from here.
-  onPathReadLate(() => broadcast('chat:authChanged', null));
+  // The PATH read again behind an answer already given, and found changed: the statuses are asked once more. Told
+  // on a channel of its own: "an install ended" would have an installer still running said failed (the third look,
+  // U3-E1), and nothing is started again for it, as nothing was signed in to or installed from here.
+  onPathReadLate(() => broadcast('chat:toolsFound', null));
   handle('chat:auth', () => auth.authStatuses());
   handle('chat:login', (cli) => auth.startLogin(cli));
   handle('chat:cancelLogin', (cli) => auth.cancelLogin(cli));

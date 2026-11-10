@@ -204,9 +204,27 @@ test('a note that cannot be read for a moment right before the save takes its pl
   } finally {
     fsp.readFile = realRead;
   }
-  assert.ok(looks >= 2, 'the second look was the one refused');
+  assert.ok(looks >= 3, 'the look refused was taken again, not skipped (U3-4)');
   assert.equal(saved.saved, true);
   assert.equal(fs.readFileSync(file, 'utf8'), '# Mine\n');
+  assert.deepEqual(fs.readdirSync(path.join(dir, 'Ev')).filter((one) => one.endsWith('.tmp')), [], 'no temporary left');
+
+  // Held for as long as it is asked about: never written over unlooked at; said, and the note is as it was.
+  const second = await readVaultNote('Ev/Tadilat.md');
+  looks = 0;
+  (fsp as { readFile: unknown }).readFile = async (...args: Parameters<typeof fsp.readFile>) => {
+    if (String(args[0]) === file) {
+      looks += 1;
+      if (looks >= 2) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    }
+    return realRead(...args);
+  };
+  try {
+    await assert.rejects(saveVaultNote('Ev/Tadilat.md', '# Mine again\n', second.hash));
+  } finally {
+    fsp.readFile = realRead;
+  }
+  assert.equal(fs.readFileSync(file, 'utf8'), '# Mine\n', 'what is there stays');
   assert.deepEqual(fs.readdirSync(path.join(dir, 'Ev')).filter((one) => one.endsWith('.tmp')), [], 'no temporary left');
 });
 

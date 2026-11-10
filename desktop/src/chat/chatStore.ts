@@ -230,6 +230,17 @@ export const useChat = create<ChatState>((set, get) => {
             });
           void get().refreshClis();
         });
+        // A tool installed outside Cortex, seen by a reading of the PATH that ended after the last answer: asked again.
+        // No installer ended: one still running stays "installing", and is over only if its tool is there by now.
+        window.cortex.on.toolsFound(() => {
+          void get()
+            .loadAuth()
+            .then(() => {
+              const installing = get().installing;
+              if (installing && get().auth?.find((one) => one.id === installing.id)?.installed) set({ installing: null });
+            });
+          void get().refreshClis();
+        });
         // Back from another app - LM Studio, where a model was just loaded, or a terminal, where a tool was installed: the CLIs asked again.
         window.addEventListener('focus', () => void get().refreshClis());
       }

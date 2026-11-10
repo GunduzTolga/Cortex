@@ -11,11 +11,13 @@ import type { ChatEvent, ChatOpened, ChatPush, CliAuth } from '../shared/chat';
  */
 
 let installed = false;
+let authAsked = 0;
 let auth: CliAuth[] = [];
 const answers: Array<[string, string, string | null]> = [];
 let answerFails = false;
 let pushTo: (push: ChatPush) => void = () => undefined;
 let authChanged: (cli?: string | null) => void = () => undefined;
+let toolsFound: () => void = () => undefined;
 const opened: Record<string, ChatOpened> = {};
 
 const claudeAuth = (): CliAuth => ({ id: 'claude', installed, signedIn: installed ? false : null, detail: null, canLogin: installed, canInstall: !installed, key: null, baseUrl: false, hasKey: false, kept: false });
@@ -37,11 +39,16 @@ Object.assign(globalThis, {
           authChanged = handler;
           return () => undefined;
         },
+        toolsFound: (handler: () => void) => {
+          toolsFound = handler;
+          return () => undefined;
+        },
       },
       chat: {
         clis: async () => [{ id: 'test', name: 'Test', available: true }],
         list: async () => [],
         auth: async () => {
+          authAsked += 1;
           auth = [claudeAuth()];
           return auth;
         },
@@ -93,6 +100,21 @@ test('an installer that ends without its tool leaves the button to be pressed ag
   installed = true;
   authChanged();
   await until(() => useChat.getState().installing === null, 'the install over');
+  installed = false;
+});
+
+test('the PATH found changed behind an answer is not an installer that ended: an install going on is not said failed', async () => {
+  // The third look, U3-E1: told as an install ended, a late reading of the PATH said "could not be installed" under an installer still running.
+  await useChat.getState().install('claude');
+  const asked = authAsked;
+  toolsFound();
+  await until(() => authAsked > asked, 'the tools asked about again');
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(useChat.getState().installing, { id: 'claude', failed: false }, 'its installer still runs');
+  // The tool there by then: nothing is left to wait for.
+  installed = true;
+  toolsFound();
+  await until(() => useChat.getState().installing === null, 'found, and the install over');
   installed = false;
 });
 

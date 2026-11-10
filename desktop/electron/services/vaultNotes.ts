@@ -579,15 +579,20 @@ function notLetIn(err: unknown, name: string): unknown {
  */
 async function renameBusy(from: string, to: string, still?: () => Promise<boolean>): Promise<boolean> {
   for (let attempt = 0; ; attempt += 1) {
-    // Held by something this moment (an antivirus, OneDrive): not known, which is not "changed". The save goes on as
-    // it did before this check was here, and the rename below waits for a busy file. A note that is gone is still an
-    // error: nothing is put back in its place (the second review, R2N-10).
+    // Held by something this moment (an antivirus, OneDrive): not known, which is not "changed", so the save is not
+    // said failed for it (the second review, R2N-10). Nor is the note renamed over unlooked at - what holds a file is
+    // often what writes it (the third look, U3-4): asked again in a moment, as a busy rename is tried again, and an
+    // error only once that has gone on for about a second. A note that is gone is an error at once.
     if (still) {
-      const same = await still().catch((err: unknown) => {
-        if (['EPERM', 'EACCES', 'EBUSY'].includes((err as NodeJS.ErrnoException)?.code ?? '')) return null;
-        throw err;
-      });
-      if (same === false) return false;
+      let same: boolean;
+      try {
+        same = await still();
+      } catch (err) {
+        if (attempt >= 8 || !['EPERM', 'EACCES', 'EBUSY'].includes((err as NodeJS.ErrnoException)?.code ?? '')) throw err;
+        await new Promise((done) => setTimeout(done, 25 * (attempt + 1)));
+        continue;
+      }
+      if (!same) return false;
     }
     try {
       await fs.rename(from, to);

@@ -1440,16 +1440,20 @@ CUT_WORDS = ('read timed out', 'read operation timed out', 'readtimeout', 'reade
              'remotedisconnected', 'chunkedencodingerror', 'winerror 10054', 'errno 104', 'bağlantı dosya bitmeden kapandı')
 
 
-def _remove_models(folder):
-    """The Whisper models fetched into this install's own folder (Hugging Face's `models--…` there)
-    are deleted: whether there was any. Nothing else of the folder is touched."""
+def _remove_models(folder, named):
+    """The Whisper models `named` says would not open (Hugging Face's `models--…` folders, as the helper's
+    error names their path), deleted from this install's own folder: whether any was. A model not named is
+    left - the other engine's, whole, or one half fetched that goes on from where it was - and so is
+    everything else of the folder (the third look, U3-1)."""
     removed = False
-    try:
-        found = list((Path(folder) / 'hf' / 'hub').glob('models--*'))
-    except OSError:
-        return False
-    for one in found:
-        if one.is_dir() and not one.is_symlink():
+    hub = Path(folder) / 'hf' / 'hub'
+    for name in sorted(set(re.findall(r'models--[A-Za-z0-9._-]+', named))):
+        one = hub / name
+        try:
+            there = one.is_dir() and not one.is_symlink()
+        except OSError:
+            continue
+        if there:
             shutil.rmtree(one, ignore_errors=True)
             removed = removed or not one.exists()
     return removed
@@ -1492,7 +1496,13 @@ def _trial_load(state, marker, say, run, previous, pause=None):
         # A model on the disk that will not open (a file damaged, or cut short and taken for whole) failed the
         # same way at every `kur`: the advice was "set it up again", and setting up again took the damaged file
         # for the model (R2N-6). Taken away once, and fetched again.
-        if done.returncode and not stalled and any(word in output.lower() for word in BROKEN_WORDS) and _remove_models(folder):
+        # Not a download that was cut: the address being fetched ends in model.bin too, and what had come of it
+        # is gone on with at the next `kur`, not deleted. Only what the error ends with is read, and only the
+        # model it names is taken away.
+        low, end = output.lower(), output[-1500:]
+        dropped = stalled or any(word in low for word in CUT_WORDS + NETWORK_WORDS)
+        wont_open = any(word in end.lower() for word in BROKEN_WORDS if word != 'model.bin')
+        if done.returncode and not dropped and wont_open and _remove_models(folder, end):
             say('  Diskteki ses modeli bozuk görünüyor; siliniyor ve yeniden indiriliyor…')
             done, stalled, output = fetch()
         if done.returncode and stalled:

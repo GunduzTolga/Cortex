@@ -162,6 +162,8 @@ export interface CortexApi {
     chat(handler: (push: ChatPush) => void): () => void;
     /** A sign-in window was closed, or a sign-in done (the tool's), or an install ended (null): ask the tools' statuses again. */
     authChanged(handler: (cli: CliId | null) => void): () => void;
+    /** The PATH read again behind an answer already given, with folders it did not have: ask about the tools again. Nothing ended. */
+    toolsFound(handler: () => void): () => void;
     /** A setup job going on: a step, or its end. */
     setup(handler: (push: SetupPush) => void): () => void;
     /** The voice status read anew (the notification-area icon switched it): the settings show it as it is. */

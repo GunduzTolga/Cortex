@@ -1408,6 +1408,10 @@ class InstallRobustnessTest(unittest.TestCase):
         (damaged / 'model.bin').write_bytes(b'half of it')
         other = folder / 'hf' / 'hub' / 'version.txt'
         other.write_text('1')
+        whole = folder / 'hf' / 'hub' / 'models--Systran--faster-whisper-large-v3' / 'snapshots' / 'y' / 'model.bin'
+        whole.parent.mkdir(parents=True)
+        whole.write_bytes(b'all of it')
+        wont_open = "RuntimeError: Unable to open file 'model.bin' in model '%s'" % damaged
         tries, said = [], []
 
         def run(command, **_options):
@@ -1418,12 +1422,13 @@ class InstallRobustnessTest(unittest.TestCase):
             if '--indir' in command:
                 tries.append((damaged / 'model.bin').exists())
                 if len(tries) == 1:
-                    return subprocess.CompletedProcess(command, 1, '', "RuntimeError: Unable to open file 'model.bin' in model 'x'")
+                    return subprocess.CompletedProcess(command, 1, '', wont_open)
                 return subprocess.CompletedProcess(command, 0, 'small (işlemci)\n', '')
             return subprocess.CompletedProcess(command, 0, '', '')
         ses.install(self.state, say=said.append, run=run, which={}.get, system=self.tmp.name, popen=popen_from(run))
         self.assertEqual(tries, [True, False], 'the damaged model was taken away before the second try')
         self.assertTrue(other.exists(), 'nothing but the models is removed')
+        self.assertTrue(whole.exists(), 'and of the models only the one that would not open: the other is whole')
         self.assertTrue([line for line in said if 'bozuk' in line and 'yeniden indiriliyor' in line], said)
         self.assertTrue(ses.installed(self.state))
         # Once: a model that will not open after a fresh download is said, not fetched for ever.
@@ -1432,7 +1437,7 @@ class InstallRobustnessTest(unittest.TestCase):
         def always(command, **_options):
             if '--indir' in command:
                 tries.append(1)
-                return subprocess.CompletedProcess(command, 1, '', "RuntimeError: Unable to open file 'model.bin' in model 'x'")
+                return subprocess.CompletedProcess(command, 1, '', wont_open)
             return run(command)
         damaged.mkdir(parents=True, exist_ok=True)
         with self.assertRaises(RuntimeError):
@@ -1449,6 +1454,45 @@ class InstallRobustnessTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             ses.install(self.state, say=said.append, run=other_failure, which={}.get, system=self.tmp.name, popen=popen_from(other_failure))
         self.assertTrue((damaged / 'model.bin').exists())
+
+    def test_a_download_that_was_cut_is_not_taken_for_a_damaged_model_and_nothing_is_deleted(self):
+        # The third look, U3-1: the address of the file being fetched ends in model.bin, which was among the words
+        # for a damaged file. A connection lost three times over deleted what had come, and every other model
+        # with it, and started from nothing three times more.
+        folder = ses.ses_dir(self.state)
+        (folder / ses.VOSK_DIR).mkdir(parents=True)
+        hub = folder / 'hf' / 'hub'
+        half = hub / 'models--Systran--faster-whisper-small' / 'blobs' / 'abc.incomplete'
+        half.parent.mkdir(parents=True)
+        half.write_bytes(b'half, to be gone on with')
+        whole = hub / 'models--Systran--faster-whisper-large-v3' / 'snapshots' / 'y' / 'model.bin'
+        whole.parent.mkdir(parents=True)
+        whole.write_bytes(b'all of it')
+        tries, said = [], []
+        warned = ('Error while downloading from https://cdn-lfs.huggingface.co/repos/x/resolve/main/model.bin: '
+                  "HTTPSConnectionPool(host='cdn-lfs.huggingface.co', port=443): Read timed out.\nTrying to resume download...\n"
+                  'requests.exceptions.ConnectionError: (ProtocolError(\'Connection aborted.\', '
+                  "RemoteDisconnected('Remote end closed connection without response')))")
+
+        def run(command, **_options):
+            tries.append((half.exists(), whole.exists()))
+            return subprocess.CompletedProcess(command, 1, '', warned)
+        with self.assertRaises(RuntimeError):
+            ses._trial_load(self.state, {'motor': 'islemci'}, said.append, run, None, pause=lambda _seconds: None)
+        self.assertEqual(tries, [(True, True)] * ses.FETCH_TRIES, 'tried as many times as a cut download is, and no more')
+        self.assertTrue(half.exists(), 'what had come is still there to be gone on with')
+        self.assertTrue(whole.exists())
+        self.assertFalse([line for line in said if 'bozuk' in line], said)
+        # A file that will not open, named with no model's folder: nothing is known to delete, and nothing is.
+        tries.clear()
+
+        def unnamed(command, **_options):
+            tries.append(1)
+            return subprocess.CompletedProcess(command, 1, '', 'RuntimeError: Unsupported model binary version')
+        with self.assertRaises(RuntimeError):
+            ses._trial_load(self.state, {'motor': 'islemci'}, said.append, unnamed, None, pause=lambda _seconds: None)
+        self.assertEqual(len(tries), 1)
+        self.assertTrue(half.exists() and whole.exists())
 
     def test_a_download_whose_file_is_being_written_is_not_ended_though_the_folder_weighs_the_same(self):
         # R2N-7: a downloader that sets a file's whole size aside first adds no byte while it fills it; weighed by

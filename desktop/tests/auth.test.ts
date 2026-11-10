@@ -569,17 +569,17 @@ test('R2K-2: a reading of the PATH that ends after the window was answered, with
 
     // Read late: the asker goes on with the PATH as it was, and is told when the reading ends with something new.
     const began = Date.now();
-    await pathReadAgain(false, slowly(['/opt/gec-kurulan'], 250), ':', 30, 0);
-    assert.ok(Date.now() - began < 200, 'gone on after the moment');
+    await pathReadAgain(false, slowly(['/opt/gec-kurulan'], 1_500), ':', 30, 0);
+    assert.ok(Date.now() - began < 1_200, 'gone on after the moment');
     assert.ok(!(process.env.PATH ?? '').split(':').includes('/opt/gec-kurulan'), 'the answer was given with the PATH as it was');
     assert.equal(told, 0);
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    await pathReadAgain(true, slowly([], 0), ':'); // the reading still going on, waited out
     assert.ok((process.env.PATH ?? '').split(':').includes('/opt/gec-kurulan'));
     assert.equal(told, 1, 'told once the reading ended');
 
     // Read late with nothing new: nothing to say, and no asking in a circle.
     await pathReadAgain(false, slowly(['/opt/gec-kurulan'], 150), ':', 20, 0);
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await pathReadAgain(true, slowly([], 0), ':');
     assert.equal(told, 1, 'the same PATH is not news');
 
     // A listener that throws is not the reading's failure: the next one waits it out as before.
@@ -587,6 +587,7 @@ test('R2K-2: a reading of the PATH that ends after the window was answered, with
       throw new Error('the window is gone');
     });
     await pathReadAgain(false, slowly(['/opt/bir-daha'], 120), ':', 20, 0);
+    await pathReadAgain(true, slowly([], 0), ':');
     await pathReadAgain(true, slowly([], 0), ':');
     assert.ok((process.env.PATH ?? '').split(':').includes('/opt/bir-daha'));
   } finally {

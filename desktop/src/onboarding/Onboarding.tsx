@@ -130,8 +130,14 @@ export function Onboarding() {
       void useSetup.getState().refresh();
     }, FOCUS_REFRESH_EVERY);
     window.addEventListener('focus', back.ask);
+    // A tool or Python installed outside Cortex, found by a reading of the PATH that ended after the last answer.
+    const found = window.cortex.on.toolsFound(() => {
+      void reread();
+      void useSetup.getState().refresh();
+    });
     return () => {
       stop();
+      found();
       back.stop();
       window.removeEventListener('focus', back.ask);
     };
