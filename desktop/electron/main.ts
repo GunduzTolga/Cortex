@@ -13,6 +13,7 @@ import { startMicCapture, stopMicCapture } from './services/micWindow';
 import { keepStartWithWindows, listeningNow, startTray, trayNotice } from './services/tray';
 import { WINDOW_MIN, keepWindowState, readWindowState } from './services/windowState';
 import { applyTheme } from './services/theme';
+import { startedByQuietInstall } from './services/updater';
 
 const DEV_SERVER = process.env.VITE_DEV_SERVER_URL;
 const isDev = Boolean(DEV_SERVER);
@@ -50,7 +51,13 @@ let window: BrowserWindow | null = null;
   right, the window when asked for. And with `background` on, closing the
   window only hides it: Cortex quits from the icon's menu.
 */
-const START_HIDDEN = process.argv.includes('--gizli');
+const START_HIDDEN = [process.argv.includes('--gizli'), startedByQuietInstall()].some(Boolean);
+/*
+  A newer Cortex waiting is installed unasked only here (services/updater.ts): started with Windows, the window not
+  opened since, in the first minutes - later, someone may be talking to the voice helper with the window closed.
+*/
+const QUIET_UPDATE_WITHIN = 10 * 60;
+let seen = false;
 let quitting = false;
 let toldOfTray = false;
 
@@ -229,6 +236,7 @@ async function pageGone(contents: Electron.WebContents, details: Electron.Render
 /** Maximized as it is first shown, where it was left so (maximizing shows it too). */
 let maximizeOnShow = false;
 function reveal(win: BrowserWindow): void {
+  seen = true;
   if (maximizeOnShow) {
     maximizeOnShow = false;
     win.maximize();
@@ -460,8 +468,9 @@ if (!app.requestSingleInstanceLock()) {
       });
       // Written where it is missing, not at every start: a person who turned Cortex off in Windows' own start-up list keeps it off.
       keepStartWithWindows(readSettings().background);
-      // A newer Cortex from the releases, fetched in the background and installed when the person says, or at the next quit.
-      startAppUpdates(trayNotice);
+      // A newer Cortex from the releases, fetched in the background and installed when the person says, at the next
+      // quit, or unasked at a start with Windows nobody has seen yet.
+      startAppUpdates(trayNotice, () => START_HIDDEN && !seen && process.uptime() < QUIET_UPDATE_WITHIN);
     }
     // The vault kept from the last run bound to where it is now, in the background (services/setup.ts); notes
     // from the phone then keep coming in while Cortex runs, in the notification area too. Yakala, where it was left

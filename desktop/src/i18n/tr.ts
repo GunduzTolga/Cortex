@@ -425,7 +425,7 @@ export const tr: Record<keyof typeof en, string> = {
   'app.vault.failed': 'Bu klasör kasa olamaz',
   'app.language': 'Dil',
   'app.update.title': 'Cortex {version} hazır',
-  'app.update.detail': 'İndirildi. Yeniden başlatınca kurulur; şimdi yapmazsan Cortex kapanırken kurulur.',
+  'app.update.detail': 'İndirildi. Yeniden başlatınca kurulur; şimdi yapmazsan Cortex kapanırken ya da bilgisayarın bir sonraki açılışında kendiliğinden kurulur.',
   'app.update.restart': 'Yeniden başlat',
   'app.update.busy': 'Bir kurulum sürüyor. Bitince yeniden başlat; ya da Cortex kapanırken kurulur.',
   'app.settings.copied': 'Ayar dosyası okunamadı, uygulama boş başladı. Dosyanın bir kopyası yanında saklandı.',

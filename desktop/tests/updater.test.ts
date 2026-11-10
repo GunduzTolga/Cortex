@@ -1,13 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { CHECK_EVERY, FIRST_CHECK, forgetUpdates, installUpdate, pendingUpdate, startUpdates, updatesWanted, type Updater } from '../electron/services/updater';
+import os from 'node:os';
+import path from 'node:path';
+import { CHECK_EVERY, FIRST_CHECK, forgetUpdates, installUpdate, pendingUpdate, quietAttempt, startUpdates, startedByQuietInstall, updatesWanted, type Updater } from '../electron/services/updater';
 
 /**
  * The app keeping itself up to date from the releases (electron/services/updater.ts): only an installed app on
  * Windows asks, a downloaded update is told once and waits for the person, and installing it is refused while a
- * setup runs. electron-updater and the clock are stood in for; what it reads on a release is checked where the
- * build and the release workflow write it.
+ * setup runs; started with Windows and not yet seen, it is installed unasked. electron-updater and the clock are
+ * stood in for; what it reads on a release is checked where the build and the release workflow write it.
  */
 
 function fakeUpdater() {
@@ -52,9 +54,11 @@ test('a newer Cortex is fetched in the background, told once it is ready, and no
   const { updater, calls, emit } = fakeUpdater();
   const clock = fakeClock();
   const told: unknown[] = [];
-  await startUpdates((update) => told.push(update), async () => updater, clock.schedule);
+  await startUpdates((update) => told.push(update), null, async () => updater, clock.schedule);
   assert.equal(updater.autoDownload, true);
   assert.equal(updater.autoInstallOnAppQuit, true, 'unanswered, it is installed at the next quit');
+  // No word that nobody is interrupted: nothing is installed unasked.
+  assert.deepEqual(calls.installs, []);
   assert.deepEqual(clock.timers.map(({ ms, repeat }) => [ms, repeat]), [[FIRST_CHECK, false], [CHECK_EVERY, true]]);
   clock.timers[0].run();
   assert.equal(calls.checks, 1);
@@ -73,7 +77,7 @@ test('installing it now is refused while a setup runs, and with none waiting; ot
   forgetUpdates();
   assert.deepEqual(installUpdate(false), { installed: false, reason: 'none' });
   const { updater, calls, emit } = fakeUpdater();
-  await startUpdates(() => undefined, async () => updater, fakeClock().schedule);
+  await startUpdates(() => undefined, null, async () => updater, fakeClock().schedule);
   assert.deepEqual(installUpdate(false), { installed: false, reason: 'none' }, 'started, nothing downloaded yet');
   emit('update-downloaded', { version: '1.0.43' });
   assert.deepEqual(installUpdate(true), { installed: false, reason: 'busy' });
@@ -81,6 +85,61 @@ test('installing it now is refused while a setup runs, and with none waiting; ot
   assert.deepEqual(installUpdate(false), { installed: true });
   assert.deepEqual(calls.installs, [[true, true]], 'without the installer’s pages, and Cortex opened again after');
   forgetUpdates();
+});
+
+test('started with Windows and not yet seen, a waiting update is installed unasked, and the start the installer makes stays unseen', async () => {
+  // 10 November: 1.0.59 was downloaded on the 7th, "installed when Cortex restarts"; a Windows start and an app start
+  // later Cortex was still 1.0.56. Windows ending the session never emits the app's `quit`, where it was to be installed.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-quiet-'));
+  const file = path.join(dir, 'update-quiet.json');
+  try {
+    forgetUpdates();
+    const { updater, calls, emit } = fakeUpdater();
+    const told: unknown[] = [];
+    let unseen = false;
+    await startUpdates((update) => told.push(update), { unseen: () => unseen, file }, async () => updater, fakeClock().schedule);
+    // The window open, or something running: told, and left to the person.
+    emit('update-downloaded', { version: '1.0.61' });
+    assert.deepEqual(told, [{ version: '1.0.61' }]);
+    assert.deepEqual(calls.installs, []);
+    assert.equal(quietAttempt(file), null);
+    // Unseen: installed now, without a word, the version written down first.
+    unseen = true;
+    emit('update-downloaded', { version: '1.0.61' });
+    assert.deepEqual(calls.installs, [[true, true]], 'without the installer’s pages, and Cortex opened again after');
+    assert.equal(told.length, 1, 'nothing more said');
+    assert.equal(quietAttempt(file), '1.0.61');
+
+    // The start the installer makes (`--updated`), now that version: unseen too, and nothing is kept.
+    assert.equal(startedByQuietInstall(['Cortex.exe', '--updated'], '1.0.61', file), true);
+    assert.equal(fs.existsSync(file), false);
+    assert.equal(startedByQuietInstall(['Cortex.exe', '--updated'], '1.0.61', file), false, 'a restart the person asked for opens the window');
+    assert.equal(startedByQuietInstall(['Cortex.exe', '--gizli'], '1.0.61', file), false);
+
+    // An installer that did not install: that version is not begun unasked again, at this start or a later one.
+    emit('update-downloaded', { version: '1.0.62' });
+    assert.equal(calls.installs.length, 2);
+    assert.equal(startedByQuietInstall(['Cortex.exe', '--updated'], '1.0.61', file), true, 'its own start, still unseen');
+    assert.equal(startedByQuietInstall(['Cortex.exe', '--updated'], '1.0.61', file), false, 'and no later one');
+    emit('update-downloaded', { version: '1.0.62' });
+    assert.equal(calls.installs.length, 2, 'not run again at every start');
+    assert.deepEqual(told.at(-1), { version: '1.0.62' }, 'it waits for the person, as before');
+    // A newer one is.
+    emit('update-downloaded', { version: '1.0.63' });
+    assert.equal(calls.installs.length, 3);
+
+    // Where the version cannot be written down, nothing is begun: it would be begun at every start.
+    forgetUpdates();
+    const second = fakeUpdater();
+    const said: unknown[] = [];
+    await startUpdates((update) => said.push(update), { unseen: () => true, file: path.join(dir, 'update-quiet.json', 'no-folder-here', 'x.json') }, async () => second.updater, fakeClock().schedule);
+    second.emit('update-downloaded', { version: '1.0.64' });
+    assert.deepEqual(second.calls.installs, []);
+    assert.deepEqual(said, [{ version: '1.0.64' }]);
+  } finally {
+    forgetUpdates();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('the build writes what the updater reads beside the installer, and a release carries it', () => {

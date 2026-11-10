@@ -18,7 +18,7 @@ import * as setup from './services/setup';
 import * as telegram from './services/telegram';
 import * as vaultSync from './services/vaultSync';
 import * as vaultNotes from './services/vaultNotes';
-import { installUpdate, pendingUpdate, startUpdates, updatesWanted } from './services/updater';
+import { installUpdate, pendingUpdate, quietFile, startUpdates, updatesWanted } from './services/updater';
 import { isMicWindow } from './services/micWindow';
 
 /**
@@ -88,10 +88,12 @@ export function moveYakala(onlyWhereGone = false): void {
 
 /**
  * The app following its releases (services/updater.ts), from its start: a newer one downloaded and checked is said in
- * the window, and in the notification area for a person who has the window closed.
+ * the window, and in the notification area for a person who has the window closed. Where the app says nobody has seen
+ * it since it started with Windows (`unseen`), and no setup or answer is going on, it is installed without a word.
  */
-export function startAppUpdates(trayWord: (title: string, body: string) => void): void {
+export function startAppUpdates(trayWord: (title: string, body: string) => void, unseen: () => boolean): void {
   if (!updatesWanted()) return;
+  const quiet = { unseen: () => unseen() && setup.setupBusy() === null && !chat.chatsRunning(), file: quietFile() };
   void startUpdates((update: AppUpdate) => {
     broadcast('app:update', update);
     const english = readSettings().language === 'en';
@@ -99,7 +101,7 @@ export function startAppUpdates(trayWord: (title: string, body: string) => void)
       english ? `Cortex ${update.version} is ready` : `Cortex ${update.version} hazır`,
       english ? 'It is installed when Cortex restarts. Open Cortex to restart now.' : 'Cortex yeniden başlayınca kurulur. Şimdi kurmak için Cortex’i aç.',
     );
-  }).catch((err: unknown) => console.warn('[updates]', err instanceof Error ? err.message : err));
+  }, quiet).catch((err: unknown) => console.warn('[updates]', err instanceof Error ? err.message : err));
 }
 
 function windowSettings(): WindowSettings {

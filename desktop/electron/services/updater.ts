@@ -1,5 +1,8 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { app } from 'electron';
 import type { AppUpdate, UpdateInstall } from '../../shared/api';
+import { writeWhole } from './fileWrite';
 
 /**
  * The app keeping itself up to date from the repository's releases, as the vault's engine already does with its
@@ -12,8 +15,8 @@ import type { AppUpdate, UpdateInstall } from '../../shared/api';
  * installs by hand. A check that cannot reach GitHub is quiet: the next one is in a few hours.
  *
  * What it is told is said once it is ready to install, not while it downloads: the person decides when to restart.
- * Unanswered, the installer runs the next time the app quits (autoInstallOnAppQuit), which in the notification area
- * may be the next sign-out.
+ * Unanswered, the installer runs the next time the app quits (autoInstallOnAppQuit), or, for an app that starts with
+ * Windows and is never quit, at its next start there, before anybody has opened it (QuietInstall).
  */
 
 /** The first look a while after the start, not in its busiest seconds; then a few times a day. */
@@ -31,8 +34,78 @@ export interface Updater {
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void;
 }
 
+/**
+ * An update installed unasked, where nobody is interrupted. 10 November: 1.0.59 had been downloaded on the 7th and the
+ * notification area said it would be installed when Cortex restarted; a Windows start and an app start later, Cortex
+ * was still 1.0.56. Windows ending the session does not emit the app's `quit` (Electron: "will not be emitted if the
+ * app is closed due to a shutdown/restart of the system or a user logout"), so autoInstallOnAppQuit never ran for an
+ * app that starts with Windows and lives in the notification area: only "Yeniden başlat" in the window, or the icon's
+ * "Çıkış", installed anything.
+ *
+ * `unseen` is the app's word that nobody is interrupted: started with Windows, its window not opened since, nothing
+ * running (electron/main.ts, ipc.ts). The version is written down first (`file`), for the start the installer then
+ * makes: that one stays in the notification area too (startedByQuietInstall), and an installer that did not install is
+ * not run again at every start - that version waits for the person, as before.
+ */
+export interface QuietInstall {
+  unseen: () => boolean;
+  file: string;
+}
+
+interface QuietKept {
+  version: string;
+  /** The start after it found another version running: the installer did not install it. */
+  failed?: boolean;
+}
+
+export const quietFile = (): string => path.join(app.getPath('userData'), 'update-quiet.json');
+
+function readQuiet(file: string): QuietKept | null {
+  try {
+    const kept = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<QuietKept> | null;
+    return kept && typeof kept.version === 'string' ? { version: kept.version, failed: kept.failed === true } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The version a quiet install was last begun for, where one is written down: installed since, nothing is. */
+export function quietAttempt(file: string = quietFile()): string | null {
+  return readQuiet(file)?.version ?? null;
+}
+
+/**
+ * Whether this start is the installer's after a quiet install (it starts the app with `--updated`): the window then
+ * stays closed, as at the start with Windows it took the place of. Asked once, at the start: installed, what was
+ * written down is forgotten; not installed, it is kept as failed, and no later start is taken for the installer's.
+ */
+export function startedByQuietInstall(argv: readonly string[] = process.argv, version: string = app.getVersion(), file: string = quietFile()): boolean {
+  const kept = readQuiet(file);
+  if (!kept || kept.failed) return false;
+  try {
+    if (kept.version === version) fs.rmSync(file, { force: true });
+    else writeWhole(file, JSON.stringify({ version: kept.version, failed: true }));
+  } catch {
+    /* Read again at the next start. */
+  }
+  return argv.includes('--updated');
+}
+
 let updater: Updater | null = null;
 let ready: AppUpdate | null = null;
+
+/** Installed now, unasked, where nobody is interrupted and this version was not begun so before; whether it was begun. */
+function installQuietly(quiet: QuietInstall, version: string): boolean {
+  if (!updater || !quiet.unseen() || quietAttempt(quiet.file) === version) return false;
+  try {
+    // Written down before the installer runs: one that cannot be remembered is not begun, or it would be at every start.
+    writeWhole(quiet.file, JSON.stringify({ version }));
+  } catch {
+    return false;
+  }
+  updater.quitAndInstall(true, true);
+  return true;
+}
 
 /** Whether this app follows the releases at all. */
 export function updatesWanted(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform, packaged: boolean = app.isPackaged): boolean {
@@ -45,11 +118,12 @@ async function loadUpdater(): Promise<Updater> {
 }
 
 /**
- * Following the releases, from the app's start: `tell` hears of an update once it is downloaded and checked.
- * `load` and the timers stand in for electron-updater and the clock in the tests.
+ * Following the releases, from the app's start: `tell` hears of an update once it is downloaded and checked, unless
+ * it is installed unasked (`quiet`). `load` and the timers stand in for electron-updater and the clock in the tests.
  */
 export async function startUpdates(
   tell: (update: AppUpdate) => void,
+  quiet: QuietInstall | null = null,
   load: () => Promise<Updater> = loadUpdater,
   schedule: { after: (run: () => void, ms: number) => void; every: (run: () => void, ms: number) => void } = {
     after: (run, ms) => setTimeout(run, ms).unref(),
@@ -64,6 +138,7 @@ export async function startUpdates(
   updater.logger = { info: () => undefined, warn: console.warn, error: console.warn, debug: () => undefined };
   updater.on('update-downloaded', (info) => {
     ready = { version: String(info.version) };
+    if (quiet && installQuietly(quiet, ready.version)) return;
     tell(ready);
   });
   updater.on('error', (err) => console.warn('[updates]', err.message));

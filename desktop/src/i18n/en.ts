@@ -431,7 +431,7 @@ export const en = {
   'app.vault.failed': 'That folder cannot be the vault',
   'app.language': 'Language',
   'app.update.title': 'Cortex {version} is ready',
-  'app.update.detail': 'Downloaded. It is installed when Cortex restarts; if you do not now, it is installed when Cortex quits.',
+  'app.update.detail': 'Downloaded. It is installed when Cortex restarts; if you do not now, it is installed by itself when Cortex quits or the next time the computer starts.',
   'app.update.restart': 'Restart',
   'app.update.busy': 'A setup is still going on. Restart once it is done, or it is installed when Cortex quits.',
   'app.settings.copied': 'The settings file would not be read, so the app started fresh. A copy of it was kept beside it.',

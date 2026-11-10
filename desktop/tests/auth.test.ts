@@ -257,11 +257,14 @@ test('pressed again while a sign-in goes on: the one before is ended, a new one 
 });
 
 test('a sign-in closed with an error, not signed in, is said with its code and the command to run it by hand', { skip: process.platform !== 'win32' }, async () => {
-  const kept = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, STANDIN_SIGN_IN_AFTER: process.env.STANDIN_SIGN_IN_AFTER, STANDIN_CLOSE_AFTER: process.env.STANDIN_CLOSE_AFTER, STANDIN_CLOSE_CODE: process.env.STANDIN_CLOSE_CODE };
+  const kept = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, CORTEX_NO_PATH_REFRESH: process.env.CORTEX_NO_PATH_REFRESH, STANDIN_SIGN_IN_AFTER: process.env.STANDIN_SIGN_IN_AFTER, STANDIN_CLOSE_AFTER: process.env.STANDIN_CLOSE_AFTER, STANDIN_CLOSE_CODE: process.env.STANDIN_CLOSE_CODE };
   const before = readSettings().chatTools;
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-ended-'));
   process.env.PATH = '';
   process.env.LOCALAPPDATA = home;
+  // The statuses asked below read the PATH again (clis.ts, refreshPath): on a computer with Codex installed the
+  // person's own was found, not the stand-in, and each of their tools was asked its sign-in (81 s, 10 November).
+  process.env.CORTEX_NO_PATH_REFRESH = '1';
   process.env.STANDIN_SIGN_IN_AFTER = '60000';
   process.env.STANDIN_CLOSE_AFTER = '1500';
   process.env.STANDIN_CLOSE_CODE = '3';

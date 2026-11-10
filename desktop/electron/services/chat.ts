@@ -645,6 +645,9 @@ export function shutdownChats(closing = false): void {
   for (const backend of Object.values(BACKENDS)) backend.shutdown();
 }
 
+/** Whether a chat is answering now, a card waiting on the person included. */
+export const chatsRunning = (): boolean => [...live.values()].some((one) => one.running);
+
 /**
  * A sign-in, a key or an install changed while CLIs were kept running: they are ended between
  * turns, and each chat's next message starts its CLI again with it, its session resumed. A CLI
@@ -653,7 +656,7 @@ export function shutdownChats(closing = false): void {
  * one is not cut off: the restart is made when the last turn ends. Whether it was made now.
  */
 export function restartIdleChats(): boolean {
-  if ([...live.values()].some((one) => one.running)) {
+  if (chatsRunning()) {
     restartWanted = true;
     return false;
   }

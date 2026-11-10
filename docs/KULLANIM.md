@@ -233,7 +233,7 @@ Kurucu istemci bağlantılarını, ortak motoru, üç başlangıç skill'ini (**
 
 ## Güncelleme
 
-- **Masaüstü uygulaması kendini günceller** (1.0.43'ten beri): yeni bir sürüm yayımlanınca arka planda iner, pencerede **"Cortex X hazır"** çıkar; **Yeniden başlat**'a basınca kurulup yeniden açılır, basılmazsa Cortex kapanırken kurulur. Yalnız yayımlanmış sürümler gelir.
+- **Masaüstü uygulaması kendini günceller** (1.0.43'ten beri): yeni bir sürüm yayımlanınca arka planda iner, pencerede **"Cortex X hazır"** çıkar; **Yeniden başlat**'a basınca kurulup yeniden açılır, basılmazsa Cortex kapanırken ya da bilgisayarın bir sonraki açılışında, sen Cortex'i açmadan önce kendiliğinden kurulur (1.0.61'den beri). Yalnız yayımlanmış sürümler gelir.
 - **Kasadaki motor:** ana ekrandaki **"Cortex güncellemesi hazır"** bildiriminde **Güncelle** (ya da Ayarlar → Cortex). Sesle yazmanın paketleri değiştiyse Ayarlar → Sesle yazma → **Sesle yazmayı güncelle** de görünür; AMD / Intel ekran kartında eski 1,6 GB'lık ses modeli kullanılıyorsa aynı yerde **Daha hafif ses modelini al** çıkar.
 - **Terminalden:** `pyn guncelle`, ya da kasada `python3 beyin.py update` (yalnız bakmak için `update --check`). Asistanına "beynimi güncelle" demek ya da kasadaki güncelleme kısayolu da aynı işi yapar.
 
