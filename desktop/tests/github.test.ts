@@ -20,6 +20,7 @@ import {
   setGithubForTests,
   startGithub,
 } from '../electron/services/github';
+import { setGitToolForTests } from '../electron/services/gitTool';
 import { readSettings, updateSettings } from '../electron/services/settings';
 import { setVaultSyncEngine } from '../electron/services/vaultSync';
 import { GITHUB_APP, type GithubStatus } from '../shared/github';
@@ -307,4 +308,39 @@ test('a vault sent to a new repository, then joined from a second computer: noth
   const again = await connectRepo(made.fullName);
   assert.equal(again.state, 'synced', JSON.stringify(again));
   assert.equal(readSettings().vaultSync, true);
+});
+
+// Windows reads its PATH again from the registry (services/clis.ts), so "no git on this computer" cannot be played there.
+test('with no git on the computer, the window is told git is being downloaded while it is, and a download that fails in one sentence (G5)', { skip: process.platform === 'win32' }, async () => {
+  // 10 November: "GitHub ile bağlan" fetched MinGit (some 40 MB) with nothing on the screen but a spinner.
+  reset();
+  await signIn();
+  fake.installations = [{ id: 7, app_slug: 'cortex-kasa' }];
+  fake.repos = [{ full_name: 'tolga/bos', private: true, size: 0 }];
+  const vault = temp('cortex-github-nogit-');
+  updateSettings((settings) => {
+    settings.vault = vault;
+    settings.vaultSync = false;
+  });
+  const kept = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA };
+  // No git on the PATH, none brought before; the package's address answers 404.
+  process.env.PATH = temp('cortex-github-nopath-');
+  process.env.LOCALAPPDATA = temp('cortex-github-local-');
+  setGitToolForTests({ releases: `${base}/no-such-release/`, platform: 'win32', pin: { file: 'MinGit-test.zip', size: 39846926, sha256: '0'.repeat(64) } });
+  heard = [];
+  try {
+    const result = await connectRepo('tolga/bos');
+    assert.equal(result.state, 'error', JSON.stringify(result));
+    assert.deepEqual(result.detail, ['Git indirilemedi (404); yeniden dene.']);
+    const steps = heard.map((status) => status.step);
+    assert.ok(steps.includes('Git indiriliyor (40 MB)…'), JSON.stringify(steps));
+    assert.equal(steps.at(-1), null, 'over, the step is taken down');
+    assert.equal(githubStatus().step, null);
+    assert.equal(readSettings().vaultSync, false, 'nothing joined');
+  } finally {
+    setGitToolForTests(null);
+    process.env.PATH = kept.PATH;
+    if (kept.LOCALAPPDATA === undefined) delete process.env.LOCALAPPDATA;
+    else process.env.LOCALAPPDATA = kept.LOCALAPPDATA;
+  }
 });

@@ -108,7 +108,15 @@ test('a package reaching out of its folder, or with no git.exe, installs nothing
   const outside = zipOf('outside.zip', { 'cmd/git.exe': 'git', '../../kacak.txt': 'x' });
   served.set('MinGit-outside.zip', outside);
   setGitToolForTests({ releases, platform: 'win32', pin: pinOf(outside, 'MinGit-outside.zip') });
-  await assert.rejects(() => installGit(undefined, { dir }), /açılamadı/);
+  await assert.rejects(
+    () => installGit(undefined, { dir }),
+    (err: Error) => {
+      assert.match(err.message, /^Git paketi açılamadı; diskte yer olduğunu ve Python’un kurulu olduğunu \(Ayarlar → Cortex\) kontrol edip yeniden dene\.$/);
+      // G5: what Python said (the path inside the package, a traceback) is for the console, not the window.
+      assert.doesNotMatch(err.message, /bad path|kacak|Traceback|SystemExit/);
+      return true;
+    },
+  );
   assert.equal(fs.existsSync(path.join(dir, '..', 'kacak.txt')), false);
   const empty = zipOf('empty.zip', { 'README.txt': 'no git here' });
   served.set('MinGit-empty.zip', empty);

@@ -280,9 +280,10 @@ export async function setVaultSync(on: unknown): Promise<SyncStatus> {
 /**
  * The vault joined to a remote for the first time (services/github.ts): sent to an empty one (`baslat`), or taken in
  * from one that holds a vault (`baglan`), by the engine (`beyin.py esitle --baslat|--baglan <url>`); kept in step from
- * then on when it went through. The engine's result as it gave it. Not while a sync runs: it waits for it.
+ * then on when it went through. The engine's result as it gave it. Not while a sync runs: it waits for it. `step`
+ * hears what is being done while git is brought first (a 40 MB download the window showed nothing of, G5).
  */
-export async function joinVault(url: string, mode: 'baslat' | 'baglan', env: Record<string, string>): Promise<Record<string, unknown>> {
+export async function joinVault(url: string, mode: 'baslat' | 'baglan', env: Record<string, string>, step: (text: string | null) => void = () => undefined): Promise<Record<string, unknown>> {
   const vault = readSettings().vault;
   if (!vault || !fs.existsSync(vault)) return { state: 'error', detail: [readSettings().language === 'en' ? 'Pick a vault first.' : 'Önce bir kasa seç.'] };
   const command = engineCommand(vault);
@@ -291,9 +292,11 @@ export async function joinVault(url: string, mode: 'baslat' | 'baglan', env: Rec
   // No git on this computer: on Windows, Cortex brings its own first (the person never sees a git setup).
   if (!gitToUse(vault) && bringsGit()) {
     try {
-      await installGit();
+      await installGit(step);
     } catch (err) {
       return { state: 'error', detail: [String((err as Error)?.message ?? err).slice(0, 300)] };
+    } finally {
+      step(null);
     }
   }
   let result: Record<string, unknown> = { state: 'busy' };

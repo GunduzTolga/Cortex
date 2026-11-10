@@ -23,6 +23,8 @@ export interface GithubStatus {
   repo: string | null;
   /** For an error: what went wrong, in a sentence the window shows as it is. */
   detail: string | null;
+  /** While the vault is being joined: what is being done first, where it takes a while ("Git indiriliyor (40 MB)…"); null otherwise. */
+  step: string | null;
 }
 
 export interface GithubCode {
