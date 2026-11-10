@@ -151,17 +151,81 @@ let cachedText = 0;
 let building: Promise<VaultIndex> | null = null;
 let last: { files: string[]; notes: Map<string, IndexedNote> } | null = null;
 
+interface Listed {
+  path: string;
+  size: number;
+  modified: number;
+}
+interface Walked {
+  folders: string[];
+  files: Listed[];
+  truncated: boolean;
+}
+
+/*
+  What the vault held when it was last listed, kept so that one note changed on
+  disk is one file asked about and not the whole vault walked again: with
+  Obsidian saving every other second, a vault on a slow disk or under an
+  antivirus was walked whole, a system call a file, at each save (N10).
+  `changedPaths` are the paths said changed since - by the watcher below, or by
+  a write made here - and `walkWhole` says the listing is not to be trusted and
+  the vault is walked again: at first, when a change came without its path or
+  too many came at once, and when the watcher stopped.
+*/
+let listing: { folders: Set<string>; files: Map<string, Listed>; truncated: boolean } | null = null;
+let changedPaths = new Set<string>();
+let walkWhole = true;
+let walkedAt = 0;
+/** More paths changed than this between two readings is a sync or a checkout: one walk is cheaper than asking about each. */
+const CHANGED_MAX = 256;
+/** The vault is walked whole again this long after the last time, whatever the watcher said: a watcher on a network or cloud folder can miss a change and say nothing. */
+const WALK_EVERY_MS = 60_000;
+
 function forget(vault: string | null): void {
   if (cachedFor === vault) return;
   cache = new Map();
   cachedText = 0;
   last = null;
+  listing = null;
+  changedPaths = new Set();
+  walkWhole = true;
   cachedFor = vault;
 }
 
-async function walk(vault: string): Promise<{ folders: string[]; files: Array<{ path: string; size: number; modified: number }>; truncated: boolean }> {
+/** A path of the vault said changed on disk; without a path, anything may have. */
+function pathChanged(relative: string): void {
+  if (!relative) {
+    walkWhole = true;
+    return;
+  }
+  changedPaths.add(relative.split(/[\\/]/).join('/'));
+  if (changedPaths.size > CHANGED_MAX) {
+    changedPaths = new Set();
+    walkWhole = true;
+  }
+}
+
+/** How many files are asked about at once while the vault is listed. */
+const STATS = 16;
+
+/** Each of `items` worked on, a few at a time, the answers in the order asked. */
+async function eachOf<T, R>(items: readonly T[], atOnce: number, work: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const at = next++;
+      out[at] = await work(items[at]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(atOnce, items.length) }, worker));
+  return out;
+}
+
+/** A folder of the vault and all under it, as listed: `room` is how many entries may still be listed, `depth` how deep the folder is. */
+async function walk(top: string, topRelative = '', topDepth = 0, room = LIST_MAX): Promise<Walked> {
   const folders: string[] = [];
-  const files: Array<{ path: string; size: number; modified: number }> = [];
+  const files: Listed[] = [];
   let truncated = false;
   const visit = async (dir: string, relative: string, depth: number): Promise<void> => {
     if (depth > LIST_DEPTH) {
@@ -174,30 +238,144 @@ async function walk(vault: string): Promise<{ folders: string[]; files: Array<{ 
     } catch {
       return;
     }
+    // Hidden, or a link: not the person's notes as Obsidian shows them, and a link is never followed.
+    entries = entries.filter((entry) => !entry.name.startsWith('.') && !entry.isSymbolicLink());
+    /*
+      The folder's files asked about a few at a time, before it is gone through in its order: one after another, each
+      waited on the disk and on an antivirus looking at it (N10). No more of them than may still be listed.
+    */
+    const asked = entries.filter((entry) => entry.isFile()).slice(0, Math.max(0, room - folders.length - files.length));
+    const answers = await eachOf(asked, STATS, (entry) => fs.lstat(path.join(dir, entry.name)).catch(() => null));
+    const stats = new Map(asked.map((entry, at) => [entry.name, answers[at]]));
     for (const entry of entries) {
-      if (folders.length + files.length >= LIST_MAX) {
+      if (folders.length + files.length >= room) {
         truncated = true;
         return;
       }
-      // Hidden, or a link: not the person's notes as Obsidian shows them, and a link is never followed.
-      if (entry.name.startsWith('.') || entry.isSymbolicLink()) continue;
       const inside = relative ? `${relative}/${entry.name}` : entry.name;
-      const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         folders.push(inside);
-        await visit(full, inside, depth + 1);
+        await visit(path.join(dir, entry.name), inside, depth + 1);
       } else if (entry.isFile()) {
-        try {
-          const stat = await fs.lstat(full);
-          files.push({ path: inside, size: stat.size, modified: stat.mtimeMs });
-        } catch {
-          /* gone while listed */
-        }
+        // None: gone while listed.
+        const stat = stats.get(entry.name);
+        if (stat) files.push({ path: inside, size: stat.size, modified: stat.mtimeMs });
       }
     }
   };
-  await visit(vault, '', 0);
+  await visit(top, topRelative, topDepth);
   return { folders, files, truncated };
+}
+
+/** A path of the listing let go, with all under it where it was a folder. Whether anything was listed there. */
+function unlist(listed: NonNullable<typeof listing>, inside: string): boolean {
+  let was = listed.files.delete(inside);
+  if (listed.folders.delete(inside)) {
+    was = true;
+    for (const folder of listed.folders) if (folder.startsWith(`${inside}/`)) listed.folders.delete(folder);
+    for (const file of listed.files.keys()) if (file.startsWith(`${inside}/`)) listed.files.delete(file);
+  }
+  return was;
+}
+
+/**
+ * The listing brought up to date for the paths said changed, each asked about
+ * on its own. False where that cannot be trusted and the vault is to be walked
+ * whole: a path the disk spells otherwise than it was said (Windows may say a
+ * name in its short form, or in another case) or reaches through a link, or
+ * more to list than the screen lists.
+ */
+async function relist(vault: string, listed: NonNullable<typeof listing>, changed: ReadonlySet<string>): Promise<boolean> {
+  const realVault = await fs.realpath(vault);
+  const queue = [...changed];
+  const asked = new Set<string>();
+  /*
+    A folder's names read again, without asking about each file: what is gone
+    from it is let go, and what is new in it is asked about. Windows says a
+    folder changed when something in it was made or deleted, and this is all
+    that can have changed in it; a file written in it is said by its own path.
+  */
+  const named = new Set<string>();
+  const names = async (folder: string): Promise<void> => {
+    // Once a folder: all that was said changed before this reading began.
+    if (named.has(folder)) return;
+    named.add(folder);
+    const entries = await fs.readdir(folder ? path.join(vault, ...folder.split('/')) : vault);
+    const there = new Set(entries.filter((name) => !name.startsWith('.')).map((name) => (folder ? `${folder}/${name}` : name)));
+    for (const one of [...listed.folders, ...listed.files.keys()]) if (folderOf(one) === folder && !there.has(one)) unlist(listed, one);
+    for (const one of there) if (!listed.folders.has(one) && !listed.files.has(one)) queue.push(one);
+  };
+  for (let at = 0; at < queue.length; at += 1) {
+    if (queue.length > CHANGED_MAX * 4) return false;
+    const parts = queue[at].split('/');
+    if (parts.some((part) => !part || part === '..' || part.startsWith('.'))) continue;
+    // In a folder not listed yet: that folder is what is new (or what was left out, as a link is), and it is asked about.
+    let depth = parts.length;
+    for (let up = 1; up < parts.length; up += 1) {
+      if (!listed.folders.has(parts.slice(0, up).join('/'))) {
+        depth = up;
+        break;
+      }
+    }
+    const inside = parts.slice(0, depth).join('/');
+    if (asked.has(inside)) continue;
+    asked.add(inside);
+    const full = path.join(vault, ...parts.slice(0, depth));
+    const stat = await fs.lstat(full).catch(() => null);
+    if (!stat) {
+      // Gone. Where it was never listed, it was made and deleted at once (a temporary), or said by another name than the listing has it under: its folder's names say which.
+      if (!unlist(listed, inside)) await names(folderOf(inside));
+      continue;
+    }
+    if (stat.isSymbolicLink()) {
+      unlist(listed, inside);
+      continue;
+    }
+    if ((await fs.realpath(full)) !== path.join(realVault, ...parts.slice(0, depth))) return false;
+    if (stat.isDirectory()) {
+      if (listed.folders.has(inside)) {
+        await names(inside);
+        continue;
+      }
+      unlist(listed, inside);
+      const under = await walk(full, inside, depth, LIST_MAX - listed.folders.size - listed.files.size - 1);
+      if (under.truncated) return false;
+      listed.folders.add(inside);
+      for (const folder of under.folders) listed.folders.add(folder);
+      for (const file of under.files) listed.files.set(file.path, file);
+    } else if (stat.isFile()) {
+      if (listed.folders.has(inside)) unlist(listed, inside);
+      listed.files.set(inside, { path: inside, size: stat.size, modified: stat.mtimeMs });
+    } else {
+      unlist(listed, inside);
+    }
+    if (listed.folders.size + listed.files.size >= LIST_MAX) return false;
+  }
+  return true;
+}
+
+/** The vault's folders and files as they are now: the last listing with what changed since asked about, where a watcher says what changes; walked whole otherwise. */
+async function listVault(vault: string): Promise<Walked> {
+  const changed = changedPaths;
+  changedPaths = new Set();
+  const whole = walkWhole || !listing || listing.truncated || !watching?.watcher || watching.vault !== vault || Math.abs(Date.now() - walkedAt) > WALK_EVERY_MS;
+  // Before anything is waited on: what is said changed from here on is for the next reading.
+  walkWhole = false;
+  if (!whole && listing) {
+    const listed = listing;
+    const held = await relist(vault, listed, changed).catch(() => false);
+    if (held && listing === listed) return { folders: [...listed.folders], files: [...listed.files.values()], truncated: false };
+  }
+  listing = null;
+  const walked = await walk(vault).catch((err) => {
+    walkWhole = true;
+    throw err;
+  });
+  if (cachedFor === vault) {
+    listing = { folders: new Set(walked.folders), files: new Map(walked.files.map((file) => [file.path, file])), truncated: walked.truncated };
+    walkedAt = Date.now();
+  }
+  return walked;
 }
 
 /** A note's bytes as text, or null when they are not UTF-8: such a note is shown and never saved, which would change bytes the person did not touch. */
@@ -218,7 +396,7 @@ async function build(): Promise<VaultIndex> {
   } catch (err) {
     return { vault: { name: path.basename(vault) }, folders: [], files: [], notes: [], truncated: false, readOnly: null, missing: (err as Error).message };
   }
-  const listed = await walk(vault);
+  const listed = await listVault(vault);
   const seen = new Set<string>();
   const toRead: typeof listed.files = [];
   for (const file of listed.files) {
@@ -363,12 +541,17 @@ export async function readVaultText(relative: unknown): Promise<TextRead> {
   return { path: inside, text: text === null ? null : text.replace(/^﻿/, ''), modified: stat.mtimeMs, tooLarge: false };
 }
 
-/** A file written beside where it goes and renamed into place, so a note is never left half written. */
-async function writeInPlace(file: string, text: string): Promise<void> {
+/**
+ * A file written beside where it goes and renamed into place, so a note is never left half written. With `still`, asked
+ * once the temporary is written and right before it takes the file's place: false, and nothing is put there.
+ */
+async function writeInPlace(file: string, text: string, still?: () => Promise<boolean>): Promise<boolean> {
   const temp = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID()}.tmp`);
   try {
     await fs.writeFile(temp, text, { flag: 'wx' });
-    await renameBusy(temp, file);
+    const placed = await renameBusy(temp, file, still);
+    if (!placed) await fs.rm(temp, { force: true });
+    return placed;
   } catch (err) {
     await fs.rm(temp, { force: true });
     throw notLetIn(err, path.basename(file));
@@ -381,12 +564,17 @@ function notLetIn(err: unknown, name: string): unknown {
   return code === 'EPERM' || code === 'EACCES' ? new VaultRefusal(`${name} could not be written: the system did not let Cortex write it.`) : err;
 }
 
-/** A rename tried again for a moment while Windows says the file is busy (an antivirus or the indexer holds a file just written), without blocking the main process. */
-async function renameBusy(from: string, to: string): Promise<void> {
+/**
+ * A rename tried again for a moment while Windows says the file is busy (an antivirus or the indexer holds a file just
+ * written), without blocking the main process. `still` is asked before every try, the waited ones too - a file busy is
+ * often a file being written by something else - and where it says no, nothing is renamed and false is the answer.
+ */
+async function renameBusy(from: string, to: string, still?: () => Promise<boolean>): Promise<boolean> {
   for (let attempt = 0; ; attempt += 1) {
+    if (still && !(await still())) return false;
     try {
       await fs.rename(from, to);
-      return;
+      return true;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code ?? '';
       if (process.platform !== 'win32' || attempt >= 8 || !['EPERM', 'EACCES', 'EBUSY'].includes(code)) throw err;
@@ -409,11 +597,23 @@ export async function saveVaultNote(relative: unknown, text: unknown, base: unkn
   const was = textOf(now);
   if (was === null) throw new VaultRefusal(`${inside} is not UTF-8 text, and saving it here would change bytes the person did not touch.`);
   if (keeperOf(inside, was)) throw new VaultRefusal(`Cortex keeps ${inside} itself: it is read here and not written.`);
-  if (hashOf(now) !== base) {
+  const conflict = async (there: Buffer): Promise<NoteSaved> => {
     const stat = await fs.stat(file);
-    return { saved: false, current: { text: textOf(now) ?? now.toString('utf8'), hash: hashOf(now), modified: stat.mtimeMs } };
-  }
-  await writeInPlace(file, text);
+    return { saved: false, current: { text: textOf(there) ?? there.toString('utf8'), hash: hashOf(there), modified: stat.mtimeMs } };
+  };
+  if (hashOf(now) !== base) return conflict(now);
+  /*
+    Read once more right before the new text takes the note's place: writing the temporary takes a moment, and on
+    Windows the rename waits while the note is busy - which is Obsidian or a sync writing it. What they wrote in that
+    moment was written over (N13); now it is a conflict like any other, and the person's text stays on the screen.
+  */
+  let latest = now;
+  const placed = await writeInPlace(file, text, async () => {
+    latest = await fs.readFile(file);
+    return hashOf(latest) === base;
+  });
+  if (!placed) return conflict(latest);
+  pathChanged(inside);
   const stat = await fs.stat(file);
   return { saved: true, hash: hashOf(Buffer.from(text, 'utf8')), modified: stat.mtimeMs };
 }
@@ -438,7 +638,9 @@ export async function createVaultNote(folder: unknown, name: unknown, options: {
     if (options.unique === true) chosen = freeName(name.trim(), await taken());
     try {
       await fs.writeFile(path.join(dir, `${chosen}.md`), textFor(chosen), { flag: 'wx' });
-      return { path: relative ? `${relative}/${chosen}.md` : `${chosen}.md` };
+      const made = relative ? `${relative}/${chosen}.md` : `${chosen}.md`;
+      pathChanged(made);
+      return { path: made };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST' || options.unique !== true) {
         if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw new VaultRefusal(`A note named ${chosen} is already in ${relative || 'the vault'}.`);
@@ -460,7 +662,9 @@ export async function createVaultFolder(parent: unknown, name: unknown): Promise
     if (err.code === 'EEXIST') throw new VaultRefusal(`Something named ${name.trim()} is already in ${relative || 'the vault'}.`);
     throw notLetIn(err, name.trim());
   });
-  return { path: relative ? `${relative}/${name.trim()}` : name.trim() };
+  const made = relative ? `${relative}/${name.trim()}` : name.trim();
+  pathChanged(made);
+  return { path: made };
 }
 
 export type { Moved };
@@ -514,6 +718,8 @@ async function moveEntry(fromRelative: unknown, toRelative: string): Promise<Mov
   const before = last;
   refuseKept(from, 'moved or renamed');
   await renameBusy(file, target);
+  pathChanged(from);
+  pathChanged(to);
   const updated: string[] = [];
   const skipped: string[] = [];
   if (!before) return { path: to, updated, skipped };
@@ -732,6 +938,7 @@ export async function trashVaultEntry(relative: unknown): Promise<{ id: string }
     const stamp = `(${dayOf(now)} ${String(now.getHours()).padStart(2, '0')}.${String(now.getMinutes()).padStart(2, '0')}.${String(now.getSeconds()).padStart(2, '0')})`;
     const id = await freeIn(dir, baseName(inside), kind === 'folder', (n) => (n === 1 ? stamp : `${stamp} ${n}`));
     await renameBusy(file, path.join(dir, id));
+    pathChanged(inside);
     await writeRecords(dir, [...(await readRecords(dir)).filter((one) => one.id !== id), { id, from: inside, kind, deletedAt: now.getTime() }]);
     return { id };
   });
@@ -787,8 +994,10 @@ export async function restoreVaultTrash(id: unknown): Promise<{ path: string }> 
     const { file: home, relative } = await onDisk(folder.join('/'));
     const name = await freeIn(home, parts[parts.length - 1], stat.isDirectory(), (n) => String(n));
     await renameBusy(source, path.join(home, name));
+    const back = relative ? `${relative}/${name}` : name;
+    pathChanged(back);
     await writeRecords(bin.dir, records.filter((one) => one.id !== id));
-    return { path: relative ? `${relative}/${name}` : name };
+    return { path: back };
   });
 }
 
@@ -921,42 +1130,93 @@ export async function openVaultEntry(relative: unknown, how: unknown): Promise<{
 /* Changes on disk                                                     */
 /* ------------------------------------------------------------------ */
 
-let watching: { vault: string; watcher: FSWatcher } | null = null;
+/** The vault watched; `watcher` is null between a watcher that failed and the next one tried in its place. */
+let watching: { vault: string; watcher: FSWatcher | null; failed: number } | null = null;
 let soon: ReturnType<typeof setTimeout> | null = null;
+let again: ReturnType<typeof setTimeout> | null = null;
+/** A watcher that failed is tried again after this long, twice as long after each failure in a row, and never longer than the second. */
+const REWATCH_FIRST_MS = 2_000;
+const REWATCH_LONGEST_MS = 5 * 60_000;
+
+/** How long after a watcher's failure the next is tried: `failed` is how many failed in a row before it. */
+export function rewatchDelay(failed: number): number {
+  return Math.min(REWATCH_LONGEST_MS, REWATCH_FIRST_MS * 2 ** Math.min(Math.max(0, failed), 20));
+}
 
 /**
  * The window told that the vault changed on disk - Obsidian, Cortex, Pyn or a
  * sync wrote a note - a moment after the last change, so that it reads the
- * index again. Hidden files are not news: Obsidian rewrites its workspace file
- * every few seconds. Where the platform cannot watch a folder whole, nothing is
- * said, and the screen reads the vault again when the window comes back.
+ * index again; what changed is kept (`pathChanged`), so that reading asks
+ * about those paths alone. Hidden files are not news: Obsidian rewrites its
+ * workspace file every few seconds. Where the platform cannot watch a folder
+ * whole, nothing is said, and the screen reads the vault again when the window
+ * comes back.
+ *
+ * A watcher that fails - a cloud or network folder gone for a moment - is put
+ * up again, after a wait that grows with each failure in a row (N12): it was
+ * closed and never tried again, and the notes stood still until the app was
+ * started again.
  */
 export function watchVault(tell: () => void): void {
   const vault = readSettings().vault;
   if (watching?.vault === vault) return;
   stopWatchingVault();
   if (!vault) return;
-  try {
-    const watcher = watch(vault, { recursive: true }, (_event, name) => {
-      const changed = typeof name === 'string' ? name : name ? String(name) : '';
-      if (changed && changed.split(/[\\/]/).some((part) => part.startsWith('.'))) return;
-      if (soon) clearTimeout(soon);
-      soon = setTimeout(() => {
-        soon = null;
-        tell();
-      }, 400);
-    });
-    watcher.on('error', () => stopWatchingVault());
-    watching = { vault, watcher };
-  } catch {
-    watching = null;
-  }
+  const state: NonNullable<typeof watching> = { vault, watcher: null, failed: 0 };
+  const later = () => {
+    if (soon) clearTimeout(soon);
+    soon = setTimeout(() => {
+      soon = null;
+      tell();
+    }, 400);
+  };
+  const failed = () => {
+    if (watching !== state) return;
+    state.watcher?.close();
+    state.watcher = null;
+    // Nothing is told while no watcher is up: the listing is not trusted until the vault is walked again.
+    walkWhole = true;
+    if (again) clearTimeout(again);
+    again = setTimeout(() => {
+      again = null;
+      if (watching !== state) return;
+      // The window reads the vault again once it is watched again: what changed meanwhile was not told.
+      if (arm()) later();
+      else failed();
+    }, rewatchDelay(state.failed));
+    state.failed += 1;
+  };
+  const arm = (): boolean => {
+    try {
+      const watcher = watch(vault, { recursive: true }, (_event, name) => {
+        if (watching !== state || state.watcher !== watcher) return;
+        const changed = typeof name === 'string' ? name : name ? String(name) : '';
+        if (changed && changed.split(/[\\/]/).some((part) => part.startsWith('.'))) return;
+        // It tells: the failures before it are behind.
+        state.failed = 0;
+        pathChanged(changed);
+        later();
+      });
+      watcher.on('error', () => {
+        if (state.watcher === watcher) failed();
+      });
+      state.watcher = watcher;
+      walkWhole = true;
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  // Where the first cannot be put up at all, nothing is kept, and the next reading of the index tries again, as before.
+  if (arm()) watching = state;
 }
 
 export function stopWatchingVault(): void {
-  watching?.watcher.close();
+  watching?.watcher?.close();
   watching = null;
+  walkWhole = true;
   if (soon) clearTimeout(soon);
   soon = null;
+  if (again) clearTimeout(again);
+  again = null;
 }
-
