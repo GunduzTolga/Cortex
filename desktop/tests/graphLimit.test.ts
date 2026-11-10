@@ -74,5 +74,8 @@ test('the graph view lays out what the limit left, and says so where it cut', ()
   assert.equal(built.length, 1);
   assert.match(view, /limitGraph\(\s*vaultGraph\(/);
   assert.match(view, /graph\.hidden \?[\s\S]{0,200}t\('notes\.graph\.capped', \{ shown: graph\.nodes\.length, hidden: graph\.hidden \}\)/);
+  // The note that is open stays in the whole vault's graph as well, not only in the local one (the second review, R2N-5).
+  assert.match(view, /keep: around \?\? front \?\? null/);
+  assert.match(view, /\[index, settings, around, front, nameIcons\]/);
   assert.ok(GRAPH_POINTS_MAX >= 500 && GRAPH_POINTS_MAX <= 3_000, 'enough to read a vault by, few enough to lay out in the window');
 });

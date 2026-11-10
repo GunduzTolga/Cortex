@@ -61,7 +61,7 @@ test('a phrase heard while the model still loads is said at once; a check alone 
   assert.equal(heardStep('hazirlaniyor', 'bakiyor', true), null, 'said once');
   assert.deepEqual(heardNotice('hazirlaniyor', false), {
     title: 'Pyn seni duydu',
-    body: 'Ses modeli hâlâ hazırlanıyor; hazır olunca not penceresi kendiliğinden açılacak.',
+    body: 'Ses modeli hâlâ hazırlanıyor; hazır olunca not penceresi açılır. İki dakikada hazır olmazsa sözü yeniden söylemen gerekir.',
   });
   assert.deepEqual(heardNotice('bakiyor', false), {
     title: 'Pyn seni duydu',
@@ -69,7 +69,7 @@ test('a phrase heard while the model still loads is said at once; a check alone 
   });
   assert.deepEqual(heardNotice('hazirlaniyor', true), {
     title: 'Pyn heard you',
-    body: 'The voice model is still getting ready; the note window will open by itself once it is.',
+    body: 'The voice model is still getting ready; the note window opens once it is. If it is not ready within two minutes, say the phrase again.',
   });
   assert.equal(heardNotice('bakiyor', true).body, 'Checking the wake phrase; if that was it, the note window opens in a moment.');
 });

@@ -1398,6 +1398,92 @@ class InstallRobustnessTest(unittest.TestCase):
         self.assertEqual(seen, [(False, False, 'islemci')])
         self.assertTrue(ses.installed(self.state))
 
+    def test_a_model_on_disk_that_will_not_open_is_fetched_again_by_the_install(self):
+        # R2N-6: "yeniden kur" was the advice for a model file that is damaged, and `kur` took the damaged file for
+        # the model on disk: the same failure every time, with nothing left for a person to do.
+        folder = ses.ses_dir(self.state)
+        (folder / ses.VOSK_DIR).mkdir(parents=True)
+        damaged = folder / 'hf' / 'hub' / 'models--Systran--faster-whisper-small' / 'snapshots' / 'x'
+        damaged.mkdir(parents=True)
+        (damaged / 'model.bin').write_bytes(b'half of it')
+        other = folder / 'hf' / 'hub' / 'version.txt'
+        other.write_text('1')
+        tries, said = [], []
+
+        def run(command, **_options):
+            if '-m' in command and 'venv' in command:
+                python = ses.venv_python(self.state)
+                python.parent.mkdir(parents=True, exist_ok=True)
+                python.write_text('')
+            if '--indir' in command:
+                tries.append((damaged / 'model.bin').exists())
+                if len(tries) == 1:
+                    return subprocess.CompletedProcess(command, 1, '', "RuntimeError: Unable to open file 'model.bin' in model 'x'")
+                return subprocess.CompletedProcess(command, 0, 'small (işlemci)\n', '')
+            return subprocess.CompletedProcess(command, 0, '', '')
+        ses.install(self.state, say=said.append, run=run, which={}.get, system=self.tmp.name, popen=popen_from(run))
+        self.assertEqual(tries, [True, False], 'the damaged model was taken away before the second try')
+        self.assertTrue(other.exists(), 'nothing but the models is removed')
+        self.assertTrue([line for line in said if 'bozuk' in line and 'yeniden indiriliyor' in line], said)
+        self.assertTrue(ses.installed(self.state))
+        # Once: a model that will not open after a fresh download is said, not fetched for ever.
+        tries.clear()
+
+        def always(command, **_options):
+            if '--indir' in command:
+                tries.append(1)
+                return subprocess.CompletedProcess(command, 1, '', "RuntimeError: Unable to open file 'model.bin' in model 'x'")
+            return run(command)
+        damaged.mkdir(parents=True, exist_ok=True)
+        with self.assertRaises(RuntimeError):
+            ses.install(self.state, say=said.append, run=always, which={}.get, system=self.tmp.name, popen=popen_from(always))
+        self.assertEqual(len(tries), 2)
+        # A failure that is not a damaged file removes nothing.
+        damaged.mkdir(parents=True, exist_ok=True)
+        (damaged / 'model.bin').write_bytes(b'whole')
+
+        def other_failure(command, **_options):
+            if '--indir' in command:
+                return subprocess.CompletedProcess(command, 1, '', 'RuntimeError: CUDA driver version is insufficient')
+            return run(command)
+        with self.assertRaises(RuntimeError):
+            ses.install(self.state, say=said.append, run=other_failure, which={}.get, system=self.tmp.name, popen=popen_from(other_failure))
+        self.assertTrue((damaged / 'model.bin').exists())
+
+    def test_a_download_whose_file_is_being_written_is_not_ended_though_the_folder_weighs_the_same(self):
+        # R2N-7: a downloader that sets a file's whole size aside first adds no byte while it fills it; weighed by
+        # bytes alone, that download was ended every 150 seconds and said stuck.
+        import time as real
+        folder = Path(self.tmp.name) / 'hf-yazilan'
+        folder.mkdir()
+        part = folder / 'model.bin.incomplete'
+        part.write_bytes(b'0' * 64)
+        progress = Path(self.tmp.name) / 'ilerleme-yazilan.json'
+        clock = {'now': 1000.0}
+        progress.write_text(json.dumps({'pid': 4242, 'at': clock['now']}), encoding='utf-8')
+        stopped = []
+        with mock.patch.object(ses, '_stop_process', stopped.append), mock.patch.object(ses, 'STALL_EVERY_SN', 0.01):
+            with ses.stall_watch(progress, folder, clock=lambda: clock['now']) as stalled:
+                for step in range(1, 8):  # 7 looks, 60 seconds apart: far past the wait, the file written each time
+                    clock['now'] += 60.0
+                    progress.write_text(json.dumps({'pid': 4242, 'at': clock['now']}), encoding='utf-8')
+                    os.utime(part, (2000.0 + step, 2000.0 + step))
+                    real.sleep(0.05)
+                self.assertEqual((stopped, list(stalled)), ([], []), 'written to all the while: not stuck')
+                for _ in range(4):  # and now nothing is written: ended after the wait
+                    clock['now'] += 60.0
+                    progress.write_text(json.dumps({'pid': 4242, 'at': clock['now']}), encoding='utf-8')
+                    real.sleep(0.05)
+                self.assertEqual(stopped, [4242])
+
+    def test_a_download_the_server_asks_to_be_tried_again_is_tried_again_not_said_refused(self):
+        # R2N-2: 408 and 425 are a server asking for another try; they were said "the network refuses this address".
+        from urllib.error import HTTPError
+        for code in (408, 425, 429, 500, 503):
+            self.assertTrue(ses.network_error(HTTPError('https://x', code, 'x', {}, None)), code)
+        for code in (401, 403, 404, 407, 410, 451):
+            self.assertFalse(ses.network_error(HTTPError('https://x', code, 'x', {}, None)), code)
+
     def test_a_model_download_that_stopped_coming_is_ended_asked_again_and_then_said(self):
         # N4: its only limit was two hours a try. A connection that hung without closing left `kur` at one
         # percentage for hours; nobody was told.
@@ -1519,7 +1605,10 @@ class InstallRobustnessTest(unittest.TestCase):
         with mock.patch.object(ses, '_reaches', lambda host, timeout=None: asked.append(host) or host not in ('huggingface.co', 'alphacephei.com')):
             with self.assertRaises(ses.Unreachable) as caught:
                 ses.install(self.state, say=said.append, run=run, which={}.get, system=self.tmp.name, popen=popen_from(run))
-        self.assertEqual(sorted(asked), sorted(ses.PIP_HOSTS + (ses.MODEL_HOST, ses.VOSK_HOST)))
+        self.assertEqual(sorted(set(asked)), sorted(ses.PIP_HOSTS + (ses.MODEL_HOST, ses.VOSK_HOST)))
+        # Asked a second time before the install is given up: a moment's trouble is not an address kept away (R2N-1).
+        self.assertEqual(asked.count('huggingface.co'), 2)
+        self.assertEqual(asked.count('pypi.org'), 1, 'what answered is not asked again')
         self.assertEqual(caught.exception.hosts, ['huggingface.co', 'alphacephei.com'])
         self.assertEqual([c for c in commands if 'pip' in c or 'venv' in c], [], 'nothing was begun')
         error = ses.setup_error(caught.exception, self.state)
@@ -1547,6 +1636,26 @@ class InstallRobustnessTest(unittest.TestCase):
             self.assertFalse(REAL_REACHES('pypi.org'))
             with mock.patch.object(ses, '_reaches', REAL_REACHES):
                 self.assertEqual(ses.unreachable_hosts(['pypi.org', 'huggingface.co']), ['pypi.org', 'huggingface.co'])
+
+    def test_pips_own_addresses_out_of_reach_are_said_and_the_install_goes_on(self):
+        # R2N-1: pip may be set to a company's own index, or have all it needs on the disk: its two public
+        # addresses not answering stopped an install that would have worked. They are said, and pip is left to try.
+        commands, said = [], []
+
+        def run(command, **_options):
+            commands.append(command)
+            return subprocess.CompletedProcess(command, 0, '', '')
+        with mock.patch.object(ses, '_reaches', lambda host, timeout=None: host not in ses.PIP_HOSTS):
+            try:
+                ses.install(self.state, say=said.append, run=run, which={}.get, system=self.tmp.name, popen=popen_from(run))
+            except ses.Unreachable:
+                self.fail('pip’s addresses alone stopped the install')
+            except Exception:
+                pass  # what comes after the check is other tests' to follow: the stand-ins here install nothing
+        self.assertTrue([c for c in commands if 'venv' in c or 'pip' in c], 'the install was begun')
+        self.assertTrue([line for line in said if 'pypi.org' in line and 'yine de deneniyor' in line], said)
+        # An address that only answered late is not said away: each is waited for longer than one try of it takes.
+        self.assertGreaterEqual(ses.REACH_WAIT_SN, ses.REACH_SN * 4)
 
     def test_a_network_failure_names_the_addresses_a_company_network_must_allow(self):
         # N5: "internete bağlanılamadı" alone sent a person on a company network to check a connection that worked.

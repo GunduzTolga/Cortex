@@ -172,12 +172,13 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
     // A large vault is drawn by its most linked points (graphLimit.ts): every point is laid out in this thread.
     let changed: Map<string, number> | null = null;
     const built = limitGraph(vaultGraph(index.notes, index.files.map((file) => file.path), { ...settings, around }), undefined, {
-      keep: around,
+      // The whole vault's graph keeps the note that is open too: it is the one the person looks for (the second review, R2N-5).
+      keep: around ?? front ?? null,
       modified: (id) => (changed ??= new Map(index.notes.map((note) => [note.path, note.modified]))).get(id) ?? 0,
     });
     // Names as the tree shows them: without the emoji they start with, unless those are asked for.
     return nameIcons ? built : { ...built, nodes: built.nodes.map((node) => (node.kind === 'tag' ? node : { ...node, label: withoutIcon(node.label) })) };
-  }, [index, settings, around, nameIcons]);
+  }, [index, settings, around, front, nameIcons]);
 
   // The graph's shape, so that a save which changed no link does not stir the drawing.
   const shape = useMemo(() => `${graph.nodes.map((node) => `${node.id}:${node.degree}`).join('\n')}|${graph.edges.map((edge) => `${edge.source}>${edge.target}`).join('\n')}`, [graph]);

@@ -264,8 +264,9 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
     the vault), and when a turn of Pyn's ends (it may have written some). Only
     the notes screen did, and only while it was in front, so the chat's panel,
     the links in its answers, the graph and the office showed the vault as it
-    was until the notes were opened (desktop-ui-7). The index is built again
-    only for what changed (electron/services/vaultNotes.ts), so this is cheap.
+    was until the notes were opened (desktop-ui-7). A change on disk asks only
+    about what changed (electron/services/vaultNotes.ts), which is cheap; coming
+    back to the window walks the folders again, as every reading did before 1.0.62.
     Read at the start too, where none is yet: with the graph or the office in
     front from the last run, nothing else read it, and they showed no notes.
   */

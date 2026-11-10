@@ -183,6 +183,33 @@ test('a note written by something else while the save is on its way is not writt
   assert.deepEqual(fs.readdirSync(path.join(dir, 'Ev')).filter((one) => !one.startsWith('.')), ['Tadilat.md']);
 });
 
+test('a note that cannot be read for a moment right before the save takes its place is still saved: held is not changed', async () => {
+  // The second review, R2N-10: the second look threw where an antivirus held the note, and the save was said failed.
+  const dir = vault();
+  useVault(dir);
+  const file = path.join(dir, 'Ev/Tadilat.md');
+  const read = await readVaultNote('Ev/Tadilat.md');
+  const realRead = fsp.readFile;
+  let looks = 0;
+  (fsp as { readFile: unknown }).readFile = async (...args: Parameters<typeof fsp.readFile>) => {
+    if (String(args[0]) === file) {
+      looks += 1;
+      if (looks === 2) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    }
+    return realRead(...args);
+  };
+  let saved: Awaited<ReturnType<typeof saveVaultNote>>;
+  try {
+    saved = await saveVaultNote('Ev/Tadilat.md', '# Mine\n', read.hash);
+  } finally {
+    fsp.readFile = realRead;
+  }
+  assert.ok(looks >= 2, 'the second look was the one refused');
+  assert.equal(saved.saved, true);
+  assert.equal(fs.readFileSync(file, 'utf8'), '# Mine\n');
+  assert.deepEqual(fs.readdirSync(path.join(dir, 'Ev')).filter((one) => one.endsWith('.tmp')), [], 'no temporary left');
+});
+
 test('a new note is made exclusively, under a free name when asked, and a name a wiki link or Windows would not take is refused', async () => {
   const dir = vault();
   useVault(dir);

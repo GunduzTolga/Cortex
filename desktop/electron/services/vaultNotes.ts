@@ -579,7 +579,16 @@ function notLetIn(err: unknown, name: string): unknown {
  */
 async function renameBusy(from: string, to: string, still?: () => Promise<boolean>): Promise<boolean> {
   for (let attempt = 0; ; attempt += 1) {
-    if (still && !(await still())) return false;
+    // Held by something this moment (an antivirus, OneDrive): not known, which is not "changed". The save goes on as
+    // it did before this check was here, and the rename below waits for a busy file. A note that is gone is still an
+    // error: nothing is put back in its place (the second review, R2N-10).
+    if (still) {
+      const same = await still().catch((err: unknown) => {
+        if (['EPERM', 'EACCES', 'EBUSY'].includes((err as NodeJS.ErrnoException)?.code ?? '')) return null;
+        throw err;
+      });
+      if (same === false) return false;
+    }
     try {
       await fs.rename(from, to);
       return true;

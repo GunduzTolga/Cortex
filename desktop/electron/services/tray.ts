@@ -324,7 +324,7 @@ export function heardNotice(heard: WakeHeard, english: boolean): { title: string
     title: say('Pyn seni duydu', 'Pyn heard you'),
     body:
       heard === 'hazirlaniyor'
-        ? say('Ses modeli hâlâ hazırlanıyor; hazır olunca not penceresi kendiliğinden açılacak.', 'The voice model is still getting ready; the note window will open by itself once it is.')
+        ? say('Ses modeli hâlâ hazırlanıyor; hazır olunca not penceresi açılır. İki dakikada hazır olmazsa sözü yeniden söylemen gerekir.', 'The voice model is still getting ready; the note window opens once it is. If it is not ready within two minutes, say the phrase again.')
         : say('Uyandırma sözünü denetliyorum; söz buysa not penceresi birazdan açılır.', 'Checking the wake phrase; if that was it, the note window opens in a moment.'),
   };
 }

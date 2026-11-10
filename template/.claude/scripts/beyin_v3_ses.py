@@ -1008,7 +1008,8 @@ def network_error(exc):
     import ssl
     from urllib.error import HTTPError, URLError
     if isinstance(exc, HTTPError):
-        return exc.code >= 500 or exc.code == 429
+        # 408 and 425 are a server asking for another try, as 429 is (R2N-2).
+        return exc.code >= 500 or exc.code in (408, 425, 429)
     return isinstance(exc, (URLError, ConnectionError, TimeoutError, socket.timeout, socket.gaierror, ssl.SSLError,
                             http.client.HTTPException))
 
@@ -1063,7 +1064,7 @@ def _download_checked(url, target, sha256, say=print, tries=4, pause=None):
             _fetch_part(url, part, say)  # the address asked again each time: a CDN's redirect expires
             break
         except Exception as exc:
-            if isinstance(exc, HTTPError) and 400 <= exc.code < 500 and exc.code != 429:
+            if isinstance(exc, HTTPError) and 400 <= exc.code < 500 and not network_error(exc):
                 exc.close()
                 raise DownloadRefused(url, 'adres isteği reddetti (HTTP %d)' % exc.code) from exc
             if attempt == tries - 1 or not network_error(exc):
@@ -1228,6 +1229,21 @@ class DownloadStalled(RuntimeError):
     """The model's download stopped coming, each time it was asked again (stall_watch)."""
 
 
+def _tree_newest(folder):
+    """When a folder's most lately written file was written; 0 where there is none."""
+    newest = 0.0
+    try:
+        for one in Path(folder).rglob('*'):
+            try:
+                if one.is_file() and not one.is_symlink():
+                    newest = max(newest, one.stat().st_mtime)
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return newest
+
+
 def _tree_bytes(folder):
     """What a folder's files weigh together; 0 where there is none."""
     total = 0
@@ -1263,7 +1279,7 @@ def stall_watch(progress, folder, clock=None):
     stop, stalled = threading.Event(), []
 
     def watch():
-        most, since = -1, clock()
+        most, written, since = -1, 0.0, clock()
         while not stop.wait(STALL_EVERY_SN):
             moment = clock()
             try:
@@ -1275,8 +1291,11 @@ def stall_watch(progress, folder, clock=None):
                 continue  # read as it was being written, or held for a moment: the next look reads it
             numbers = all(isinstance(one, (int, float)) and not isinstance(one, bool) for one in (pid, at))
             size = _tree_bytes(folder) if numbers and abs(moment - at) <= PROGRESS_FRESH_SN else None
-            if size is None or size > most:
-                most, since = (-1 if size is None else size), moment  # no download now, or one that comes
+            # A file being written counts as coming too: a downloader that sets the whole size aside first adds
+            # no byte while it fills it (R2N-7).
+            last = _tree_newest(folder) if size is not None else 0.0
+            if size is None or size > most or last > written:
+                most, written, since = (-1 if size is None else size), last, moment  # no download now, or one that comes
             elif moment - since >= STALL_SN:
                 stalled.append(True)
                 _stop_process(int(pid))
@@ -1421,6 +1440,21 @@ CUT_WORDS = ('read timed out', 'read operation timed out', 'readtimeout', 'reade
              'remotedisconnected', 'chunkedencodingerror', 'winerror 10054', 'errno 104', 'bağlantı dosya bitmeden kapandı')
 
 
+def _remove_models(folder):
+    """The Whisper models fetched into this install's own folder (Hugging Face's `models--…` there)
+    are deleted: whether there was any. Nothing else of the folder is touched."""
+    removed = False
+    try:
+        found = list((Path(folder) / 'hf' / 'hub').glob('models--*'))
+    except OSError:
+        return False
+    for one in found:
+        if one.is_dir() and not one.is_symlink():
+            shutil.rmtree(one, ignore_errors=True)
+            removed = removed or not one.exists()
+    return removed
+
+
 def _trial_load(state, marker, say, run, previous, pause=None):
     """The helper loads the model once on the engine `marker` names, so the install fetches it, not
     the first word: (what it loaded, how long a second of sound took on a card, or None). Failed,
@@ -1435,7 +1469,8 @@ def _trial_load(state, marker, say, run, previous, pause=None):
     say('Whisper modeli hazırlanıyor' + (' (ilk seferde yaklaşık %s GB iner)…' % download_size(marker['motor'], load_config(state))
                                          if marker['motor'] != 'vulkan' else '…'))
     import time
-    try:
+
+    def fetch():
         for attempt in range(FETCH_TRIES):
             env = dict(worker_env(state), **({LAST_TRY_ENV: '1'} if attempt == FETCH_TRIES - 1 else {}))
             (folder / PROGRESS_FILE).unlink(missing_ok=True)  # a helper that was ended left its last word behind
@@ -1451,6 +1486,15 @@ def _trial_load(state, marker, say, run, previous, pause=None):
                 if stalled else
                 '  Bağlantı koptu; model indirmesi kaldığı yerden yeniden deneniyor (%d/%d)…' % (attempt + 2, FETCH_TRIES))
             (pause or time.sleep)(10 * (attempt + 1))
+        return done, stalled, output
+    try:
+        done, stalled, output = fetch()
+        # A model on the disk that will not open (a file damaged, or cut short and taken for whole) failed the
+        # same way at every `kur`: the advice was "set it up again", and setting up again took the damaged file
+        # for the model (R2N-6). Taken away once, and fetched again.
+        if done.returncode and not stalled and any(word in output.lower() for word in BROKEN_WORDS) and _remove_models(folder):
+            say('  Diskteki ses modeli bozuk görünüyor; siliniyor ve yeniden indiriliyor…')
+            done, stalled, output = fetch()
         if done.returncode and stalled:
             raise DownloadStalled('Whisper modelinin indirmesi %d denemede de takıldı: ' % FETCH_TRIES + output[-2000:])
         if done.returncode:
@@ -1481,6 +1525,7 @@ PIP_HOSTS = ('pypi.org', 'files.pythonhosted.org')
 MODEL_HOST = 'huggingface.co'
 VOSK_HOST = 'alphacephei.com'
 REACH_SN = 6.0
+REACH_WAIT_SN = 30.0
 
 
 class Unreachable(RuntimeError):
@@ -1534,8 +1579,12 @@ def unreachable_hosts(hosts):
     threads = [threading.Thread(target=ask, args=(host,), daemon=True) for host in hosts]
     for thread in threads:
         thread.start()
+    # Each try of an address takes up to REACH_SN, and a name may have several (an IPv6 one that does not answer,
+    # then its IPv4): waited for long enough that an address slow to answer is not said away (R2N-1).
+    import time
+    ends = time.time() + REACH_WAIT_SN
     for thread in threads:
-        thread.join(REACH_SN * 2)
+        thread.join(max(0.0, ends - time.time()))
     return [host for host in hosts if not answers.get(host)]
 
 
@@ -1552,8 +1601,17 @@ def install(state, say=print, run=subprocess.run, download=_download, which=shut
     # page) was found out only after pip's minutes, or after 40 MB of the wake model: asked first.
     say('İnternet bağlantısı denetleniyor…')
     away = unreachable_hosts(needed_hosts(folder))
-    if away:
-        raise Unreachable(away)
+    # What the install itself downloads (the models) and cannot reach, it cannot fetch: asked once more, then
+    # said and stopped before pip's minutes. pip's own addresses are only said: pip may be set to a company's
+    # index, or have what it needs already, and an install that would have worked was stopped (R2N-1).
+    direct = [host for host in away if host not in PIP_HOSTS]
+    if direct:
+        direct = unreachable_hosts(direct)
+        if direct:
+            raise Unreachable(direct)
+    slow = [host for host in away if host in PIP_HOSTS]
+    if slow:
+        say('%s şu an cevap vermiyor; kurulum yine de deneniyor (paketler başka bir adresten ya da diskten gelebilir).' % ', '.join(slow))
     if plan['motor'] == 'vulkan' and not _vulkan_ready(state, say, download_checked):
         say('İşlemciye geçiliyor.')
         plan.update(motor='islemci', paketler=packages_for('islemci'), ekran_karti=False)
@@ -1705,7 +1763,7 @@ LOAD_TROUBLE = {
            % MODEL_HOST),
     'disk': 'Ses modeli açılamadı: diskte yer kalmadı; biraz yer aç.',
     'bellek': 'Ses modeli için bellek yetmedi; açık programlardan birkaçını kapat.',
-    'bozuk': 'Ses modelinin dosyası eksik ya da bozuk; Ayarlar → Sesle yazma\'dan yeniden kur.',
+    'bozuk': 'Ses modelinin dosyası eksik ya da bozuk; Ayarlar → Sesle yazma\'dan yeniden kur (kurulum bozuk dosyayı silip yeniden indirir).',
     'bilinmeyen': 'Ses modeli yüklenemedi; ayrıntılar ses klasöründeki %s dosyasında.' % LOG,
 }
 
