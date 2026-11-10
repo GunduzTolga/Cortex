@@ -8,6 +8,7 @@ import type { Key } from '../i18n';
 import { folderLabel, useActiveTab, useNotes } from './notesStore';
 import { useView } from '../store/view';
 import { GraphGuide, openFromGraph, writeMissing } from './GraphGuide';
+import { limitGraph } from './graphLimit';
 
 /**
  * The vault as a graph, as Obsidian draws one: a note a point, a link a line,
@@ -167,8 +168,13 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
   const around = local ? live?.path ?? front ?? null : null;
   const nameIcons = useNotes((state) => state.nameIcons);
   const graph = useMemo(() => {
-    if (!index) return { nodes: [], edges: [] };
-    const built = vaultGraph(index.notes, index.files.map((file) => file.path), { ...settings, around });
+    if (!index) return { nodes: [], edges: [], hidden: 0 };
+    // A large vault is drawn by its most linked points (graphLimit.ts): every point is laid out in this thread.
+    let changed: Map<string, number> | null = null;
+    const built = limitGraph(vaultGraph(index.notes, index.files.map((file) => file.path), { ...settings, around }), undefined, {
+      keep: around,
+      modified: (id) => (changed ??= new Map(index.notes.map((note) => [note.path, note.modified]))).get(id) ?? 0,
+    });
     // Names as the tree shows them: without the emoji they start with, unless those are asked for.
     return nameIcons ? built : { ...built, nodes: built.nodes.map((node) => (node.kind === 'tag' ? node : { ...node, label: withoutIcon(node.label) })) };
   }, [index, settings, around, nameIcons]);
@@ -589,6 +595,11 @@ export function GraphView({ local = false, visible = true }: { local?: boolean; 
               {t(label)}
             </button>
           ))}
+          {graph.hidden ? (
+            <p className="rounded-md bg-white/90 px-2 py-0.5 text-[11px] text-warn" data-graph-capped={graph.hidden}>
+              {t('notes.graph.capped', { shown: graph.nodes.length, hidden: graph.hidden })}
+            </p>
+          ) : null}
         </div>
         <div className={`absolute ${local ? 'bottom-2 right-2' : 'bottom-4 right-4'} flex flex-col gap-1`}>
           {[
