@@ -56,7 +56,50 @@ export function childEnv(extra: Record<string, string> = {}, from: NodeJS.Proces
     if (/^ELECTRON_/i.test(key) || key === 'NODE_OPTIONS') delete env[key];
     else if (inSession && (HOST_SESSION.test(key) || key === 'ANTHROPIC_BASE_URL')) delete env[key];
   }
-  return { ...env, ...extra };
+  return { ...withSystemProxy(env), ...extra };
+}
+
+/**
+ * Windows' proxy for an https address, as Chromium resolved it (main.ts asks once the app is ready and again every
+ * few minutes): null where there is none, or before it was asked.
+ */
+let systemProxy: string | null = null;
+const PROXY_NAMES = /^(https?_proxy|all_proxy)$/i;
+
+/**
+ * The first proxy of Chromium's answer ("PROXY host:port; DIRECT") as the address a program's environment takes;
+ * null for "DIRECT" and for a kind those programs do not read from the environment (SOCKS).
+ */
+export function proxyUrlOf(rule: string): string | null {
+  const first = rule.split(';')[0]?.trim() ?? '';
+  const found = /^(PROXY|HTTPS)\s+([A-Za-z0-9.\-_[\]:]+)$/i.exec(first);
+  if (!found) return null;
+  const address = found[2];
+  if (!/:\d{1,5}$/.test(address)) return null;
+  return `${found[1].toUpperCase() === 'HTTPS' ? 'https' : 'http'}://${address}`;
+}
+
+/** Asked of Chromium (session.resolveProxy); an answer that fails leaves what was known. */
+export async function learnSystemProxy(resolve: (url: string) => Promise<string>): Promise<void> {
+  try {
+    systemProxy = proxyUrlOf(await resolve('https://api.anthropic.com/'));
+  } catch {
+    // Kept: a network that answered a moment ago is likelier the same one than none.
+  }
+}
+
+/**
+ * A company's proxy lives in Windows' settings, which Cortex's own downloads use (netFetch.ts) and the programs it
+ * starts do not: the AI tool and the voice setup's Python could not reach the internet where the browser could, and
+ * the chat only waited (the review of 10 November, S4 and N5). Windows' proxy is handed on as HTTPS_PROXY and
+ * HTTP_PROXY, unless the person's environment already names one; this computer itself is reached without it (a
+ * model server, a hook's port).
+ */
+export function withSystemProxy(env: NodeJS.ProcessEnv, proxy: string | null = systemProxy): NodeJS.ProcessEnv {
+  if (!proxy || Object.keys(env).some((key) => PROXY_NAMES.test(key) && env[key])) return env;
+  const local = 'localhost,127.0.0.1,::1';
+  const noProxyKey = Object.keys(env).find((key) => /^no_proxy$/i.test(key));
+  return { ...env, HTTPS_PROXY: proxy, HTTP_PROXY: proxy, ...(noProxyKey && env[noProxyKey] ? {} : { NO_PROXY: local }) };
 }
 
 export class AcpConnection {

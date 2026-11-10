@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { moveYakala, registerIpc, startAppUpdates, stopWatching, trustPagesWhere } from './ipc';
+import { learnSystemProxy } from './services/acp';
 import { readSettings } from './services/settings';
 import { settleVault, setupBusy, whenSetupIdle } from './services/setup';
 import { startTelegram } from './services/telegram';
@@ -522,6 +523,11 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => showWindow());
 
   void app.whenReady().then(() => {
+    // Windows' proxy, for the programs Cortex starts (services/acp.ts): asked now and again, since a laptop moves
+    // between the office's network and home's.
+    const askProxy = (): void => void learnSystemProxy((url) => session.defaultSession.resolveProxy(url));
+    askProxy();
+    setInterval(askProxy, 5 * 60_000).unref();
     holdSession();
     trustPagesWhere(isOwnPage);
     registerIpc();
