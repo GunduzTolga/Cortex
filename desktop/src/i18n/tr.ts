@@ -8,6 +8,9 @@ import type { en } from './en';
 export const tr: Record<keyof typeof en, string> = {
   /* The app around the notes: the first opening, the header. */
   'app.loading': 'Açılıyor…',
+  'app.crash.title': 'Cortex bu ekranı gösteremedi',
+  'app.crash.detail': 'Yeniden yükle; sürerse Cortex\'i kapatıp aç, yine olmazsa yeniden kur. Kaydedilmiş notların yerinde duruyor.',
+  'app.crash.reload': 'Yeniden yükle',
   'common.close': 'Kapat',
   'notes.code.copy': 'Kopyala',
   'notes.large.plain': 'Bu not uzun, bu yüzden biçimlenmeden metin olarak gösteriliyor. Ctrl+E ile düzenleyebilirsin.',

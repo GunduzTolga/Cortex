@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
-import { WINDOW_MIN, onAScreen, readWindowState, windowStateOf } from '../electron/services/windowState';
+import { WINDOW_DEFAULT, WINDOW_MIN, minSizeOn, onAScreen, openSizeOn, readWindowState, windowSizesFor, windowStateOf } from '../electron/services/windowState';
 
 /**
  * The window opened where it was left (electron/services/windowState.ts): maximized the first
@@ -40,4 +40,31 @@ test('a place on a screen no longer there is not reused; a size under the least 
   const small = windowStateOf({ bounds: { x: 10, y: 10, width: 300, height: 200 }, maximized: false }, SCREEN).bounds;
   assert.deepEqual(small, { x: 10, y: 10, width: WINDOW_MIN.width, height: WINDOW_MIN.height });
   assert.equal(windowStateOf({ bounds: { x: Number.NaN, y: 0, width: 1400, height: 900 }, maximized: false }, SCREEN).bounds, null);
+});
+
+test('on a small screen the least size comes down to the screen: the window is never held larger than its work area (G8)', () => {
+  // 1366x768 at 150% and at 125%, less the taskbar, as Electron counts them (scaled pixels).
+  const at150 = { x: 0, y: 0, width: 911, height: 472 };
+  const at125 = { x: 0, y: 0, width: 1093, height: 574 };
+  assert.deepEqual(minSizeOn(at150), { width: 911, height: 472 });
+  assert.deepEqual(minSizeOn(at125), { width: WINDOW_MIN.width, height: 574 }, 'each side by itself');
+  // Where the screen has the room, the least size is what it was; with no screen to ask, too.
+  assert.deepEqual(minSizeOn(SCREEN[0]), WINDOW_MIN);
+  assert.deepEqual(minSizeOn(null), WINDOW_MIN);
+  assert.deepEqual(minSizeOn({ width: 0, height: 0 }), WINDOW_MIN);
+  assert.notEqual(minSizeOn(null), WINDOW_MIN, 'a copy: nothing changes the constant through it');
+  // The size it opens at, where none was kept, fits too.
+  assert.deepEqual(openSizeOn(at150), { width: 911, height: 472 });
+  assert.deepEqual(openSizeOn(SCREEN[0]), WINDOW_DEFAULT);
+  // A size kept on that screen is read back as it was, not raised past the screen at the next start.
+  const kept = { bounds: { x: 0, y: 0, width: 911, height: 472 }, maximized: false };
+  assert.deepEqual(windowStateOf(kept, [at150]), kept);
+  const tiny = windowStateOf({ bounds: { x: 0, y: 0, width: 300, height: 200 }, maximized: false }, [at150]).bounds;
+  assert.deepEqual(tiny, { x: 0, y: 0, width: 911, height: 472 }, 'raised to that screen’s least, no further');
+  // With no screen to ask (this stub has no main display), the sizes are the defaults.
+  assert.deepEqual(windowSizesFor(null), { min: WINDOW_MIN, open: WINDOW_DEFAULT });
+  // And the window is made with them: no fixed least size in the main process.
+  const main = fs.readFileSync('electron/main.ts', 'utf8');
+  assert.match(main, /minWidth: sizes\.min\.width,\s+minHeight: sizes\.min\.height/);
+  assert.match(main, /windowSizesFor\(kept\.bounds\)/);
 });

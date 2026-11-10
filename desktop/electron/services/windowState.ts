@@ -16,7 +16,10 @@ export interface WindowState {
   maximized: boolean;
 }
 
+/** The least the window is made, where the screen has the room; see `minSizeOn`. */
 export const WINDOW_MIN = { width: 1040, height: 680 };
+/** The size of the first opening before it is maximized, and of a window whose kept place was not reused. */
+export const WINDOW_DEFAULT = { width: 1440, height: 900 };
 const FIRST: WindowState = { bounds: null, maximized: true };
 /** How much of the window must be on a screen for its place to be kept: its title bar, to drag it by. */
 const SEEN = { width: 160, height: 60 };
@@ -33,6 +36,16 @@ export function onAScreen(bounds: Rectangle, areas: Rectangle[]): boolean {
   });
 }
 
+/**
+ * The least size on a screen with this work area: WINDOW_MIN, cut to what the screen has. A 1366x768 laptop at
+ * 125-150% scaling has a work area of about 1093x574 to 911x472 (Electron counts in scaled pixels), under the 1040x680
+ * the window was held to: it could not be made to fit, and part of it lay off the screen (G8, 10 November).
+ */
+export function minSizeOn(area: Pick<Rectangle, 'width' | 'height'> | null | undefined): { width: number; height: number } {
+  if (!area || !(area.width > 0) || !(area.height > 0)) return { ...WINDOW_MIN };
+  return { width: Math.min(WINDOW_MIN.width, Math.floor(area.width)), height: Math.min(WINDOW_MIN.height, Math.floor(area.height)) };
+}
+
 /** The state as written, read back: anything that is not one is the first opening's. */
 export function windowStateOf(kept: unknown, areas: Rectangle[]): WindowState {
   if (!kept || typeof kept !== 'object') return FIRST;
@@ -41,10 +54,37 @@ export function windowStateOf(kept: unknown, areas: Rectangle[]): WindowState {
     bounds && [bounds.x, bounds.y, bounds.width, bounds.height].every((one) => typeof one === 'number' && Number.isFinite(one))
       ? { x: Math.round(bounds.x!), y: Math.round(bounds.y!), width: Math.max(WINDOW_MIN.width, Math.round(bounds.width!)), height: Math.max(WINDOW_MIN.height, Math.round(bounds.height!)) }
       : null;
-  return { bounds: sized && onAScreen(sized, areas) ? sized : null, maximized: maximized !== false };
+  // The screen it lies on, and the least size there: on a small screen a size kept under WINDOW_MIN is not raised past the screen.
+  const area = sized ? areas.find((one) => onAScreen(sized, [one])) : undefined;
+  if (!sized || !area) return { bounds: null, maximized: maximized !== false };
+  const least = minSizeOn(area);
+  return {
+    bounds: { x: sized.x, y: sized.y, width: Math.max(least.width, Math.round(bounds!.width!)), height: Math.max(least.height, Math.round(bounds!.height!)) },
+    maximized: maximized !== false,
+  };
 }
 
 const workAreas = (): Rectangle[] => screen.getAllDisplays().map((display) => display.workArea);
+
+/**
+ * The least size, and the size to open at, for a window about to be made: on the screen its kept place lies on, or
+ * the main one. Neither is larger than that screen's work area.
+ */
+export function windowSizesFor(bounds: Rectangle | null): { min: { width: number; height: number }; open: { width: number; height: number } } {
+  let area: Rectangle | null = null;
+  try {
+    area = (bounds ? screen.getDisplayMatching(bounds) : screen.getPrimaryDisplay()).workArea;
+  } catch {
+    /* no screen to ask (a test, a session without one): the defaults */
+  }
+  return { min: minSizeOn(area), open: openSizeOn(area) };
+}
+
+/** The size a window opens at where none was kept: the default, cut to the screen. */
+export function openSizeOn(area: Pick<Rectangle, 'width' | 'height'> | null | undefined): { width: number; height: number } {
+  if (!area || !(area.width > 0) || !(area.height > 0)) return { ...WINDOW_DEFAULT };
+  return { width: Math.min(WINDOW_DEFAULT.width, Math.floor(area.width)), height: Math.min(WINDOW_DEFAULT.height, Math.floor(area.height)) };
+}
 
 export function readWindowState(): WindowState {
   try {

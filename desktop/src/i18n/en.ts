@@ -14,6 +14,9 @@
 export const en = {
   /* The app around the notes: the first opening, the header. */
   'app.loading': 'Opening…',
+  'app.crash.title': 'Cortex could not show this screen',
+  'app.crash.detail': 'Reload it; if it goes on, quit Cortex and open it again, and if that fails too, install it again. Your saved notes are where they were.',
+  'app.crash.reload': 'Reload',
   'common.close': 'Close',
   'notes.code.copy': 'Copy',
   'notes.large.plain': 'This note is long, so it is shown as text rather than drawn. Ctrl+E edits it.',
