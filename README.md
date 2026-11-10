@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.61" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.61-E8B23A">
+  <img alt="Sürüm 1.0.62" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.62-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -195,6 +195,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.62](docs/v3/releases/1.0.62.md) | İlk kez kuran için baştan sona gözden geçirildi: takılan girişte yeniden dene ve vazgeç var, araç açılmayınca ve internet yokken neden ve çare söyleniyor, "Hey Pyn" zayıf bilgisayarda daha çabuk ve duyduğunu belli ederek açılıyor, takılan indirmeler fark ediliyor, şirket ağının proxy'si kullanılıyor, güncelleme Ayarlar'dan kapatılabiliyor |
 | [1.0.61](docs/v3/releases/1.0.61.md) | İnen güncelleme artık gerçekten kuruluyor: Cortex Windows'la açıldığında, pencere açılmadan önce, sessizce. Önceden yalnız "Yeniden başlat"a ya da "Çıkış"a basılınca kuruluyordu. Electron 43.8.7 (güvenlik yaması). |
 | [1.0.60](docs/v3/releases/1.0.60.md) | Yakala bozuk karakterli sayfada takılmıyor, doktor bayat kuralları ayırt ediyor, Jev başlıksız kayıtta hata vermiyor |
 | [1.0.59](docs/v3/releases/1.0.59.md) | Kasayı yapay zeka araçlarına masaüstünden bağlamak (Ayarlar hazır satırı veriyor, Claude Code'a tek düğmeyle ekliyor) ve sunucuya kodla bağlanmak: Ayarlar › Sunucu'ya tek kullanımlık kodu yapıştırınca Cortex kendi küçük bağlantı aracıyla tailnet'e katılıyor, Tailscale kurmak ya da adres yazmak gerekmiyor. 1.0.57 ve 1.0.58 bu sürümle geliyor. |
