@@ -64,7 +64,7 @@ export function ToolsStep({
             : ['onboarding.tools.noModel', 'bg-zinc-100 text-zinc-500']
       : fresh.has(tool.id)
         ? ['onboarding.tools.fresh', 'bg-good/15 text-good']
-        : unfinished.has(tool.id)
+        : unfinished.has(tool.id) && tool.signedIn !== true
           ? ['onboarding.tools.unfinished', 'bg-bad/10 text-bad']
           : refused.includes(tool.id)
           ? ['auth.status.refused', 'bg-bad/10 text-bad']

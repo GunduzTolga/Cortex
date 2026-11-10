@@ -62,6 +62,15 @@ test('K2: while a sign-in goes on its row has "Yeniden dene" and "Vazgeç"; befo
   assert.doesNotMatch(draw({ auth: [tool('gemini', { canLogin: false, key: 'cortex' })], signingIn: new Set<CliId>(['gemini']) }), /data-onboarding-tool-(retry|cancel)=/);
 });
 
+test('R2K: a sign-in given up here and then made in a terminal is said signed in, not left "unfinished"', () => {
+  // "Vazgeç", then `claude auth login` in a terminal as the row itself suggests: the row stayed red, "Giriş
+  // tamamlanmadı", though the tool was signed in (the second review, R2K-1).
+  const givenUp = draw({ auth: [tool('claude')], unfinished: new Set<CliId>(['claude']) });
+  assert.ok(words(givenUp).includes(tr['onboarding.tools.unfinished']), 'not signed in: said unfinished');
+  const signedInElsewhere = draw({ auth: [tool('claude', { signedIn: true })], unfinished: new Set<CliId>(['claude']) });
+  assert.ok(!words(signedInElsewhere).includes(tr['onboarding.tools.unfinished']), 'signed in since: no longer said unfinished');
+});
+
 test('K2: a sign-in still going on after a minute or so says what to do, and for Claude Code that it takes a paid plan', () => {
   assert.ok(LOGIN_SLOW_AFTER >= 60_000 && LOGIN_SLOW_AFTER <= 90_000, 'not said in the minute a sign-in takes, nor kept for the ten it is waited on');
   const fresh = draw({ auth: [tool('claude')], signingIn: new Set<CliId>(['claude']) });

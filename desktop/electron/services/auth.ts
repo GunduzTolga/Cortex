@@ -378,9 +378,14 @@ export function startLogin(id: unknown): void {
 export function cancelLogin(id: unknown): void {
   const tool = toolOf(id);
   // None going on (it ended by itself a moment ago): how that one ended stands.
-  if (!logins.has(tool.id)) return;
+  const child = logins.get(tool.id);
+  if (!child) return;
+  // Its own end says nothing later: pressed "Giriş yap" again before the console was gone, that end told the window
+  // and the window took the new sign-in for over (the second review, R2K-3). The window is told now.
+  replaced.add(child);
   noteLoginEnd(tool, null, false);
   endLogin(tool.id);
+  changed(tool.id);
 }
 
 /**
