@@ -3,7 +3,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child
 import { randomUUID } from 'node:crypto';
 import type { ChatEvent, ConfigOption, ToolStatus } from '../../shared/chat';
 import { fileLines, IMAGE_INLINE_MAX, type HeldAttachment } from './attachments';
-import { childEnv } from './acp';
+import { childEnv, systemProxyKnown } from './acp';
 import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, networkTrouble, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
 import { launchFor } from './clis';
 import { readSettings } from './settings';
@@ -450,6 +450,7 @@ async function answerControl(proc: Proc, message: Record<string, unknown>): Prom
 
 /** The chat's program, started in the vault with its settings, continuing its session; asked what models it has. */
 async function start(turn: Turn, options: ConfigOption[]): Promise<Proc> {
+  await systemProxyKnown();
   const launch = launchFor(turn.cli);
   if (!launch) throw new ChatRefusal('Claude Code is not installed on this machine.');
   let child: ChildProcessWithoutNullStreams;

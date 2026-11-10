@@ -80,12 +80,42 @@ export function proxyUrlOf(rule: string): string | null {
 }
 
 /** Asked of Chromium (session.resolveProxy); an answer that fails leaves what was known. */
-export async function learnSystemProxy(resolve: (url: string) => Promise<string>): Promise<void> {
-  try {
-    systemProxy = proxyUrlOf(await resolve('https://api.anthropic.com/'));
-  } catch {
-    // Kept: a network that answered a moment ago is likelier the same one than none.
-  }
+export function learnSystemProxy(resolve: (url: string) => Promise<string>): Promise<void> {
+  const asking = (async () => {
+    try {
+      systemProxy = proxyUrlOf(await resolve('https://api.anthropic.com/'));
+    } catch {
+      // Kept: a network that answered a moment ago is likelier the same one than none.
+    }
+  })();
+  firstAnswer ??= asking.then(() => {
+    firstAnswered = true;
+  });
+  return asking;
+}
+
+let firstAnswer: Promise<void> | null = null;
+let firstAnswered = false;
+/** How long a chat's program waits to be started for Windows' first answer about the proxy. */
+export const PROXY_FIRST_WAIT = 3_000;
+
+/**
+ * Over once Windows' proxy was answered for the first time, or the wait is up: awaited before a chat's program is
+ * started. A program started in the first seconds of the app - the chat's list of models is asked for as the window
+ * opens - took its environment before a proxy file (PAC, WPAD) was read, went without the proxy and kept going
+ * without it for as long as it ran (the second review, R2S-4). At once where nothing was asked (tests) or the
+ * answer is in.
+ */
+export function systemProxyKnown(wait = PROXY_FIRST_WAIT): Promise<void> {
+  if (!firstAnswer || firstAnswered) return Promise.resolve();
+  const asked = firstAnswer;
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, wait);
+    void asked.then(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 /**

@@ -6,6 +6,7 @@ import { restartingListener, sayMicrophone } from './services/microphone';
 import { currentListener, expectVoiceTurn, onHelperChange, startWithWindows, trayChanged } from './services/tray';
 import { defaultVaultDir, setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
+import { onPathReadLate } from './services/clis';
 import * as chat from './services/chat';
 import { keepAttachment } from './services/attachments';
 import * as github from './services/github';
@@ -303,6 +304,9 @@ export function registerIpc(): void {
     chat.restartIdleChats();
     broadcast('chat:authChanged', cli);
   });
+  // The PATH read again behind an answer already given, and found changed: the statuses are asked once more. Nothing
+  // is started again for it, as nothing was signed in to or installed from here.
+  onPathReadLate(() => broadcast('chat:authChanged', null));
   handle('chat:auth', () => auth.authStatuses());
   handle('chat:login', (cli) => auth.startLogin(cli));
   handle('chat:cancelLogin', (cli) => auth.cancelLogin(cli));

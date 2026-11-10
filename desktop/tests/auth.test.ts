@@ -7,7 +7,7 @@ import test from 'node:test';
 import { app } from 'electron';
 import type { CliId } from '../shared/chat';
 import { addTool, authStatuses, cancelLogin, claudeStatus, codexStatus, commandLineArg, installEndOf, installProgressOf, installScript, installTool, LOGIN_SCRIPT, loginCommandOf, loginEndOf, onAuthChanged, removeTool, setToolKey, startLogin } from '../electron/services/auth';
-import { READ_PATH, pathOutput, powerShellExe, waitedAtMost, withDirs } from '../electron/services/clis';
+import { READ_PATH, onPathReadLate, pathOutput, pathReadAgain, powerShellExe, waitedAtMost, withDirs } from '../electron/services/clis';
 import { forgetKey, hasKey, keyEnv, saveKey } from '../electron/services/keys';
 import { readSettings, updateSettings } from '../electron/services/settings';
 import { toolsDir } from '../electron/services/toolPackages';
@@ -550,4 +550,47 @@ test('the PATH is read again for a tool installed while the app was open: what i
   // PowerShell writes the machine's PATH and the person's, one a line, as UTF-8 (a BOM dropped): a Turkish folder comes back whole.
   assert.deepEqual(pathOutput('\uFEFFC:\\Windows\\system32;C:\\Windows;\r\nC:\\Users\\Tolga Gündüz\\.local\\bin;\r\n'), ['C:\\Windows\\system32', 'C:\\Windows', 'C:\\Users\\Tolga Gündüz\\.local\\bin']);
   assert.ok(READ_PATH.includes("GetEnvironmentVariable('Path', 'User')") && READ_PATH.includes('UTF8Encoding $false'));
+});
+
+test('R2K-2: a reading of the PATH that ends after the window was answered, with a folder it did not have, is told to the window', async () => {
+  // A tool installed outside Cortex stayed "not installed": whoever asked went on with the PATH as it was, and nobody heard the reading end.
+  const kept = process.env.PATH;
+  let told = 0;
+  onPathReadLate(() => {
+    told += 1;
+  });
+  const slowly = (dirs: string[], ms: number) => () => new Promise<string[]>((resolve) => setTimeout(() => resolve(dirs), ms));
+  try {
+    // Read in time: whoever asked has the new PATH already, and nothing more is said.
+    process.env.PATH = '/usr/bin';
+    await pathReadAgain(false, slowly(['/opt/zamaninda'], 10), ':', 2_000, 0);
+    assert.ok((process.env.PATH ?? '').split(':').includes('/opt/zamaninda'));
+    assert.equal(told, 0, 'nobody was left behind');
+
+    // Read late: the asker goes on with the PATH as it was, and is told when the reading ends with something new.
+    const began = Date.now();
+    await pathReadAgain(false, slowly(['/opt/gec-kurulan'], 250), ':', 30, 0);
+    assert.ok(Date.now() - began < 200, 'gone on after the moment');
+    assert.ok(!(process.env.PATH ?? '').split(':').includes('/opt/gec-kurulan'), 'the answer was given with the PATH as it was');
+    assert.equal(told, 0);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    assert.ok((process.env.PATH ?? '').split(':').includes('/opt/gec-kurulan'));
+    assert.equal(told, 1, 'told once the reading ended');
+
+    // Read late with nothing new: nothing to say, and no asking in a circle.
+    await pathReadAgain(false, slowly(['/opt/gec-kurulan'], 150), ':', 20, 0);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(told, 1, 'the same PATH is not news');
+
+    // A listener that throws is not the reading's failure: the next one waits it out as before.
+    onPathReadLate(() => {
+      throw new Error('the window is gone');
+    });
+    await pathReadAgain(false, slowly(['/opt/bir-daha'], 120), ':', 20, 0);
+    await pathReadAgain(true, slowly([], 0), ':');
+    assert.ok((process.env.PATH ?? '').split(':').includes('/opt/bir-daha'));
+  } finally {
+    onPathReadLate(() => undefined);
+    process.env.PATH = kept;
+  }
 });

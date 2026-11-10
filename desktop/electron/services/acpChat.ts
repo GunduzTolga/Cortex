@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { app } from 'electron';
 import type { CliId, ConfigOption, PermissionKind, ToolStatus } from '../../shared/chat';
-import { AcpConnection, AcpError } from './acp';
+import { AcpConnection, AcpError, systemProxyKnown } from './acp';
 import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
 import { launchFor } from './clis';
 import { keptReadable } from './keys';
@@ -458,6 +458,7 @@ async function withOpencodeCause(cli: CliId, failure: TurnFailure, since: number
  * Not while another chat's turn waits on it too: that one is not cut off by this chat's Stop.
  */
 async function connected(turn: Turn): Promise<Conn> {
+  await systemProxyKnown();
   const ready = connectionFor(turn.cli, turn.vault);
   const starting = conns.get(turn.cli);
   if (starting) starting.waiting += 1;
@@ -536,6 +537,7 @@ export const acpBackend: Backend = {
     const asked = (async () => {
       // Counted among those waiting for the program, as a turn is: a chat's Stop while this asks does not end the
       // program under it (the second review, R2S-6).
+      await systemProxyKnown();
       const ready = connectionFor(cli, vault);
       const starting = conns.get(cli);
       if (starting) starting.waiting += 1;

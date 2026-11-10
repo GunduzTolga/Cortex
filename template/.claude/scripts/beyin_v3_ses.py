@@ -3576,7 +3576,8 @@ def serve(state, config, lines=None):
             # Heard, and being checked: a light word at once, for the tray to show while the check
             # takes its time. 'hazirlaniyor' while the model is still loading: the check waits for
             # it. Not the window: that opens only once Whisper has confirmed the phrase.
-            out(olay='duydu', durum='bakiyor' if 'model' in loaded else 'hazirlaniyor', tur=turn)
+            checking['bekledi'] = 'model' not in loaded
+            out(olay='duydu', durum='hazirlaniyor' if checking['bekledi'] else 'bakiyor', tur=turn)
         return True
 
     def confirmed():
@@ -3736,6 +3737,10 @@ def serve(state, config, lines=None):
                 # Heard before the model was ready, the check waited here for it: sent before, it
                 # came back empty and the phrase was dropped as not said.
                 checking['sent'] = True
+                if checking.get('bekledi'):
+                    # Said to be waiting for the model, which is here now: the sign says what is being
+                    # done, where it kept saying "still getting ready" through the check (R2N-4).
+                    out(olay='duydu', durum='bakiyor', tur=turn)
                 jobs.put({'is': 'dogrula', 'turn': turn, 'audio': checking['audio'], 'son': False})
             elif not checking['sent'] and moment - recorder.started > WAKE_MODEL_WAIT_SN:
                 log('uyandırma: söz duyuldu, model %d sn içinde hazır olmadı; bırakıldı' % WAKE_MODEL_WAIT_SN)

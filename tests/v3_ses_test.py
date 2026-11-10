@@ -3294,6 +3294,7 @@ class ServeTest(unittest.TestCase):
         self.assertEqual((self.asked, self.recorder.stream), ([], 'open'), 'nothing to check it with yet; what is said is kept')
         ready.set()
         self.until('hazir')
+        self.assertEqual(self.until('duydu')['durum'], 'bakiyor', 'the model is there: the sign no longer says it is waited for')
         self.assertEqual(self.until('uyandi')['mikrofon'], 'Mikrofon', 'checked as soon as the model is there: the window opens')
         self.assertEqual(self.asked, ['once'])
 

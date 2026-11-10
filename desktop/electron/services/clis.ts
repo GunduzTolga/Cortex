@@ -195,9 +195,12 @@ const REFRESH_WAIT = 1_500;
  * Work waited for at most this long: over when the work is, or when the time is up, whichever comes first. The work
  * goes on either way, and its failure is nobody's here.
  */
-export function waitedAtMost(work: Promise<unknown>, ms: number): Promise<void> {
+export function waitedAtMost(work: Promise<unknown>, ms: number, timedOut?: () => void): Promise<void> {
   return new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
+    const timer = setTimeout(() => {
+      timedOut?.();
+      resolve();
+    }, ms);
     const done = () => {
       clearTimeout(timer);
       resolve();
@@ -225,20 +228,56 @@ export function waitedAtMost(work: Promise<unknown>, ms: number): Promise<void> 
  */
 export function refreshPath(now = false): Promise<void> {
   if (!WINDOWS || process.env.CORTEX_NO_PATH_REFRESH === '1') return Promise.resolve();
+  return pathReadAgain(now, readWindowsPath, ';');
+}
+
+/** The machine's and the person's PATH as PowerShell reads them; nothing where it would not answer. */
+function readWindowsPath(): Promise<string[]> {
+  return new Promise<string[]>((resolve) => {
+    execFile(powerShellExe(), ['-NoProfile', '-NonInteractive', '-Command', READ_PATH], { windowsHide: true, timeout: 15_000, encoding: 'utf8' }, (err, stdout) =>
+      resolve(err ? [] : pathOutput(String(stdout))),
+    );
+  });
+}
+
+let leftBehind = false;
+let readLate: () => void = () => undefined;
+
+/**
+ * Where the window hears that a reading of the PATH ended after it was answered, with folders this process did not
+ * have: a tool or Python installed outside Cortex was shown "not installed" until the window was left and come back
+ * to, because whoever asked had gone on with the PATH as it was and nobody was told the reading ended (the second
+ * review, R2K-2).
+ */
+export function onPathReadLate(listener: () => void): void {
+  readLate = listener;
+}
+
+/** refreshPath's working, with the reading and its times handed in (tests run it off Windows). */
+export function pathReadAgain(now: boolean, read: () => Promise<string[]>, delimiter: ':' | ';', wait = REFRESH_WAIT, every = REFRESH_EVERY): Promise<void> {
   if (!refreshing) {
-    if (!now && Date.now() - refreshedAt < REFRESH_EVERY) return Promise.resolve();
-    refreshing = new Promise<void>((resolve) => {
-      execFile(powerShellExe(), ['-NoProfile', '-NonInteractive', '-Command', READ_PATH], { windowsHide: true, timeout: 15_000, encoding: 'utf8' }, (err, stdout) => {
-        const fresh = err ? [] : pathOutput(String(stdout));
+    if (!now && Date.now() - refreshedAt < every) return Promise.resolve();
+    const before = process.env.PATH ?? '';
+    leftBehind = false;
+    refreshing = read()
+      .catch(() => [] as string[])
+      .then((fresh) => {
         const dirs = [...fresh, ...installedDirs().filter((dir) => fs.existsSync(dir))];
-        process.env.PATH = withDirs(process.env.PATH ?? '', dirs, ';');
+        process.env.PATH = withDirs(process.env.PATH ?? '', dirs, delimiter);
         refreshedAt = Date.now();
         refreshing = null;
-        resolve();
+        if (!leftBehind || process.env.PATH === before) return;
+        try {
+          readLate();
+        } catch {
+          // The window not told is the window as it was: it asks again when it is come back to.
+        }
       });
-    });
   }
-  return now ? refreshing : waitedAtMost(refreshing, REFRESH_WAIT);
+  if (now) return refreshing;
+  return waitedAtMost(refreshing, wait, () => {
+    leftBehind = true;
+  });
 }
 
 /** The first of these names in a folder of the PATH. */
