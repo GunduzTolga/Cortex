@@ -1,7 +1,10 @@
 import { _electron as electron } from 'playwright';
+import electronBinary from 'electron';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -250,26 +253,23 @@ const software = process.platform === 'linux' || process.env.CORTEX_SOFTWARE ===
 // CORTEX_HEADLESS=1: Chromium's own headless platform, for a Linux machine with neither a display nor Xvfb (a server).
 // There no keyring is unlocked, so the run stops at "Pyn on a server" (its key is not saved): the checks before it hold.
 const launchArgs = ['.', `--user-data-dir=${userData}`, ...(process.platform === 'linux' ? ['--no-sandbox'] : []), ...(process.env.CORTEX_HEADLESS === '1' ? ['--ozone-platform=headless'] : []), ...(software ? ['--disable-gpu'] : [])];
-const launch = () =>
-  electron.launch({
-    args: launchArgs,
-    env: {
-      ...process.env,
-      // Electron refuses to be Electron with this set, and Playwright waits out its timeout on a launch that technically succeeded.
-      ELECTRON_RUN_AS_NODE: undefined,
-      NODE_ENV: 'production',
-      // Pyn's chat talks to a stand-in for an AI CLI (tests/fixtures/fake-acp-agent.mjs), never to one of the machine's.
-      CORTEX_TEST_AGENT: path.resolve('tests/fixtures/fake-acp-agent.mjs'),
-      CORTEX_TEST_CLAUDE: path.resolve('tests/fixtures/fake-claude.mjs'),
-      CORTEX_TEST_CODEX: path.resolve('tests/fixtures/fake-codex.mjs'),
-      FAKE_AGENT_GATE: agentGate,
-      // The model servers: LM Studio's stand-in, and Ollama where nothing answers; never the machine's own.
-      CORTEX_TEST_LMSTUDIO: lmStudioBase,
-      CORTEX_TEST_OLLAMA: 'http://127.0.0.1:9',
-      CORTEX_ENGINE_PACKAGES: enginePackages,
-      [pathKey]: `${toolBin}${path.delimiter}${process.env[pathKey] ?? ''}`,
-    },
-  });
+const launchEnv = {
+  ...process.env,
+  // Electron refuses to be Electron with this set, and Playwright waits out its timeout on a launch that technically succeeded.
+  ELECTRON_RUN_AS_NODE: undefined,
+  NODE_ENV: 'production',
+  // Pyn's chat talks to a stand-in for an AI CLI (tests/fixtures/fake-acp-agent.mjs), never to one of the machine's.
+  CORTEX_TEST_AGENT: path.resolve('tests/fixtures/fake-acp-agent.mjs'),
+  CORTEX_TEST_CLAUDE: path.resolve('tests/fixtures/fake-claude.mjs'),
+  CORTEX_TEST_CODEX: path.resolve('tests/fixtures/fake-codex.mjs'),
+  FAKE_AGENT_GATE: agentGate,
+  // The model servers: LM Studio's stand-in, and Ollama where nothing answers; never the machine's own.
+  CORTEX_TEST_LMSTUDIO: lmStudioBase,
+  CORTEX_TEST_OLLAMA: 'http://127.0.0.1:9',
+  CORTEX_ENGINE_PACKAGES: enginePackages,
+  [pathKey]: `${toolBin}${path.delimiter}${process.env[pathKey] ?? ''}`,
+};
+const launch = () => electron.launch({ args: launchArgs, env: launchEnv });
 
 /*
   A run never opens the system's browser. The app hands an address the page
@@ -396,7 +396,7 @@ const windowAlone = await page.evaluate(async () => {
   });
   return { node: typeof require + typeof process, bridge: Object.keys(window.cortex).sort(), fetched, image, opened: window.open('https://example.com/') === null };
 });
-check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,chat,github,hermes,mcp,notes,office,on,settings,setup,tailnet,telegram,update,vault,vaultSync');
+check('the page has no node in it, and only the bridge', windowAlone.node === 'undefinedundefined' && windowAlone.bridge.join(',') === 'bootstrap,browserLink,chat,github,hermes,mcp,notes,office,on,settings,setup,tailnet,telegram,update,vault,vaultSync');
 check('it reaches nothing on the network: no request, no image', windowAlone.fetched === 'blocked' && windowAlone.image === 'blocked');
 check('and opens no window of its own', windowAlone.opened && app.windows().length === 1);
 
@@ -1305,6 +1305,165 @@ await page.locator('[data-chat-input]').fill('');
 await shoot('13b-lmstudio.png');
 
 /*
+  Cortex Browser's link (electron/services/browserLink.ts, shared/browser-link-contract.json): a browser on this
+  computer, stood in for by a socket of this run's, finds Cortex by the meeting file in the app's data, is let in once
+  by the person on a card, and has its question answered by the tool last written to in Cortex - here Claude Code's
+  stand-in. The conversation is a chat of Cortex's, marked as the browser's; a page added to a question is shown by its
+  name, and the card asked after it says so and offers no leave for good. The leave is taken back in the settings.
+*/
+console.log('\nCortex Browser');
+await page.locator('[data-chat-new]').click();
+await page.locator('[data-chat-chip="cli"]').click();
+await page.locator('[data-chat-choice="test-claude"]').click();
+await page.locator('[data-chat-input]').fill('merhaba');
+await page.keyboard.press('Enter');
+await shownSoon(page.locator('[data-chat-text]', { hasText: 'Merhaba dünya' }));
+await page.locator('[data-chat-send]').waitFor();
+const meetingFile = path.join(userData, 'browser-link.json');
+const meeting = JSON.parse(fs.readFileSync(meetingFile, 'utf8'));
+check(
+  'the meeting file in the app’s data says where the link is, and whose it is',
+  meeting.version === 1 && typeof meeting.pipe === 'string' && meeting.pipe.length > 0 && typeof meeting.exe === 'string' && meeting.pid === (await app.evaluate(() => process.pid)),
+);
+/** The browser's end: every line Cortex writes, and whether the link was closed. */
+const browserHeard = [];
+let browserClosed = false;
+const browserSocket = net.connect(meeting.pipe);
+await new Promise((done, failed) => {
+  browserSocket.once('connect', done);
+  browserSocket.once('error', failed);
+});
+{
+  let rest = '';
+  browserSocket.setEncoding('utf8');
+  browserSocket.on('data', (chunk) => {
+    rest += chunk;
+    for (let at = rest.indexOf('\n'); at >= 0; at = rest.indexOf('\n')) {
+      browserHeard.push(JSON.parse(rest.slice(0, at)));
+      rest = rest.slice(at + 1);
+    }
+  });
+  browserSocket.on('error', () => undefined);
+  browserSocket.on('close', () => (browserClosed = true));
+}
+const browserSay = (message) => browserSocket.write(`${JSON.stringify(message)}\n`);
+const browserEvents = (id) => browserHeard.filter((one) => one.type === 'event' && one.id === id);
+const browserEnded = (id) => soon(() => browserEvents(id).some((one) => one.kind === 'done' || one.kind === 'error'), 30_000);
+browserSay({ type: 'hello', protocol: 1, client: 'cortex-browser', client_version: '0.0.1', token: null });
+check(
+  'a browser that connects for the first time is told to wait, and the person is asked on a card',
+  (await soon(() => browserHeard.some((one) => one.type === 'pairing' && one.state === 'waiting'))) && (await shownSoon(page.locator('[data-browser-link-ask]'))) && !browserHeard.some((one) => one.type === 'hello_ok'),
+);
+await shoot('13c-browser-ask.png');
+await page.locator('[data-browser-link-allow]').click();
+await soon(() => browserHeard.some((one) => one.type === 'hello_ok'));
+const welcomed = browserHeard.find((one) => one.type === 'hello_ok') ?? {};
+const keptSettings = fs.readFileSync(path.join(userData, 'settings.json'), 'utf8');
+check(
+  'allowed, it is given a token, and told the tool and the vault that answer; Cortex keeps the token’s digest alone',
+  typeof welcomed.token === 'string' &&
+    welcomed.token.length >= 43 &&
+    welcomed.protocol === 1 &&
+    welcomed.tool?.id === 'test-claude' &&
+    welcomed.vault_name === path.basename(vaultDir) &&
+    !keptSettings.includes(welcomed.token) &&
+    JSON.parse(keptSettings).browserLinkToken === createHash('sha256').update(String(welcomed.token)).digest('hex') &&
+    (await page.locator('[data-browser-link-ask]').count()) === 0,
+);
+browserSay({ type: 'ask', id: 'a1', conversation: 'e2e-c1', text: 'tarayıcıdan merhaba', page: null });
+await browserEnded('a1');
+const firstAnswer = browserEvents('a1');
+check(
+  'its question is answered by the tool last written to in Cortex: starting, thinking, answering, the words, done',
+  firstAnswer.filter((one) => one.kind === 'status').map((one) => one.phase).join() === 'starting,thinking,answering' &&
+    firstAnswer.filter((one) => one.kind === 'text').map((one) => one.text).join('') === 'Merhaba dünya, [[Ideas]] notuna baktım.' &&
+    firstAnswer.at(-1)?.kind === 'done' &&
+    firstAnswer.at(-1)?.cancelled === false &&
+    !JSON.stringify(browserHeard).includes('Düşünüyorum'),
+);
+const browserChatItem = page.locator('[data-chat-item]', { has: page.locator('[data-chat-origin="browser"]', { hasText: /^(Tarayıcı|Browser)$/ }) });
+check('the conversation is in Cortex’s chat list, marked as the browser’s', (await shownSoon(browserChatItem)) && (await browserChatItem.count()) === 1);
+await browserChatItem.click();
+check(
+  'and reads there as any chat: the question, and Pyn’s answer',
+  (await shownSoon(page.locator('[data-chat-user]', { hasText: 'tarayıcıdan merhaba' }))) && (await shownSoon(page.locator('[data-chat-text]', { hasText: 'Merhaba dünya' }))),
+);
+// A page added to the next question, and a step the tool asks leave for.
+browserSay({ type: 'ask', id: 'a2', conversation: 'e2e-c1', text: 'izin iste, bu sayfayı özetle', page: { title: 'Örnek sayfa', url: 'https://example.com/yazi', text: 'E2E-SAYFA-METNI', truncated: false } });
+await soon(() => browserEvents('a2').some((one) => one.kind === 'permission'), 30_000);
+const browserCard = browserEvents('a2').find((one) => one.kind === 'permission')?.permission ?? {};
+check(
+  'a page added to a question is shown in the chat by its title and address, never its text',
+  (await shownSoon(page.locator('[data-chat-user-page]', { hasText: 'Örnek sayfa' }))) &&
+    (await page.locator('[data-chat-user-page]').getAttribute('title')) === 'https://example.com/yazi' &&
+    !(await page.locator('[data-chat-transcript]').textContent()).includes('E2E-SAYFA-METNI'),
+);
+check(
+  'the card after it says so, here and in the browser, and neither offers to allow for good',
+  (await shownSoon(page.locator('[data-chat-permission] [data-chat-permission-after-page]'))) &&
+    (await page.locator('[data-chat-permission] [data-chat-answer-option="allow_once"]').count()) === 1 &&
+    (await page.locator('[data-chat-permission] [data-chat-answer-option="allow_always"]').count()) === 0 &&
+    browserCard.after_page === true &&
+    Array.isArray(browserCard.options) &&
+    browserCard.options.map((one) => one.kind).join() === 'allow_once,reject_once',
+);
+await shoot('13d-browser-card.png');
+await page.locator('[data-chat-permission] [data-chat-answer-option="allow_once"]').click();
+await browserEnded('a2');
+check(
+  'answered on the card in Cortex, the browser’s card is closed with what was chosen, and the answer goes on',
+  browserEvents('a2').some((one) => one.kind === 'permission_closed' && one.permission === browserCard.id && one.option === 'allow') &&
+    browserEvents('a2').filter((one) => one.kind === 'text').map((one) => one.text).join('').startsWith('izin: allow.') &&
+    browserEvents('a2').at(-1)?.kind === 'done',
+);
+// "Save to Cortex": this vault has no engine yet, and the browser is told so in a sentence rather than left waiting.
+browserSay({ type: 'capture', id: 'k1', title: 'Örnek sayfa', url: 'https://example.com/yazi', note: 'sonra bak' });
+await soon(() => browserHeard.some((one) => one.type === 'captured' && one.id === 'k1'), 30_000);
+const browserKept = browserHeard.find((one) => one.type === 'captured' && one.id === 'k1') ?? {};
+check('a page it asks to keep is answered: here, that the vault cannot keep it yet', browserKept.ok === false && browserKept.code === 'capture_failed' && typeof browserKept.detail === 'string' && browserKept.detail.length > 0);
+/*
+  The browser starts Cortex hidden when it finds it closed (`Cortex.exe --gizli`). Started so while it runs, the second
+  launch hands its arguments to the one that runs and goes; the window is left as it was, not brought to the front.
+*/
+const shownBefore = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible());
+await setInMain(({ app: electronApp }) => {
+  globalThis.cortexSecond = null;
+  electronApp.on('second-instance', (_event, argv) => {
+    globalThis.cortexSecond = argv;
+  });
+});
+const secondExit = await new Promise((done) => {
+  const second = spawn(electronBinary, [...launchArgs, '--gizli'], { env: launchEnv, stdio: 'ignore' });
+  second.on('exit', (code) => done(code));
+  second.on('error', () => done(-1));
+});
+let secondArgv = null;
+for (const end = Date.now() + 20_000; Date.now() < end && !secondArgv; await new Promise((done) => setTimeout(done, 100))) secondArgv = await app.evaluate(() => globalThis.cortexSecond);
+check(
+  'started a second time with --gizli, Cortex stays as it was: the launch is heard, and no window comes to the front',
+  secondExit !== -1 && Array.isArray(secondArgv) && secondArgv.includes('--gizli') && (await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible())) === shownBefore && app.windows().length === 1,
+);
+// The settings say the link as it is, and take the leave back.
+await page.locator('[data-settings-open]').click();
+const linkSection = page.locator('[data-settings-section="browser-link"]');
+await linkSection.scrollIntoViewIfNeeded();
+check('the settings say a browser is connected', await shownSoon(linkSection.locator('[data-browser-link-state="connected"]')));
+await shoot('13e-browser-settings.png');
+await linkSection.locator('[data-browser-link-unpair]').click();
+check(
+  '"Remove permission" closes the browser’s link and forgets its token',
+  (await shownSoon(linkSection.locator('[data-browser-link-state="none"]'))) &&
+    (await soon(() => browserClosed)) &&
+    browserHeard.at(-1)?.type === 'bye' &&
+    browserHeard.at(-1)?.reason === 'unpaired' &&
+    JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8')).browserLinkToken === null &&
+    (await linkSection.locator('[data-browser-link-unpair]').count()) === 0,
+);
+await page.keyboard.press('Escape');
+await page.locator('[data-settings]').waitFor({ state: 'detached' });
+browserSocket.destroy();
+
+/*
   Pyn on a server (electron/services/hermesChat.ts, src/chat/HermesSection.tsx): set up in the
   sign-ins - its address, its profile, its key, never shown again - then offered in the tool chip
   as Pyn. A session begun on a phone is continued from its last messages; a new chat begins one
@@ -1532,6 +1691,7 @@ check('what it asked for went to the system’s browser instead (stood in for: n
 */
 console.log('\nOpened again');
 await app.close();
+check('closed, Cortex takes its meeting file with it: a browser finds nothing to connect to', !fs.existsSync(meetingFile));
 app = await launch();
 page = await app.firstWindow();
 await page.waitForLoadState('domcontentloaded');
@@ -1551,6 +1711,10 @@ check(
     (await page.locator('[data-chat-view]').count()) === 0,
 );
 check('in the language chosen', (await page.evaluate(() => document.documentElement.lang)) === 'en');
+check(
+  'the link is open again under the same name, for the process that runs now',
+  (await soon(() => fs.existsSync(meetingFile))) && JSON.parse(fs.readFileSync(meetingFile, 'utf8')).pipe === meeting.pipe && JSON.parse(fs.readFileSync(meetingFile, 'utf8')).pid !== meeting.pid,
+);
 check('and the settings file is in the app’s data, not in the vault', fs.existsSync(path.join(userData, 'settings.json')) && !fs.readdirSync(vaultDir).includes('settings.json'));
 
 // The policy's refusals of the probes above are what was asked for; anything else the window logged is a fault.
