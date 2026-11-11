@@ -281,7 +281,7 @@ test('a browser chat starts in the mode the person chose for the tool, as a chat
   sendChat(wide.id, 'test-claude', 'bu sayfayı özetle', undefined, { conversation: 'c1', page: PAGE });
   await doneOf(wide.id, from);
   const again = starts(log).at(-1) as string[];
-  assert.equal(modeFlag(again), null, 'no wider mode is asked of Claude Code');
+  assert.equal(modeFlag(again), 'default', 'asking first is asked of Claude Code in so many words');
   assert.equal(again[again.indexOf('--resume') + 1], `claude-ses-${session}`, 'the conversation goes on');
   assert.equal(modeOf(wide.id), 'default', 'and its chip says what it runs in');
   assert.ok(pushes.some((one) => one.chatId === wide.id && one.state?.options.find((option) => option.id === 'mode')?.current === 'default'), 'the window is told');
@@ -303,12 +303,12 @@ test('a browser chat starts in the mode the person chose for the tool, as a chat
   from = eventsOf(wide.id).length;
   sendChat(wide.id, 'test-claude', 'devam');
   await doneOf(wide.id, from);
-  assert.equal(modeFlag(starts(log).at(-1) as string[]), null);
+  assert.equal(modeFlag(starts(log).at(-1) as string[]), 'default');
 
   // A conversation whose first question carries the page never starts wide.
   const first = sendChat(null, 'test-claude', 'özetle', undefined, { conversation: 'c3', page: PAGE });
   await doneOf(first.id);
-  assert.equal(modeFlag(starts(log).at(-1) as string[]), null);
+  assert.equal(modeFlag(starts(log).at(-1) as string[]), 'default');
   assert.equal(modeOf(first.id), 'default');
 });
 
@@ -320,7 +320,7 @@ test('a conversation begun with a page, by an app the window was never opened in
   forgetChats();
   const first = sendChat(null, 'test-claude', 'özetle', undefined, { conversation: 'c1', page: PAGE });
   await doneOf(first.id);
-  assert.equal(modeFlag(starts(log).at(-1) as string[]), null);
+  assert.equal(modeFlag(starts(log).at(-1) as string[]), 'default');
   assert.equal(modeOf(first.id), 'default');
   const plain = sendChat(null, 'test-claude', 'merhaba', undefined, { conversation: 'c2', page: null });
   await doneOf(plain.id);
@@ -406,6 +406,71 @@ test('in a chat that holds a page nothing is written unasked: Claude Code is sta
   await doneOf(other.id);
   assert.ok(textOf(eventsOf(other.id)).startsWith('düzenledim: sormadan.'));
   assert.notEqual(allowed(starts(log).at(-1) as string[]), null);
+  assert.equal(modeFlag(starts(log).at(-1) as string[]), null, 'and names no mode: Claude Code’s own stands, as before');
+});
+
+test('a person whose own Claude Code accepts edits by default is still asked in a chat that holds a page: asking first is said outright, not left to the default', async () => {
+  const { log } = fresh();
+  // As `defaultMode: acceptEdits` in the person's own Claude Code settings: taken wherever a start names no mode.
+  process.env.FAKE_CLAUDE_DEFAULT_MODE = 'acceptEdits';
+  try {
+    const { id } = sendChat(null, 'test-claude', 'bu sayfaya göre planı düzenle', undefined, { conversation: 'c1', page: PAGE });
+    const card = await cardOf(id);
+    assert.equal(card.title, 'Edit Notes/Plan.md');
+    const start = linesIn(log).findLast((one) => Array.isArray(one.argv)) as { argv: string[]; mode: string };
+    assert.deepEqual([modeFlag(start.argv), start.mode], ['default', 'default']);
+    answerChat(id, card.id, 'deny');
+    await doneOf(id);
+    // Without a page their own default stands, as in any chat of Cortex's.
+    const plain = sendChat(null, 'test-claude', 'planı düzenle');
+    await doneOf(plain.id);
+    assert.equal((linesIn(log).findLast((one) => Array.isArray(one.argv)) as { mode: string }).mode, 'acceptEdits');
+    assert.equal(eventsOf(plain.id).some((one) => one.type === 'permission'), false);
+  } finally {
+    delete process.env.FAKE_CLAUDE_DEFAULT_MODE;
+  }
+});
+
+test('a chat that holds a page is started with the predecessor’s own memory hooks switched off: its transcript is not summed up into a note unasked', async () => {
+  const { log } = fresh();
+  const marks = () => linesIn(log).filter((one) => Array.isArray(one.argv)).map((one) => one.invokedBy);
+  const plain = sendChat(null, 'test-claude', 'merhaba');
+  await doneOf(plain.id);
+  const paged = sendChat(null, 'test-claude', 'özetle', undefined, { conversation: 'c1', page: PAGE });
+  await doneOf(paged.id);
+  assert.deepEqual(marks(), [null, 'cortex-page'], 'the switch those hooks already heed (BEYIN_INVOKED_BY), for the chat with a page alone');
+});
+
+test('Codex: a page added to a chat starts its server again where no other chat is answering on it, so leave given "for this chat" before the page does not outlast it', async () => {
+  const { log } = fresh();
+  const pids = () => [...new Set(linesIn(log).filter((one) => one.method === 'turn/start').map((one) => one.pid))];
+  const { id } = sendChat(null, 'test-codex', 'merhaba', undefined, { conversation: 'c1', page: null });
+  await doneOf(id);
+  let from = eventsOf(id).length;
+  sendChat(id, 'test-codex', 'özetle', undefined, { conversation: 'c1', page: PAGE });
+  await doneOf(id, from);
+  assert.equal(pids().length, 2, 'another process for the turn with the page');
+  const thread = openChat(id);
+  assert.ok(linesIn(log).some((one) => one.method === 'thread/resume' && one.pid === pids()[1]), 'and the conversation taken up again in it');
+  assert.equal(eventsOf(id).slice(from).some((one) => one.type === 'notice'), false, 'the same conversation: nothing is said of a new one');
+  assert.equal(thread.chat.id, id);
+  // Once is enough: its next turns run on the server it has.
+  from = eventsOf(id).length;
+  sendChat(id, 'test-codex', 'devam');
+  await doneOf(id, from);
+  assert.equal(pids().length, 2);
+
+  // Another chat answering on the server is not cut off for it: the server stays, and that is the limit said in the documents.
+  const busy = sendChat(null, 'test-codex', 'yavaş olsun');
+  await until(() => eventsOf(busy.id).some((one) => one.type === 'text'), 'the other chat to be answering');
+  const second = sendChat(null, 'test-codex', 'merhaba', undefined, { conversation: 'c2', page: null });
+  await doneOf(second.id);
+  from = eventsOf(second.id).length;
+  sendChat(second.id, 'test-codex', 'özetle', undefined, { conversation: 'c2', page: PAGE });
+  await doneOf(second.id, from);
+  assert.equal(pids().length, 2, 'not started again under a chat that is answering');
+  assert.equal(openChat(busy.id).running, true);
+  shutdownChats(true);
 });
 
 test('a tool that names its own modes is left in the one it has: none of them is known to ask', async () => {

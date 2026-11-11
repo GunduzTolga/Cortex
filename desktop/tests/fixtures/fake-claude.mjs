@@ -3,9 +3,11 @@
 // end-to-end run (CORTEX_TEST_CLAUDE). Its lines are shaped as Claude Code
 // 2.1.296 was recorded writing them (14 October). What it does is chosen by
 // words in the message: "izin" asks leave for a step, "düzenle" edits a note of
-// the vault - unasked where it was started with `--allowedTools Edit(/**/*.md)`,
-// as Claude Code does with a rule that allows the step, and asking leave where
-// it was not - "plan" writes a todo
+// the vault - unasked where it was started with `--allowedTools Edit(/**/*.md)`
+// or runs in a mode that accepts edits, as Claude Code does, and asking leave
+// otherwise. Its mode is `--permission-mode`, else FAKE_CLAUDE_DEFAULT_MODE (as
+// a person's own `defaultMode` in Claude Code's settings is taken where no flag
+// names one), else `default`. "plan" writes a todo
 // list, "yavaş" waits to be interrupted, "inatçı" waits and never heeds an
 // interrupt, "hata" fails as a sign-in that has expired does, "çök" dies, "kopuk" tries its request again twice as
 // with no internet (`api_retry`, as Claude Code 2.1.322 writes it) and gives up, "yoğun" tries again once for a
@@ -22,7 +24,8 @@ const resumed = argv.includes('--resume') ? argv[argv.indexOf('--resume') + 1] :
 const session = resumed ?? `claude-ses-${process.pid}`;
 const cwd = process.cwd();
 const log = (entry) => process.env.FAKE_AGENT_LOG && fs.appendFileSync(process.env.FAKE_AGENT_LOG, `${JSON.stringify(entry)}\n`);
-log({ argv, cwd, pid: process.pid });
+const mode = argv.includes('--permission-mode') ? argv[argv.indexOf('--permission-mode') + 1] : (process.env.FAKE_CLAUDE_DEFAULT_MODE ?? 'default');
+log({ argv, cwd, pid: process.pid, mode, invokedBy: process.env.BEYIN_INVOKED_BY ?? null });
 const gone = Boolean(resumed) && resumed === process.env.FAKE_CLAUDE_GONE;
 const forgotten = () => {
   process.stderr.write(`No conversation found with session ID: ${resumed}\n`);
@@ -98,7 +101,7 @@ async function turn(text) {
     said = `izin: ${answer.behavior}${answer.updatedPermissions ? ' always' : ''}. `;
   }
   if (text.includes('düzenle')) {
-    if (argv.includes('Edit(/**/*.md)')) said += 'düzenledim: sormadan. ';
+    if (argv.includes('Edit(/**/*.md)') || mode === 'acceptEdits' || mode === 'auto' || mode === 'bypassPermissions') said += 'düzenledim: sormadan. ';
     else {
       const answer = await control({ subtype: 'can_use_tool', tool_name: 'Edit', input: { file_path: note, old_string: '# Plan', new_string: '# Yeni plan' }, tool_use_id: 'toolu_3' });
       said += `düzenledim: ${answer.behavior}. `;

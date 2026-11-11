@@ -152,14 +152,27 @@ export function askingArgs(args: readonly string[]): string[] {
   return out;
 }
 
-/** The flags a start is given for the chat's settings, and the session it continues. */
-export function claudeArgs(base: string[], options: ConfigOption[], sessionId: string | null): string[] {
+/**
+ * For a chat that holds a web page's content. A vault still on the predecessor's hooks (or one whose person kept
+ * them) sums a session's transcript up into the day's note when the session ends, with no card: the page's words
+ * would reach the vault's memory that way. Those hooks stand aside for a program started with this variable, their
+ * own guard against being run by themselves; Cortex's hooks (beyin_v3_hook.py) keep no transcript text and do not
+ * look at it.
+ */
+export const PAGE_ENV: Readonly<Record<string, string>> = { BEYIN_INVOKED_BY: 'cortex-page' };
+
+/**
+ * The flags a start is given for the chat's settings, and the session it continues. `named`: the mode is said even
+ * where it is Claude Code's `default` - for a chat that holds a web page's content, where "ask first" left unsaid
+ * would be whatever the person's own Claude Code settings make the default (`defaultMode`), a wider one among them.
+ */
+export function claudeArgs(base: string[], options: ConfigOption[], sessionId: string | null, named = false): string[] {
   const current = (id: string) => options.find((one) => one.id === id)?.current;
   const args = [...base];
   const model = current('model');
   if (model && model !== 'default') args.push('--model', model);
   const mode = current('mode');
-  if (mode && mode !== 'default') args.push('--permission-mode', mode);
+  if (mode && (named || mode !== 'default')) args.push('--permission-mode', mode);
   const effort = current('effort');
   if (effort && effort !== 'default') args.push('--effort', effort);
   if (sessionId) args.push('--resume', sessionId);
@@ -477,7 +490,10 @@ async function start(turn: Turn, options: ConfigOption[]): Promise<Proc> {
   if (!launch) throw new ChatRefusal('Claude Code is not installed on this machine.');
   let child: ChildProcessWithoutNullStreams;
   try {
-    child = spawn(launch.command, claudeArgs(turn.afterPage ? askingArgs(launch.args) : launch.args, options, turn.sessionId), { cwd: turn.vault, env: childEnv(launch.env), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false });
+    // A chat that holds a web page's content: no step allowed beforehand, its mode said outright, and the memory
+    // hooks of the predecessor's vaults switched off by the word they already heed (PAGE_ENV).
+    const guarded = turn.afterPage === true;
+    child = spawn(launch.command, claudeArgs(guarded ? askingArgs(launch.args) : launch.args, options, turn.sessionId, guarded), { cwd: turn.vault, env: childEnv(guarded ? { ...launch.env, ...PAGE_ENV } : launch.env), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false });
   } catch (err) {
     // Refused at once: Node throws what the system says of a start it would not make (EPERM under an antivirus), where a program not found comes as an `error` event.
     throw startFailure(err);

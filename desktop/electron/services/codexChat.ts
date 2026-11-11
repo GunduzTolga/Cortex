@@ -416,11 +416,35 @@ async function asked(conn: Conn, method: string, params: unknown): Promise<unkno
 /** The turn a chat runs now, whatever became of its thread. */
 const runningOf = (chatId: string) => [...running.entries()].find(([, now]) => now.turn.chatId === chatId);
 
+/** The chats put on a server of their own start since a web page was added to them (afterPageServer). */
+const pageStarted = new Set<string>();
+
+/**
+ * A web page added to a chat whose thread a running server already holds. Leave given "for this chat" before the page
+ * is that server's own memory of the thread, and would let the same step through unasked after it. The server is
+ * ended, so the chat's thread is taken up again in a new one (thread/resume, as after the app is opened again) - but
+ * only while no chat is answering on it: one server carries every Codex chat, and another chat's answer is not cut
+ * off for this. Where one is, the server stays and so may that leave. Whether a resumed thread forgets such leave
+ * was not tried with Codex itself.
+ */
+function afterPageServer(turn: Turn): void {
+  if (!turn.afterPage || pageStarted.has(turn.chatId)) return;
+  const held = threads.get(turn.chatId);
+  if (held?.conn.rpc.alive) {
+    if ([...running.values()].some((now) => now.conn === held.conn)) return;
+    if (conns.get(held.conn.cli) === held.conn) conns.delete(held.conn.cli);
+    for (const [chatId, one] of threads) if (one.conn === held.conn) threads.delete(chatId);
+    held.conn.rpc.close();
+  }
+  pageStarted.add(turn.chatId);
+}
+
 export const codexBackend: Backend = {
   async run(turn, message) {
     let threadId: string | null = null;
     let entry: Running | null = null;
     try {
+      afterPageServer(turn);
       const conn = await unlessStopped(turn.signal, connectionFor(turn.cli, turn.vault));
       let options = settings.get(turn.chatId);
       if (!options) {
@@ -523,6 +547,7 @@ export const codexBackend: Backend = {
   forget(chatId) {
     threads.delete(chatId);
     settings.delete(chatId);
+    pageStarted.delete(chatId);
   },
 
   shutdown() {
