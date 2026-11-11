@@ -188,8 +188,28 @@ export function shownPath(vault: string, place: string): string {
 /** A string, cut to a length; anything else, empty. */
 export const textOf = (value: unknown, max: number) => (typeof value === 'string' ? value.slice(0, max) : '');
 
-/** A turn's failure as the window is told it: the CLI's sentence made safe, and its kind. */
-export function failureEvent(err: unknown, scrub: (text: string) => string): ChatEvent {
-  const kind = err instanceof TurnFailure ? err.kind : null;
-  return { type: 'error', message: scrub(err instanceof Error ? err.message : String(err)).slice(0, 1000), kind };
+/** The system's own codes for a server that was not reached: no address for its name, refused, no answer, cut off. */
+const NETWORK_CODES = /\b(?:ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH)\b/;
+/** The same said in words, as the tools say it ("API Error: Connection error.", "Unable to connect to API", "fetch failed"). */
+const NETWORK_WORDS = /unable to connect|connection error|fetch failed|network (?:error|connection|request failed|is unreachable)|check your (?:internet|network)/i;
+
+/**
+ * Whether a tool's sentence says its server was not reached - no internet, a proxy in the way: 'code' by the system's
+ * own code, which says so whatever else the sentence names; 'words' by the tool's words alone; null where it says
+ * neither. Without it a turn that failed for want of a connection ended as "the answer could not be completed" over
+ * a raw English line (S3).
+ */
+export function networkTrouble(text: string): 'code' | 'words' | null {
+  return NETWORK_CODES.test(text) ? 'code' : NETWORK_WORDS.test(text) ? 'words' : null;
+}
+
+/**
+ * A turn's failure as the window is told it: the CLI's sentence made safe, and its kind. A failure its backend gave no
+ * kind is a `network` one where `online` (a tool that answers from the internet, not a model server on this machine)
+ * and its sentence says the server was not reached.
+ */
+export function failureEvent(err: unknown, scrub: (text: string) => string, online = false): ChatEvent {
+  const text = err instanceof Error ? err.message : String(err);
+  const kind = (err instanceof TurnFailure ? err.kind : null) ?? (online && networkTrouble(text) ? 'network' : null);
+  return { type: 'error', message: scrub(text).slice(0, 1000), kind };
 }

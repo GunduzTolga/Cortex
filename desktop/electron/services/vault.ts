@@ -112,7 +112,12 @@ export async function defaultVaultDir(documents: string): Promise<string> {
     const dir = path.join(documents, n === 1 ? 'Cortex' : `Cortex ${n}`);
     const entries = await fs.readdir(dir).catch((err: NodeJS.ErrnoException) => (err.code === 'ENOENT' ? null : ['?']));
     if (entries === null) {
-      await fs.mkdir(dir, { recursive: true });
+      // Windows not letting Cortex make it (Documents kept by "Controlled folder access", or a Documents the account may
+      // not write in): Node's own "EPERM: operation not permitted, mkdir 'C:\…'" was the sentence shown (K11).
+      await fs.mkdir(dir, { recursive: true }).catch((err: NodeJS.ErrnoException) => {
+        console.warn(`[vault] the first vault could not be made in Documents (${err.code ?? err.message})`);
+        throw new Error('Cortex could not make a folder for the vault in Documents: Windows did not allow it (the folder may be protected). Choose another folder.');
+      });
       return dir;
     }
     if (!entries.length || entries.includes('beyin.py') || entries.includes('.beyin-version')) return dir;

@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -134,6 +135,97 @@ test('a save is written over the version read and no other; a note changed meanw
   assert.ok(!stale.saved && stale.current.text.includes('Obsidian wrote this.'));
   assert.equal(fs.readFileSync(file, 'utf8'), '# Tadilat\n\nObsidian wrote this.\n', 'nothing written over it');
   await assert.rejects(saveVaultNote('Ev/Yok.md', 'x', 'h'), undefined, 'a save is of a note that is there');
+});
+
+test('a note written by something else while the save is on its way is not written over: asked once more right before the new text takes its place', async () => {
+  // Between the first look and the rename there is the temporary's writing, and on Windows the wait while the note is busy (N13).
+  const dir = vault();
+  useVault(dir);
+  const file = path.join(dir, 'Ev/Tadilat.md');
+  const read = await readVaultNote('Ev/Tadilat.md');
+  const realWrite = fsp.writeFile;
+  let between = 0;
+  (fsp as { writeFile: unknown }).writeFile = async (...args: Parameters<typeof fsp.writeFile>) => {
+    await realWrite(...args);
+    // Obsidian saves the note in the moment after Cortex's temporary is written and before it is renamed into place.
+    if (String(args[0]).endsWith('.tmp')) {
+      between += 1;
+      fs.writeFileSync(file, '# Tadilat\n\nObsidian wrote this meanwhile.\n');
+    }
+  };
+  let saved: Awaited<ReturnType<typeof saveVaultNote>>;
+  try {
+    saved = await saveVaultNote('Ev/Tadilat.md', '# Mine\n', read.hash);
+  } finally {
+    fsp.writeFile = realWrite;
+  }
+  assert.equal(between, 1, 'the other write landed in the window');
+  assert.equal(fs.readFileSync(file, 'utf8'), '# Tadilat\n\nObsidian wrote this meanwhile.\n', 'what the other wrote is still there');
+  assert.equal(saved.saved, false, 'said as a conflict, for the person to choose');
+  assert.ok(!saved.saved && saved.current.text.includes('Obsidian wrote this meanwhile.'));
+  assert.ok(!saved.saved && saved.current.hash === hashOf('# Tadilat\n\nObsidian wrote this meanwhile.\n'), 'and a save over what is there now goes through');
+  assert.deepEqual(fs.readdirSync(path.join(dir, 'Ev')).filter((one) => one.endsWith('.tmp')), [], 'no temporary left');
+  const chosen = await saveVaultNote('Ev/Tadilat.md', '# Mine\n', saved.saved ? '' : saved.current.hash);
+  assert.equal(chosen.saved, true);
+  assert.equal(fs.readFileSync(file, 'utf8'), '# Mine\n');
+
+  // Deleted in that moment: nothing is put back in its place, and no temporary is left.
+  const again = await readVaultNote('Ev/Liste.md');
+  (fsp as { writeFile: unknown }).writeFile = async (...args: Parameters<typeof fsp.writeFile>) => {
+    await realWrite(...args);
+    if (String(args[0]).endsWith('.tmp')) fs.rmSync(path.join(dir, 'Ev/Liste.md'));
+  };
+  try {
+    await assert.rejects(saveVaultNote('Ev/Liste.md', '# Mine\n', again.hash));
+  } finally {
+    fsp.writeFile = realWrite;
+  }
+  assert.deepEqual(fs.readdirSync(path.join(dir, 'Ev')).filter((one) => !one.startsWith('.')), ['Tadilat.md']);
+});
+
+test('a note that cannot be read for a moment right before the save takes its place is still saved: held is not changed', async () => {
+  // The second review, R2N-10: the second look threw where an antivirus held the note, and the save was said failed.
+  const dir = vault();
+  useVault(dir);
+  const file = path.join(dir, 'Ev/Tadilat.md');
+  const read = await readVaultNote('Ev/Tadilat.md');
+  const realRead = fsp.readFile;
+  let looks = 0;
+  (fsp as { readFile: unknown }).readFile = async (...args: Parameters<typeof fsp.readFile>) => {
+    if (String(args[0]) === file) {
+      looks += 1;
+      if (looks === 2) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    }
+    return realRead(...args);
+  };
+  let saved: Awaited<ReturnType<typeof saveVaultNote>>;
+  try {
+    saved = await saveVaultNote('Ev/Tadilat.md', '# Mine\n', read.hash);
+  } finally {
+    fsp.readFile = realRead;
+  }
+  assert.ok(looks >= 3, 'the look refused was taken again, not skipped (U3-4)');
+  assert.equal(saved.saved, true);
+  assert.equal(fs.readFileSync(file, 'utf8'), '# Mine\n');
+  assert.deepEqual(fs.readdirSync(path.join(dir, 'Ev')).filter((one) => one.endsWith('.tmp')), [], 'no temporary left');
+
+  // Held for as long as it is asked about: never written over unlooked at; said, and the note is as it was.
+  const second = await readVaultNote('Ev/Tadilat.md');
+  looks = 0;
+  (fsp as { readFile: unknown }).readFile = async (...args: Parameters<typeof fsp.readFile>) => {
+    if (String(args[0]) === file) {
+      looks += 1;
+      if (looks >= 2) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    }
+    return realRead(...args);
+  };
+  try {
+    await assert.rejects(saveVaultNote('Ev/Tadilat.md', '# Mine again\n', second.hash));
+  } finally {
+    fsp.readFile = realRead;
+  }
+  assert.equal(fs.readFileSync(file, 'utf8'), '# Mine\n', 'what is there stays');
+  assert.deepEqual(fs.readdirSync(path.join(dir, 'Ev')).filter((one) => one.endsWith('.tmp')), [], 'no temporary left');
 });
 
 test('a new note is made exclusively, under a free name when asked, and a name a wiki link or Windows would not take is refused', async () => {

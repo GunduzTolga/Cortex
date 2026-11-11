@@ -1,19 +1,21 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { BookOpen, Download, PencilLine, Plus, ShieldQuestion, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { BookOpen, Download, Info, PencilLine, Plus, ShieldQuestion, Trash2, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 // Pyn greeting in a new chat: the logo itself; the seal (it, on its paper disc) stays the app's icon.
 import face from '../../../tema/ananas/marka/pyn-logo-512.png';
-import type { ChatSummary } from '@shared/chat';
+import type { ChatSummary, CliId } from '@shared/chat';
 import { messageOf } from '@shared/ipcError';
 import type { Key } from '../i18n';
 import { useLanguage, useT } from '../i18n/useT';
 import { noteFor, useNotes } from '../notes/notesStore';
 import { useConfirm, usePrompt } from '../notes/NotesMenus';
 import { useApp } from '../store/app';
+import { useSetup } from '../store/setup';
 import { useView } from '../store/view';
 import { Button, Spinner } from '../ui/ui';
-import { toolName } from './AuthDialog';
+import { installFailedKey, toolName } from './AuthDialog';
 import { useChat, waitingChats } from './chatStore';
+import { closeMemoryNote, memoryNoteClosed, memoryOff } from './memoryNote';
 import { Composer } from './Composer';
 import { spendWords } from './spend';
 import { SidePane } from './SidePane';
@@ -145,6 +147,39 @@ function ChatList() {
         ))}
       </div>
     </aside>
+  );
+}
+
+/**
+ * One line above the field while the chat answers without the vault's memory (memoryNote.ts): the chat went on as if
+ * it knew the vault, and nothing said it did not (S8). Gone when the setup is finished, or closed by the person.
+ */
+function MemoryOffNote({ cli, big }: { cli: CliId | null; big: boolean }) {
+  const t = useT();
+  const status = useSetup((s) => s.status);
+  const [closed, setClosed] = useState(memoryNoteClosed);
+  if (closed || !memoryOff(status, cli)) return null;
+  return (
+    <div className={`mx-auto mb-2 flex w-full max-w-[46rem] items-start gap-1.5 text-[11.5px] text-zinc-500 ${big ? '' : 'px-6'}`} data-chat-notice="memory-off">
+      <Info size={13} className="mt-0.5 shrink-0" />
+      <span className="min-w-0 flex-1">{t('chat.notice.memoryOff')}</span>
+      <button type="button" onClick={() => useApp.getState().openSettings(true)} className="shrink-0 font-semibold text-darkDelegation hover:underline" data-chat-memory-settings>
+        {t('chat.notice.memoryOff.open')}
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          closeMemoryNote();
+          setClosed(true);
+        }}
+        title={t('chat.notice.dismiss')}
+        aria-label={t('chat.notice.dismiss')}
+        className="shrink-0 rounded p-0.5 text-zinc-400 hover:text-darkDelegation"
+        data-chat-memory-dismiss
+      >
+        <X size={13} />
+      </button>
+    </div>
   );
 }
 
@@ -311,6 +346,7 @@ export function ChatView({ visible }: { visible: boolean }) {
                 document.querySelector<HTMLTextAreaElement>('[data-chat-input]')?.focus();
               }}
             />
+            <MemoryOffNote cli={summary?.cli ?? cli} big={false} />
             {composer(false)}
           </>
         ) : (
@@ -325,6 +361,7 @@ export function ChatView({ visible }: { visible: boolean }) {
               </div>
               {available.length ? (
                 <>
+                  <MemoryOffNote cli={cli} big />
                   {composer(true)}
                   <div className="mt-3 flex flex-wrap gap-2">
                     {SUGGESTIONS.map((one) => (
@@ -372,7 +409,7 @@ export function ChatView({ visible }: { visible: boolean }) {
                   </div>
                   {installing ? (
                     <p className={`mt-2 text-[12px] ${installing.failed ? 'text-bad' : 'text-zinc-500'}`} data-chat-install-state={installing.failed ? 'failed' : 'running'}>
-                      {t(installing.failed ? 'onboarding.tools.installFailed' : 'auth.install.waiting', { name: toolName(installing.id, t) ?? installing.id })}
+                      {t(installing.failed ? installFailedKey(state.auth?.find((one) => one.id === installing.id)?.installEnded) : 'auth.install.waiting', { name: toolName(installing.id, t) ?? installing.id })}
                     </p>
                   ) : null}
                 </div>

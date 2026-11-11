@@ -125,3 +125,64 @@ test('uninstalled, the person is asked whether everything Cortex kept goes too; 
   const states = /def default_state[\s\S]*?return base \/ "beyin-v3"/.exec(fs.readFileSync('../template/.claude/scripts/beyin_v3.py', 'utf8'))?.[0] ?? '';
   assert.match(states, /LOCALAPPDATA/);
 });
+
+test('a first install asks nobody "only me or everybody": it is for the person who runs it, with no administrator (G7)', () => {
+  // The assisted installer shows that page unless the build is for the whole computer, and "everybody" asks for an
+  // administrator; the README says none is needed.
+  const nsis = (packaged.build as unknown as { nsis: { oneClick?: boolean; perMachine?: boolean } }).nsis;
+  assert.deepEqual([nsis.oneClick, nsis.perMachine], [false, false]);
+  const script = fs.readFileSync(packaged.build.nsis.include!, 'utf8');
+  const macro = /!macro customInstallMode([\s\S]*?)!macroend/.exec(script)?.[1] ?? '';
+  assert.match(macro, /StrCpy \$isForceCurrentInstall "1"/);
+  assert.doesNotMatch(macro, /isForceMachineInstall/);
+  // Only where no Cortex is installed for the whole computer already: that one is updated where it is.
+  assert.match(macro, /\$\{if\} \$hasPerMachineInstallation != "1"\s+StrCpy \$isForceCurrentInstall "1"\s+\$\{endif\}/);
+  // What it leans on in electron-builder's own script, so that an upgrade that renames either is caught here: the
+  // page is there for this build, reads the macro before it draws, and is skipped for the current user when told.
+  const templates = path.join('node_modules', 'app-builder-lib', 'templates', 'nsis');
+  const assisted = fs.readFileSync(path.join(templates, 'assistedInstaller.nsh'), 'utf8');
+  assert.match(assisted, /!ifndef INSTALL_MODE_PER_ALL_USERS\s+!insertmacro PAGE_INSTALL_MODE/);
+  const page = fs.readFileSync(path.join(templates, 'multiUserUi.nsh'), 'utf8');
+  assert.match(page, /!ifmacrodef customInstallmode\s+!insertmacro customInstallMode\s+!endif/i);
+  assert.match(page, /\$\{if\} \$isForceCurrentInstall == "1"[\s\S]{0,200}?!insertmacro setInstallModePerUser\s+Abort/);
+  assert.match(fs.readFileSync(path.join(templates, 'multiUser.nsh'), 'utf8'), /Var hasPerMachineInstallation/);
+});
+
+/** The MIT License as GitHub's licence detection knows it (choosealicense.com), with this repository's copyright line. */
+const MIT = `MIT License
+
+Copyright (c) 2026 Tolga Gündüz
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
+
+test('the installer CI builds is installed, opened and uninstalled on the same runner, after it is built and kept (K6)', () => {
+  // The build only looked whether an installer came out; what a person gets from it - the packaged app on a Windows
+  // it was just installed on - was never started anywhere (e2e/kurulu.mjs says what the run does).
+  const workflow = fs.readFileSync(path.join('..', '.github', 'workflows', 'desktop.yml'), 'utf8').replace(/\r\n/g, '\n');
+  const names = [...workflow.matchAll(/^      - (?:name: (.+)|uses: (\S+))$/gm)].map((found) => found[1] ?? found[2]);
+  const built = names.indexOf('Kurulum dosyasi');
+  const tried = names.indexOf('Kurulu uygulama');
+  assert.ok(built >= 0 && tried > built, names.join(' | '));
+  const step = workflow.slice(workflow.indexOf('- name: Kurulu uygulama'));
+  const own = step.slice(0, step.indexOf('\n      - ', 1));
+  // With the engine set up from the package the installed app carries, by the Python the other steps use; the window
+  // shown as a person's is, or hidden (--gizli) where a runner will not show one.
+  assert.match(own, /^\s+run: node e2e\/kurulu\.mjs --motor( --gizli)?$/m);
+  assert.match(own, /BEYIN_PYTHON: \$\{\{ steps\.python\.outputs\.python-path \}\}/);
+  // It cannot hold the job for ever, and what it saw is kept whether it passed or not: a Windows runner cannot be watched.
+  assert.match(own, /^\s+timeout-minutes: \d+$/m);
+  const kept = step.slice(own.length);
+  assert.match(kept, /^\n      - uses: actions\/upload-artifact@v4\n\s+if: \$\{\{ !cancelled\(\) \}\}\n\s+with:\n\s+name: desktop-kurulu-uygulama\n\s+path: desktop\/e2e\/screenshots\/kurulu\/\n/);
+  // The installer itself is kept before the run, as it was: a run that fails does not take the week's copy with it.
+  const uploads = [...workflow.matchAll(/name: (cortex-setup-windows|desktop-kurulu-uygulama|desktop-smoke-screenshots)/g)].map((found) => found[1]);
+  assert.deepEqual(uploads, ['desktop-smoke-screenshots', 'cortex-setup-windows', 'desktop-kurulu-uygulama']);
+  assert.ok(workflow.indexOf('name: cortex-setup-windows') < workflow.indexOf('- name: Kurulu uygulama'));
+  // The run is there to be run, and reads the installer's name from where the build writes it.
+  const run = fs.readFileSync(path.join('e2e', 'kurulu.mjs'), 'utf8');
+  assert.match(run, /path\.join\('release', layout\.installer\)/);
+  assert.equal((packaged.build.nsis as { artifactName?: string }).artifactName, 'Cortex-Setup-${version}.${ext}');
+});

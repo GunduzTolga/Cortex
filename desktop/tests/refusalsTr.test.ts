@@ -69,6 +69,16 @@ test('a tool or a model server keeps its name, and a program its own words', () 
   );
 });
 
+test('K4: a download that stalled, and a tool an antivirus holds, are said in Turkish with what to do', () => {
+  assert.equal(turkishOf('The download stalled: nothing came for a while. Check the internet connection and try again.'), 'İndirme takıldı: bir süredir veri gelmiyor; internet bağlantını denetleyip yeniden dene.');
+  assert.equal(
+    turkishOf('The tool could not be put in place: another program (an antivirus, perhaps) is holding its new files. Try again in a moment.'),
+    'Araç yerine konamadı: yeni dosyalarını başka bir program (belki antivirüs) tutuyor; birazdan yeniden dene.',
+  );
+  // The one it begins as, for a tool open somewhere, is still its own.
+  assert.equal(turkishOf('The tool could not be put in place: close it where it is open, then try again.'), 'Araç yerine konamadı: açık olduğu yerde kapatıp yeniden dene.');
+});
+
 test('a sentence no rule knows comes back as it came', () => {
   for (const said of [
     'API Error: 401 {"type":"error","error":{"type":"authentication_error"}}',

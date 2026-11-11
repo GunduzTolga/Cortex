@@ -239,7 +239,9 @@ Komut kelimeleri yalnız sonda ya da tek başına sayılır: "notu kaydettim" ya
 - **Pilde:** Windows'un pilde arka plan süreçlerini yavaşlatması (güç kısması) ses yardımcısı ve whisper.cpp için kapatılır.
   - Daha doğru ama işlemcide yavaş modeli seçmek için: Ayarlar → Sesle yazma → Yazı modeli → **En doğru**, ya da `beyin.py ses ayar --islemci-modeli large-v3-turbo`.
 - **Hazırlık süresi:**
-  - Model, yakala dinleyicisi başlarken yüklenir. İşlemcide bu birkaç saniyeden yarım dakikaya kadar sürebilir.
+  - Model, yakala dinleyicisi başlarken yüklenir ve işlemcide bir kez sessizlikle ısıtılır; "Pyn hazır" ısıtma bitince denir. İşlemcide bu birkaç saniyeden yarım dakikaya kadar sürer; zayıf bir dizüstünde, Windows açılırken bir dakikayı bulabilir (ölçülen süre `isci.log`'da "model hazır" ve "ısıtıldı" satırlarında).
+  - Uyandırma sözü bu sırada da dinlenir. Söz model hazır olmadan duyulursa simge "Pyn seni duydu" der ve pencere model hazır olunca açılır; model iki dakikada hazır olmazsa o söz bırakılır.
+  - Isıtmadan sonra söz ile pencere arasında yalnız doğrulamanın kendi süresi kalır (`isci.log`'da "uyandırma doğrulaması" satırı); birkaç saniyeyi geçerse simge yine "Pyn seni duydu" der, söz doğrulanmazsa bildirim sessizce kalkar.
   - Masaüstü uygulaması bu sırada Ayarlar → Sesle yazma'da bir çubuk gösterir (model iniyorsa ne kadarının indiği). Sağ alttaki simgede "Ses hazırlanıyor…" der. Hazırlık uzarsa bildirim gönderir, hazır olunca "Pyn hazır" der.
   - Yazı modeli yüklenince ses hazırdır; uyandırma sözünün küçük doğrulayıcısı ondan sonra yüklenir, o gelene kadar sözü yazı modeli doğrular.
   - `ses kur` Whisper modelinin inişini yüzdeyle söyler.

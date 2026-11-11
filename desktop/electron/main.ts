@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { moveYakala, registerIpc, startAppUpdates, stopWatching, trustPagesWhere } from './ipc';
+import { learnSystemProxy } from './services/acp';
 import { readSettings } from './services/settings';
 import { settleVault, setupBusy, whenSetupIdle } from './services/setup';
 import { startTelegram } from './services/telegram';
@@ -11,7 +12,8 @@ import { startTailnet } from './services/tailnet';
 import { startMicrophoneWord, stopMicrophoneWord } from './services/microphone';
 import { startMicCapture, stopMicCapture } from './services/micWindow';
 import { keepStartWithWindows, listeningNow, startTray, trayNotice } from './services/tray';
-import { WINDOW_MIN, keepWindowState, readWindowState } from './services/windowState';
+import { WINDOW_DEFAULT, WINDOW_MIN, keepWindowState, readWindowState, windowSizesFor } from './services/windowState';
+import { SHOW_ANYWAY_MS, failedLoadStep } from './services/pageLoad';
 import { applyTheme } from './services/theme';
 import { startedByQuietInstall } from './services/updater';
 
@@ -233,10 +235,62 @@ async function pageGone(contents: Electron.WebContents, details: Electron.Render
   }
 }
 
+/*
+  The app's own page would not load (services/pageLoad.ts): loaded once more by itself, then the person is told and
+  asked, on a window that is shown. At a start with Windows nothing is put on the screen for it: the page is loaded
+  again when the window is asked for (`showWindow`), and said then if it fails again.
+*/
+let loadFailures = 0;
+let loadFailedUnseen = false;
+let askingAfterLoad = false;
+
+function loadPage(win: BrowserWindow): void {
+  // A load that fails is heard as `did-fail-load`; its promise says the same and is not waited on.
+  void (DEV_SERVER ? win.loadURL(DEV_SERVER) : win.loadFile(pageFile)).catch(() => undefined);
+}
+
+async function pageNotLoaded(win: BrowserWindow): Promise<void> {
+  if (HIDDEN || quitting || askingAfterLoad || win.isDestroyed()) return;
+  if (!win.isVisible()) {
+    // Started in the notification area, or closed to it since: nothing appears by itself; tried again when it is opened.
+    if (START_HIDDEN || seen) {
+      loadFailedUnseen = true;
+      return;
+    }
+    reveal(win);
+  }
+  askingAfterLoad = true;
+  const english = readSettings().language === 'en';
+  try {
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'error',
+      title: 'Cortex',
+      message: english ? 'Cortex could not open its window.' : 'Cortex penceresini açamadı.',
+      detail: english
+        ? 'Try again; if it goes on, quit Cortex and start it again, and if that fails too, install Cortex again.'
+        : 'Yeniden dene; sürerse Cortex’i kapatıp yeniden başlat, yine olmazsa Cortex’i yeniden kur.',
+      buttons: english ? ['Try again', 'Quit'] : ['Yeniden dene', 'Çık'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    });
+    if (response === 1) void quitWhenSetupAllows();
+    else if (!win.isDestroyed()) {
+      loadFailures = 0;
+      loadPage(win);
+    }
+  } finally {
+    askingAfterLoad = false;
+  }
+}
+
 /** Maximized as it is first shown, where it was left so (maximizing shows it too). */
 let maximizeOnShow = false;
+/** Whether the window made last has been shown yet: its first frame, or the wait for it, shows it once. */
+let firstShown = false;
 function reveal(win: BrowserWindow): void {
   seen = true;
+  firstShown = true;
   if (maximizeOnShow) {
     maximizeOnShow = false;
     win.maximize();
@@ -249,12 +303,14 @@ function createWindow(showNow = true): void {
   // Where it was left; filling the screen at the first opening (services/windowState.ts). The e2e run's hidden window keeps the default.
   const kept = HIDDEN ? { bounds: null, maximized: false } : readWindowState();
   maximizeOnShow = kept.maximized;
+  // Never larger than the screen it opens on: at 1366x768 and 125-150% the old least size (1040x680) lay partly off it.
+  const sizes = HIDDEN ? { min: WINDOW_MIN, open: WINDOW_DEFAULT } : windowSizesFor(kept.bounds);
   window = new BrowserWindow({
-    width: kept.bounds?.width ?? 1440,
-    height: kept.bounds?.height ?? 900,
+    width: kept.bounds?.width ?? sizes.open.width,
+    height: kept.bounds?.height ?? sizes.open.height,
     ...(kept.bounds ? { x: kept.bounds.x, y: kept.bounds.y } : {}),
-    minWidth: WINDOW_MIN.width,
-    minHeight: WINDOW_MIN.height,
+    minWidth: sizes.min.width,
+    minHeight: sizes.min.height,
     backgroundColor: nativeTheme.shouldUseDarkColors ? NIGHT_PAPER : PAPER,
     title: 'Cortex',
     icon: windowIcon(),
@@ -277,10 +333,29 @@ function createWindow(showNow = true): void {
   else keepWindowState(window);
   const contents = window.webContents;
   contents.on('render-process-gone', (_event, details) => void pageGone(contents, details));
-
-  window.once('ready-to-show', () => {
-    if (!HIDDEN && showNow && window) reveal(window);
+  const made = window;
+  loadFailures = 0;
+  loadFailedUnseen = false;
+  contents.on('did-finish-load', () => {
+    loadFailures = 0;
   });
+  contents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    const step = failedLoadStep(loadFailures, errorCode, isMainFrame);
+    if (step === 'ignore' || made.isDestroyed()) return;
+    console.error('[window] the page could not be loaded', errorCode, errorDescription, validatedURL);
+    loadFailures += 1;
+    if (step === 'reload') loadPage(made);
+    else void pageNotLoaded(made);
+  });
+
+  // Shown at its first frame; where that has not come after a while, shown anyway rather than never (services/pageLoad.ts).
+  firstShown = false;
+  const showFirst = () => {
+    if (firstShown || HIDDEN || !showNow || made.isDestroyed() || window !== made) return;
+    reveal(made);
+  };
+  made.once('ready-to-show', showFirst);
+  const showAnyway = setTimeout(showFirst, SHOW_ANYWAY_MS);
 
   // Windows shutting down or signing out: the window closes for good, nothing holds the session up.
   window.on('query-session-end', () => {
@@ -334,16 +409,12 @@ function createWindow(showNow = true): void {
     }
   });
 
-  if (DEV_SERVER) {
-    void window.loadURL(DEV_SERVER);
-    window.webContents.openDevTools({ mode: 'detach' });
-  } else {
-    void window.loadFile(pageFile);
-  }
+  loadPage(made);
+  if (DEV_SERVER) made.webContents.openDevTools({ mode: 'detach' });
 
   // This window's going, not one made after it: a window whose page died is replaced (`showWindow`), and its end comes after.
-  const made = window;
   made.on('closed', () => {
+    clearTimeout(showAnyway);
     if (window === made) window = null;
     // Closed for good (Windows signing out): the hidden recording window must not keep the app from quitting.
     if (quitting) stopMicCapture();
@@ -413,6 +484,12 @@ function showWindow(): void {
   if (window.isMinimized()) window.restore();
   reveal(window);
   window.focus();
+  // Its page had not loaded while nobody looked (a start with Windows): tried again now, and said if it fails again.
+  if (loadFailedUnseen) {
+    loadFailedUnseen = false;
+    loadFailures = 0;
+    loadPage(window);
+  }
 }
 
 function buildMenu(): void {
@@ -446,6 +523,11 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => showWindow());
 
   void app.whenReady().then(() => {
+    // Windows' proxy, for the programs Cortex starts (services/acp.ts): asked now and again, since a laptop moves
+    // between the office's network and home's.
+    const askProxy = (): void => void learnSystemProxy((url) => session.defaultSession.resolveProxy(url));
+    askProxy();
+    setInterval(askProxy, 5 * 60_000).unref();
     holdSession();
     trustPagesWhere(isOwnPage);
     registerIpc();

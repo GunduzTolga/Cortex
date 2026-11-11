@@ -56,7 +56,86 @@ export function childEnv(extra: Record<string, string> = {}, from: NodeJS.Proces
     if (/^ELECTRON_/i.test(key) || key === 'NODE_OPTIONS') delete env[key];
     else if (inSession && (HOST_SESSION.test(key) || key === 'ANTHROPIC_BASE_URL')) delete env[key];
   }
-  return { ...env, ...extra };
+  return { ...withSystemProxy(env), ...extra };
+}
+
+/**
+ * Windows' proxy for an https address, as Chromium resolved it (main.ts asks once the app is ready and again every
+ * few minutes): null where there is none, or before it was asked.
+ */
+let systemProxy: string | null = null;
+const PROXY_NAMES = /^(https?_proxy|all_proxy)$/i;
+
+/**
+ * The first proxy of Chromium's answer ("PROXY host:port; DIRECT") as the address a program's environment takes;
+ * null for "DIRECT" and for a kind those programs do not read from the environment (SOCKS).
+ */
+export function proxyUrlOf(rule: string): string | null {
+  const first = rule.split(';')[0]?.trim() ?? '';
+  const found = /^(PROXY|HTTPS)\s+([A-Za-z0-9.\-_[\]:]+)$/i.exec(first);
+  if (!found) return null;
+  const address = found[2];
+  if (!/:\d{1,5}$/.test(address)) return null;
+  return `${found[1].toUpperCase() === 'HTTPS' ? 'https' : 'http'}://${address}`;
+}
+
+/** Asked of Chromium (session.resolveProxy); an answer that fails leaves what was known. */
+export function learnSystemProxy(resolve: (url: string) => Promise<string>): Promise<void> {
+  const asking = (async () => {
+    try {
+      systemProxy = proxyUrlOf(await resolve('https://api.anthropic.com/'));
+    } catch {
+      // Kept: a network that answered a moment ago is likelier the same one than none.
+    }
+  })();
+  firstAnswer ??= asking.then(() => {
+    firstAnswered = true;
+  });
+  return asking;
+}
+
+let firstAnswer: Promise<void> | null = null;
+let firstAnswered = false;
+/** How long a chat's program waits to be started for Windows' first answer about the proxy. */
+export const PROXY_FIRST_WAIT = 3_000;
+
+/**
+ * Over once Windows' proxy was answered for the first time, or the wait is up: awaited before a chat's program is
+ * started. A program started in the first seconds of the app - the chat's list of models is asked for as the window
+ * opens - took its environment before a proxy file (PAC, WPAD) was read, went without the proxy and kept going
+ * without it for as long as it ran (the second review, R2S-4). At once where nothing was asked (tests) or the
+ * answer is in.
+ */
+export function systemProxyKnown(wait = PROXY_FIRST_WAIT): Promise<void> {
+  if (!firstAnswer || firstAnswered) return Promise.resolve();
+  const asked = firstAnswer;
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, wait);
+    void asked.then(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+/**
+ * A company's proxy lives in Windows' settings, which Cortex's own downloads use (netFetch.ts) and the programs it
+ * starts do not: the AI tool and the voice setup's Python could not reach the internet where the browser could, and
+ * the chat only waited (the review of 10 November, S4 and N5). Windows' proxy is handed on as HTTPS_PROXY and
+ * HTTP_PROXY, unless the person's environment already names one; this computer itself is reached without it (a
+ * model server, a hook's port). CORTEX_NO_SYSTEM_PROXY in the person's environment turns this off, for a proxy in
+ * Windows' settings that no longer answers. Known limits: one proxy is asked for (the one for the AI provider's
+ * address), so a proxy file (PAC) that sends some addresses straight is not followed for those; a program already
+ * running keeps the proxy it was started with until it is started again.
+ */
+export function withSystemProxy(env: NodeJS.ProcessEnv, proxy: string | null = systemProxy): NodeJS.ProcessEnv {
+  if (!proxy || env.CORTEX_NO_SYSTEM_PROXY || Object.keys(env).some((key) => PROXY_NAMES.test(key) && env[key])) return env;
+  // This computer is added to the person's own list too, under the name they used: a model server here is not asked
+  // for through the proxy because they listed their company's addresses (the second review, R2S-3).
+  const noProxyKey = Object.keys(env).find((key) => /^no_proxy$/i.test(key) && env[key]) ?? 'NO_PROXY';
+  const listed = (env[noProxyKey] ?? '').split(',').map((one) => one.trim()).filter(Boolean);
+  for (const local of ['localhost', '127.0.0.1', '::1']) if (!listed.some((one) => one.toLowerCase() === local)) listed.push(local);
+  return { ...env, HTTPS_PROXY: proxy, HTTP_PROXY: proxy, [noProxyKey]: listed.join(',') };
 }
 
 export class AcpConnection {

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { offered } from '../electron/services/chat';
-import { chooseChatTool, forgetSettings, readSettings, setChatTool, settingsPath, settingsUnreadable, tidyName, updateSettings } from '../electron/services/settings';
+import { chooseChatTool, forgetSettings, onSettingsUnsaved, readSettings, setChatTool, settingsPath, settingsUnreadable, settingsUnsaved, tidyName, updateSettings } from '../electron/services/settings';
 import type { CliInfo } from '../shared/chat';
 
 /**
@@ -22,12 +22,12 @@ const fresh = () => {
 
 test('a missing file is a first run, and what is changed is written at once, through a temporary', () => {
   fresh();
-  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
+  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null, autoUpdate: true });
   assert.equal(settingsUnreadable(), null);
   updateSettings((settings) => {
     settings.language = 'en';
   });
-  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')), { theme: 'system', vault: null, language: 'en', allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath(), 'utf8')), { theme: 'system', vault: null, language: 'en', allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null, autoUpdate: true });
   assert.deepEqual(fs.readdirSync(dir()).filter((name) => name.endsWith('.tmp')), [], 'no temporary left');
   forgetSettings();
   assert.equal(readSettings().language, 'en', 'read back from disk');
@@ -36,7 +36,7 @@ test('a missing file is a first run, and what is changed is written at once, thr
 test('a file that will not parse is copied aside before an empty one is saved', () => {
   fresh();
   fs.writeFileSync(settingsPath(), '{"vault": "C:\\\\Notlar", "lang');
-  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
+  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null, autoUpdate: true });
   assert.equal(settingsUnreadable(), 'copied');
   const copies = fs.readdirSync(dir()).filter((name) => name.startsWith('settings.json.corrupt-'));
   assert.equal(copies.length, 1);
@@ -51,7 +51,7 @@ test('a file the disk will not hand over is left as it is, and nothing is writte
   fresh();
   // A folder where the file should be: read fails without the text ever arriving, as a locked file's does.
   fs.mkdirSync(settingsPath());
-  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
+  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null, autoUpdate: true });
   assert.equal(settingsUnreadable(), 'left');
   updateSettings((settings) => {
     settings.language = 'en';
@@ -63,10 +63,10 @@ test('a file the disk will not hand over is left as it is, and nothing is writte
 test('what is not a known value is read as none', () => {
   fresh();
   fs.writeFileSync(settingsPath(), JSON.stringify({ vault: 42, language: 'de', other: true, allFiles: 'yes', nameIcons: 1, userName: 7, onboarded: 'yes' }));
-  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
+  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null, autoUpdate: true });
   fs.writeFileSync(settingsPath(), JSON.stringify(['not', 'an', 'object']));
   forgetSettings();
-  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null });
+  assert.deepEqual(readSettings(), { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null, autoUpdate: true });
   assert.equal(settingsUnreadable(), 'copied');
 });
 
@@ -147,4 +147,49 @@ test('the theme is read as one of its three values; anything else is the system 
   forgetSettings();
   fs.writeFileSync(settingsPath(), JSON.stringify({ theme: 'sepia' }));
   assert.equal(readSettings().theme, 'system');
+});
+
+test('updates are downloaded unasked unless the person turned that off: only a written no is one (G2)', () => {
+  fresh();
+  assert.equal(readSettings().autoUpdate, true, 'a first run, and an install from before the switch');
+  fs.writeFileSync(settingsPath(), JSON.stringify({ autoUpdate: false }));
+  forgetSettings();
+  assert.equal(readSettings().autoUpdate, false);
+  fs.writeFileSync(settingsPath(), JSON.stringify({ autoUpdate: 'no' }));
+  forgetSettings();
+  assert.equal(readSettings().autoUpdate, true);
+});
+
+test('a write that fails is not only logged: the folder is said, once, until a write goes through again (K10)', () => {
+  // 10 November: with the settings folder not writable, `onboarded` was never kept and the first run came back at
+  // every start, with nothing on the screen to say why.
+  fresh();
+  const heard: string[] = [];
+  onSettingsUnsaved((folder) => heard.push(folder));
+  assert.equal(settingsUnsaved(), null);
+  // The temporary's name taken by a folder: the write fails on any system, whoever runs the tests.
+  fs.mkdirSync(`${settingsPath()}.tmp`);
+  try {
+    const kept = updateSettings((settings) => {
+      settings.onboarded = true;
+    });
+    assert.equal(kept.onboarded, true, 'the change holds while the app runs');
+    assert.equal(fs.existsSync(settingsPath()), false, 'and is not on disk');
+    assert.equal(settingsUnsaved(), dir());
+    assert.deepEqual(heard, [dir()]);
+    updateSettings((settings) => {
+      settings.allFiles = true;
+    });
+    assert.deepEqual(heard, [dir()], 'said once, not at every change');
+  } finally {
+    fs.rmSync(`${settingsPath()}.tmp`, { recursive: true, force: true });
+  }
+  // Writable again: the next change is kept, with everything changed meanwhile, and nothing is left to say.
+  updateSettings((settings) => {
+    settings.nameIcons = true;
+  });
+  assert.equal(settingsUnsaved(), null);
+  const written = JSON.parse(fs.readFileSync(settingsPath(), 'utf8')) as { onboarded: boolean; allFiles: boolean; nameIcons: boolean };
+  assert.deepEqual([written.onboarded, written.allFiles, written.nameIcons], [true, true, true]);
+  onSettingsUnsaved(() => undefined);
 });

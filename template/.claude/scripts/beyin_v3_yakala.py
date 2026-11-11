@@ -2300,10 +2300,21 @@ class VoiceLink:
         # hears, 'sorun' with why ('mikrofon', 'sessiz', 'model') and a sentence, 'kapali'; None
         # until it says.
         self.wake, self.wake_problem, self.wake_message = None, None, ''
+        # The wake phrase heard and not yet confirmed (the helper's 'duydu'): 'bakiyor' while Whisper
+        # checks it, 'hazirlaniyor' while its model still loads; None once a window opened for it or
+        # it was not the phrase. And what kind of trouble kept the model from loading ('hata', `tur`).
+        self.candidate, self.error_kind = None, None
 
     def heard(self, event, moment):
         """An event from the helper, kept; True when what the link says has changed."""
         kind = event.get('olay')
+        if kind == 'duydu':
+            candidate = event.get('durum') if event.get('durum') in ('bakiyor', 'hazirlaniyor') else None
+            changed, self.candidate = candidate != self.candidate, candidate
+            return changed
+        if kind in ('uyandi', 'dinliyor') and self.candidate is not None:
+            self.candidate = None  # confirmed, or taken up by a window: no longer only heard
+            return True
         if kind == 'indiriliyor':
             progress = (int(event.get('mb') or 0), int(event.get('toplam') or 0))
             changed, self.progress = progress != self.progress, progress
@@ -2320,23 +2331,28 @@ class VoiceLink:
             return changed
         if kind == 'hazir':
             self.ready, self.what, self.error, self.wait, self.progress = True, event.get('aciklama') or '', '', self.FIRST_WAIT, None
+            self.error_kind = None
             return True
         if kind == 'hata' and event.get('neden') == 'model':
             self.ready, self.error = False, str(event.get('mesaj') or 'model açılamadı')[:200]
+            self.error_kind = event.get('tur') if isinstance(event.get('tur'), str) else None
             self.worker.send('kapat')  # its end ('bitti') sets the next try
             return True
         if kind == 'bitti':
             self.ready = False
             self.error = self.error or 'Ses yardımcısı kapandı'
             self.wake, self.wake_problem, self.wake_message = None, None, ''  # a new helper says it anew
+            self.candidate = None
             if self.start is not None and self.retry_at is None:
                 self.retry_at, self.wait = moment + self.wait, min(self.LONGEST_WAIT, self.wait * 2)
             return True
         return False
 
     def listens(self):
-        """Whether the wake listener really listens now: the model ready and its microphone heard."""
-        return self.ready and self.wake == 'dinliyor'
+        """Whether the wake listener really listens now: its microphone heard. It listens while the
+        dictation's model still loads (a phrase heard then waits for it), and the microphone open is
+        said as open."""
+        return self.wake == 'dinliyor'
 
     def revive(self, moment):
         """A stopped helper started again once its wait is over; True when that was tried. One that
@@ -3646,7 +3662,8 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
             else:
                 mb, total = link.progress or (None, None)
                 wake = bool(voice_config.get('wake'))
-                ses.say_listener(ses=link.word(), model=link.what, mesaj=link.error, mb=mb, toplam=total,
+                ses.say_listener(ses=link.word(), model=link.what, mesaj=link.error, hata_turu=link.error_kind,
+                                 mb=mb, toplam=total, duydu=link.candidate if wake else None,
                                  uyandirma=wake and link.listens(),
                                  uyandirma_sorun=link.wake_problem if wake else None,
                                  uyandirma_mesaj=link.wake_message if wake else '', **key)

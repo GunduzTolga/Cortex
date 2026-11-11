@@ -188,6 +188,26 @@ export const installedDirs = (): string[] => [
 let refreshing: Promise<void> | null = null;
 let refreshedAt = 0;
 const REFRESH_EVERY = 10_000;
+/** How long whoever asks for the tools waits on the PATH being read again; `now` waits it out. */
+const REFRESH_WAIT = 1_500;
+
+/**
+ * Work waited for at most this long: over when the work is, or when the time is up, whichever comes first. The work
+ * goes on either way, and its failure is nobody's here.
+ */
+export function waitedAtMost(work: Promise<unknown>, ms: number, timedOut?: () => void): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      timedOut?.();
+      resolve();
+    }, ms);
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    work.then(done, done);
+  });
+}
 
 /**
  * The PATH as a program started now would have it. Windows hands a program the PATH of the
@@ -197,25 +217,67 @@ const REFRESH_EVERY = 10_000;
  * process lacks are added to its own, so every tool found and started after sees them; the
  * installer's folder with them. At most every ten seconds unless `now`; elsewhere a no-op.
  *
+ * Read by PowerShell, which an antivirus can hold up for seconds: whoever asks without `now` - the chat's list of
+ * tools, the tools' sign-ins, the setup's status - waits a moment for it and then goes on with the PATH as it is known,
+ * the reading finished behind them for the next to ask. They waited it out, up to its fifteen seconds, with an empty
+ * list on screen (the review before 1.0.62, K9 and S7). After an install (`now`) it is waited out, as before.
+ *
  * CORTEX_NO_PATH_REFRESH=1 (tests only): the PATH a test set is kept as it is. Tests used to point SystemRoot at an
  * empty folder so PowerShell was not found, but a node started from that environment could not start on Windows, and a
  * stand-in CLI run by node answered nothing (6 November, the MCP section's tests on Windows CI).
  */
 export function refreshPath(now = false): Promise<void> {
   if (!WINDOWS || process.env.CORTEX_NO_PATH_REFRESH === '1') return Promise.resolve();
-  if (refreshing) return refreshing;
-  if (!now && Date.now() - refreshedAt < REFRESH_EVERY) return Promise.resolve();
-  refreshing = new Promise<void>((resolve) => {
-    execFile(powerShellExe(), ['-NoProfile', '-NonInteractive', '-Command', READ_PATH], { windowsHide: true, timeout: 15_000, encoding: 'utf8' }, (err, stdout) => {
-      const fresh = err ? [] : pathOutput(String(stdout));
-      const dirs = [...fresh, ...installedDirs().filter((dir) => fs.existsSync(dir))];
-      process.env.PATH = withDirs(process.env.PATH ?? '', dirs, ';');
-      refreshedAt = Date.now();
-      refreshing = null;
-      resolve();
-    });
+  return pathReadAgain(now, readWindowsPath, ';');
+}
+
+/** The machine's and the person's PATH as PowerShell reads them; nothing where it would not answer. */
+function readWindowsPath(): Promise<string[]> {
+  return new Promise<string[]>((resolve) => {
+    execFile(powerShellExe(), ['-NoProfile', '-NonInteractive', '-Command', READ_PATH], { windowsHide: true, timeout: 15_000, encoding: 'utf8' }, (err, stdout) =>
+      resolve(err ? [] : pathOutput(String(stdout))),
+    );
   });
-  return refreshing;
+}
+
+let leftBehind = false;
+let readLate: () => void = () => undefined;
+
+/**
+ * Where the window hears that a reading of the PATH ended after it was answered, with folders this process did not
+ * have: a tool or Python installed outside Cortex was shown "not installed" until the window was left and come back
+ * to, because whoever asked had gone on with the PATH as it was and nobody was told the reading ended (the second
+ * review, R2K-2).
+ */
+export function onPathReadLate(listener: () => void): void {
+  readLate = listener;
+}
+
+/** refreshPath's working, with the reading and its times handed in (tests run it off Windows). */
+export function pathReadAgain(now: boolean, read: () => Promise<string[]>, delimiter: ':' | ';', wait = REFRESH_WAIT, every = REFRESH_EVERY): Promise<void> {
+  if (!refreshing) {
+    if (!now && Date.now() - refreshedAt < every) return Promise.resolve();
+    const before = process.env.PATH ?? '';
+    leftBehind = false;
+    refreshing = read()
+      .catch(() => [] as string[])
+      .then((fresh) => {
+        const dirs = [...fresh, ...installedDirs().filter((dir) => fs.existsSync(dir))];
+        process.env.PATH = withDirs(process.env.PATH ?? '', dirs, delimiter);
+        refreshedAt = Date.now();
+        refreshing = null;
+        if (!leftBehind || process.env.PATH === before) return;
+        try {
+          readLate();
+        } catch {
+          // The window not told is the window as it was: it asks again when it is come back to.
+        }
+      });
+  }
+  if (now) return refreshing;
+  return waitedAtMost(refreshing, wait, () => {
+    leftBehind = true;
+  });
 }
 
 /** The first of these names in a folder of the PATH. */

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Check, KeyRound, LogIn, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import type { CliAuth, CliId } from '@shared/chat';
+import type { CliAuth, CliId, InstallProgress } from '@shared/chat';
 import { messageOf } from '@shared/ipcError';
 import type { Key } from '../i18n';
 import { useT } from '../i18n/useT';
@@ -29,6 +29,82 @@ const NOTES: Record<string, Key> = {
   lmstudio: 'auth.note.lmstudio',
   ollama: 'auth.note.ollama',
 };
+
+/**
+ * A sign-in still going on after this long is not the usual minute in the browser: what to do is said under it (K2:
+ * the browser that never opened, or an account the tool does not take, left "Giriş sürüyor" turning for ten minutes).
+ */
+export const LOGIN_SLOW_AFTER = 75_000;
+
+/** What only this tool's sign-in needs said: Claude Code asks for a paid plan, which a sign-in that will not finish may be for want of. */
+const PLAN_NOTES: Partial<Record<CliId, Key>> = { claude: 'auth.login.plan.claude' };
+export function PlanNote({ tool }: { tool: CliId }) {
+  const t = useT();
+  const key = PLAN_NOTES[tool];
+  return key ? (
+    <span className="mt-0.5 block text-[11.5px] font-normal leading-relaxed text-zinc-600" data-auth-plan-note={tool}>
+      {t(key)}
+    </span>
+  ) : null;
+}
+
+/** What a sign-in going on for too long says: try again, or give up and sign in from a terminal; and the plan its tool asks for. */
+export function LoginSlow({ tool, after = LOGIN_SLOW_AFTER }: { tool: CliId; after?: number }) {
+  const t = useT();
+  const [slow, setSlow] = useState(after <= 0);
+  useEffect(() => {
+    if (after <= 0) return;
+    const timer = window.setTimeout(() => setSlow(true), after);
+    return () => window.clearTimeout(timer);
+  }, [after]);
+  return slow ? (
+    <>
+      <span className="mt-1 block text-[11.5px] font-normal leading-relaxed text-darkDelegation" data-auth-login-slow>
+        {t('auth.login.slow')}
+      </span>
+      <PlanNote tool={tool} />
+    </>
+  ) : null;
+}
+
+/** Why an install from here ended without its tool (CliAuth.installEnded), as a sentence that says what to do; `{name}` is the tool. */
+export const installFailedKey = (ended: CliAuth['installEnded']): Key =>
+  ended === 'network' ? 'onboarding.tools.installFailed.network' : ended === 'blocked' ? 'onboarding.tools.installFailed.blocked' : ended === 'timeout' ? 'onboarding.tools.installFailed.timeout' : 'onboarding.tools.installFailed';
+
+const megabytes = (bytes: number) => Math.round(bytes / (1024 * 1024));
+
+/** A download's progress as words: its percent and megabytes where the server said how long it is, else the megabytes come so far. */
+export function progressWords(progress: InstallProgress | null): { key: Key; values: Record<string, number> } | null {
+  if (!progress || progress.got <= 0) return null;
+  if (!progress.total || progress.total < progress.got) return { key: 'onboarding.tools.install.progressSome', values: { got: megabytes(progress.got) } };
+  return { key: 'onboarding.tools.install.progress', values: { percent: Math.floor((progress.got / progress.total) * 100), got: megabytes(progress.got), total: megabytes(progress.total) } };
+}
+
+/**
+ * How far the download of a tool Cortex is installing has come, asked of the main process every second while it is
+ * shown (K4: "Kuruluyor" stood still for however long 170 MB took). Nothing for Claude Code, whose installer shows its
+ * own progress in its console.
+ */
+export function InstallProgressLine({ tool }: { tool: CliId }) {
+  const t = useT();
+  const [progress, setProgress] = useState<InstallProgress | null>(null);
+  useEffect(() => {
+    let shown = true;
+    const ask = () => void window.cortex.chat.installProgress(tool).then((now) => shown && setProgress(now), () => undefined);
+    ask();
+    const timer = window.setInterval(ask, 1000);
+    return () => {
+      shown = false;
+      window.clearInterval(timer);
+    };
+  }, [tool]);
+  const words = progressWords(progress);
+  return words ? (
+    <span className="mt-0.5 block text-[11.5px] tabular-nums text-zinc-500" data-install-progress={tool}>
+      {t(words.key, words.values)}
+    </span>
+  ) : null;
+}
 
 /**
  * An AI tool added to Cortex: installed and offered in the chat. One that is not - not installed, or signed in only in a
@@ -112,6 +188,16 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
     } catch (err) {
       failed(err);
     }
+  };
+  // "Vazgeç" while its sign-in goes on: its hidden console ended; how to sign in from a terminal is said after.
+  const cancelLogin = async () => {
+    setSigningIn(false);
+    try {
+      await window.cortex.chat.cancelLogin(tool.id);
+    } catch (err) {
+      failed(err);
+    }
+    void useChat.getState().loadAuth();
   };
   // "Ekle": installed where it is not (the window's own install, so the empty chat says the same), added to the chat,
   // its sign-in opened where it is not signed in; a tool that only takes a key has its key asked here after.
@@ -240,12 +326,19 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
       ) : null}
       {installing && !tool.installed ? (
         <p className={`mt-2 text-[11.5px] ${installing.failed ? 'text-bad' : 'text-zinc-500'}`} data-auth-install-state={installing.failed ? 'failed' : 'running'}>
-          {t(installing.failed ? 'onboarding.tools.installFailed' : 'auth.install.waiting', { name: TOOL_NAMES[tool.id] ?? tool.id })}
+          {t(installing.failed ? installFailedKey(tool.installEnded) : 'auth.install.waiting', { name: TOOL_NAMES[tool.id] ?? tool.id })}
+          {installing.failed ? null : <InstallProgressLine tool={tool.id} />}
         </p>
       ) : signingIn ? (
-        <p className="mt-2 text-[11.5px] text-zinc-500">{t('auth.login.waiting')}</p>
+        <div className="mt-2 text-[11.5px] text-zinc-500" data-auth-login-waiting>
+          <p>{t('auth.login.waiting')}</p>
+          <LoginSlow tool={tool.id} />
+          <Button tone="quiet" className="mt-1.5 h-7" onClick={() => void cancelLogin()} data-auth-login-cancel>
+            {t('auth.cancel')}
+          </Button>
+        </div>
       ) : tool.loginEnded && tool.signedIn !== true ? (
-        <LoginEnded ended={tool.loginEnded} onRetry={() => void login()} />
+        <LoginEnded ended={tool.loginEnded} tool={tool.id} onRetry={() => void login()} />
       ) : null}
       {keying ? (
         <form
@@ -277,13 +370,15 @@ function ToolRow({ tool, focused, refused }: { tool: CliAuth; focused: boolean; 
  * How the last sign-in from here ended without signing in, and what to do: again, or in a terminal where the browser
  * could not be opened from here (its address is pasted by hand). Shown in the AI tools window and on the first-run screen.
  */
-export function LoginEnded({ ended, onRetry }: { ended: NonNullable<CliAuth['loginEnded']>; onRetry?: () => void }) {
+export function LoginEnded({ ended, tool, onRetry }: { ended: NonNullable<CliAuth['loginEnded']>; tool?: CliId; onRetry?: () => void }) {
   // Here a Refresh button; on the first-run screen the status is read again when the person comes back to the window.
   const t = useT();
   return (
     <div className="mt-2 rounded-lg bg-bad/5 px-2.5 py-2 text-[11.5px] leading-relaxed" data-auth-login-ended={ended.end}>
       <p className="font-semibold text-bad">{t(`auth.login.ended.${ended.end}`, { code: ended.code ?? '' })}</p>
       <p className="mt-0.5 text-zinc-600">{t(onRetry ? 'auth.login.ended.hint' : 'onboarding.tools.ended.hint', { command: ended.command })}</p>
+      {/* The ten minutes can go by on an account the tool does not take: said, where the tool asks for a plan (K2). */}
+      {tool ? <PlanNote tool={tool} /> : null}
       {onRetry ? (
         <Button tone="quiet" className="mt-1.5 h-7" onClick={onRetry} data-auth-login-retry>
           <LogIn size={12} />

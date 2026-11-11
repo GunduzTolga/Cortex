@@ -46,6 +46,7 @@ export function setGithubForTests(next: { web: string; api: string; clientId: st
   generation += 1;
   state = 'off';
   detail = null;
+  step = null;
 }
 
 const REQUEST_MS = 20_000;
@@ -116,6 +117,8 @@ const unseal = (text: string): string | null => {
 
 let state: GithubState = 'off';
 let detail: string | null = null;
+/** What a join is doing first, said as it comes (git being brought: services/gitTool.ts). */
+let step: string | null = null;
 let tell: (status: GithubStatus) => void = () => undefined;
 /** Where the window hears the sign-in end (`on.github`). */
 export function onGithub(listener: (status: GithubStatus) => void): void {
@@ -126,7 +129,7 @@ export function githubStatus(): GithubStatus {
   const kept = readKept();
   const signedIn = kept && unseal(kept.access) !== null;
   const now: GithubState = signedIn && (state === 'off' || state === 'connected') ? 'connected' : state === 'connected' ? 'off' : state;
-  return { offered: Boolean(clientId), state: now, login: signedIn ? kept.login : null, repo: signedIn ? kept.repo : null, detail };
+  return { offered: Boolean(clientId), state: now, login: signedIn ? kept.login : null, repo: signedIn ? kept.repo : null, detail, step };
 }
 
 function settle(next: GithubState, said: string | null = null): void {
@@ -390,9 +393,15 @@ export async function connectRepo(fullName: unknown): Promise<VaultConnected> {
   const kept = readKept();
   if (!kept) throw new GithubRefusal(say('GitHub ile bağlı değil.', 'Not connected to GitHub.'));
   const env = await envFor(kept);
-  const first = await joinVault(url, repo.empty ? 'baslat' : 'baglan', env);
+  // Git brought first where there is none: the window hears each step, so a 40 MB download is not a silent wait.
+  const said = (text: string | null) => {
+    if (step === text) return;
+    step = text;
+    tell(githubStatus());
+  };
+  const first = await joinVault(url, repo.empty ? 'baslat' : 'baglan', env, said);
   // GitHub's size lags a push by a while: the engine is the one that looks, and says which way it should have gone.
-  const result = first.state === 'not_empty' ? await joinVault(url, 'baglan', env) : first.state === 'empty' ? await joinVault(url, 'baslat', env) : first;
+  const result = first.state === 'not_empty' ? await joinVault(url, 'baglan', env, said) : first.state === 'empty' ? await joinVault(url, 'baslat', env, said) : first;
   // Joined to this very repository already (signed out and in again): no conflict, kept in step again.
   const same = result.state === 'already' && typeof result.remote === 'string' && result.remote.toLowerCase() === (remoteLabel(url) ?? '').toLowerCase();
   const ok = result.state === 'synced' || same;

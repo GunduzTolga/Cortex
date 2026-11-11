@@ -52,6 +52,18 @@ export interface CliAuth {
    * from here and the address it gives is pasted by hand. Null once signed in or a new sign-in begun.
    */
   loginEnded?: { end: 'closed' | 'failed' | 'timeout'; code: number | null; command: string } | null;
+  /**
+   * How its last install from here ended without the tool (Claude Code's console installer): its maker's server not
+   * reached, the download or the script blocked (a company network, a proxy, an antivirus), not done in time, or not
+   * known. Null once installed or a new install begun.
+   */
+  installEnded?: 'network' | 'blocked' | 'timeout' | 'unknown' | null;
+}
+
+/** How far a tool's download by Cortex has come (toolPackages.ts), in bytes; `total` null where the server did not say. */
+export interface InstallProgress {
+  got: number;
+  total: number | null;
 }
 
 /**
@@ -182,8 +194,12 @@ export interface ChatApi {
   auth(): Promise<CliAuth[]>;
   /** The tool's own sign-in, in a window of its own; the statuses are pushed again when it closes. */
   login(cli: CliId): Promise<void>;
+  /** A sign-in going on given up: its hidden console ended. */
+  cancelLogin(cli: CliId): Promise<void>;
   /** The tool installed by its maker's installer, in a window of its own; its sign-in opened after; the statuses pushed again. */
   install(cli: CliId): Promise<void>;
+  /** How far the download of a tool Cortex is installing has come; null where none is going on. */
+  installProgress(cli: CliId): Promise<InstallProgress | null>;
   /** A key for a tool: kept encrypted by Cortex, or handed to the tool itself (Codex). */
   setKey(cli: CliId, key: string, baseUrl?: string): Promise<CliAuth[]>;
   /** "Ekle": the tool installed where it is not, offered in the chat, its sign-in opened where it is not signed in; every tool's sign-in, as `auth` says. */

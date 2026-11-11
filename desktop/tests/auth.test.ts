@@ -6,8 +6,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
 import type { CliId } from '../shared/chat';
-import { addTool, authStatuses, claudeStatus, codexStatus, commandLineArg, installScript, installTool, LOGIN_SCRIPT, loginCommandOf, loginEndOf, onAuthChanged, removeTool, setToolKey, startLogin } from '../electron/services/auth';
-import { READ_PATH, pathOutput, powerShellExe, withDirs } from '../electron/services/clis';
+import { addTool, authStatuses, cancelLogin, claudeStatus, codexStatus, commandLineArg, installEndOf, installProgressOf, installScript, installTool, LOGIN_SCRIPT, loginCommandOf, loginEndOf, onAuthChanged, removeTool, setToolKey, startLogin } from '../electron/services/auth';
+import { READ_PATH, onPathReadLate, pathOutput, pathReadAgain, powerShellExe, waitedAtMost, withDirs } from '../electron/services/clis';
 import { forgetKey, hasKey, keyEnv, saveKey } from '../electron/services/keys';
 import { readSettings, updateSettings } from '../electron/services/settings';
 import { toolsDir } from '../electron/services/toolPackages';
@@ -256,6 +256,63 @@ test('pressed again while a sign-in goes on: the one before is ended, a new one 
   }
 });
 
+test('K2: "Vazgeç" on a sign-in going on ends its hidden console, and says how to sign in from a terminal', { skip: process.platform !== 'win32' }, async () => {
+  // The sign-in whose browser never opened could only be waited out: ten minutes, its console hidden.
+  const kept = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, CORTEX_NO_PATH_REFRESH: process.env.CORTEX_NO_PATH_REFRESH, STANDIN_SIGN_IN_AFTER: process.env.STANDIN_SIGN_IN_AFTER, STANDIN_CLOSE_AFTER: process.env.STANDIN_CLOSE_AFTER };
+  const before = readSettings().chatTools;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cortex-cancel-'));
+  process.env.PATH = '';
+  process.env.LOCALAPPDATA = home;
+  process.env.CORTEX_NO_PATH_REFRESH = '1';
+  // Never signed in, and not ending by itself while this runs.
+  process.env.STANDIN_SIGN_IN_AFTER = '600000';
+  process.env.STANDIN_CLOSE_AFTER = '600000';
+  const pids = () => (fs.existsSync(path.join(home, 'codex-login-pids')) ? fs.readFileSync(path.join(home, 'codex-login-pids'), 'utf8').split('\n').filter(Boolean).map(Number) : []);
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const until = async (done: () => boolean) => {
+    for (let waited = 0; !done() && waited < 20_000; waited += 200) await new Promise((resolve) => setTimeout(resolve, 200));
+  };
+  const told: Array<CliId | null> = [];
+  onAuthChanged((cli) => told.push(cli));
+  try {
+    standIn('codex', home, []);
+    startLogin('codex');
+    // Its own sign-in, not one left from the test before (ended by this press, its pid in another folder).
+    await until(() => pids().length === 1);
+    const [pid] = pids();
+    assert.ok(pid && alive(pid), 'its sign-in going on');
+    told.length = 0;
+    cancelLogin('codex');
+    await until(() => !alive(pid) && told.includes('codex'));
+    assert.ok(!alive(pid), 'its hidden console, and the tool in it, ended');
+    assert.ok(told.includes('codex'), 'the window told, to ask its status again');
+    const codex = (await authStatuses()).find((one) => one.id === 'codex');
+    assert.equal(codex?.signedIn, false);
+    assert.equal(codex?.loginEnded?.end, 'closed');
+    assert.match(codex?.loginEnded?.command ?? '', /login$/, 'what is left to try where the browser never opened');
+    // Pressed with nothing going on: nothing happens, and nothing more is said.
+    cancelLogin('codex');
+    assert.equal((await authStatuses()).find((one) => one.id === 'codex')?.loginEnded?.end, 'closed');
+  } finally {
+    onAuthChanged(() => undefined);
+    for (const [name, value] of Object.entries(kept)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    updateSettings((settings) => {
+      settings.chatTools = before;
+    });
+    fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  }
+});
+
 test('a sign-in closed with an error, not signed in, is said with its code and the command to run it by hand', { skip: process.platform !== 'win32' }, async () => {
   const kept = { PATH: process.env.PATH, LOCALAPPDATA: process.env.LOCALAPPDATA, CORTEX_NO_PATH_REFRESH: process.env.CORTEX_NO_PATH_REFRESH, STANDIN_SIGN_IN_AFTER: process.env.STANDIN_SIGN_IN_AFTER, STANDIN_CLOSE_AFTER: process.env.STANDIN_CLOSE_AFTER, STANDIN_CLOSE_CODE: process.env.STANDIN_CLOSE_CODE };
   const before = readSettings().chatTools;
@@ -365,6 +422,12 @@ test('with no tool installed, each is said to be missing and nothing is offered;
     const [tools, servers] = [statuses.slice(0, 5), statuses.slice(5)];
     assert.ok(tools.every((one) => !one.installed && !one.canLogin && one.key === null && one.signedIn === null && !one.local));
     assert.ok(tools.every((one) => one.loginEnded === null), 'no sign-in begun here: nothing to say about one');
+    assert.ok(tools.every((one) => one.installEnded === null), 'nor an install');
+    // "Vazgeç" with no sign-in going on does nothing; a download not going on has no progress; neither takes what is not a tool.
+    assert.doesNotThrow(() => cancelLogin('claude'));
+    assert.throws(() => cancelLogin('nope'), /Not a tool/);
+    assert.equal(installProgressOf('codex'), null);
+    assert.throws(() => installProgressOf('nope'), /Not a tool/);
     // Installed from the app in a console window, Windows only: Claude Code by Anthropic's installer, the others by npm
     // (1 November: a fresh install offered only Claude Code; OpenCode could not be had from the app).
     assert.deepEqual(tools.filter((one) => one.canInstall).map((one) => one.id), process.platform === 'win32' ? ['claude', 'codex', 'opencode', 'gemini', 'qwen'] : []);
@@ -401,6 +464,53 @@ test('Claude Code is installed by Anthropic’s own installer, its window kept o
   assert.throws(() => installScript('nope' as never, true), /does not install/);
 });
 
+test('K3: Claude Code’s console writes down how its installer ended, and keeps what it showed for the log', () => {
+  // Behind a proxy or an antivirus the console showed PowerShell's own error and waited for Enter; Cortex knew nothing
+  // until it was closed, and then only that the program was not there.
+  for (const script of [installScript('claude', true), installScript('claude', false)]) {
+    const steps = script.split('; ');
+    const at = (part: string) => steps.findIndex((step) => step.includes(part));
+    assert.ok(at('Start-Transcript -LiteralPath $env:CORTEX_INSTALL_LOG') >= 0, 'what the console shows is kept');
+    assert.ok(at('Start-Transcript') < at('irm https://claude.ai/install.ps1 | iex'), 'from before the installer runs');
+    assert.ok(at('Set-Content -LiteralPath $env:CORTEX_INSTALL_RESULT') > at('irm https://claude.ai/install.ps1 | iex'), 'how it ended, written after it');
+    assert.ok(at('Set-Content -LiteralPath $env:CORTEX_INSTALL_RESULT') < at('Read-Host'), 'and before the console waits for Enter: Cortex reads it while the console is open');
+    assert.ok(at('Stop-Transcript') < at('Read-Host'));
+    // Names, not sentences (those come in Windows' language): PowerShell's for the error, .NET's for why a request failed, the server's answer.
+    assert.match(script, /\$cortexEnd = 'error ' \+ \$_\.FullyQualifiedErrorId/);
+    assert.match(script, /\[System\.Net\.WebException\]/);
+    assert.match(script, /' status ' \+ \$cortexWeb\.Status/);
+    assert.match(script, /' http ' \+ \[int\]\$cortexWeb\.Response\.StatusCode/);
+    // Neither file being unwritable stops the install.
+    assert.match(script, /try \{ Start-Transcript [^}]*\} catch \{ \}/);
+    assert.match(script, /try \{ Set-Content [^}]*\} catch \{ \}/);
+  }
+});
+
+test('K3: why an install ended without its tool is told apart: the server not reached, blocked, out of time, or not known', () => {
+  const irm = 'error WebCmdletWebResponseException,Microsoft.PowerShell.Commands.InvokeRestMethodCommand';
+  // No internet, or no way to the server.
+  assert.equal(installEndOf(`${irm} status NameResolutionFailure`, false), 'network');
+  assert.equal(installEndOf(`\uFEFF${irm} status ConnectFailure\r\n`, false), 'network', 'as PowerShell writes the file: a BOM before, a line end after');
+  assert.equal(installEndOf(`${irm} status Timeout`, false), 'network');
+  // A company's proxy asking for a sign-in or refusing; a certificate replaced on the way (a proxy or an antivirus reading the traffic).
+  assert.equal(installEndOf(`${irm} status ProtocolError http 407`, false), 'blocked');
+  assert.equal(installEndOf(`${irm} status ProtocolError http 403`, false), 'blocked');
+  assert.equal(installEndOf(`${irm} status TrustFailure`, false), 'blocked');
+  assert.equal(installEndOf(`${irm} status SecureChannelFailure`, false), 'blocked');
+  // An antivirus stopping the script, or a company's rules not letting it run whole.
+  assert.equal(installEndOf('error ScriptContainedMaliciousContent,Microsoft.PowerShell.Commands.InvokeExpressionCommand', false), 'blocked');
+  assert.equal(installEndOf('error MethodInvocationNotSupportedInConstrainedLanguage', false), 'blocked');
+  // The server answering with something else, an error of the installer's own, or nothing written down: not guessed at.
+  assert.equal(installEndOf(`${irm} status ProtocolError http 500`, false), 'unknown');
+  assert.equal(installEndOf('error RuntimeException', false), 'unknown');
+  assert.equal(installEndOf('ran', false), 'unknown', 'the installer ran and left no program');
+  assert.equal(installEndOf(null, false), 'unknown', 'the console was closed before it wrote anything');
+  assert.equal(installEndOf('', false), 'unknown');
+  // Ended by Cortex for taking too long, whatever was written.
+  assert.equal(installEndOf(null, true), 'timeout');
+  assert.equal(installEndOf(`${irm} status NameResolutionFailure`, true), 'timeout');
+});
+
 test('only Claude Code has a console installer: OpenCode, Codex, Gemini CLI and Qwen Code are Cortex’s to install, with no npm and no Node.js', () => {
   for (const id of ['opencode', 'codex', 'gemini', 'qwen'] as const) assert.throws(() => installScript(id, true), /does not install/);
   const source = fs.readFileSync('electron/services/auth.ts', 'utf8');
@@ -415,10 +525,73 @@ test('Claude Code’s console script is PowerShell without a fault (Windows)', {
   }
 });
 
+test('K9: the PATH being read again is waited on for a moment, not for as long as PowerShell takes', async () => {
+  // Reading it took up to fifteen seconds where an antivirus holds PowerShell up, the chat's list of tools empty meanwhile.
+  let finished = false;
+  const slow = new Promise<void>((resolve) => setTimeout(() => {
+    finished = true;
+    resolve();
+  }, 400));
+  const began = Date.now();
+  await waitedAtMost(slow, 40);
+  assert.ok(Date.now() - began < 300, `gone on after the moment (${Date.now() - began} ms)`);
+  assert.equal(finished, false, 'the reading itself goes on behind');
+  await slow;
+  // Done sooner, it is not waited on longer; and a failure is not thrown at whoever waited.
+  const quick = Date.now();
+  await waitedAtMost(Promise.resolve(), 5_000);
+  await waitedAtMost(Promise.reject(new Error('PowerShell would not start')), 5_000);
+  assert.ok(Date.now() - quick < 1_000);
+});
+
 test('the PATH is read again for a tool installed while the app was open: what it lacks is added after it, once, whatever its case', () => {
   assert.equal(withDirs('C:\\Windows;C:\\Users\\Tolga\\AppData\\Roaming\\npm', ['c:\\windows\\', 'C:\\Users\\Tolga\\.local\\bin', '', 'C:\\Users\\Tolga\\.local\\bin'], ';'), 'C:\\Windows;C:\\Users\\Tolga\\AppData\\Roaming\\npm;C:\\Users\\Tolga\\.local\\bin');
   assert.equal(withDirs('', ['C:\\a'], ';'), 'C:\\a');
   // PowerShell writes the machine's PATH and the person's, one a line, as UTF-8 (a BOM dropped): a Turkish folder comes back whole.
   assert.deepEqual(pathOutput('\uFEFFC:\\Windows\\system32;C:\\Windows;\r\nC:\\Users\\Tolga Gündüz\\.local\\bin;\r\n'), ['C:\\Windows\\system32', 'C:\\Windows', 'C:\\Users\\Tolga Gündüz\\.local\\bin']);
   assert.ok(READ_PATH.includes("GetEnvironmentVariable('Path', 'User')") && READ_PATH.includes('UTF8Encoding $false'));
+});
+
+test('R2K-2: a reading of the PATH that ends after the window was answered, with a folder it did not have, is told to the window', async () => {
+  // A tool installed outside Cortex stayed "not installed": whoever asked went on with the PATH as it was, and nobody heard the reading end.
+  const kept = process.env.PATH;
+  let told = 0;
+  onPathReadLate(() => {
+    told += 1;
+  });
+  const slowly = (dirs: string[], ms: number) => () => new Promise<string[]>((resolve) => setTimeout(() => resolve(dirs), ms));
+  try {
+    // Read in time: whoever asked has the new PATH already, and nothing more is said.
+    process.env.PATH = '/usr/bin';
+    await pathReadAgain(false, slowly(['/opt/zamaninda'], 10), ':', 2_000, 0);
+    assert.ok((process.env.PATH ?? '').split(':').includes('/opt/zamaninda'));
+    assert.equal(told, 0, 'nobody was left behind');
+
+    // Read late: the asker goes on with the PATH as it was, and is told when the reading ends with something new.
+    const began = Date.now();
+    await pathReadAgain(false, slowly(['/opt/gec-kurulan'], 1_500), ':', 30, 0);
+    assert.ok(Date.now() - began < 1_200, 'gone on after the moment');
+    assert.ok(!(process.env.PATH ?? '').split(':').includes('/opt/gec-kurulan'), 'the answer was given with the PATH as it was');
+    assert.equal(told, 0);
+    await pathReadAgain(true, slowly([], 0), ':'); // the reading still going on, waited out
+    assert.ok((process.env.PATH ?? '').split(':').includes('/opt/gec-kurulan'));
+    assert.equal(told, 1, 'told once the reading ended');
+
+    // Read late with nothing new: nothing to say, and no asking in a circle.
+    await pathReadAgain(false, slowly(['/opt/gec-kurulan'], 150), ':', 20, 0);
+    await pathReadAgain(true, slowly([], 0), ':');
+    assert.equal(told, 1, 'the same PATH is not news');
+
+    // A listener that throws is not the reading's failure: the next one waits it out as before.
+    onPathReadLate(() => {
+      throw new Error('the window is gone');
+    });
+    await pathReadAgain(false, slowly(['/opt/bir-daha'], 120), ':', 20, 0);
+    await pathReadAgain(true, slowly([], 0), ':');
+    await pathReadAgain(true, slowly([], 0), ':');
+    assert.ok((process.env.PATH ?? '').split(':').includes('/opt/bir-daha'));
+  } finally {
+    onPathReadLate(() => undefined);
+    process.env.PATH = kept;
+  }
 });

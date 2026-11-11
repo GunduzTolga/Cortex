@@ -247,6 +247,13 @@ export function GithubConnect({ onConnected }: { onConnected?: () => void }) {
             ) : null}
           </>
         )}
+        {busy && status.step ? (
+          <Line data="step">
+            <span className="inline-flex items-center gap-1.5">
+              <Spinner size={11} /> {status.step}
+            </span>
+          </Line>
+        ) : null}
         {refusal ? <Line tone="error" data="refusal">{refusal}</Line> : null}
         {outcome}
         <div className="px-3 pt-1">

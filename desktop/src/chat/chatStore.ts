@@ -193,7 +193,8 @@ export const useChat = create<ChatState>((set, get) => {
       try {
         set({ auth: await window.cortex.chat.auth() });
       } catch (err) {
-        set({ error: messageOf(err) });
+        // Not left at null: "the tools are being looked for" would turn for ever (K5); what was known stays, or none.
+        set({ error: messageOf(err), auth: get().auth ?? [] });
       }
     },
 
@@ -226,6 +227,17 @@ export const useChat = create<ChatState>((set, get) => {
               if (!installing) return;
               if (get().auth?.find((one) => one.id === installing.id)?.installed) set({ installing: null });
               else if (!installing.failed) set({ installing: { ...installing, failed: true } });
+            });
+          void get().refreshClis();
+        });
+        // A tool installed outside Cortex, seen by a reading of the PATH that ended after the last answer: asked again.
+        // No installer ended: one still running stays "installing", and is over only if its tool is there by now.
+        window.cortex.on.toolsFound(() => {
+          void get()
+            .loadAuth()
+            .then(() => {
+              const installing = get().installing;
+              if (installing && get().auth?.find((one) => one.id === installing.id)?.installed) set({ installing: null });
             });
           void get().refreshClis();
         });

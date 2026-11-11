@@ -62,6 +62,11 @@ export interface Settings {
    * through which none was set up).
    */
   chatTools: CliId[] | null;
+  /**
+   * A newer Cortex is asked for and downloaded unasked (services/updater.ts, Settings › Hakkında); on by default. Off,
+   * nothing is asked of GitHub at all: the person fetches a new installer themselves.
+   */
+  autoUpdate: boolean;
 }
 
 /** The tools the person chooses among; a model server, Hermes and the tests' stand-ins are offered as before. */
@@ -77,11 +82,14 @@ export function tidyName(value: unknown): string | null {
   return name || null;
 }
 
-const EMPTY: Settings = { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null };
+const EMPTY: Settings = { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null, autoUpdate: true };
 
 let cache: Settings | null = null;
 let keepOff = false;
 let unreadable: 'copied' | 'left' | null = null;
+/** The folder the settings could not be written into, while the last write failed; null once one went through. */
+let unsaved: string | null = null;
+let unsavedHeard: (folder: string) => void = () => undefined;
 
 export function settingsPath(): string {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -103,6 +111,7 @@ function hydrate(raw: Record<string, unknown>): Settings {
     hermesProfile: typeof raw.hermesProfile === 'string' && HERMES_PROFILE.test(raw.hermesProfile) ? raw.hermesProfile : null,
     vaultSync: raw.vaultSync === true,
     chatTools: Array.isArray(raw.chatTools) ? [...new Set(raw.chatTools as unknown[])].filter((id): id is CliId => CHAT_TOOLS.includes(id as CliId)) : null,
+    autoUpdate: raw.autoUpdate !== false,
   };
 }
 
@@ -145,6 +154,20 @@ export function settingsUnreadable(): 'copied' | 'left' | null {
   return unreadable;
 }
 
+/**
+ * The folder a change could not be written into, where the last write failed: the change holds while the app runs and
+ * is gone at the next start. 10 November: a failed write was only logged, so `onboarded` was never kept and the first
+ * run came back at every start without a word. Null where the last write went through.
+ */
+export function settingsUnsaved(): string | null {
+  return unsaved;
+}
+
+/** Where a write that failed is heard, each time one that had been going through stops doing so (electron/ipc.ts says it). */
+export function onSettingsUnsaved(listener: (folder: string) => void): void {
+  unsavedHeard = listener;
+}
+
 /** Change the settings and write them at once: two small facts, written rarely, need no debounce. */
 export function updateSettings(change: (settings: Settings) => void): Settings {
   const settings = readSettings();
@@ -156,8 +179,12 @@ export function updateSettings(change: (settings: Settings) => void): Settings {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(temp, JSON.stringify(settings, null, 2), 'utf8');
     renameRetrying(temp, file);
+    unsaved = null;
   } catch (err) {
     console.error('[settings] the settings could not be saved', err);
+    const first = unsaved === null;
+    unsaved = path.dirname(file);
+    if (first) unsavedHeard(unsaved);
   }
   return settings;
 }
@@ -167,6 +194,7 @@ export function forgetSettings(): void {
   cache = null;
   keepOff = false;
   unreadable = null;
+  unsaved = null;
 }
 
 /**

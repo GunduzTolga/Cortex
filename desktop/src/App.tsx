@@ -24,6 +24,7 @@ import { useView, type View } from './store/view';
 import { LanguageSwitch } from './ui/LanguageSwitch';
 import { SettingsDialog } from './ui/SettingsDialog';
 import { MicConsent } from './ui/MicConsent';
+import { RenderGuard } from './ui/RenderGuard';
 import { escapeLayers } from './ui/escapeLayers';
 import { Toasts } from './ui/Toasts';
 import { Button, Spinner } from './ui/ui';
@@ -37,7 +38,16 @@ import { retryKeptAside } from './notes/NotePane';
  * (src/store/view.ts), so the graph is not laid out again at every switch.
  */
 
+/** The window, inside the guard that says so when drawing it throws (src/ui/RenderGuard.tsx): a blank page before. */
 export function App() {
+  return (
+    <RenderGuard beforeReload={leaveOpenNotes}>
+      <AppWindow />
+    </RenderGuard>
+  );
+}
+
+function AppWindow() {
   const t = useT();
   const ready = useApp((s) => s.ready);
   const bootError = useApp((s) => s.bootError);
@@ -254,20 +264,23 @@ function VaultScreen({ name, missing }: { name: string; missing: boolean }) {
     the vault), and when a turn of Pyn's ends (it may have written some). Only
     the notes screen did, and only while it was in front, so the chat's panel,
     the links in its answers, the graph and the office showed the vault as it
-    was until the notes were opened (desktop-ui-7). The index is built again
-    only for what changed (electron/services/vaultNotes.ts), so this is cheap.
+    was until the notes were opened (desktop-ui-7). A change on disk asks only
+    about what changed (electron/services/vaultNotes.ts), which is cheap; coming
+    back to the window walks the folders again, as every reading did before 1.0.62.
     Read at the start too, where none is yet: with the graph or the office in
     front from the last run, nothing else read it, and they showed no notes.
   */
   useEffect(() => {
     if (missing) return;
     const again = () => void useNotes.getState().refresh();
+    // The window come back to: another program may have written a moment ago, before the watcher said so.
+    const back = () => void useNotes.getState().refresh(true);
     if (!useNotes.getState().index) again();
     const stop = window.cortex.on.notesChanged(again);
-    window.addEventListener('focus', again);
+    window.addEventListener('focus', back);
     return () => {
       stop();
-      window.removeEventListener('focus', again);
+      window.removeEventListener('focus', back);
     };
   }, [missing]);
   const turnsEnded = useChat((s) => s.turnsEnded);

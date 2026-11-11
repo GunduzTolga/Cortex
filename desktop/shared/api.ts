@@ -40,6 +40,8 @@ export interface WindowSettings {
   voiceConsent: boolean;
   /** The person let the microphone listen all the time for the wake phrase while Cortex runs; until then it does not. */
   wakeConsent: boolean;
+  /** A newer Cortex is asked for on GitHub and downloaded unasked; on by default. Off, nothing is asked at all (Settings › Hakkında). */
+  autoUpdate: boolean;
 }
 
 /** A word from the main process for a toast, from work the window did not ask for and does not wait on (yakala moved to another vault). */
@@ -48,6 +50,9 @@ export interface AppNotice {
   title: string;
   detail?: string;
 }
+
+/** Where the installers are, for a person who fetches one themselves (Settings › Hakkında, README). */
+export const RELEASES_PAGE = 'https://github.com/GunduzTolga/Cortex/releases/latest';
 
 /** A newer Cortex downloaded from the releases and checked, waiting to be installed (electron/services/updater.ts). */
 export interface AppUpdate {
@@ -82,7 +87,8 @@ export interface Moved {
 }
 
 export interface NotesApi {
-  index(): Promise<VaultIndex>;
+  /** `whole`: the folders walked again (the window come back to), not only what was said changed. */
+  index(whole?: boolean): Promise<VaultIndex>;
   read(path: string): Promise<NoteRead>;
   /** A file that is not a note, as text to be shown: read only, never run. */
   text(path: string): Promise<TextRead>;
@@ -156,6 +162,8 @@ export interface CortexApi {
     chat(handler: (push: ChatPush) => void): () => void;
     /** A sign-in window was closed, or a sign-in done (the tool's), or an install ended (null): ask the tools' statuses again. */
     authChanged(handler: (cli: CliId | null) => void): () => void;
+    /** The PATH read again behind an answer already given, with folders it did not have: ask about the tools again. Nothing ended. */
+    toolsFound(handler: () => void): () => void;
     /** A setup job going on: a step, or its end. */
     setup(handler: (push: SetupPush) => void): () => void;
     /** The voice status read anew (the notification-area icon switched it): the settings show it as it is. */

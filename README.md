@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.61" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.61-E8B23A">
+  <img alt="Sürüm 1.0.62" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.62-E8B23A">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -78,7 +78,7 @@ Cortex'le birlikte bir düşünme ortağı gelir: ananas **Pyn**. Seni tanır, f
 Terminal gerekmez; uygulama gerekeni kendisi kurar.
 
 1. **İndir.** [Son sürüm sayfasından](https://github.com/GunduzTolga/Cortex/releases/latest) `Cortex-Setup-X.Y.Z.exe` dosyasını indir.
-2. **Kur.** Yönetici izni istemez; yalnız senin kullanıcın için kurulur.
+2. **Kur.** Yönetici izni istemez ve "kimin için" diye sormaz; yalnız senin kullanıcın için kurulur.
    > Kurulum dosyası henüz kodla imzalı değil. Windows **"Windows bilgisayarınızı korudu"** ekranını gösterirse **Ek bilgi** → **Yine de çalıştır**.
 3. **İlk kurulum ekranını izle.** Pyn sırayla sorar ve kurar:
    - sana nasıl hitap edeceğini,
@@ -87,6 +87,8 @@ Terminal gerekmez; uygulama gerekeni kendisi kurar.
    - Pyn'in hafızasını (notlarına dokunulmaz),
    - yapay zeka aracını ve girişini (Claude Code kurulu değilse uygulamadan kurulur),
    - isteğe bağlı sesle yazmayı.
+
+   > **Claude Code ücretli bir Claude planı ister** (Pro, Max vb.). Planın yoksa aynı ekrandan Codex, OpenCode, Gemini CLI ya da Qwen Code'u kurup onunla giriş yapabilirsin (ücretini ve varsa ücretsiz kullanım payını her aracın kendi sağlayıcısı belirler) ya da bilgisayarında çalışan yerel bir modeli seçebilirsin: LM Studio ya da Ollama'yı kendin kurarsın, Cortex onu bulur; ücretsizdir ve hiçbir şey bilgisayardan çıkmaz.
 
    İsteğe bağlı adımlar **Atla** ile geçilir ve sonra Ayarlar'dan yapılır.
 
@@ -162,7 +164,11 @@ Hafızayı model değil istemci taşır; ücretsiz, uygun fiyatlı ya da yerel m
 
 Cortex notlarını kendi başına hiçbir yere göndermez ve telemetri toplamaz.
 
-- **Tek otomatik ağ isteği:** GitHub'a sorulan "yeni sürüm var mı?" sorusu; not ya da hesap bilgisi taşımaz ve kapatılabilir. Geri kalan her istek senin başlattığın bir işten gelir (Yakala, sesle yazma kurulumu, güncelleme, Telegram).
+- **Kendiliğinden yapılan ağ istekleri yalnız güncelleme içindir;** not ya da hesap bilgisi taşımaz ve ikisi de kapatılır:
+  - **Hafıza motoru** asistan oturumu açılırken GitHub'a "yeni sürüm var mı?" diye sorar (günde en çok bir kez); bir şey indirmez. `beyin.py preferences --update-notifications off` kapatır.
+  - **Windows masaüstü uygulaması** açıldıktan yarım dakika sonra ve çalıştığı sürece 6 saatte bir GitHub'a sorar; yeni sürüm varsa kurulum dosyasını (yaklaşık 160 MB) sormadan arka planda indirir, hazır olunca haber verir. **Ayarlar › Hakkında › Güncellemeleri kendiliğinden indir** kapalıyken ne sorar ne indirir; yeni sürümü sürümler sayfasından kendin kurarsın.
+
+  Geri kalan her istek senin başlattığın bir işten gelir (Yakala, sesle yazma kurulumu, terminalden güncelleme, Telegram, kasa eşitleme).
 - **Asıl akış:** mesajınla eşleşen notlar asistanın bağlamına eklenir ve böylece kullandığın yapay zeka sağlayıcısına gider. Yerel bir model kullanırsan hiçbir şey bilgisayardan çıkmaz.
 - **Neyin gitmeyeceğini sen seçersin:**
   - `visibility: private` işaretli notlar otomatik bağlama girmez.
@@ -189,6 +195,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.62](docs/v3/releases/1.0.62.md) | İlk kez kuran için baştan sona gözden geçirildi: takılan girişte yeniden dene ve vazgeç var, araç açılmayınca ve internet yokken neden ve çare söyleniyor, "Hey Pyn" zayıf bilgisayarda daha çabuk ve duyduğunu belli ederek açılıyor, takılan indirmeler fark ediliyor, şirket ağının proxy'si kullanılıyor, güncelleme Ayarlar'dan kapatılabiliyor |
 | [1.0.61](docs/v3/releases/1.0.61.md) | İnen güncelleme artık gerçekten kuruluyor: Cortex Windows'la açıldığında, pencere açılmadan önce, sessizce. Önceden yalnız "Yeniden başlat"a ya da "Çıkış"a basılınca kuruluyordu. Electron 43.8.7 (güvenlik yaması). |
 | [1.0.60](docs/v3/releases/1.0.60.md) | Yakala bozuk karakterli sayfada takılmıyor, doktor bayat kuralları ayırt ediyor, Jev başlıksız kayıtta hata vermiyor |
 | [1.0.59](docs/v3/releases/1.0.59.md) | Kasayı yapay zeka araçlarına masaüstünden bağlamak (Ayarlar hazır satırı veriyor, Claude Code'a tek düğmeyle ekliyor) ve sunucuya kodla bağlanmak: Ayarlar › Sunucu'ya tek kullanımlık kodu yapıştırınca Cortex kendi küçük bağlantı aracıyla tailnet'e katılıyor, Tailscale kurmak ya da adres yazmak gerekmiyor. 1.0.57 ve 1.0.58 bu sürümle geliyor. |
@@ -244,7 +251,7 @@ Arama yerel kelime eşleştirmesi kullanır; genel doğal dil anlama ya da her s
 - **Take a note anywhere:** `Ctrl+Alt+C` opens a small window over any app; on Windows, "Pyn, not al" or "Hey Pyn" opens it too. Speech is transcribed locally by Whisper (CUDA, Vulkan or CPU) and never leaves the computer.
 - **Capture:** save the open browser page, a screenshot, a video, an article or a file with one key; your assistant extracts the text and links the lessons into your notes.
 - **From your phone:** send a text, link, photo, file or voice note to your own Telegram bot and it lands in the vault's inbox.
-- **Privacy:** notes marked `visibility: private` and folders named like "Private", "Secret" or "Passwords" never enter automatic context. The only automatic network request is an update check against GitHub, which can be turned off.
+- **Privacy:** notes marked `visibility: private` and folders named like "Private", "Secret" or "Passwords" never enter automatic context. The only automatic network requests are for updates, against GitHub: the engine asks whether a newer version exists (at most daily), and the Windows app asks half a minute after it starts and every 6 hours, then downloads a newer installer (about 160 MB) in the background. Both can be turned off: `beyin.py preferences --update-notifications off`, and Settings › About › "Download updates by itself".
 
 The documentation is in Turkish; the desktop app also has an English interface. Download the Windows installer from the [latest release](https://github.com/GunduzTolga/Cortex/releases/latest). On macOS and Linux, install the engine with `python3 scripts/install_v3.py --vault <folder>` from the release package. The installer is not code-signed yet, so Windows SmartScreen may ask you to confirm (**More info → Run anyway**).
 

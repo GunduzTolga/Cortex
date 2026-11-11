@@ -6,6 +6,7 @@ import test from 'node:test';
 import { app } from 'electron';
 import { forgetSettings, readSettings, settingsPath } from '../electron/services/settings';
 import { defaultVaultDir, ownDataTouchedBy, setVault, vaultStatus } from '../electron/services/vault';
+import { turkishOf } from '../shared/refusalsTr';
 
 /**
  * Which folder is the vault (electron/services/vault.ts): a folder, by its
@@ -94,4 +95,37 @@ test('the first run’s vault is made as Cortex in Documents; one holding other 
   const second = await defaultVaultDir(documents);
   assert.equal(second, path.join(documents, 'Cortex 2'), 'a Cortex holding other things is left alone');
   assert.equal(fs.readFileSync(path.join(first, 'baska.txt'), 'utf8'), 'someone else’s', 'and nothing in it touched');
+});
+
+test('K11: Documents not letting Cortex make the vault’s folder is said as that, with what to do, not as Node’s EPERM and the path', async () => {
+  // "Controlled folder access" keeping Documents, or a Documents the account may not write in: the toast read
+  // "EPERM: operation not permitted, mkdir 'C:\\Users\\…\\Documents\\Cortex'".
+  const documents = fs.mkdtempSync(path.join(os.tmpdir(), 'belgeler-korumali-'));
+  const promises = fs.promises as { mkdir: typeof fs.promises.mkdir };
+  const mkdir = promises.mkdir;
+  const warn = console.warn;
+  const logged: string[] = [];
+  console.warn = (...said: unknown[]) => void logged.push(said.join(' '));
+  promises.mkdir = (async (dir: fs.PathLike) => {
+    throw Object.assign(new Error(`EPERM: operation not permitted, mkdir '${String(dir)}'`), { code: 'EPERM' });
+  }) as typeof fs.promises.mkdir;
+  try {
+    await assert.rejects(defaultVaultDir(documents), (err: unknown) => {
+      assert.ok(err instanceof Error);
+      assert.equal(err.message, 'Cortex could not make a folder for the vault in Documents: Windows did not allow it (the folder may be protected). Choose another folder.');
+      assert.ok(!err.message.includes(documents) && !/EPERM|mkdir/.test(err.message), 'no path and no system error in what the window shows');
+      return true;
+    });
+    assert.ok(logged.some((line) => line.includes('EPERM')), 'the system’s own word goes to the log');
+    assert.ok(!fs.existsSync(path.join(documents, 'Cortex')));
+  } finally {
+    promises.mkdir = mkdir;
+    console.warn = warn;
+    fs.rmSync(documents, { recursive: true, force: true });
+  }
+  // In Turkish, as the window shows it (shared/refusalsTr.ts).
+  assert.equal(
+    turkishOf('Cortex could not make a folder for the vault in Documents: Windows did not allow it (the folder may be protected). Choose another folder.'),
+    'Cortex, Belgeler içinde kasa için klasör açamadı: Windows izin vermedi (klasör korumalı olabilir); Kasayı seç ile başka bir klasör seç.',
+  );
 });

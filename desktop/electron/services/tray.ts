@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { hotkeyLabel, HOTKEYS, type ListenerSeen, wakePhraseLabel, type VoiceStatus, type WakeTrouble } from '../../shared/setup';
 import { readSettings } from './settings';
-import { type ListenerWord, listenerHasSpoken, listenerRestarting, readListener, readOwner } from './microphone';
+import { type ListenerWord, type ListenerWordNow, type LoadTrouble, type WakeHeard, listenerHasSpoken, listenerRestarting, readListener, readOwner } from './microphone';
 import { onVoiceStatus, openNoteWindow, restartListener, setupStatus, setVoice } from './setup';
 
 /**
@@ -131,6 +131,8 @@ export function trayTooltip(voice: VoiceStatus | null, english: boolean, seen: P
   const phrase = wakePhraseLabel(voice?.wakePhrase, english);
   const usable = Boolean(voice?.installed && voice.on);
   if (usable && seen.missing) return english ? 'Cortex · the listener is not running' : 'Cortex · dinleyici çalışmıyor';
+  // Heard, and its window not open yet: said before "getting ready", which it may be at the same time.
+  if (listensAlways(voice) && (seen.word as ListenerWordNow | null | undefined)?.duydu) return english ? 'Cortex · Pyn heard you…' : 'Cortex · Pyn seni duydu…';
   if (usable && seen.word?.ses === 'yukleniyor') {
     const far = percent === null ? '' : english ? ` ${percent}%` : ` %${percent}`;
     return english ? `Cortex · voice is getting ready…${far}` : `Cortex · Pyn hazırlanıyor…${far}`;
@@ -257,7 +259,7 @@ function ownKey(): string | null {
 export const currentListener = (): ListenerSeen => ({ word: helper, missing, hotkey: ownKey(), quiet });
 
 /** What the listener said of its voice last, read every two seconds while the icon is there (services/microphone.ts). */
-let helper: ListenerWord | null = null;
+let helper: ListenerWordNow | null = null;
 /** No listener where one should run, since then (`missingSince`), and whether that is said now (`isMissing`). */
 let missingFrom: number | null = null;
 let missing = false;
@@ -289,7 +291,45 @@ export function expectVoiceTurn(): void {
  * one that would not load says so. Before, the wake phrase only seemed not to work until then,
  * and Cortex was closed and opened again (21 October).
  */
-export function helperTurn(before: ListenerWord | null, now: ListenerWord | null, english: boolean, phrase: string, toldLoad: boolean): { title: string; body: string } | null {
+/**
+ * Why the voice model did not load, in English: the engine sorts its failures (`hata_turu`) and says each in a Turkish
+ * sentence (`mesaj`, beyin_v3_ses.LOAD_TROUBLE), which a Turkish window shows as it is. Before, the notification carried
+ * the library's own words, whatever the window's language ("Unable to open file 'model.bin' in model …").
+ */
+const LOAD_TROUBLE_EN: Record<LoadTrouble, string> = {
+  ag: 'The voice model could not be downloaded: no internet connection; check it, and on a company network huggingface.co may be blocked.',
+  disk: 'The voice model could not start: the disk is full; free some space.',
+  bellek: 'There was not enough memory for the voice model; close a few open programs.',
+  bozuk: 'The voice model’s file is missing or damaged; set voice typing up again in Settings → Voice typing.',
+  bilinmeyen: 'The voice model did not load; the details are in isci.log in the voice folder.',
+};
+
+/**
+ * The wake phrase heard, said before its window opens (the helper's `duydu`): what to do about each change. While the
+ * model still loads the wait is long, and it is said at once (`say`); a check alone is mostly over in a moment, and is
+ * said only if it is not (`later`, HEARD_SAID_AFTER). Over - a window opened, or it was not the phrase - what was said
+ * is taken away without a word (`clear`).
+ */
+export function heardStep(before: WakeHeard | null, now: WakeHeard | null, told: boolean): 'say' | 'later' | 'clear' | null {
+  if (before === now) return null;
+  if (!now) return told ? 'clear' : null;
+  if (told) return null;
+  return now === 'hazirlaniyor' ? 'say' : 'later';
+}
+
+/** What is said of a phrase heard and not yet answered with a window. */
+export function heardNotice(heard: WakeHeard, english: boolean): { title: string; body: string } {
+  const say = (tr: string, en: string) => (english ? en : tr);
+  return {
+    title: say('Pyn seni duydu', 'Pyn heard you'),
+    body:
+      heard === 'hazirlaniyor'
+        ? say('Ses modeli hâlâ hazırlanıyor; hazır olunca not penceresi açılır. İki dakikada hazır olmazsa sözü yeniden söylemen gerekir.', 'The voice model is still getting ready; the note window opens once it is. If it is not ready within two minutes, say the phrase again.')
+        : say('Uyandırma sözünü denetliyorum; söz buysa not penceresi birazdan açılır.', 'Checking the wake phrase; if that was it, the note window opens in a moment.'),
+  };
+}
+
+export function helperTurn(before: ListenerWord | null, now: ListenerWordNow | null, english: boolean, phrase: string, toldLoad: boolean): { title: string; body: string } | null {
   const say = (tr: string, en: string) => (english ? en : tr);
   if (!now || before?.ses === now.ses) return null;
   if (now.ses === 'hazir' && (toldLoad || before?.ses === 'hata')) {
@@ -303,7 +343,7 @@ export function helperTurn(before: ListenerWord | null, now: ListenerWord | null
   if (now.ses === 'hata') {
     return {
       title: say('Ses açılamadı', 'Voice could not start'),
-      body: say(`${now.mesaj || 'Ses modeli yüklenemedi.'} Birazdan yeniden denenecek.`, `${now.mesaj || 'The voice model did not load.'} It will be tried again shortly.`),
+      body: say(`${now.mesaj || 'Ses modeli yüklenemedi.'} Birazdan yeniden denenecek.`, `${(now.hata_turu && LOAD_TROUBLE_EN[now.hata_turu]) || now.mesaj || 'The voice model did not load.'} It will be tried again shortly.`),
     };
   }
   return null;
@@ -351,6 +391,38 @@ export function listenerTurn(
   return null;
 }
 
+/** A check of the wake phrase that takes longer than this is said (`heardStep`): a quick one is answered by its window. */
+const HEARD_SAID_AFTER = 2_500;
+let heardTimer: NodeJS.Timeout | null = null;
+let toldHeard = false;
+
+/** The phrase heard, said or taken back (`heardStep`); the icon's own notice only, never a window. */
+function followHeard(before: WakeHeard | null, now: WakeHeard | null): void {
+  const step = heardStep(before, now, toldHeard);
+  const tell = () => {
+    const heard = helper?.duydu;
+    if (!heard || toldHeard) return;
+    toldHeard = true;
+    const notice = heardNotice(heard, english());
+    trayNotice(notice.title, notice.body);
+  };
+  if (!now && heardTimer) {
+    clearTimeout(heardTimer);
+    heardTimer = null;
+  }
+  if (step === 'say') tell();
+  else if (step === 'later' && !heardTimer) {
+    heardTimer = setTimeout(() => {
+      heardTimer = null;
+      tell();
+    }, HEARD_SAID_AFTER);
+    heardTimer.unref?.();
+  } else if (step === 'clear') {
+    toldHeard = false;
+    tray?.removeBalloon();
+  }
+}
+
 function listenToHelper(): void {
   const next = readListener();
   const now = Date.now();
@@ -362,6 +434,7 @@ function listenToHelper(): void {
   if (JSON.stringify(before.word) === JSON.stringify(next) && before.missing === missing) return;
   const seen = currentListener();
   for (const listener of helperListeners) listener(seen);
+  followHeard((before.word as ListenerWordNow | null)?.duydu ?? null, next?.duydu ?? null);
   const other = listenerTurn(before, seen, english());
   if (other && other.body !== toldListener) {
     trayNotice(other.title, other.body);

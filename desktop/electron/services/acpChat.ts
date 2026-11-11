@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { app } from 'electron';
 import type { CliId, ConfigOption, PermissionKind, ToolStatus } from '../../shared/chat';
-import { AcpConnection, AcpError } from './acp';
+import { AcpConnection, AcpError, systemProxyKnown } from './acp';
 import { type Backend, ChatRefusal, OUTPUT_MAX, STOP_GRACE, Stopped, TITLE_MAX, type Turn, TurnFailure, cardPath, cardTextFor, cutSaid, scrubberFor, shownPath, textOf, unlessStopped, vaultWord } from './chatKit';
 import { launchFor } from './clis';
 import { keptReadable } from './keys';
@@ -23,8 +23,19 @@ interface Conn {
   vault: string;
   acp: AcpConnection;
   ready: Promise<void>;
+  /** It answered `initialize`: until then it is a program still starting, or stuck in its start. */
+  settled: boolean;
+  /** The turns waiting for it to be ready. */
+  waiting: number;
   canResume: boolean;
 }
+
+/**
+ * How long a program has to answer `initialize` (and take its key) before it is taken for stuck and ended: in an
+ * object, so a test can wait less. A first start under a virus scan takes tens of seconds; one that never answers
+ * held every chat of its CLI until the app was closed (S5).
+ */
+export const READY_MAX = { ms: 180_000 };
 
 const conns = new Map<CliId, Conn>();
 /** Each chat's session, in the program it lives in. */
@@ -132,7 +143,7 @@ function connectionFor(cli: CliId, vault: string): Promise<Conn> {
   had?.acp.close();
   const launch = launchFor(cli);
   if (!launch) throw new ChatRefusal(`${cli} is not installed on this machine.`);
-  const conn = { cli, vault, canResume: false } as Conn;
+  const conn = { cli, vault, canResume: false, settled: false, waiting: 0 } as Conn;
   conn.acp = new AcpConnection(launch, vault, {
     notify: (method, params) => heard(conn, method, params),
     request: (method, params) => asked(method, params),
@@ -142,7 +153,7 @@ function connectionFor(cli: CliId, vault: string): Promise<Conn> {
       if (spares.get(cli)?.conn === conn) spares.delete(cli);
     },
   });
-  conn.ready = conn.acp
+  const started = conn.acp
     .request('initialize', {
       protocolVersion: 1,
       // The program reads and writes the vault with its own tools, under its own permissions: Cortex serves it no files and no terminal.
@@ -155,7 +166,14 @@ function connectionFor(cli: CliId, vault: string): Promise<Conn> {
       // A key kept by Cortex is in the program's environment; it is told to use it, by the way in it names for a key (14 October).
       const method = KEY_METHODS[cli];
       if (method && keptReadable(cli) && answer?.authMethods?.some((one) => one.id === method)) await conn.acp.request('authenticate', { methodId: method });
+      conn.settled = true;
     });
+  // Ready, or given up on: a start that never answers fails here, and is ended below as any failed start is.
+  conn.ready = new Promise<void>((resolve, reject) => {
+    const seconds = Math.round(READY_MAX.ms / 1000);
+    const timer = setTimeout(() => reject(new TurnFailure(`The AI tool did not answer within ${seconds} seconds of starting, and was closed.`, 'start-timeout')), READY_MAX.ms);
+    started.then(resolve, reject).finally(() => clearTimeout(timer));
+  });
   // A start that failed is not kept: the next message starts the program again, rather than meet the same failure until the app is closed.
   conn.ready.catch(() => {
     if (conns.get(cli) !== conn) return;
@@ -434,6 +452,29 @@ async function withOpencodeCause(cli: CliId, failure: TurnFailure, since: number
   return failure;
 }
 
+/**
+ * The turn's program, ready, or the turn's Stop. Stopped while the program was still starting, the program is ended:
+ * one stuck in its `initialize` was left running, and the chat's next message waited on the same one for ever (S5).
+ * Not while another chat's turn waits on it too: that one is not cut off by this chat's Stop.
+ */
+async function connected(turn: Turn): Promise<Conn> {
+  await systemProxyKnown();
+  const ready = connectionFor(turn.cli, turn.vault);
+  const starting = conns.get(turn.cli);
+  if (starting) starting.waiting += 1;
+  try {
+    return await unlessStopped(turn.signal, ready);
+  } catch (err) {
+    if (err instanceof Stopped && starting && !starting.settled && starting.waiting === 1 && conns.get(turn.cli) === starting) {
+      conns.delete(turn.cli);
+      starting.acp.close();
+    }
+    throw err;
+  } finally {
+    if (starting) starting.waiting -= 1;
+  }
+}
+
 export const acpBackend: Backend = {
   async run(original, message) {
     const began = Date.now();
@@ -447,7 +488,7 @@ export const acpBackend: Backend = {
       },
     };
     try {
-      const conn = await unlessStopped(turn.signal, connectionFor(turn.cli, turn.vault));
+      const conn = await connected(turn);
       sessionId = await unlessStopped(turn.signal, sessionFor(turn, conn));
       const letGo = new Promise<{ stopReason: string }>((resolve) => {
         entry = { turn, conn, letGo: () => resolve({ stopReason: 'cancelled' }) };
@@ -494,7 +535,18 @@ export const acpBackend: Backend = {
     const going = probing.get(cli);
     if (going) return going;
     const asked = (async () => {
-      const conn = await connectionFor(cli, vault);
+      // Counted among those waiting for the program, as a turn is: a chat's Stop while this asks does not end the
+      // program under it (the second review, R2S-6).
+      await systemProxyKnown();
+      const ready = connectionFor(cli, vault);
+      const starting = conns.get(cli);
+      if (starting) starting.waiting += 1;
+      let conn: Conn;
+      try {
+        conn = await ready;
+      } finally {
+        if (starting) starting.waiting -= 1;
+      }
       const had = spares.get(cli);
       if (had && had.conn === conn) return had.options;
       const made = (await conn.acp.request('session/new', { cwd: conn.vault, mcpServers: [] })) as { sessionId?: unknown; configOptions?: unknown } | null;

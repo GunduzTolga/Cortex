@@ -1,11 +1,14 @@
 import { BrowserWindow, ipcMain, session } from 'electron';
 import path from 'node:path';
 import { type Capture, MicLink, micMayAsk, micMayCheck, micUrlAllowed } from './micCapture';
+import { readSettings } from './settings';
 
 /**
  * The window that records, never shown (micCapture.ts says why Cortex holds the microphone). It is made when the
  * helper first wants sound and closed a minute after it last did, so a machine with little memory does not keep a
- * page open for nothing; the wake listener keeps it while it listens.
+ * page open for nothing; the wake listener keeps it while it listens. Where the person let the microphone listen
+ * all the time it is made as the app starts (`startMicCapture`): the wake listener asks for sound within seconds,
+ * and a window made only then, cold, took longer to send its first sound than the helper waited for it.
  *
  * It runs in a session of its own (PARTITION, kept in memory only): the app's session refuses every permission and
  * stays that way, and this one grants the microphone to this window and nothing else to anything.
@@ -113,17 +116,27 @@ const windowCapture: Capture = {
   stop() {
     pending = null;
     if (win && !win.isDestroyed() && ready) win.webContents.send('mic:stop');
-    if (idle) clearTimeout(idle);
-    idle = setTimeout(() => {
-      idle = null;
-      if (link?.wanted) return;
-      const closing = win;
-      win = null;
-      if (closing && !closing.isDestroyed()) closing.destroy();
-    }, IDLE_CLOSE);
-    idle.unref?.();
+    closeWhenIdle();
   },
 };
+
+/** The window closed once the helper has not wanted sound for IDLE_CLOSE. */
+function closeWhenIdle(): void {
+  if (idle) clearTimeout(idle);
+  idle = setTimeout(() => {
+    idle = null;
+    if (link?.wanted) return;
+    const closing = win;
+    win = null;
+    if (closing && !closing.isDestroyed()) closing.destroy();
+  }, IDLE_CLOSE);
+  idle.unref?.();
+}
+
+/** Whether the recording window is made as the app starts: where the wake listener will ask for sound at once. */
+export function madeAtStart(platform: NodeJS.Platform, wakeConsent: boolean): boolean {
+  return platform === 'win32' && wakeConsent;
+}
 
 /** Whether a window is the hidden one that records: the app's own code looking for its window passes it by. */
 export function isMicWindow(one: BrowserWindow): boolean {
@@ -136,6 +149,11 @@ export function startMicCapture(): void {
   listen();
   link = new MicLink(windowCapture);
   link.start();
+  // Made now, its page loaded before sound is asked for; unused for a minute, it closes as any idle one does.
+  if (madeAtStart(process.platform, readSettings().wakeConsent) && (!win || win.isDestroyed())) {
+    win = make();
+    closeWhenIdle();
+  }
 }
 
 /** The app quits: the microphone let go at once, the helper takes it back when it next needs it. */
