@@ -65,8 +65,9 @@ Tarayıcı Cortex'i bu dosyadan bulur. Adı `browser-link.json`, yeri uygulaman�
 
 - Cortex **her açılışta** yazar (önceki çalışmadan kalanın üzerine) ve **kapanışta silmez**: dosyanın varlığı
   Cortex'in kurulu olduğunu ve `exe`'nin yerini söyler, çalıştığını söylemez.
-- `pipe`: bağlanılacak boru (ya da soket yolu). Dinleyici kapalıyken ya da açılamadıysa `null`. Her açılışta değişir;
-  tarayıcı her bağlanışta dosyayı yeniden okur.
+- `pipe`: bağlanılacak boru (ya da soket yolu). Dinleyici kapalıyken ya da açılamadıysa `null`; uygulama düzgün
+  kapanırken de `null` yazılır (kimsenin dinlemediği bir ad yazılı kalmaz). Çökmeden ya da Windows oturumu
+  kapanmasından sonra eski ad kalabilir. Her açılışta değişir; tarayıcı her bağlanışta dosyayı yeniden okur.
 - `pipe` `null` ise ya da boruya bağlanılamıyorsa tarayıcı `exe`'yi `--gizli --tarayici` ile başlatır ve dosyanın
   yeniden yazılmasını bekler. Cortex zaten çalışıyorsa bu ikinci başlatma dinleyiciyi açar ve dosyayı günceller.
 - Dosya bütün olarak yazılır (yanına yazılıp yerine taşınır). `pid`, dosyayı yazan süreçtir.

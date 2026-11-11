@@ -780,11 +780,15 @@ export async function setBrowserLinkOn(on: unknown): Promise<BrowserLinkStatus> 
 }
 
 /**
- * The app closing: every browser told and the listener closed. The meeting file is left as it is: by it the browser
- * finds the program to start, and a pipe nothing listens on tells it that Cortex is not running.
+ * The app closing: every browser told and the listener closed. The meeting file stays - by it the browser finds the
+ * program to start - and names no pipe from here on: nothing listens, and a name left written would be one for
+ * another program to open in Cortex's place. Where the app ends without this (a crash, Windows signing out) the name
+ * stays, and a pipe nothing listens on tells the browser as much.
  */
 export function stopBrowserLink(): void {
+  const listened = listeningOn !== null;
   closeListener();
+  if (listened) writeMeeting(null);
   refusals = 0;
   refusedAt = 0;
   askedAgainAt = Number.NEGATIVE_INFINITY;

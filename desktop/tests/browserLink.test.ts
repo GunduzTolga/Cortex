@@ -267,8 +267,12 @@ test('the listener is closed until the person opens it, or Cortex is started for
   assert.ok(typeof said()?.pipe === 'string' && said()?.pipe !== second);
   if (process.platform !== 'win32') assert.deepEqual(fs.readdirSync(path.join(userData(), 'link')), [path.basename(said()?.pipe as string)]);
 
-  // Started for the browser (`--tarayici`), with the setting off: opened, and kept on from then.
+  // The app closing: the file stays, to say where the program is, and names no pipe any more - nothing listens.
   stopBrowserLink();
+  assert.equal(fs.existsSync(meeting()), true);
+  assert.equal(said()?.pipe, null, 'a pipe nothing listens on is not left written');
+  assert.equal(said()?.exe, app.getPath('exe'));
+  // Started for the browser (`--tarayici`), with the setting off: opened, and kept on from then.
   updateSettings((settings) => {
     settings.browserLink = false;
   });
