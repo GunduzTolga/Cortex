@@ -1320,11 +1320,40 @@ await page.keyboard.press('Enter');
 await shownSoon(page.locator('[data-chat-text]', { hasText: 'Merhaba dünya' }));
 await page.locator('[data-chat-send]').waitFor();
 const meetingFile = path.join(userData, 'browser-link.json');
-const meeting = JSON.parse(fs.readFileSync(meetingFile, 'utf8'));
+const readMeeting = () => JSON.parse(fs.readFileSync(meetingFile, 'utf8'));
+const mainPid = await app.evaluate(() => process.pid);
 check(
-  'the meeting file in the app’s data says where the link is, and whose it is',
-  meeting.version === 1 && typeof meeting.pipe === 'string' && meeting.pipe.length > 0 && typeof meeting.exe === 'string' && meeting.pid === (await app.evaluate(() => process.pid)),
+  'Cortex writes its meeting file at its start, and listens for no browser until it is asked to',
+  readMeeting().version === 1 && readMeeting().pipe === null && typeof readMeeting().exe === 'string' && readMeeting().pid === mainPid && JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8')).browserLink === false,
 );
+/*
+  The browser starts Cortex hidden and with the link opened when it finds no pipe to connect to (`Cortex.exe --gizli
+  --tarayici`). Started so while Cortex runs, the second launch hands its arguments to the one that runs and goes: the
+  window is left as it was, not brought to the front, and the listener is opened and kept on from then.
+*/
+const shownBefore = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible());
+await setInMain(({ app: electronApp }) => {
+  globalThis.cortexSecond = null;
+  electronApp.on('second-instance', (_event, argv) => {
+    globalThis.cortexSecond = argv;
+  });
+});
+const secondExit = await new Promise((done) => {
+  const second = spawn(electronBinary, [...launchArgs, '--gizli', '--tarayici'], { env: launchEnv, stdio: 'ignore' });
+  second.on('exit', (code) => done(code));
+  second.on('error', () => done(-1));
+});
+let secondArgv = null;
+for (const end = Date.now() + 20_000; Date.now() < end && !secondArgv; await new Promise((done) => setTimeout(done, 100))) secondArgv = await app.evaluate(() => globalThis.cortexSecond);
+check(
+  'started a second time with --gizli, Cortex stays as it was: the launch is heard, and no window comes to the front',
+  secondExit !== -1 && Array.isArray(secondArgv) && secondArgv.includes('--gizli') && (await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible())) === shownBefore && app.windows().length === 1,
+);
+check(
+  'and with --tarayici it opens the link: the meeting file names a pipe now, and the link is kept on',
+  (await soon(() => typeof readMeeting().pipe === 'string' && readMeeting().pipe.length > 0)) && readMeeting().pid === mainPid && JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8')).browserLink === true,
+);
+const meeting = readMeeting();
 /** The browser's end: every line Cortex writes, and whether the link was closed. */
 const browserHeard = [];
 let browserClosed = false;
@@ -1350,9 +1379,15 @@ const browserSay = (message) => browserSocket.write(`${JSON.stringify(message)}\
 const browserEvents = (id) => browserHeard.filter((one) => one.type === 'event' && one.id === id);
 const browserEnded = (id) => soon(() => browserEvents(id).some((one) => one.kind === 'done' || one.kind === 'error'), 30_000);
 browserSay({ type: 'hello', protocol: 1, client: 'cortex-browser', client_version: '0.0.1', token: null });
+await soon(() => browserHeard.some((one) => one.type === 'pairing'));
+const pairingCode = browserHeard.find((one) => one.type === 'pairing')?.code;
 check(
-  'a browser that connects for the first time is told to wait, and the person is asked on a card',
-  (await soon(() => browserHeard.some((one) => one.type === 'pairing' && one.state === 'waiting'))) && (await shownSoon(page.locator('[data-browser-link-ask]'))) && !browserHeard.some((one) => one.type === 'hello_ok'),
+  'a browser that connects for the first time is told to wait, with a code, and the person is asked on a card that shows the same code',
+  browserHeard[0]?.state === 'waiting' &&
+    /^\d{4}$/.test(String(pairingCode)) &&
+    (await shownSoon(page.locator('[data-browser-link-ask]'))) &&
+    (await page.locator('[data-browser-link-code]').textContent())?.trim() === pairingCode &&
+    !browserHeard.some((one) => one.type === 'hello_ok'),
 );
 await shoot('13c-browser-ask.png');
 await page.locator('[data-browser-link-allow]').click();
@@ -1379,6 +1414,10 @@ const firstAnswer = browserEvents('a1');
 check(
   'its question is answered by the tool last written to in Cortex: starting, thinking, answering, the words, done',
   firstAnswer.filter((one) => one.kind === 'status').map((one) => one.phase).join() === 'starting,thinking,answering' &&
+    // The tool that answers is said with the first status, and once.
+    firstAnswer[0]?.tool?.id === 'test-claude' &&
+    firstAnswer[0]?.tool?.can_ask === true &&
+    firstAnswer.filter((one) => one.tool).length === 1 &&
     // Without a page, a note of the vault is Pyn's to edit unasked, as in any chat of Cortex's.
     firstAnswer.filter((one) => one.kind === 'text').map((one) => one.text).join('') === 'düzenledim: sormadan. Merhaba dünya, [[Ideas]] notuna baktım.' &&
     !firstAnswer.some((one) => one.kind === 'permission') &&
@@ -1438,28 +1477,6 @@ browserSay({ type: 'capture', id: 'k1', title: 'Örnek sayfa', url: 'https://exa
 await soon(() => browserHeard.some((one) => one.type === 'captured' && one.id === 'k1'), 30_000);
 const browserKept = browserHeard.find((one) => one.type === 'captured' && one.id === 'k1') ?? {};
 check('a page it asks to keep is answered: here, that the vault cannot keep it yet', browserKept.ok === false && browserKept.code === 'capture_failed' && typeof browserKept.detail === 'string' && browserKept.detail.length > 0);
-/*
-  The browser starts Cortex hidden when it finds it closed (`Cortex.exe --gizli`). Started so while it runs, the second
-  launch hands its arguments to the one that runs and goes; the window is left as it was, not brought to the front.
-*/
-const shownBefore = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible());
-await setInMain(({ app: electronApp }) => {
-  globalThis.cortexSecond = null;
-  electronApp.on('second-instance', (_event, argv) => {
-    globalThis.cortexSecond = argv;
-  });
-});
-const secondExit = await new Promise((done) => {
-  const second = spawn(electronBinary, [...launchArgs, '--gizli'], { env: launchEnv, stdio: 'ignore' });
-  second.on('exit', (code) => done(code));
-  second.on('error', () => done(-1));
-});
-let secondArgv = null;
-for (const end = Date.now() + 20_000; Date.now() < end && !secondArgv; await new Promise((done) => setTimeout(done, 100))) secondArgv = await app.evaluate(() => globalThis.cortexSecond);
-check(
-  'started a second time with --gizli, Cortex stays as it was: the launch is heard, and no window comes to the front',
-  secondExit !== -1 && Array.isArray(secondArgv) && secondArgv.includes('--gizli') && (await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible())) === shownBefore && app.windows().length === 1,
-);
 // The settings say the link as it is, and take the leave back.
 await page.locator('[data-settings-open]').click();
 const linkSection = page.locator('[data-settings-section="browser-link"]');
@@ -1476,6 +1493,18 @@ check(
     JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8')).browserLinkToken === null &&
     (await linkSection.locator('[data-browser-link-unpair]').count()) === 0,
 );
+// The switch: off, nothing listens and the file names no pipe; on again, it is another pipe.
+await linkSection.locator('[data-browser-link-on]').click();
+check(
+  'switched off in the settings, the listener is closed: the meeting file names no pipe',
+  (await shownSoon(linkSection.locator('[data-browser-link-on="off"]'))) && (await soon(() => readMeeting().pipe === null)) && JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8')).browserLink === false,
+);
+await linkSection.locator('[data-browser-link-on]').click();
+check(
+  'switched on again, it listens under a name drawn anew',
+  (await shownSoon(linkSection.locator('[data-browser-link-on="on"]'))) && (await soon(() => typeof readMeeting().pipe === 'string' && readMeeting().pipe !== meeting.pipe)),
+);
+const lastPipe = readMeeting().pipe;
 await page.keyboard.press('Escape');
 await page.locator('[data-settings]').waitFor({ state: 'detached' });
 browserSocket.destroy();
@@ -1708,7 +1737,16 @@ check('what it asked for went to the system’s browser instead (stood in for: n
 */
 console.log('\nOpened again');
 await app.close();
-check('closed, Cortex takes its meeting file with it: a browser finds nothing to connect to', !fs.existsSync(meetingFile));
+check(
+  'closed, Cortex leaves its meeting file: the browser finds the program to start by it, and nothing listens on the pipe it names',
+  fs.existsSync(meetingFile) &&
+    typeof readMeeting().exe === 'string' &&
+    (await new Promise((done) => {
+      const probe = net.connect(readMeeting().pipe);
+      probe.once('connect', () => (probe.destroy(), done(false)));
+      probe.once('error', () => done(true));
+    })),
+);
 app = await launch();
 page = await app.firstWindow();
 await page.waitForLoadState('domcontentloaded');
@@ -1729,8 +1767,8 @@ check(
 );
 check('in the language chosen', (await page.evaluate(() => document.documentElement.lang)) === 'en');
 check(
-  'the link is open again under the same name, for the process that runs now',
-  (await soon(() => fs.existsSync(meetingFile))) && JSON.parse(fs.readFileSync(meetingFile, 'utf8')).pipe === meeting.pipe && JSON.parse(fs.readFileSync(meetingFile, 'utf8')).pid !== meeting.pid,
+  'opened again with the link kept on, it listens without being asked, under another name, for the process that runs now',
+  (await soon(() => readMeeting().pid !== meeting.pid && typeof readMeeting().pipe === 'string')) && readMeeting().pipe !== lastPipe && readMeeting().pipe !== meeting.pipe,
 );
 check('and the settings file is in the app’s data, not in the vault', fs.existsSync(path.join(userData, 'settings.json')) && !fs.readdirSync(vaultDir).includes('settings.json'));
 
