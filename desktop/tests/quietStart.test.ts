@@ -26,7 +26,9 @@ test('a second launch brings the window to the front, unless it asked to stay hi
   assert.equal(asksForBrowserLink(['Cortex.exe', '--tarayicilar', 'tarayici']), false);
   // main.ts hands the second launch's own arguments to the rules, and starts by the same flags.
   assert.match(main, /app\.on\('second-instance', \(_event, argv\) => \{[^}]*if \(secondLaunchShows\(argv\)\) showWindow\(\);/);
-  assert.match(main, /app\.on\('second-instance', \(_event, argv\) => \{[\s\S]*?if \(asksForBrowserLink\(argv\)\) void setBrowserLinkOn\(true\);/);
+  // The browser's word, not the person's switch: it opens nothing the person closed (services/browserLink.ts).
+  assert.match(main, /app\.on\('second-instance', \(_event, argv\) => \{[\s\S]*?if \(asksForBrowserLink\(argv\)\) void openBrowserLinkForBrowser\(\);/);
+  assert.doesNotMatch(main, /setBrowserLinkOn/, 'the switch is the settings’ alone');
   assert.doesNotMatch(main, /app\.on\('second-instance', \(\) => showWindow\(\)\)/);
   assert.match(main, /const START_HIDDEN = \[startedHidden\(process\.argv\), startedByQuietInstall\(\)\]\.some\(Boolean\);/);
   assert.match(main, /void startBrowserLink\(\{ asked: asksForBrowserLink\(process\.argv\) \}\)/);

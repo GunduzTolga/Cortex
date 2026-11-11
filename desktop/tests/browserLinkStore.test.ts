@@ -7,7 +7,7 @@ import type { BrowserLinkStatus } from '../shared/browserLink';
  * link's state as it is told, the person's answer to a browser waiting, and the leave taken back.
  */
 
-const NONE: BrowserLinkStatus = { on: true, listening: true, allowed: false, connected: false, asking: false, code: null, locked: false };
+const NONE: BrowserLinkStatus = { on: true, turnedOff: false, listening: true, allowed: false, connected: false, asking: false, code: null, locked: false };
 let now: BrowserLinkStatus = { ...NONE };
 let fails = false;
 let push: (status: BrowserLinkStatus) => void = () => undefined;
@@ -26,7 +26,7 @@ Object.assign(globalThis, {
       browserLink: {
         status: () => answer('status', {}),
         decide: (allow: boolean) => answer('decide', { asking: false, code: null, allowed: allow }, allow),
-        setOn: (on: boolean) => answer('setOn', { on, listening: on, connected: false }, on),
+        setOn: (on: boolean) => answer('setOn', { on, turnedOff: !on, listening: on, connected: false }, on),
         allow: () => answer('allow', now.asking ? { asking: false, code: null, allowed: true } : { locked: false }),
         unpair: () => answer('unpair', { allowed: false, connected: false }),
       },
@@ -65,7 +65,7 @@ test('the link’s state is asked for once and followed after; a browser waiting
 test('the switch closes and opens the link; "allow" in the settings lets a refused browser ask again', async () => {
   await useBrowserLink.getState().setOn(false);
   assert.deepEqual(calls.at(-1), ['setOn', false]);
-  assert.deepEqual([useBrowserLink.getState().status?.on, useBrowserLink.getState().status?.listening], [false, false]);
+  assert.deepEqual([useBrowserLink.getState().status?.on, useBrowserLink.getState().status?.turnedOff, useBrowserLink.getState().status?.listening], [false, true, false]);
   await useBrowserLink.getState().setOn(true);
   assert.deepEqual(calls.at(-1), ['setOn', true]);
   assert.equal(useBrowserLink.getState().status?.listening, true);

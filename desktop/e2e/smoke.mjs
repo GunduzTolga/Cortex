@@ -1324,7 +1324,7 @@ const readMeeting = () => JSON.parse(fs.readFileSync(meetingFile, 'utf8'));
 const mainPid = await app.evaluate(() => process.pid);
 check(
   'Cortex writes its meeting file at its start, and listens for no browser until it is asked to',
-  readMeeting().version === 1 && readMeeting().pipe === null && typeof readMeeting().exe === 'string' && readMeeting().pid === mainPid && JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8')).browserLink === false,
+  readMeeting().version === 1 && readMeeting().pipe === null && typeof readMeeting().exe === 'string' && readMeeting().pid === mainPid && JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8')).browserLink === null,
 );
 /*
   The browser starts Cortex hidden and with the link opened when it finds no pipe to connect to (`Cortex.exe --gizli
@@ -1351,7 +1351,7 @@ check(
 );
 check(
   'and with --tarayici it opens the link: the meeting file names a pipe now, and the link is kept on',
-  (await soon(() => typeof readMeeting().pipe === 'string' && readMeeting().pipe.length > 0)) && readMeeting().pid === mainPid && JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8')).browserLink === true,
+  (await soon(() => typeof readMeeting().pipe === 'string' && readMeeting().pipe.length > 0)) && readMeeting().pid === mainPid && JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8')).browserLink === 'on',
 );
 const meeting = readMeeting();
 /** The browser's end: every line Cortex writes, and whether the link was closed. */
@@ -1496,13 +1496,41 @@ check(
 // The switch: off, nothing listens and the file names no pipe; on again, it is another pipe.
 await linkSection.locator('[data-browser-link-on]').click();
 check(
-  'switched off in the settings, the listener is closed: the meeting file names no pipe',
-  (await shownSoon(linkSection.locator('[data-browser-link-on="off"]'))) && (await soon(() => readMeeting().pipe === null)) && JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8')).browserLink === false,
+  'switched off in the settings, the listener is closed: the meeting file names no pipe and says the person closed it, and so do the settings',
+  (await shownSoon(linkSection.locator('[data-browser-link-on="off"]'))) &&
+    (await soon(() => readMeeting().pipe === null && readMeeting().off === true)) &&
+    JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8')).browserLink === 'off' &&
+    (await shownSoon(linkSection.locator('[data-browser-link-turned-off]'))),
+);
+// The browser starts Cortex for the link again, as it does when it finds no pipe: closed by the person, it stays closed.
+await setInMain(() => {
+  globalThis.cortexSecond = null;
+});
+await new Promise((done) => {
+  const again = spawn(electronBinary, [...launchArgs, '--gizli', '--tarayici'], { env: launchEnv, stdio: 'ignore' });
+  again.on('exit', done);
+  again.on('error', done);
+});
+let againArgv = null;
+for (const end = Date.now() + 20_000; Date.now() < end && !againArgv; await new Promise((done) => setTimeout(done, 100))) againArgv = await app.evaluate(() => globalThis.cortexSecond);
+// The launch was heard; whatever it would have opened has had its time to open.
+await new Promise((done) => setTimeout(done, 500));
+check(
+  'a link the person closed is not opened by the browser starting Cortex for it',
+  Array.isArray(againArgv) &&
+    againArgv.includes('--tarayici') &&
+    readMeeting().pipe === null &&
+    readMeeting().off === true &&
+    JSON.parse(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8')).browserLink === 'off' &&
+    (await linkSection.locator('[data-browser-link-on="off"]').count()) === 1,
 );
 await linkSection.locator('[data-browser-link-on]').click();
 check(
-  'switched on again, it listens under a name drawn anew',
-  (await shownSoon(linkSection.locator('[data-browser-link-on="on"]'))) && (await soon(() => typeof readMeeting().pipe === 'string' && readMeeting().pipe !== meeting.pipe)),
+  'switched on again by the person, it listens under a name drawn anew, and the file says nothing of having been closed',
+  (await shownSoon(linkSection.locator('[data-browser-link-on="on"]'))) &&
+    (await soon(() => typeof readMeeting().pipe === 'string' && readMeeting().pipe !== meeting.pipe)) &&
+    !('off' in readMeeting()) &&
+    (await linkSection.locator('[data-browser-link-turned-off]').count()) === 0,
 );
 const lastPipe = readMeeting().pipe;
 await page.keyboard.press('Escape');
@@ -1738,11 +1766,13 @@ check('what it asked for went to the system’s browser instead (stood in for: n
 console.log('\nOpened again');
 await app.close();
 check(
-  'closed, Cortex leaves its meeting file: the browser finds the program to start by it, and nothing listens on the pipe it names',
+  'closed, Cortex leaves its meeting file: the browser finds the program to start by it; it names no pipe, and nothing listens on the last one',
   fs.existsSync(meetingFile) &&
     typeof readMeeting().exe === 'string' &&
+    readMeeting().pipe === null &&
+    !('off' in readMeeting()) &&
     (await new Promise((done) => {
-      const probe = net.connect(readMeeting().pipe);
+      const probe = net.connect(lastPipe);
       probe.once('connect', () => (probe.destroy(), done(false)));
       probe.once('error', () => done(true));
     })),

@@ -35,8 +35,10 @@ import { readSettings, updateSettings } from './settings';
  * assistant asks, and the AI tool the person uses in Cortex answers, in a chat of this vault's that can be read and
  * gone on with here (services/chat.ts).
  *
- * Nothing listens until the person opens the link: in the settings, or by the browser starting Cortex for it
- * (`--tarayici`), which keeps it open from then on. Open, it is a named pipe on Windows and a socket elsewhere, under
+ * Nothing listens until the link is opened: by the person in the settings, or by the browser starting Cortex for it
+ * (`--tarayici`), which keeps it open from then on. Closed by the person in the settings, it stays closed: the
+ * browser's word does not open it again, only the person does, and the meeting file says so (`off`) for the browser
+ * not to try. Open, it is a named pipe on Windows and a socket elsewhere, under
  * a name drawn anew each time; no port is opened, so a web page cannot reach it and no firewall asks. The socket lies
  * in a folder only the person may enter, made so before anything listens in it. Who may open the pipe on Windows is
  * Node's default for a pipe, which Cortex does not narrow and which has not been looked at on a Windows machine
@@ -154,10 +156,13 @@ export function pipeFor(name: string, platform: NodeJS.Platform = process.platfo
 
 const rendezvousPath = () => path.join(app.getPath('userData'), RENDEZVOUS_FILE);
 
-/** The meeting file, written whole: the pipe, or none while nothing listens. Said, not thrown, where it cannot be written. */
+/**
+ * The meeting file, written whole: the pipe, or none while nothing listens; and `off` where the person closed the
+ * link, which tells the browser not to start Cortex for it. Said, not thrown, where it cannot be written.
+ */
 function writeMeeting(pipe: string | null): void {
   try {
-    const meeting: Rendezvous = { version: RENDEZVOUS_VERSION, pipe, exe: app.getPath('exe'), pid: process.pid };
+    const meeting: Rendezvous = { version: RENDEZVOUS_VERSION, pipe, ...(readSettings().browserLink === 'off' ? { off: true as const } : {}), exe: app.getPath('exe'), pid: process.pid };
     writeWhole(rendezvousPath(), JSON.stringify(meeting));
   } catch (err) {
     console.warn('[browser link] the meeting file could not be written:', (err as NodeJS.ErrnoException | null)?.code ?? 'unknown');
@@ -181,7 +186,8 @@ export function onPairingAsked(listener: () => void): void {
 
 export function browserLinkStatus(): BrowserLinkStatus {
   return {
-    on: readSettings().browserLink,
+    on: readSettings().browserLink === 'on',
+    turnedOff: readSettings().browserLink === 'off',
     listening: server !== null,
     allowed: readSettings().browserLinkToken !== null,
     connected: [...conns].some((one) => one.stage === 'paired'),
@@ -738,36 +744,53 @@ function closeListener(): void {
 }
 
 /**
+ * The browser's own word that the link be open (`--tarayici`), taken where nobody has opened or closed it yet: kept
+ * as `on` from then. Where the person closed it, it stays closed - the switch in the settings would mean nothing if
+ * the browser could put it back at every question.
+ */
+function openedForBrowser(): void {
+  if (readSettings().browserLink !== null) return;
+  updateSettings((settings) => {
+    settings.browserLink = 'on';
+  });
+}
+
+/**
  * At the app's start, by the one instance that runs (electron/main.ts): the meeting file written - over whatever a
- * run before left - and the listener opened where the person keeps the link on, or `asked` says Cortex was started
- * for the browser, which keeps it on from now. Whether the listener is open. `tools` stands in for the chat's list
- * of tools in a test.
+ * run before left - and the listener opened where the link is kept on. `asked`: Cortex was started for the browser,
+ * which opens a link nobody has touched and never one the person closed. Whether the listener is open. `tools`
+ * stands in for the chat's list of tools in a test.
  */
 export async function startBrowserLink(given: { tools?: () => Promise<CliInfo[]>; asked?: boolean } = {}): Promise<boolean> {
   tools = given.tools ?? listChatClis;
-  if (given.asked && !readSettings().browserLink) {
-    updateSettings((settings) => {
-      settings.browserLink = true;
-    });
-  }
+  if (given.asked) openedForBrowser();
   if (server) return true;
   writeMeeting(null);
-  if (!readSettings().browserLink) {
+  if (readSettings().browserLink !== 'on') {
     changed();
     return false;
   }
   return openListener();
 }
 
+/** The same word reaching a Cortex that already runs, by a second launch (electron/main.ts): opened as at a start, or left closed. */
+export async function openBrowserLinkForBrowser(): Promise<BrowserLinkStatus> {
+  openedForBrowser();
+  if (readSettings().browserLink === 'on') await openListener();
+  changed();
+  return browserLinkStatus();
+}
+
 /**
- * The link switched on or off: by the person in the settings, or on by a second launch that asks for it
- * (`--tarayici`). Kept as the setting. Off, the listener is closed and the meeting file names no pipe.
+ * The person's switch in the settings, and theirs alone. On: the listener opened, and kept on. Off: the listener
+ * closed, the meeting file naming no pipe and saying `off`, and the link not to be opened by the browser from then.
  */
 export async function setBrowserLinkOn(on: unknown): Promise<BrowserLinkStatus> {
   if (typeof on !== 'boolean') return browserLinkStatus();
-  if (readSettings().browserLink !== on) {
+  const kept = on ? 'on' : 'off';
+  if (readSettings().browserLink !== kept) {
     updateSettings((settings) => {
-      settings.browserLink = on;
+      settings.browserLink = kept;
     });
   }
   if (on) await openListener();

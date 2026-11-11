@@ -68,10 +68,11 @@ export interface Settings {
    */
   autoUpdate: boolean;
   /**
-   * Cortex Browser's link is open (services/browserLink.ts): off until the person turns it on in the settings, or
-   * Cortex is started for the browser (`--tarayici`), which turns it on for good. Off, nothing listens.
+   * Cortex Browser's link (services/browserLink.ts). Null: never touched - nothing listens, and Cortex started for
+   * the browser (`--tarayici`) opens it and keeps it `on`. `on`: open, by that or by the person in the settings.
+   * `off`: closed by the person in the settings, and only they open it again: the browser cannot.
    */
-  browserLink: boolean;
+  browserLink: 'on' | 'off' | null;
   /**
    * The SHA-256 of the token given to Cortex Browser when the person let it connect, in hex; null while no leave is
    * given. Never the token itself: that one the browser keeps.
@@ -92,7 +93,7 @@ export function tidyName(value: unknown): string | null {
   return name || null;
 }
 
-const EMPTY: Settings = { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null, autoUpdate: true, browserLink: false, browserLinkToken: null };
+const EMPTY: Settings = { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null, autoUpdate: true, browserLink: null, browserLinkToken: null };
 
 let cache: Settings | null = null;
 let keepOff = false;
@@ -122,7 +123,9 @@ function hydrate(raw: Record<string, unknown>): Settings {
     vaultSync: raw.vaultSync === true,
     chatTools: Array.isArray(raw.chatTools) ? [...new Set(raw.chatTools as unknown[])].filter((id): id is CliId => CHAT_TOOLS.includes(id as CliId)) : null,
     autoUpdate: raw.autoUpdate !== false,
-    browserLink: raw.browserLink === true,
+    // `true` and `false`, as written before there were three states: a link opened, and the `false` every install
+    // began with - a default, not a choice anybody made (the link had not been released), so read as never touched.
+    browserLink: raw.browserLink === 'on' || raw.browserLink === true ? 'on' : raw.browserLink === 'off' ? 'off' : null,
     browserLinkToken: typeof raw.browserLinkToken === 'string' && /^[0-9a-f]{64}$/.test(raw.browserLinkToken) ? raw.browserLinkToken : null,
   };
 }

@@ -115,12 +115,15 @@ export interface LinkTool {
 /**
  * Where the browser finds Cortex, written at every start and left when Cortex closes: that the file is there says
  * Cortex is installed and where its program is, not that it runs. `pipe`: the pipe to connect to, under a name drawn
- * anew at each start; null while the listener is not open (the person has not turned the link on, or it could not be
- * opened). The program to start when there is no pipe, or nothing listens on it, and the process that wrote the file.
+ * anew at each start; null while the listener is not open (nobody has opened the link, the person closed it, or it
+ * could not be opened), and once Cortex has closed. `off`, there only when it is so: the person closed the link in
+ * Cortex's settings - starting Cortex for the browser does not open it then, and the browser does not try. The
+ * program to start when there is no pipe, or nothing listens on it, and the process that wrote the file.
  */
 export interface Rendezvous {
   version: number;
   pipe: string | null;
+  off?: true;
   exe: string;
   pid: number;
 }
@@ -180,14 +183,15 @@ export type CortexMessage =
   | { type: 'bye'; reason: ByeReason };
 
 /**
- * The link as the window is told of it (Settings, and the question asked when a browser first connects): whether the
- * person keeps it open (`on`) and it is in fact listening (`listening`: on and not listening, it could not be
- * opened); whether a browser has been let in, whether one is connected now, and whether one waits to be let in - with
+ * The link as the window is told of it (Settings, and the question asked when a browser first connects): whether it
+ * is kept open (`on`) and is in fact listening (`listening`: on and not listening, it could not be opened);
+ * `turnedOff`, that the person closed it here, which is more than its not being on: a browser cannot open it then; whether a browser has been let in, whether one is connected now, and whether one waits to be let in - with
  * the code it was told, for the person to compare with what the browser shows. `locked`: refused so often in a row
  * that no browser is asked about any more, until the person lets it ask again here.
  */
 export interface BrowserLinkStatus {
   on: boolean;
+  turnedOff: boolean;
   listening: boolean;
   allowed: boolean;
   connected: boolean;
@@ -374,5 +378,6 @@ export function encodeLine(message: CortexMessage | BrowserMessage): string {
 export function readRendezvous(value: unknown): Rendezvous | null {
   if (!isObject(value) || typeof value.version !== 'number' || !isText(value.exe) || typeof value.pid !== 'number') return null;
   if (value.pipe !== null && (!isText(value.pipe) || !value.pipe)) return null;
-  return { version: value.version, pipe: value.pipe, exe: value.exe, pid: value.pid };
+  if (!none(value.off) && typeof value.off !== 'boolean') return null;
+  return { version: value.version, pipe: value.pipe, ...(value.off === true ? { off: true as const } : {}), exe: value.exe, pid: value.pid };
 }

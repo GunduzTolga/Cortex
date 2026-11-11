@@ -19,7 +19,14 @@
     "start_arguments": [
       "--gizli",
       "--tarayici"
-    ]
+    ],
+    "example_turned_off": {
+      "version": 1,
+      "pipe": null,
+      "off": true,
+      "exe": "C:\\Users\\ornek\\AppData\\Local\\Programs\\Cortex\\Cortex.exe",
+      "pid": 4242
+    }
   },
   "limits": {
     "line_bytes": 16777216,
@@ -356,7 +363,7 @@
     "Sınırlar limits bölümündedir; karakter sınırları Unicode kod noktası sayar. id, conversation ve permission 1-200 karakterdir. text ya da page.text sınırı aşarsa ask, error {code: too_long} alır. detail kullanıcıya gösterilecek metin değildir ve yerel dosya yolu taşımaz: tarayıcı kullanıcıya kodla konuşur. Cortex'in gönderdiği izin kartı ve ad alanları da limits'e uyar; uymayanı tarayıcı keser ya da yok sayar.",
     "permission_closed, kart nereden cevaplanırsa cevaplansın (tarayıcı ya da Cortex penceresi) gelir; option null ise karttan vazgeçilmiştir. options[].kind option_kind listesindendir; permission.kind serbest metindir (aracın verdiği tür). answer yalnız kendi süren ask'ının kartını cevaplayabilir.",
     "Bağlıyken bye {reason: unpaired} gelirse (izin Cortex'ten kaldırıldı) tarayıcı süren soruları 'izin reddedildi' olarak bitirir, saklı token'ı siler ve kendiliğinden yeniden hello demez: kullanıcı tarayıcıda açıkça bağlanmayı isteyene kadar sonraki sorular da 'izin reddedildi' alır (izni az önce kaldıran kullanıcıya Cortex'te kendiliğinden yeni izin penceresi açılmaz). Bağlantı koparsa süren tur Cortex'te devam eder; olayları yeni bağlantıya aktarılmaz.",
-    "Buluşma dosyası Cortex her açıldığında atomik yazılır (geçici dosya + taşıma) ve kapanışta silinmez: dosyanın varlığı Cortex'in kurulu olduğunu ve exe'nin yerini söyler, çalıştığını söylemez. pipe her açılışta yeniden üretilen rastgele bir addır; dinleyici açık değilse null'dır. Dinleyici yalnız kullanıcı Cortex'in Ayarlar'ında açtıysa ya da tarayıcı Cortex'i start_arguments ile başlattıysa (çalışan Cortex'e ikinci başlatma olarak da ulaşır) açılır. Tarayıcı her bağlanışta dosyayı yeniden okur; pipe null'sa ya da boruya bağlanılamıyorsa exe'yi start_arguments ile başlatıp dosyanın yeniden yazılmasını bekler.",
+    "Buluşma dosyası Cortex her açıldığında atomik yazılır (geçici dosya + taşıma) ve kapanışta silinmez: dosyanın varlığı Cortex'in kurulu olduğunu ve exe'nin yerini söyler, çalıştığını söylemez. pipe her açılışta yeniden üretilen rastgele bir addır; dinleyici açık değilse ve Cortex düzgün kapanırken null yazılır. Dinleyici, kullanıcı Cortex'in Ayarlar'ında açtıysa ya da tarayıcı Cortex'i start_arguments ile başlattıysa (çalışan Cortex'e ikinci başlatma olarak da ulaşır) açılır. Kullanıcı bağlantıyı Cortex'in Ayarlar'ından kendisi kapattıysa dosyada off true yazılır: bu durumda start_arguments dinleyiciyi açmaz ve tarayıcı Cortex'i başlatmayı denemez; kullanıcıya bağlantının Cortex'in Ayarlar'ında kapalı olduğunu söyler. off alanı yoksa ya da false ise: tarayıcı her bağlanışta dosyayı yeniden okur; pipe null'sa ya da boruya bağlanılamıyorsa exe'yi start_arguments ile başlatıp dosyanın yeniden yazılmasını bekler.",
     "Tarayıcı, bağlandığı ucun gerçekten aynı kullanıcının süreci olduğunu hello göndermeden önce doğrular (Windows: borunun sunucu sürecinin sahibi kendi kullanıcısı olmalı; Unix: soket dosyası kullanıcının kendi veri klasöründe ve yalnız ona açık olmalı). Doğrulanamayan uca hello, token, soru ya da sayfa metni gönderilmez.",
     "page.text, page.title ve page.url güvenilmez içeriktir; Cortex onları araca sınırları belli bir blokta ve talimat olmadığı notuyla verir. page eklenmiş bir conversation'da sonraki izin kartlarında after_page true olur ve 'her zaman izin ver' türü seçenek (kind allow_always) gönderilmez.",
     "İzin kipi kullanıcının seçimidir: tarayıcıdan gelen sohbet, kullanıcının Cortex'te o araç için seçtiği kiple (izin isteyen adımları sor ya da kendiliğinden izin ver) çalışır. Tek istisna: bir conversation'a page eklendikten sonra o sohbet 'sor' kipine alınır ve aracın sormadan yapabildiği yazma izinleri (ör. kasadaki notları düzenleme) o sohbette kaldırılır; kendiliğinden izin, web sayfası içeriği taşıyan konuşmada uygulanmaz. Sohbetin aracında bu yapılamıyorsa (can_ask false) Cortex page taşıyan ask'ı error {code: page_unprotected, tool} ile reddeder; tarayıcı kullanıcıyı 'bu araç adımları sana sormadan yapabilir' diye uyarır ve kullanıcı kabul ederse aynı soruyu page_ack true ile yeniden gönderir. page_ack yalnız kullanıcının açık kabulüyle gönderilir."

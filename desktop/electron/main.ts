@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { moveYakala, registerIpc, startAppUpdates, stopWatching, trustPagesWhere } from './ipc';
 import { learnSystemProxy } from './services/acp';
-import { onBrowsersThere, onPairingAsked, setBrowserLinkOn, startBrowserLink, stopBrowserLink } from './services/browserLink';
+import { onBrowsersThere, onPairingAsked, openBrowserLinkForBrowser, startBrowserLink, stopBrowserLink } from './services/browserLink';
 import { chatsRunning } from './services/chat';
 import { asksForBrowserLink, leaveWatch, secondLaunchShows, startedHidden } from './services/quietStart';
 import { readSettings } from './services/settings';
@@ -554,8 +554,9 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', (_event, argv) => {
     // Unless it asked to stay hidden, as Cortex Browser asks when it starts Cortex: already running, nothing appears.
     if (secondLaunchShows(argv)) showWindow();
-    // Started again for the browser: its link is opened, and kept open from now (services/browserLink.ts).
-    if (asksForBrowserLink(argv)) void setBrowserLinkOn(true);
+    // Started again for the browser: its link is opened and kept open from now - unless the person closed it in the
+    // settings, which the browser's word does not undo (services/browserLink.ts).
+    if (asksForBrowserLink(argv)) void openBrowserLinkForBrowser();
   });
 
   void app.whenReady().then(() => {
@@ -605,7 +606,8 @@ if (!app.requestSingleInstanceLock()) {
         after: LEAVE_AFTER_MS,
       }),
     );
-    // Its meeting file is written at every start; it listens where the person keeps the link on, or was started for the browser.
+    // Its meeting file is written at every start; it listens where the link is kept on, or Cortex was started for the
+    // browser and the person has not closed the link.
     void startBrowserLink({ asked: asksForBrowserLink(process.argv) });
     if (!HIDDEN) {
       void settled.then(() => {

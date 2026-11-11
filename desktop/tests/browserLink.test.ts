@@ -23,6 +23,7 @@ import {
   linkToolOf,
   onBrowserLink,
   onPairingAsked,
+  openBrowserLinkForBrowser,
   pipeFor,
   safeDetail,
   setBrowserLinkOn,
@@ -220,14 +221,14 @@ test('the listener is closed until the person opens it, or Cortex is started for
   fs.writeFileSync(meeting(), JSON.stringify({ version: 1, pipe: '\\\\.\\pipe\\cortex-browser-link-0000000000000000', exe: 'old', pid: 1 }));
   // A first start, nobody having asked for the link: no listener, and the file says so.
   assert.equal(await startBrowserLink({ tools }), false);
-  assert.equal(readSettings().browserLink, false);
+  assert.equal(readSettings().browserLink, null, 'neither opened nor closed by anybody yet');
   assert.deepEqual(said(), { version: 1, pipe: null, exe: app.getPath('exe'), pid: process.pid });
-  assert.deepEqual(browserLinkStatus(), { on: false, listening: false, allowed: false, connected: false, asking: false, code: null, locked: false });
+  assert.deepEqual(browserLinkStatus(), { on: false, turnedOff: false, listening: false, allowed: false, connected: false, asking: false, code: null, locked: false });
   if (process.platform !== 'win32') assert.deepEqual(fs.existsSync(path.join(userData(), 'link')) ? fs.readdirSync(path.join(userData(), 'link')) : [], [], 'nothing listens anywhere');
 
   // The switch in the settings: opened now, kept on, and the file names the pipe.
-  assert.deepEqual(await setBrowserLinkOn(true), { on: true, listening: true, allowed: false, connected: false, asking: false, code: null, locked: false });
-  assert.equal(readSettings().browserLink, true);
+  assert.deepEqual(await setBrowserLinkOn(true), { on: true, turnedOff: false, listening: true, allowed: false, connected: false, asking: false, code: null, locked: false });
+  assert.equal(readSettings().browserLink, 'on');
   const first = said()?.pipe as string;
   assert.deepEqual(said(), { version: 1, pipe: first, exe: app.getPath('exe'), pid: process.pid });
   assert.ok(!fs.readdirSync(userData()).some((name) => name.startsWith('browser-link.json.')), 'written whole: no temporary left beside it');
@@ -239,18 +240,19 @@ test('the listener is closed until the person opens it, or Cortex is started for
   }
   const { client, token } = await paired();
   // Switched off: the browser is told, the listener is gone, the file names no pipe - and the leave given stays.
-  assert.deepEqual(await setBrowserLinkOn(false), { on: false, listening: false, allowed: true, connected: false, asking: false, code: null, locked: false });
+  assert.deepEqual(await setBrowserLinkOn(false), { on: false, turnedOff: true, listening: false, allowed: true, connected: false, asking: false, code: null, locked: false });
   assert.deepEqual(await client.next('bye'), { type: 'bye', reason: 'shutdown' });
   await client.gone();
-  assert.equal(said()?.pipe, null);
+  assert.deepEqual(said(), { version: 1, pipe: null, off: true, exe: app.getPath('exe'), pid: process.pid }, 'closed by the person, and the file says so');
   if (process.platform !== 'win32') assert.equal(fs.existsSync(first), false);
-  assert.equal(readSettings().browserLink, false);
+  assert.equal(readSettings().browserLink, 'off');
   // What is not a yes or a no changes nothing.
   assert.equal((await setBrowserLinkOn('yes')).on, false);
 
-  // On again: another name, and the token is still the browser's leave.
+  // On again: another name, nothing in the file of having been closed, and the token is still the browser's leave.
   await setBrowserLinkOn(true);
   const second = said()?.pipe as string;
+  assert.deepEqual(said(), { version: 1, pipe: second, exe: app.getPath('exe'), pid: process.pid });
   assert.notEqual(second, first, 'a name drawn anew each time the listener opens');
   const back = await Client.open();
   back.hello(token);
@@ -272,16 +274,53 @@ test('the listener is closed until the person opens it, or Cortex is started for
   assert.equal(fs.existsSync(meeting()), true);
   assert.equal(said()?.pipe, null, 'a pipe nothing listens on is not left written');
   assert.equal(said()?.exe, app.getPath('exe'));
-  // Started for the browser (`--tarayici`), with the setting off: opened, and kept on from then.
-  updateSettings((settings) => {
-    settings.browserLink = false;
-  });
+});
+
+test('started for the browser, Cortex opens the link where nobody has closed it - and never where the person closed it', async () => {
+  await fresh();
+  stopBrowserLink();
+  const wipe = () => {
+    fs.rmSync(settingsPath(), { force: true });
+    forgetSettings();
+  };
+  // Untouched, and Cortex started for the browser (`--tarayici`): opened, and kept on from then.
+  wipe();
   assert.equal(await startBrowserLink({ tools, asked: true }), true);
-  assert.equal(readSettings().browserLink, true);
-  // And the same word reaching a Cortex that already runs with the listener closed (a second launch): opened.
+  assert.equal(readSettings().browserLink, 'on');
+  assert.equal(typeof said()?.pipe, 'string');
+  stopBrowserLink();
+  // Untouched, Cortex running with the listener closed, and the same word comes by a second launch: opened too.
+  wipe();
+  assert.equal(await startBrowserLink({ tools }), false);
+  assert.deepEqual((({ on, listening }) => ({ on, listening }))(await openBrowserLinkForBrowser()), { on: true, listening: true });
+  assert.equal(readSettings().browserLink, 'on');
+  const open = said()?.pipe;
+  assert.equal(typeof open, 'string');
+  // Already open, the word changes nothing: the same listener, the same name.
+  await openBrowserLinkForBrowser();
+  assert.equal(said()?.pipe, open);
+
+  // The person closes it in the settings. From now the browser cannot open it: not by a second launch...
   await setBrowserLinkOn(false);
-  assert.equal(said()?.pipe, null);
+  const closed = { version: 1, pipe: null, off: true, exe: app.getPath('exe'), pid: process.pid };
+  assert.deepEqual(said(), closed);
+  assert.deepEqual(await openBrowserLinkForBrowser(), { on: false, turnedOff: true, listening: false, allowed: false, connected: false, asking: false, code: null, locked: false });
+  assert.deepEqual([readSettings().browserLink, said()], ['off', closed], 'asked for by the browser, and left closed');
+  // ...nor by starting Cortex anew for it, however often.
+  stopBrowserLink();
+  assert.deepEqual(said(), closed, 'closing Cortex leaves the word in the file');
+  for (let n = 0; n < 2; n += 1) {
+    assert.equal(await startBrowserLink({ tools, asked: true }), false);
+    assert.deepEqual([readSettings().browserLink, said(), browserLinkStatus().listening], ['off', closed, false]);
+    stopBrowserLink();
+  }
+  if (process.platform !== 'win32') assert.deepEqual(fs.readdirSync(path.join(userData(), 'link')), [], 'nothing listens anywhere');
+  // Only the person opens it again, where they closed it; the word then goes from the file.
+  assert.equal(await startBrowserLink({ tools }), false);
   assert.equal((await setBrowserLinkOn(true)).listening, true);
+  assert.deepEqual(said(), { version: 1, pipe: said()?.pipe, exe: app.getPath('exe'), pid: process.pid });
+  assert.ok(typeof said()?.pipe === 'string' && !('off' in (said() as object)));
+  assert.equal(readSettings().browserLink, 'on');
 });
 
 test('a listener that cannot be opened is said so: the setting stays on, the file names no pipe, and the settings can tell', { skip: process.platform === 'win32' }, async () => {
@@ -292,7 +331,7 @@ test('a listener that cannot be opened is said so: the setting stays on, the fil
   fs.writeFileSync(path.join(userData(), 'link'), '');
   try {
     assert.equal(await startBrowserLink({ tools }), false);
-    assert.deepEqual(browserLinkStatus(), { on: true, listening: false, allowed: false, connected: false, asking: false, code: null, locked: false });
+    assert.deepEqual(browserLinkStatus(), { on: true, turnedOff: false, listening: false, allowed: false, connected: false, asking: false, code: null, locked: false });
     assert.equal(said()?.pipe, null);
   } finally {
     fs.rmSync(path.join(userData(), 'link'), { force: true });

@@ -7,7 +7,7 @@ import { Button, Switch } from './ui';
 
 /**
  * Settings › "Cortex Browser bağlantısı" (electron/services/browserLink.ts). The switch that opens the link: off,
- * nothing listens. On: whether a browser is let in - connected now, allowed and not connected, or not allowed - and
+ * nothing listens - and switched off here by the person, Cortex Browser cannot open it by itself, which is said. On: whether a browser is let in - connected now, allowed and not connected, or not allowed - and
  * "İzni kaldır", which forgets the leave and closes a browser's link. Said as it is: "connected" only while a browser
  * is; on and not listening, that it could not be opened. A program waiting can be let in from here too, by its code;
  * and after three refusals in a row, when nobody is asked about any more, the person lets the browser ask again here.
@@ -28,6 +28,12 @@ export function BrowserLinkSection({ open }: { open: boolean }) {
       {status ? (
         <>
           <Switch checked={status.on} onChange={(on) => void link.setOn(on)} label={t('settings.browserLink.on')} hint={t('settings.browserLink.on.hint')} data-browser-link-on={status.on ? 'on' : 'off'} />
+          {/* Closed by the person, which the browser cannot undo: said, so the switch reads as what it is. */}
+          {status.turnedOff ? (
+            <p className="px-3 text-[11.5px] leading-relaxed text-zinc-600" data-browser-link-turned-off>
+              {t('settings.browserLink.turnedOff')}
+            </p>
+          ) : null}
           {status.on && !status.listening ? (
             <p className="px-3 text-[11.5px] leading-relaxed text-red-700" data-browser-link-not-listening>
               {t('settings.browserLink.notListening')}

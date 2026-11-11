@@ -38,7 +38,7 @@ import { MESSAGE_MAX } from '../electron/services/chat';
 const contract = JSON.parse(fs.readFileSync('shared/browser-link-contract.json', 'utf8')) as {
   about: string;
   protocol: number;
-  rendezvous_file: { name: string; example: unknown; example_listener_closed: unknown; start_arguments: string[] };
+  rendezvous_file: { name: string; example: unknown; example_listener_closed: unknown; example_turned_off: unknown; start_arguments: string[] };
   limits: Record<string, number>;
   enums: Record<string, string[]>;
   messages: { browser_to_cortex: Array<Record<string, unknown>>; cortex_to_browser: Array<Record<string, unknown>> };
@@ -53,6 +53,13 @@ test('the protocol, the line limit and the meeting file are the contract’s', (
   // Written at every start, the listener open or not: with it closed the file names the program and no pipe.
   assert.deepEqual(readRendezvous(contract.rendezvous_file.example_listener_closed), contract.rendezvous_file.example_listener_closed);
   assert.equal((readRendezvous(contract.rendezvous_file.example_listener_closed) as { pipe: unknown }).pipe, null);
+  // Closed by the person in Cortex's settings: said, so the browser does not start Cortex to open it.
+  assert.deepEqual(readRendezvous(contract.rendezvous_file.example_turned_off), contract.rendezvous_file.example_turned_off);
+  assert.deepEqual(readRendezvous(contract.rendezvous_file.example_turned_off), { version: 1, pipe: null, off: true, exe: 'C:\\Users\\ornek\\AppData\\Local\\Programs\\Cortex\\Cortex.exe', pid: 4242 });
+  // The word is there only when it is so: left out, null or false, the file reads as one without it.
+  assert.ok(!('off' in (readRendezvous(contract.rendezvous_file.example) as object)) && !('off' in (readRendezvous(contract.rendezvous_file.example_listener_closed) as object)));
+  assert.deepEqual(readRendezvous({ version: 1, pipe: null, off: false, exe: 'x', pid: 1 }), { version: 1, pipe: null, exe: 'x', pid: 1 });
+  assert.equal(readRendezvous({ version: 1, pipe: null, off: 'yes', exe: 'x', pid: 1 }), null);
   assert.equal(readRendezvous({ version: 1, pipe: '', exe: 'x', pid: 1 }), null, 'an empty name is no pipe');
   assert.equal(readRendezvous({ version: 1, pipe: 7, exe: 'x', pid: 1 }), null);
   assert.equal(readRendezvous({ version: 1, exe: 'x', pid: 1 }), null, 'the pipe is said, or said to be none');

@@ -10,8 +10,8 @@ import { START_ARGUMENTS } from '../../shared/browserLink';
  * - A second launch brings the window of the one that runs to the front, unless it too asked to stay hidden: the
  *   browser starting a Cortex that is already running puts nothing on the screen.
  * - Started for the browser (`--tarayici`, beside `--gizli`: the contract's START_ARGUMENTS), at its start or as a
- *   second launch, Cortex opens the link and keeps it open from then (services/browserLink.ts). Without it nothing
- *   listens until the person opens the link in the settings.
+ *   second launch, Cortex opens the link and keeps it open from then (services/browserLink.ts) - unless the person
+ *   closed it in the settings, which only they undo. Without it nothing listens until the person opens the link.
  * - With `background` off the person has said Cortex is not to stay behind once its window is closed. A Cortex the
  *   browser started hidden is there for the browser alone: it stays while a browser is connected and leaves once the
  *   last has gone, the setting itself left as the person keeps it. Not one the person has opened since (its window's

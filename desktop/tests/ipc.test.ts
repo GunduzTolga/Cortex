@@ -353,7 +353,7 @@ test('an update that will not come down is said in the window and the notificati
 test('Cortex Browser’s link from the window: the switch, how it is, and leave taken back; a token never crosses', async () => {
   firstRun();
   stopBrowserLink();
-  const off = { on: false, listening: false, allowed: false, connected: false, asking: false, code: null, locked: false };
+  const off = { on: false, turnedOff: false, listening: false, allowed: false, connected: false, asking: false, code: null, locked: false };
   assert.deepEqual(await call('browserLink:status'), off, 'closed until the person opens it');
   // No browser waits: an answer is an answer to nothing, whatever it says, and "allow" lets nobody in.
   assert.deepEqual(await call('browserLink:decide', true), off);
@@ -363,7 +363,7 @@ test('Cortex Browser’s link from the window: the switch, how it is, and leave 
   assert.deepEqual(await call('browserLink:setOn', 'yes'), off);
   sent.length = 0;
   assert.deepEqual(await call('browserLink:setOn', true), { ...off, on: true, listening: true });
-  assert.equal(readSettings().browserLink, true);
+  assert.equal(readSettings().browserLink, 'on');
   assert.deepEqual(sent.filter(([channel]) => channel === 'browserLink:status').at(-1), ['browserLink:status', { ...off, on: true, listening: true }], 'every window is told');
   updateSettings((settings) => {
     settings.browserLinkToken = 'a'.repeat(64);
@@ -373,8 +373,9 @@ test('Cortex Browser’s link from the window: the switch, how it is, and leave 
   assert.ok(!JSON.stringify(allowed).includes('aaaa'), 'not even its digest');
   assert.deepEqual(await call('browserLink:unpair'), { ...off, on: true, listening: true });
   assert.equal(readSettings().browserLinkToken, null);
-  assert.deepEqual(await call('browserLink:setOn', false), off);
-  assert.equal(readSettings().browserLink, false);
+  // Switched off by the person: said as that, which is more than "not on" - a browser cannot open it from now.
+  assert.deepEqual(await call('browserLink:setOn', false), { ...off, turnedOff: true });
+  assert.equal(readSettings().browserLink, 'off');
   assert.ok(!JSON.stringify(await call('app:bootstrap')).includes('browserLink'), 'the settings the window is given hold nothing of the link');
 });
 
