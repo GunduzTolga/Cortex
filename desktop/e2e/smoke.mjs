@@ -1365,18 +1365,23 @@ check(
     welcomed.token.length >= 43 &&
     welcomed.protocol === 1 &&
     welcomed.tool?.id === 'test-claude' &&
+    // How it asks leave, and that a page added holds it to asking (shared/browserLink.ts, LinkTool).
+    welcomed.tool?.permission === 'ask' &&
+    welcomed.tool?.can_ask === true &&
     welcomed.vault_name === path.basename(vaultDir) &&
     !keptSettings.includes(welcomed.token) &&
     JSON.parse(keptSettings).browserLinkToken === createHash('sha256').update(String(welcomed.token)).digest('hex') &&
     (await page.locator('[data-browser-link-ask]').count()) === 0,
 );
-browserSay({ type: 'ask', id: 'a1', conversation: 'e2e-c1', text: 'tarayıcıdan merhaba', page: null });
+browserSay({ type: 'ask', id: 'a1', conversation: 'e2e-c1', text: 'tarayıcıdan merhaba, planı düzenle', page: null });
 await browserEnded('a1');
 const firstAnswer = browserEvents('a1');
 check(
   'its question is answered by the tool last written to in Cortex: starting, thinking, answering, the words, done',
   firstAnswer.filter((one) => one.kind === 'status').map((one) => one.phase).join() === 'starting,thinking,answering' &&
-    firstAnswer.filter((one) => one.kind === 'text').map((one) => one.text).join('') === 'Merhaba dünya, [[Ideas]] notuna baktım.' &&
+    // Without a page, a note of the vault is Pyn's to edit unasked, as in any chat of Cortex's.
+    firstAnswer.filter((one) => one.kind === 'text').map((one) => one.text).join('') === 'düzenledim: sormadan. Merhaba dünya, [[Ideas]] notuna baktım.' &&
+    !firstAnswer.some((one) => one.kind === 'permission') &&
     firstAnswer.at(-1)?.kind === 'done' &&
     firstAnswer.at(-1)?.cancelled === false &&
     !JSON.stringify(browserHeard).includes('Düşünüyorum'),
@@ -1386,10 +1391,10 @@ check('the conversation is in Cortex’s chat list, marked as the browser’s', 
 await browserChatItem.click();
 check(
   'and reads there as any chat: the question, and Pyn’s answer',
-  (await shownSoon(page.locator('[data-chat-user]', { hasText: 'tarayıcıdan merhaba' }))) && (await shownSoon(page.locator('[data-chat-text]', { hasText: 'Merhaba dünya' }))),
+  (await shownSoon(page.locator('[data-chat-user]', { hasText: 'tarayıcıdan merhaba, planı düzenle' }))) && (await shownSoon(page.locator('[data-chat-text]', { hasText: 'Merhaba dünya' }))),
 );
-// A page added to the next question, and a step the tool asks leave for.
-browserSay({ type: 'ask', id: 'a2', conversation: 'e2e-c1', text: 'izin iste, bu sayfayı özetle', page: { title: 'Örnek sayfa', url: 'https://example.com/yazi', text: 'E2E-SAYFA-METNI', truncated: false } });
+// A page added to the next question, a step the tool asks leave for, and the same edit of a note as before.
+browserSay({ type: 'ask', id: 'a2', conversation: 'e2e-c1', text: 'izin iste, bu sayfaya göre planı düzenle', page: { title: 'Örnek sayfa', url: 'https://example.com/yazi', text: 'E2E-SAYFA-METNI', truncated: false } });
 await soon(() => browserEvents('a2').some((one) => one.kind === 'permission'), 30_000);
 const browserCard = browserEvents('a2').find((one) => one.kind === 'permission')?.permission ?? {};
 check(
@@ -1409,12 +1414,24 @@ check(
 );
 await shoot('13d-browser-card.png');
 await page.locator('[data-chat-permission] [data-chat-answer-option="allow_once"]').click();
+check(
+  'answered on the card in Cortex, the browser’s card is closed with what was chosen',
+  await soon(() => browserEvents('a2').some((one) => one.kind === 'permission_closed' && one.permission === browserCard.id && one.option === 'allow')),
+);
+// The note Pyn edited unasked a moment ago: with a page in the conversation, the same edit is asked for.
+await soon(() => browserEvents('a2').filter((one) => one.kind === 'permission').length === 2, 30_000);
+const editCard = browserEvents('a2').filter((one) => one.kind === 'permission')[1]?.permission ?? {};
+check(
+  'once a page is in the conversation, an edit of a note is no longer made unasked: it comes as a card, here and in the browser',
+  editCard.title === 'Edit Notes/Plan.md' &&
+    editCard.after_page === true &&
+    (await shownSoon(page.locator('[data-chat-permission] [data-chat-permission-title]', { hasText: 'Edit Notes/Plan.md' }))),
+);
+await page.locator('[data-chat-permission] [data-chat-answer-option="allow_once"]').click();
 await browserEnded('a2');
 check(
-  'answered on the card in Cortex, the browser’s card is closed with what was chosen, and the answer goes on',
-  browserEvents('a2').some((one) => one.kind === 'permission_closed' && one.permission === browserCard.id && one.option === 'allow') &&
-    browserEvents('a2').filter((one) => one.kind === 'text').map((one) => one.text).join('').startsWith('izin: allow.') &&
-    browserEvents('a2').at(-1)?.kind === 'done',
+  'and the answer goes on once the person has allowed each step',
+  browserEvents('a2').filter((one) => one.kind === 'text').map((one) => one.text).join('').startsWith('izin: allow. düzenledim: allow.') && browserEvents('a2').at(-1)?.kind === 'done',
 );
 // "Save to Cortex": this vault has no engine yet, and the browser is told so in a sentence rather than left waiting.
 browserSay({ type: 'capture', id: 'k1', title: 'Örnek sayfa', url: 'https://example.com/yazi', note: 'sonra bak' });

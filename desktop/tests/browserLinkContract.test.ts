@@ -7,16 +7,22 @@ import {
   CAPTURED_CODES,
   ERROR_CODES,
   EVENT_KINDS,
+  LIMITS,
   LINE_MAX,
+  OPTION_KINDS,
   PAIRING_STATES,
   RENDEZVOUS_FILE,
   STATUS_PHASES,
+  TOOL_PERMISSIONS,
   encodeLine,
   parseBrowserLine,
   readBrowserMessage,
   readCortexMessage,
   readRendezvous,
 } from '../shared/browserLink';
+import type { PermissionKind } from '../shared/chat';
+import { PAGE_TEXT_MAX } from '../electron/services/browserPage';
+import { MESSAGE_MAX } from '../electron/services/chat';
 
 /**
  * The contract of the link between Cortex and Cortex Browser (shared/browser-link-contract.json): the same file lies
@@ -29,6 +35,7 @@ const contract = JSON.parse(fs.readFileSync('shared/browser-link-contract.json',
   about: string;
   protocol: number;
   rendezvous_file: { name: string; example: unknown };
+  limits: Record<string, number>;
   enums: Record<string, string[]>;
   messages: { browser_to_cortex: Array<Record<string, unknown>>; cortex_to_browser: Array<Record<string, unknown>> };
 };
@@ -43,8 +50,25 @@ test('the protocol, the line limit and the meeting file are the contract’s', (
   assert.equal(readRendezvous('x'), null);
 });
 
+test('the limits are the code’s own: the ones the link holds a message to, and the ones the chat holds a question to', () => {
+  assert.deepEqual(contract.limits, { ...LIMITS });
+  assert.deepEqual(Object.keys(contract.limits).sort(), ['detail_chars', 'id_chars', 'line_bytes', 'page_text_chars', 'text_chars']);
+  assert.equal(LIMITS.line_bytes, LINE_MAX);
+  // Not two numbers that could drift: what the chat sends a tool at most, and the longest page taken.
+  assert.equal(LIMITS.text_chars, MESSAGE_MAX);
+  assert.equal(LIMITS.page_text_chars, PAGE_TEXT_MAX);
+  const id = (length: number) => parseBrowserLine(JSON.stringify({ type: 'cancel', id: 'a'.repeat(length) }));
+  assert.deepEqual(id(LIMITS.id_chars), { message: { type: 'cancel', id: 'a'.repeat(LIMITS.id_chars) } });
+  assert.deepEqual(id(LIMITS.id_chars + 1), { bad: true });
+});
+
 test('every list of values is the code’s own, in the contract’s order', () => {
-  assert.deepEqual(Object.keys(contract.enums).sort(), ['bye_reason', 'captured_code', 'error_code', 'event_kind', 'pairing_state', 'status_phase']);
+  assert.deepEqual(Object.keys(contract.enums).sort(), ['bye_reason', 'captured_code', 'error_code', 'event_kind', 'option_kind', 'pairing_state', 'status_phase', 'tool_permission']);
+  assert.deepEqual(contract.enums.option_kind, [...OPTION_KINDS]);
+  assert.deepEqual(contract.enums.tool_permission, [...TOOL_PERMISSIONS]);
+  // A card's answers are the chat's own kinds (shared/chat.ts): the same four, so none is sent that the contract has no word for.
+  const chatKinds: Record<PermissionKind, true> = { allow_once: true, allow_always: true, reject_once: true, reject_always: true };
+  assert.deepEqual(Object.keys(chatKinds).sort(), [...OPTION_KINDS].sort());
   assert.deepEqual(contract.enums.pairing_state, [...PAIRING_STATES]);
   assert.deepEqual(contract.enums.event_kind, [...EVENT_KINDS]);
   assert.deepEqual(contract.enums.status_phase, [...STATUS_PHASES]);
@@ -83,6 +107,9 @@ test('a field the code does not know is left out, a kind it does not know is no 
   assert.deepEqual(parseBrowserLine(' {"type":"bye","reason":"shutdown"}\r'), { message: { type: 'bye', reason: 'shutdown' } }, 'a line ended as Windows ends one');
   // What is left out of a message is as the contract's `null`: no token, no page.
   assert.deepEqual(parseBrowserLine('{"type":"hello","protocol":1}'), { message: { type: 'hello', protocol: 1, client: '', client_version: '', token: null } });
+  // "Ask again" is there only when it is asked for: left out, null or false, a hello is an ordinary one.
+  assert.deepEqual(parseBrowserLine('{"type":"hello","protocol":1,"ask_again":false,"token":null}'), { message: { type: 'hello', protocol: 1, client: '', client_version: '', token: null } });
+  assert.deepEqual(parseBrowserLine('{"type":"hello","protocol":1,"ask_again":true}'), { message: { type: 'hello', protocol: 1, client: '', client_version: '', token: null, ask_again: true } });
   assert.deepEqual(parseBrowserLine('{"type":"ask","id":"a","conversation":"c","text":"x"}'), { message: { type: 'ask', id: 'a', conversation: 'c', text: 'x', page: null } });
   assert.deepEqual(
     parseBrowserLine('{"type":"ask","id":"a","conversation":"c","text":"x","page":{"title":"T","url":"https://example.com/","text":"p"}}'),
@@ -93,7 +120,7 @@ test('a field the code does not know is left out, a kind it does not know is no 
 });
 
 test('a line that is not JSON, not an object, or a known message without what it needs, is a bad message', () => {
-  for (const line of ['', 'hello', '{"type":"ask"', '[]', '"ask"', 'null', '7', '{}', '{"type":7}', '{"type":"ask","id":"a"}', '{"type":"ask","id":7,"conversation":"c","text":"x"}', '{"type":"hello"}', '{"type":"hello","protocol":"1"}', '{"type":"answer","id":"a","permission":"p","option":7}', '{"type":"ask","id":"a","conversation":"c","text":"x","page":"text"}', '{"type":"ask","id":"a","conversation":"c","text":"x","page":{"title":"T"}}', '{"type":"capture","id":"k"}', '{"type":"cancel"}', '{"type":"ask","id":"","conversation":"c","text":"x"}']) {
+  for (const line of ['', 'hello', '{"type":"ask"', '[]', '"ask"', 'null', '7', '{}', '{"type":7}', '{"type":"ask","id":"a"}', '{"type":"ask","id":7,"conversation":"c","text":"x"}', '{"type":"hello"}', '{"type":"hello","protocol":"1"}', '{"type":"hello","protocol":1,"ask_again":"yes"}', '{"type":"answer","id":"a","permission":"p","option":7}', '{"type":"ask","id":"a","conversation":"c","text":"x","page":"text"}', '{"type":"ask","id":"a","conversation":"c","text":"x","page":{"title":"T"}}', '{"type":"capture","id":"k"}', '{"type":"cancel"}', '{"type":"ask","id":"","conversation":"c","text":"x"}']) {
     assert.deepEqual(parseBrowserLine(line), { bad: true }, line);
   }
   // An id is a short name, not a text: one too long to be one is not taken.
@@ -119,4 +146,13 @@ test('Cortex writes nothing the contract has no word for', () => {
   assert.equal(readCortexMessage({ type: 'bye', reason: 'bored' }), null);
   assert.equal(readCortexMessage({ type: 'pairing', state: 'maybe' }), null);
   assert.equal(readCortexMessage({ type: 'captured', id: 'k', ok: false, code: 'no_idea', detail: '' }), null);
+  const welcome = (tool: unknown) => readCortexMessage({ type: 'hello_ok', protocol: 1, app_version: '1.0.63', tool, vault_name: null, token: null });
+  assert.notEqual(welcome({ id: 'claude', name: 'Claude Code', permission: 'ask', can_ask: true }), null);
+  assert.equal(welcome({ id: 'claude', name: 'Claude Code' }), null, 'a tool is told with how it asks');
+  assert.equal(welcome({ id: 'claude', name: 'Claude Code', permission: 'sometimes', can_ask: true }), null);
+  assert.equal(welcome({ id: 'claude', name: 'Claude Code', permission: 'ask', can_ask: 'yes' }), null);
+  const card = (kind: string) => readCortexMessage({ type: 'event', id: 'a', kind: 'permission', permission: { id: 'p', title: 't', kind: 'anything the tool says', paths: [], options: [{ id: 'o', name: 'n', kind }], after_page: false } });
+  assert.notEqual(card('allow_once'), null);
+  assert.equal(card('allow_forever'), null, 'an answer of a kind the contract does not list');
+  assert.equal(readCortexMessage({ type: 'event', id: 'a', kind: 'error', code: 'internal', detail: 'x'.repeat(LIMITS.detail_chars + 1) }), null, 'a detail longer than the contract allows');
 });

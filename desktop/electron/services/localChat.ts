@@ -580,7 +580,8 @@ async function answer(turn: Turn, message: string, session: Session, found: Loca
     let used: number | null = null;
     turn.sent?.();
     for (let round = 0; ; round += 1) {
-      const tools = round < TOOL_ROUNDS && !toolless.has(key) ? TOOLS : undefined;
+      // Its one tool saves a card unasked: not offered in a chat that holds a web page's content (Turn.afterPage).
+      const tools = round < TOOL_ROUNDS && !toolless.has(key) && !turn.afterPage ? TOOLS : undefined;
       let result: { text: string; used: number | null; calls: ToolCall[] };
       try {
         result = await complete(

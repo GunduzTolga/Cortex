@@ -7,7 +7,7 @@ import type { ChatEvent, ChatPush } from '../shared/chat';
 import { childEnv } from '../electron/services/acp';
 import { answerChat, cancelChat, forgetChats, onChatPush, openChat, sendChat, setChatOption, shutdownChats } from '../electron/services/chat';
 import { STOP_GRACE, cardTextFor } from '../electron/services/chatKit';
-import { cardOf, claudeArgs, claudeOptions, stepOf } from '../electron/services/claudeChat';
+import { askingArgs, cardOf, claudeArgs, claudeOptions, stepOf } from '../electron/services/claudeChat';
 import { attachmentsFolder, heldAttachments, keepAttachment, safeName } from '../electron/services/attachments';
 import { CLAUDE_ARGS } from '../electron/services/clis';
 import { updateSettings } from '../electron/services/settings';
@@ -86,6 +86,16 @@ test('a step is shown by its tool and what it works on; settings become flags, t
   assert.deepEqual(claudeArgs(['-p'], kept, null), ['-p', '--model', 'sonnet[1m]']);
   assert.equal(claudeOptions({ model: 'not a model' }).find((one) => one.id === 'model')?.current, 'default');
   assert.equal(claudeOptions({ model: 'sonnet[1m]' }, [{ value: 'opus', name: 'Opus' }]).find((one) => one.id === 'model')?.current, 'default', 'Claude Code’s own list decides');
+});
+
+test('for a chat that holds a web page’s content, the start loses every step allowed beforehand and nothing else', () => {
+  const asking = askingArgs(CLAUDE_ARGS);
+  assert.deepEqual(asking, ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio']);
+  // Wherever the flag stands, and however it is spelled: its rules go with it, and the flags after it stay.
+  assert.deepEqual(askingArgs(['-p', '--allowedTools', 'Edit(/**/*.md)', 'Bash(x:*)', '--verbose', '--allowed-tools', 'Write', '--model', 'opus']), ['-p', '--verbose', '--model', 'opus']);
+  assert.deepEqual(askingArgs(['-p', '--allowedTools']), ['-p']);
+  // The settings and the session are added after, as for any start.
+  assert.deepEqual(claudeArgs(asking, claudeOptions({ model: 'opus' }), 'ses-1').slice(-4), ['--model', 'opus', '--resume', 'ses-1']);
 });
 
 test('a message to Claude Code gets its answer streamed in pieces, its steps with paths made safe, its plan, its context; a sub-agent’s words stay its own', async () => {

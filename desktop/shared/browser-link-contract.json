@@ -3,21 +3,31 @@
   "protocol": 1,
   "rendezvous_file": {
     "name": "browser-link.json",
-    "where": "Cortex'in kullanıcı veri klasörü (Electron userData)",
-    "example": { "version": 1, "pipe": "\\\\.\\pipe\\cortex-browser-link-3f9a1c", "exe": "C:\\Users\\ornek\\AppData\\Local\\Programs\\Cortex\\Cortex.exe", "pid": 4242 }
+    "where": "Cortex'in kullanıcı veri klasörü (Electron userData; Windows'ta %APPDATA%\\Cortex)",
+    "example": { "version": 1, "pipe": "\\\\.\\pipe\\cortex-browser-link-3f9a1c0b7d2e4a65", "exe": "C:\\Users\\ornek\\AppData\\Local\\Programs\\Cortex\\Cortex.exe", "pid": 4242 }
+  },
+  "limits": {
+    "line_bytes": 16777216,
+    "id_chars": 200,
+    "text_chars": 100000,
+    "page_text_chars": 200000,
+    "detail_chars": 300
   },
   "enums": {
     "pairing_state": ["waiting", "refused"],
     "event_kind": ["status", "text", "permission", "permission_closed", "done", "error"],
     "status_phase": ["starting", "thinking", "answering"],
-    "error_code": ["not_signed_in", "no_tool", "limit", "network", "tool_failed", "busy", "too_long", "internal"],
+    "error_code": ["not_signed_in", "no_tool", "no_vault", "limit", "network", "tool_failed", "busy", "too_long", "internal"],
     "captured_code": ["capture_failed", "no_vault"],
-    "bye_reason": ["protocol", "unpaired", "shutdown", "bad_message"]
+    "bye_reason": ["protocol", "unpaired", "shutdown", "bad_message"],
+    "option_kind": ["allow_once", "allow_always", "reject_once", "reject_always"],
+    "tool_permission": ["ask", "auto", "unknown"]
   },
   "messages": {
     "browser_to_cortex": [
       { "type": "hello", "protocol": 1, "client": "cortex-browser", "client_version": "0.0.1", "token": null },
       { "type": "hello", "protocol": 1, "client": "cortex-browser", "client_version": "0.0.1", "token": "b64url-ornek-jeton" },
+      { "type": "hello", "protocol": 1, "client": "cortex-browser", "client_version": "0.0.1", "token": null, "ask_again": true },
       { "type": "ask", "id": "a1", "conversation": "c1", "text": "lansman ne durumda", "page": null },
       { "type": "ask", "id": "a2", "conversation": "c1", "text": "bu sayfayı özetle", "page": { "title": "Örnek sayfa", "url": "https://example.com/yazi", "text": "Sayfanın metni…", "truncated": false } },
       { "type": "answer", "id": "a2", "permission": "p1", "option": "allow" },
@@ -29,7 +39,8 @@
     "cortex_to_browser": [
       { "type": "pairing", "state": "waiting" },
       { "type": "pairing", "state": "refused" },
-      { "type": "hello_ok", "protocol": 1, "app_version": "1.0.63", "tool": { "id": "claude", "name": "Claude Code" }, "vault_name": "Cortex", "token": "b64url-ornek-jeton" },
+      { "type": "hello_ok", "protocol": 1, "app_version": "1.0.63", "tool": { "id": "claude", "name": "Claude Code", "permission": "ask", "can_ask": true }, "vault_name": "Cortex", "token": "b64url-ornek-jeton" },
+      { "type": "hello_ok", "protocol": 1, "app_version": "1.0.63", "tool": { "id": "gemini", "name": "Gemini CLI", "permission": "unknown", "can_ask": false }, "vault_name": "Cortex", "token": null },
       { "type": "hello_ok", "protocol": 1, "app_version": "1.0.63", "tool": null, "vault_name": null, "token": null },
       { "type": "event", "id": "a1", "kind": "status", "phase": "starting" },
       { "type": "event", "id": "a1", "kind": "status", "phase": "thinking" },
@@ -37,6 +48,7 @@
       { "type": "event", "id": "a1", "kind": "text", "text": "Lansman için " },
       { "type": "event", "id": "a2", "kind": "permission", "permission": { "id": "p1", "title": "Notu düzenle", "kind": "edit", "paths": ["Projeler/Lansman.md"], "options": [ { "id": "allow", "name": "Bir kez izin ver", "kind": "allow_once" }, { "id": "deny", "name": "Reddet", "kind": "reject_once" } ], "after_page": true } },
       { "type": "event", "id": "a2", "kind": "permission_closed", "permission": "p1", "option": "allow" },
+      { "type": "event", "id": "a2", "kind": "permission_closed", "permission": "p1", "option": null },
       { "type": "event", "id": "a1", "kind": "done", "cancelled": false },
       { "type": "event", "id": "a2", "kind": "done", "cancelled": true },
       { "type": "event", "id": "a1", "kind": "error", "code": "not_signed_in", "detail": "" },
@@ -46,14 +58,22 @@
     ]
   },
   "rules": [
-    "İlk mesaj hello olmalı; hello'dan önce gelen başka mesaja bye {reason: unpaired} verilir ve bağlantı kapanır.",
+    "İlk mesaj hello olmalı. hello'dan önce gelen, bilinen başka bir mesaja (ask, answer, cancel, capture) bye {reason: unpaired} verilir ve bağlantı kapanır.",
+    "Tanınmayan type her zaman yok sayılır (hello'dan önce de); tanınmayan alanlar yok sayılır (ileriye uyum). Boş satır yok sayılır. JSON olmayan, sınırı aşan ya da bilinen bir mesajın gerekli alanını taşımayan satırda bye {reason: bad_message}.",
     "protocol tanınmıyorsa bye {reason: protocol}.",
-    "token yoksa ya da geçersizse Cortex pairing {state: waiting} der ve kullanıcıya sorar; izin verilince aynı bağlantıda hello_ok (yeni token ile) gelir; reddedilince pairing {state: refused}.",
-    "hello_ok'tan önce ask, answer, cancel, capture kabul edilmez (bye unpaired).",
-    "Bir ask'ın olayları aynı id ile gelir; sıra: status* → (text | permission | permission_closed | status)* → done ya da error. done ve error sondur.",
-    "conversation tarayıcının verdiği kimliktir; aynı conversation ile gelen ask'lar aynı sohbete gider.",
-    "Tanınmayan alanlar yok sayılır (ileriye uyum); tanınmayan type için bağlantı kapatılmaz, mesaj yok sayılır. JSON olmayan ya da sınırı aşan satırda bye {reason: bad_message}.",
+    "token yoksa ya da geçersizse Cortex pairing {state: waiting} der ve kullanıcıya sorar; izin verilince aynı bağlantıda hello_ok (yeni token ile) gelir; reddedilince pairing {state: refused}. Tarayıcı izin beklerken bağlantıyı açık tutar; refused'dan sonra bağlantıyı tarayıcı kapatır.",
+    "token yalnız izin verildiği anda, ilk hello_ok'ta gelir; sonraki hello_ok'larda token null'dır. Aynı anda tek token geçerlidir: yeni bir izin öncekini geçersiz kılar.",
+    "Retten sonra Cortex bir süre (artan bekleme) yeni hello'yu kullanıcıya sormadan refused ile cevaplar. hello'da ask_again true ise (kullanıcı tarayıcıda 'Yeniden sor'a bastı) Cortex beklemeyi atlayıp kullanıcıya yeniden sorar. ask_again yalnız kullanıcının açık isteğiyle gönderilir.",
+    "hello_ok'tan önce ask, answer, cancel, capture kabul edilmez (bye unpaired). İzinli bir bağlantıda yeniden hello gönderilirse Cortex güncel hello_ok döndürür (araç ya da kasa değişmiş olabilir).",
+    "hello_ok.tool Cortex'in varsayılan aracıdır: kurulu ve sunulan araç; girişin geçerli olduğunu garanti etmez (giriş yoksa ask, error {code: not_signed_in} ile biter). tool.permission aracın bu kullanıcı için seçili izin kipidir: ask (her adımı sorar), auto (sormadan ilerler), unknown (Cortex bilemiyor). tool.can_ask, Cortex'in bu aracı sohbet sürerken 'sor' kipine alıp alamadığıdır.",
+    "Bir ask'ın olayları aynı id ile gelir; sıra: status* → (text | permission | permission_closed | status)* → done ya da error. done ve error sondur. Düşünce ve araç adımları gönderilmez.",
+    "cancel gelen ask, done {cancelled: true} ile biter.",
+    "conversation tarayıcının verdiği kimliktir; aynı conversation ile gelen ask'lar aynı sohbete gider. Aynı conversation'da bir ask sürerken (ya da o sohbet Cortex'ten yazılmış bir mesajı cevaplarken) gelen yeni ask, error {code: busy} alır.",
+    "id, conversation ve permission 1-200 karakterdir. text en çok 100000, page.text en çok 200000 karakterdir; aşan ask, error {code: too_long} alır. detail en çok 300 karakterdir ve kullanıcıya gösterilecek metin değildir: tarayıcı kullanıcıya kodla konuşur.",
+    "permission_closed, kart nereden cevaplanırsa cevaplansın (tarayıcı ya da Cortex penceresi) gelir; option null ise karttan vazgeçilmiştir. options[].kind option_kind listesindendir; permission.kind serbest metindir (aracın verdiği tür).",
+    "Bağlıyken bye {reason: unpaired} gelirse (izin Cortex'ten kaldırıldı) tarayıcı süren soruları 'izin reddedildi' olarak bitirir. Bağlantı koparsa süren tur Cortex'te devam eder; olayları yeni bağlantıya aktarılmaz.",
+    "Buluşma dosyası atomik yazılır (geçici dosya + taşıma) ve Cortex kapanırken silinir; çökmeden sonra bayat kalabilir. Tarayıcı her bağlanışta dosyayı yeniden okur ve hep dosyadaki pipe değerini kullanır. Dosya var ama boruya bağlanılamıyorsa Cortex çalışmıyordur.",
     "page.text güvenilmez içeriktir; Cortex onu araca sınırları belli bir blokta ve talimat olmadığı notuyla verir. page eklenmiş bir conversation'da sonraki izin kartlarında after_page true olur ve 'her zaman izin ver' türü seçenek (kind allow_always) gönderilmez.",
-    "İzin kipi kullanıcının seçimidir: tarayıcıdan gelen sohbet, kullanıcının Cortex'te o araç için seçtiği kiple (her adımı sor ya da kendiliğinden izin ver) çalışır. Tek istisna: bir conversation'a page eklendikten sonra o sohbet 'sor' kipine alınır; kendiliğinden izin, web sayfası içeriği taşıyan konuşmada uygulanmaz."
+    "İzin kipi kullanıcının seçimidir: tarayıcıdan gelen sohbet, kullanıcının Cortex'te o araç için seçtiği kiple (her adımı sor ya da kendiliğinden izin ver) çalışır. Tek istisna: bir conversation'a page eklendikten sonra o sohbet 'sor' kipine alınır ve aracın sormadan yapabildiği yazma izinleri (ör. kasadaki notları düzenleme) o sohbette kaldırılır; kendiliğinden izin, web sayfası içeriği taşıyan konuşmada uygulanmaz. tool.can_ask false olan araçta Cortex bunu yapamaz: tarayıcı sayfa eklenmeden önce kullanıcıyı uyarır."
   ]
 }

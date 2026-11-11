@@ -2,7 +2,10 @@
 // stream-json --output-format stream-json`), for the chat's tests and the
 // end-to-end run (CORTEX_TEST_CLAUDE). Its lines are shaped as Claude Code
 // 2.1.296 was recorded writing them (14 October). What it does is chosen by
-// words in the message: "izin" asks leave for a step, "plan" writes a todo
+// words in the message: "izin" asks leave for a step, "düzenle" edits a note of
+// the vault - unasked where it was started with `--allowedTools Edit(/**/*.md)`,
+// as Claude Code does with a rule that allows the step, and asking leave where
+// it was not - "plan" writes a todo
 // list, "yavaş" waits to be interrupted, "inatçı" waits and never heeds an
 // interrupt, "hata" fails as a sign-in that has expired does, "çök" dies, "kopuk" tries its request again twice as
 // with no internet (`api_retry`, as Claude Code 2.1.322 writes it) and gives up, "yoğun" tries again once for a
@@ -93,6 +96,13 @@ async function turn(text) {
   if (text.includes('izin')) {
     const answer = await control({ subtype: 'can_use_tool', tool_name: 'Write', input: { file_path: note, content: 'x' }, permission_suggestions: [{ type: 'addRules', rules: [{ toolName: 'Write' }], behavior: 'allow', destination: 'localSettings' }], tool_use_id: 'toolu_2' });
     said = `izin: ${answer.behavior}${answer.updatedPermissions ? ' always' : ''}. `;
+  }
+  if (text.includes('düzenle')) {
+    if (argv.includes('Edit(/**/*.md)')) said += 'düzenledim: sormadan. ';
+    else {
+      const answer = await control({ subtype: 'can_use_tool', tool_name: 'Edit', input: { file_path: note, old_string: '# Plan', new_string: '# Yeni plan' }, tool_use_id: 'toolu_3' });
+      said += `düzenledim: ${answer.behavior}. `;
+    }
   }
   if (text.includes('inatçı')) {
     stream({ type: 'message_start', message: { id: 'msg_2' } });

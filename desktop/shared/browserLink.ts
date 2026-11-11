@@ -12,7 +12,7 @@
  */
 
 export const BROWSER_LINK_PROTOCOL = 1;
-/** The longest line, in bytes, its `\n` not counted. */
+/** The longest line, in bytes, its `\n` not counted (LIMITS.line_bytes). */
 export const LINE_MAX = 16 * 1024 * 1024;
 /** The file in Cortex's data folder that says where the link is (Rendezvous). */
 export const RENDEZVOUS_FILE = 'browser-link.json';
@@ -20,15 +20,41 @@ export const RENDEZVOUS_FILE = 'browser-link.json';
 export const PAIRING_STATES = ['waiting', 'refused'] as const;
 export const EVENT_KINDS = ['status', 'text', 'permission', 'permission_closed', 'done', 'error'] as const;
 export const STATUS_PHASES = ['starting', 'thinking', 'answering'] as const;
-export const ERROR_CODES = ['not_signed_in', 'no_tool', 'limit', 'network', 'tool_failed', 'busy', 'too_long', 'internal'] as const;
+export const ERROR_CODES = ['not_signed_in', 'no_tool', 'no_vault', 'limit', 'network', 'tool_failed', 'busy', 'too_long', 'internal'] as const;
 export const CAPTURED_CODES = ['capture_failed', 'no_vault'] as const;
 export const BYE_REASONS = ['protocol', 'unpaired', 'shutdown', 'bad_message'] as const;
+
+/** A card's answers by kind, as the chat's cards have them (shared/chat.ts, PermissionKind). */
+export const OPTION_KINDS = ['allow_once', 'allow_always', 'reject_once', 'reject_always'] as const;
+/** How the tool that answers asks leave: before each step, not at all, or in a way Cortex cannot tell. */
+export const TOOL_PERMISSIONS = ['ask', 'auto', 'unknown'] as const;
+
+/**
+ * The contract's limits. A line in bytes, an id (an ask, a conversation, a card) in characters; a question's words and
+ * a page's text in characters, past which the question is refused as too long (services/chat.ts MESSAGE_MAX,
+ * services/browserPage.ts PAGE_TEXT_MAX: the test holds the three to one another); the longest `detail` of a failure.
+ */
+export const LIMITS = { line_bytes: 16 * 1024 * 1024, id_chars: 200, text_chars: 100_000, page_text_chars: 200_000, detail_chars: 300 } as const;
 
 export type PairingState = (typeof PAIRING_STATES)[number];
 export type StatusPhase = (typeof STATUS_PHASES)[number];
 export type ErrorCode = (typeof ERROR_CODES)[number];
 export type CapturedCode = (typeof CAPTURED_CODES)[number];
 export type ByeReason = (typeof BYE_REASONS)[number];
+export type OptionKind = (typeof OPTION_KINDS)[number];
+export type ToolPermission = (typeof TOOL_PERMISSIONS)[number];
+
+/**
+ * The tool that answers, as the browser is told of it: `permission`, the mode the person chose for it (`ask`: it asks
+ * before a step; `auto`: it goes on unasked; `unknown`: Cortex cannot tell), and `can_ask`, whether Cortex can hold it
+ * to asking in a conversation a web page was added to. Where it cannot, the browser warns before a page is added.
+ */
+export interface LinkTool {
+  id: string;
+  name: string;
+  permission: ToolPermission;
+  can_ask: boolean;
+}
 
 /** Where the browser finds Cortex: the pipe to connect to, the program to start when nothing listens there, and the process that wrote it. */
 export interface Rendezvous {
@@ -48,7 +74,8 @@ export interface LinkPage {
 }
 
 export type BrowserMessage =
-  | { type: 'hello'; protocol: number; client: string; client_version: string; token: string | null }
+  /** `ask_again`: the person pressed "ask again" in the browser after a refusal; the wait after a refusal is passed over. */
+  | { type: 'hello'; protocol: number; client: string; client_version: string; token: string | null; ask_again?: true }
   | { type: 'ask'; id: string; conversation: string; text: string; page: LinkPage | null }
   /** The person's answer to a card; `option` null gives it up. */
   | { type: 'answer'; id: string; permission: string; option: string | null }
@@ -61,7 +88,7 @@ export interface LinkPermission {
   title: string;
   kind: string;
   paths: string[];
-  options: Array<{ id: string; name: string; kind: string }>;
+  options: Array<{ id: string; name: string; kind: OptionKind }>;
   /** A web page's content was added to this conversation before the step was asked for. */
   after_page: boolean;
 }
@@ -76,7 +103,7 @@ export type LinkEvent =
 
 export type CortexMessage =
   | { type: 'pairing'; state: PairingState }
-  | { type: 'hello_ok'; protocol: number; app_version: string; tool: { id: string; name: string } | null; vault_name: string | null; token: string | null }
+  | { type: 'hello_ok'; protocol: number; app_version: string; tool: LinkTool | null; vault_name: string | null; token: string | null }
   | LinkEvent
   | { type: 'captured'; id: string; ok: true; path: string }
   | { type: 'captured'; id: string; ok: false; code: CapturedCode; detail: string }
@@ -101,7 +128,7 @@ export interface BrowserLinkApi {
 }
 
 /** The longest id a message names (an ask, a conversation, a card): a name, not a text. */
-export const ID_MAX = 200;
+export const ID_MAX = LIMITS.id_chars;
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isId = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= ID_MAX;
@@ -128,7 +155,15 @@ export function readBrowserMessage(value: unknown): BrowserMessage | null | unde
       // Only the protocol is asked of every hello: one of a protocol not known is answered `bye {reason: protocol}`.
       if (typeof value.protocol !== 'number' || !Number.isInteger(value.protocol)) return undefined;
       if (!none(value.token) && !isText(value.token)) return undefined;
-      return { type: 'hello', protocol: value.protocol, client: isText(value.client) ? value.client : '', client_version: isText(value.client_version) ? value.client_version : '', token: isText(value.token) ? value.token : null };
+      if (!none(value.ask_again) && typeof value.ask_again !== 'boolean') return undefined;
+      return {
+        type: 'hello',
+        protocol: value.protocol,
+        client: isText(value.client) ? value.client : '',
+        client_version: isText(value.client_version) ? value.client_version : '',
+        token: isText(value.token) ? value.token : null,
+        ...(value.ask_again === true ? { ask_again: true as const } : {}),
+      };
     case 'ask': {
       const page = readPage(value.page);
       if (!isId(value.id) || !isId(value.conversation) || !isText(value.text) || page === undefined) return undefined;
@@ -168,7 +203,7 @@ function readPermission(value: unknown): LinkPermission | null {
   if (!Array.isArray(value.paths) || !value.paths.every(isText) || !Array.isArray(value.options)) return null;
   const options: LinkPermission['options'] = [];
   for (const one of value.options) {
-    if (!isObject(one) || !isText(one.id) || !isText(one.name) || !isText(one.kind)) return null;
+    if (!isObject(one) || !isText(one.id) || !isText(one.name) || !isOneOf(OPTION_KINDS, one.kind)) return null;
     options.push({ id: one.id, name: one.name, kind: one.kind });
   }
   return { id: value.id, title: value.title, kind: value.kind, paths: [...value.paths], options, after_page: value.after_page };
@@ -192,7 +227,7 @@ function readEvent(value: Record<string, unknown>): LinkEvent | null {
     case 'done':
       return typeof value.cancelled === 'boolean' ? { type: 'event', id, kind: 'done', cancelled: value.cancelled } : null;
     case 'error':
-      return isOneOf(ERROR_CODES, value.code) && isText(value.detail) ? { type: 'event', id, kind: 'error', code: value.code, detail: value.detail } : null;
+      return isOneOf(ERROR_CODES, value.code) && isText(value.detail) && value.detail.length <= LIMITS.detail_chars ? { type: 'event', id, kind: 'error', code: value.code, detail: value.detail } : null;
     default:
       return null;
   }
@@ -211,16 +246,23 @@ export function readCortexMessage(value: unknown): CortexMessage | null {
     case 'hello_ok': {
       const tool = value.tool;
       if (typeof value.protocol !== 'number' || !isText(value.app_version)) return null;
-      if (tool !== null && (!isObject(tool) || !isText(tool.id) || !isText(tool.name))) return null;
+      if (tool !== null && (!isObject(tool) || !isText(tool.id) || !isText(tool.name) || !isOneOf(TOOL_PERMISSIONS, tool.permission) || typeof tool.can_ask !== 'boolean')) return null;
       if ((value.vault_name !== null && !isText(value.vault_name)) || (value.token !== null && !isText(value.token))) return null;
-      return { type: 'hello_ok', protocol: value.protocol, app_version: value.app_version, tool: tool === null ? null : { id: tool.id as string, name: tool.name as string }, vault_name: value.vault_name, token: value.token };
+      return {
+        type: 'hello_ok',
+        protocol: value.protocol,
+        app_version: value.app_version,
+        tool: tool === null ? null : { id: tool.id as string, name: tool.name as string, permission: tool.permission as ToolPermission, can_ask: tool.can_ask as boolean },
+        vault_name: value.vault_name,
+        token: value.token,
+      };
     }
     case 'event':
       return readEvent(value);
     case 'captured':
       if (!isId(value.id)) return null;
       if (value.ok === true) return isText(value.path) ? { type: 'captured', id: value.id, ok: true, path: value.path } : null;
-      if (value.ok !== false || !isOneOf(CAPTURED_CODES, value.code) || !isText(value.detail)) return null;
+      if (value.ok !== false || !isOneOf(CAPTURED_CODES, value.code) || !isText(value.detail) || value.detail.length > LIMITS.detail_chars) return null;
       return { type: 'captured', id: value.id, ok: false, code: value.code, detail: value.detail };
     case 'bye':
       return isOneOf(BYE_REASONS, value.reason) ? { type: 'bye', reason: value.reason } : null;

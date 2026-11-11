@@ -97,7 +97,8 @@ test('a chat begun from the browser is marked as the browser’s, found again by
   assert.equal(pushes.find((one) => one.chatId === id && one.summary)?.summary?.origin, 'browser', 'the list hears it with the chat');
   assert.equal(browserChat('c1'), id);
   assert.equal(browserChat('c2'), null);
-  assert.ok(!JSON.stringify(listChats()).includes('c1'), 'the browser’s own id is not the window’s to know');
+  // Looked for by its field's name: the chat's own id is random letters, and may hold any two of them.
+  assert.ok(!('conversation' in listChats()[0]) && !('conversation' in openChat(id).chat), 'the browser’s own id is not the window’s to know');
 
   // One begun in Cortex is not: nothing marks it.
   const own = sendChat(null, 'test-claude', 'merhaba');
@@ -337,10 +338,74 @@ test('Codex too: the person’s mode without a page, asking first once one is ad
   sendChat(id, 'test-codex', 'özetle', undefined, { conversation: 'c1', page: PAGE });
   await doneOf(id, from);
   assert.deepEqual(policies(), ['never', 'on-request']);
-  assert.equal(modeOf(id), 'ask');
+  // Read only: in Codex's "ask first" the vault is written to unasked (only what its sandbox stops is asked for), so a
+  // chat that holds a page may write nothing without asking.
+  assert.equal(modeOf(id), 'readonly');
+  assert.deepEqual(linesIn(log).filter((one) => one.method === 'turn/start').map((one) => (one.params as { sandboxPolicy: { type: string } }).sandboxPolicy.type), ['workspaceWrite', 'readOnly']);
   await assert.rejects(setChatOption(id, 'mode', 'auto'), ChatRefusal);
-  // Read only asks too, and does less: it is left to the person.
-  assert.equal((await setChatOption(id, 'mode', 'readonly')).find((one) => one.id === 'mode')?.current, 'readonly');
+  await assert.rejects(setChatOption(id, 'mode', 'ask'), ChatRefusal);
+  assert.equal(modeOf(id), 'readonly');
+  // Chosen for the tool as "ask first", a conversation with a page is read only all the same; without one, as chosen.
+  await beginChat('test-codex', 'mode', 'ask');
+  const first = sendChat(null, 'test-codex', 'özetle', undefined, { conversation: 'c2', page: PAGE });
+  await doneOf(first.id);
+  assert.equal(modeOf(first.id), 'readonly');
+  const plain = sendChat(null, 'test-codex', 'merhaba', undefined, { conversation: 'c3', page: null });
+  await doneOf(plain.id);
+  assert.equal(modeOf(plain.id), 'ask');
+});
+
+test('in a chat that holds a page nothing is written unasked: Claude Code is started without the leave it has for the vault’s notes, and an edit comes as a card', async () => {
+  const { log } = fresh();
+  const allowed = (argv: string[]) => (argv.includes('--allowedTools') ? argv.slice(argv.indexOf('--allowedTools') + 1, argv.indexOf('--allowedTools') + 4) : null);
+  // Without a page, as ever: the vault's notes are Pyn's to write without asking.
+  const { id } = sendChat(null, 'test-claude', 'planı düzenle', undefined, { conversation: 'c1', page: null });
+  assert.deepEqual(await doneOf(id), { type: 'done', reason: 'end_turn' });
+  assert.deepEqual(allowed(starts(log).at(-1) as string[]), ['Edit(/**/*.md)', 'Bash(py -3 beyin.py receipt:*)', 'Bash(python3 beyin.py receipt:*)']);
+  assert.ok(textOf(eventsOf(id)).startsWith('düzenledim: sormadan.'));
+  assert.equal(eventsOf(id).some((one) => one.type === 'permission'), false);
+  const session = (linesIn(log).findLast((one) => Array.isArray(one.argv)) as { pid: number }).pid;
+
+  // A page added: the chat already asked first, and its program is started again all the same, on the same session,
+  // with no step allowed beforehand. The same edit is now asked for on a card.
+  let from = eventsOf(id).length;
+  sendChat(id, 'test-claude', 'bu sayfaya göre planı düzenle', undefined, { conversation: 'c1', page: PAGE });
+  const card = await cardOf(id, from);
+  assert.deepEqual([card.title, card.kind, card.paths, card.afterPage], ['Edit Notes/Plan.md', 'edit', ['Notes/Plan.md'], true]);
+  assert.equal(starts(log).length, 2, 'started again for it');
+  const guarded = starts(log).at(-1) as string[];
+  assert.equal(allowed(guarded), null, 'no leave given beforehand');
+  assert.ok(!guarded.some((one) => /^(Edit|Write|Bash)\(/.test(one)));
+  assert.equal(guarded[guarded.indexOf('--resume') + 1], `claude-ses-${session}`, 'the conversation goes on');
+  // What makes it ask the person at all is still there, and so is everything else it is started with.
+  assert.deepEqual(guarded.slice(guarded.indexOf('--permission-prompt-tool'), guarded.indexOf('--permission-prompt-tool') + 2), ['--permission-prompt-tool', 'stdio']);
+  assert.deepEqual(guarded.slice(0, guarded.indexOf('--permission-prompt-tool')), (starts(log)[0] as string[]).slice(0, (starts(log)[0] as string[]).indexOf('--permission-prompt-tool')));
+  answerChat(id, card.id, 'deny');
+  await doneOf(id, from);
+  assert.ok(textOf(eventsOf(id).slice(from)).startsWith('düzenledim: deny.'), 'refused, it is not done');
+
+  // It stays so: the next question, without a page and written in Cortex, on the program still running.
+  from = eventsOf(id).length;
+  sendChat(id, 'test-claude', 'yine düzenle');
+  const again = await cardOf(id, from);
+  assert.equal(starts(log).length, 2, 'the same program');
+  answerChat(id, again.id, 'allow');
+  await doneOf(id, from);
+  assert.ok(textOf(eventsOf(id).slice(from)).startsWith('düzenledim: allow.'), 'allowed once, by the person');
+  // After a restart of the app too.
+  shutdownChats();
+  forgetChats();
+  from = eventsOf(id).length;
+  sendChat(id, 'test-claude', 'bir daha düzenle');
+  answerChat(id, (await cardOf(id, from)).id, 'deny');
+  await doneOf(id, from);
+  assert.equal(allowed(starts(log).at(-1) as string[]), null);
+
+  // Another chat, without a page, is as it ever was.
+  const other = sendChat(null, 'test-claude', 'planı düzenle');
+  await doneOf(other.id);
+  assert.ok(textOf(eventsOf(other.id)).startsWith('düzenledim: sormadan.'));
+  assert.notEqual(allowed(starts(log).at(-1) as string[]), null);
 });
 
 test('a tool that names its own modes is left in the one it has: none of them is known to ask', async () => {

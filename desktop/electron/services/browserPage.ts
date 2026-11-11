@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { LinkPage } from '../../shared/browserLink';
+import { LIMITS, type LinkPage } from '../../shared/browserLink';
 
 /**
  * A web page the person added to a question in Cortex Browser (services/browserLink.ts), as it is handed to the AI
@@ -16,7 +16,7 @@ import type { LinkPage } from '../../shared/browserLink';
  */
 
 /** The longest page taken, in characters: longer, and the question is refused as too long rather than cut here unsaid. */
-export const PAGE_TEXT_MAX = 200_000;
+export const PAGE_TEXT_MAX = LIMITS.page_text_chars;
 const TITLE_MAX = 300;
 const URL_MAX = 2000;
 

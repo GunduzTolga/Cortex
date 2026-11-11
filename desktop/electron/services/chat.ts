@@ -4,7 +4,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { ChatEvent, ChatOpened, ChatPush, ChatSpend, ChatSummary, CliId, CliInfo, ConfigOption } from '../../shared/chat';
 import { ATTACHING_CLIS } from '../../shared/chat';
-import type { LinkPage } from '../../shared/browserLink';
+import type { LinkPage, ToolPermission } from '../../shared/browserLink';
 import { heldAttachments, type HeldAttachment } from './attachments';
 import { acpBackend } from './acpChat';
 import { PAGE_TEXT_MAX, pageBlock, pageShown } from './browserPage';
@@ -367,14 +367,35 @@ async function askPerson(chat: Live, card: Card): Promise<string | null> {
 const kept = (chat: Live) => live.get(chat.stored.id) === chat;
 
 /**
- * The modes of each engine in which it asks before a step that changes something, the first the one a chat is put in
- * (claudeChat.ts PERMISSION_MODES, codexChat.ts MODES; both name the setting `mode`). A chat that holds a web page's
- * content runs in one of them: in a mode that allows unasked nobody reads a card, and words planted in the page would
- * reach a tool that writes and runs commands. An ACP tool names its own modes and none of them is known to ask; a model
- * server and Pyn on a server have none: those are left as they are.
+ * The modes of the engines whose modes Cortex knows (claudeChat.ts PERMISSION_MODES, codexChat.ts MODES; both name the
+ * setting `mode`). `asks`: those in which the engine asks before a step, as the person is told of the tool
+ * (toolPermission). `held`: those a chat that holds a web page's content may run in, the first the one it is put in:
+ * in a mode that allows unasked nobody reads a card, and words planted in the page would reach a tool that writes and
+ * runs commands. For Codex that is read only: in its "ask first" the vault is written to unasked, and only what its
+ * sandbox stops is asked for (codexChat.ts policyOf). An ACP tool names its own modes and none of them is known to
+ * ask; Pyn on a server runs under that server's rules: those are left as they are, and said so (toolPermission).
  */
-const ASKING: Partial<Record<Protocol, readonly string[]>> = { claude: ['default', 'plan'], codex: ['ask', 'readonly'] };
-const askingOf = (cli: CliId) => ASKING[protocolOf(cli)] ?? null;
+const MODES: Partial<Record<Protocol, { asks: readonly string[]; held: readonly string[] }>> = {
+  claude: { asks: ['default', 'plan'], held: ['default', 'plan'] },
+  codex: { asks: ['ask', 'readonly'], held: ['readonly'] },
+};
+const askingOf = (cli: CliId) => MODES[protocolOf(cli)]?.held ?? null;
+
+/**
+ * How a tool asks leave, as Cortex Browser is told of it (shared/browserLink.ts, LinkTool): `permission` by the mode a
+ * new chat with it starts in - the person's choice, as the new chat's chips show it or as it was last kept - and
+ * `can_ask`, whether a chat with it is held to asking once a web page is added (heldToAsking, Turn.afterPage). A model
+ * server on this computer runs no step of its own: it asks, and its one tool, which saves a card, is not offered in
+ * such a chat. An ACP tool and Pyn on a server: not Cortex's to tell, nor to change.
+ */
+export function toolPermission(cli: CliId): { permission: ToolPermission; can_ask: boolean } {
+  const protocol = protocolOf(cli);
+  if (protocol === 'local') return { permission: 'ask', can_ask: true };
+  const modes = MODES[protocol];
+  if (!modes) return { permission: 'unknown', can_ask: false };
+  const mode = shownNew.get(cli)?.find((one) => one.id === 'mode')?.current ?? readIndex().prefs[cli]?.mode;
+  return { permission: mode === undefined || modes.asks.includes(mode) ? 'ask' : 'auto', can_ask: true };
+}
 
 /**
  * A chat that holds a web page's content put to asking first, before its turn: by the way a mode chosen on its chip is
@@ -433,6 +454,7 @@ function turnOf(chat: Live, signal: AbortSignal, attachments: readonly HeldAttac
     },
     // After Stop nothing more is asked: a step that a CLI which does not stop asks leave for is refused, unshown.
     ask: (card) => (chat.running && !signal.aborted ? askPerson(chat, card) : Promise.resolve(null)),
+    ...(stored.page ? { afterPage: true } : {}),
     sent: () => {
       if (chat.running && !signal.aborted) tapped({ chatId: stored.id, sent: true });
     },

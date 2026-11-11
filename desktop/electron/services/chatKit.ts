@@ -57,6 +57,12 @@ export interface Turn {
   setTitle(title: string): void;
   /** Asked of the person on a card; the option chosen, or null when refused or the turn ended first. */
   ask(card: Card): Promise<string | null>;
+  /**
+   * The chat holds a web page's content (Cortex Browser's "add this page"): nothing is written unasked in it. A backend
+   * that starts its tool with leave given beforehand (Claude Code's `--allowedTools`), or hands a model a tool that
+   * writes without a card (a local model's inbox tool), leaves that out for this turn and every one after it.
+   */
+  afterPage?: boolean;
   /** The message has been handed to the tool: from here the wait is for its answer, not for its start. Said once a turn. */
   sent?(): void;
 }

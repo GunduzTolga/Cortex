@@ -9,8 +9,10 @@ import {
   type BrowserMessage,
   type CortexMessage,
   type ErrorCode,
+  LIMITS,
   LINE_MAX,
   type LinkEvent,
+  type LinkTool,
   RENDEZVOUS_FILE,
   type Rendezvous,
   STATUS_PHASES,
@@ -21,7 +23,7 @@ import {
 } from '../../shared/browserLink';
 import type { CliInfo } from '../../shared/chat';
 import { PAGE_TEXT_MAX } from './browserPage';
-import { type ChatHeard, MESSAGE_MAX, answerChat, browserChat, cancelChat, chatAnswering, listChatClis, listChats, sendChat, tapChat } from './chat';
+import { type ChatHeard, MESSAGE_MAX, answerChat, browserChat, cancelChat, chatAnswering, listChatClis, listChats, sendChat, tapChat, toolPermission } from './chat';
 import { writeWhole } from './fileWrite';
 import { captureToInbox } from './inbox';
 import { readSettings, updateSettings } from './settings';
@@ -31,12 +33,14 @@ import { readSettings, updateSettings } from './settings';
  * assistant asks, and the AI tool the person uses in Cortex answers, in a chat of this vault's that can be read and
  * gone on with here (services/chat.ts).
  *
- * Reached only from this computer: a named pipe on Windows (`\\.\pipe\cortex-browser-link-<id>`, the id drawn once
- * for this install), a socket in the app's data folder elsewhere, the person's alone. No port is opened: a web page
- * cannot reach a pipe, and no firewall asks. Where it is, is written in the data folder (`browser-link.json`: the
+ * A named pipe on Windows (`\\.\pipe\cortex-browser-link-<id>`, the id drawn once for this install), a socket in the
+ * app's data folder elsewhere, which only the person may open (its mode, and the folder's). No port is opened: a web
+ * page cannot reach a pipe, and no firewall asks. Who may open the pipe on Windows is Node's default for a pipe,
+ * which Cortex does not narrow and which has not been looked at on a Windows machine (docs/v3/BROWSER-LINK.md says
+ * how to): nothing here leans on it. Where it is, is written in the data folder (`browser-link.json`: the
  * pipe, the program to start when nothing listens there, the process), whole, and taken away when the app closes.
  *
- * Any program of the same person can connect. What tells the browser from another is leave given once, in Cortex: a
+ * Whoever can open it can connect. What tells the browser from another is leave given once, in Cortex: a
  * connection that shows no token Cortex knows is told to wait while the person is asked, and is given a token when
  * they allow it. Cortex keeps the token's SHA-256 (services/settings.ts), never the token, and writes it nowhere
  * else: no line here logs what a message carried. This sets apart the program the person meant to let in; it is no
@@ -162,6 +166,11 @@ export async function defaultTool(): Promise<CliInfo | null> {
   return offered.find((one) => one.id === last) ?? offered[0] ?? null;
 }
 
+/** A tool as the browser is told of it: its name, how it asks leave, and whether a page added to a conversation holds it to asking (services/chat.ts, toolPermission). */
+export function linkToolOf(tool: CliInfo): LinkTool {
+  return { id: tool.id, name: tool.name, ...toolPermission(tool.id) };
+}
+
 /** A turn's failure in the contract's codes, by the kind the chat gave it (ChatEvent's `error`). */
 export function errorCodeOf(kind: string | null): ErrorCode {
   if (kind === 'auth' || kind === 'provider-auth' || kind === 'provider-key') return 'not_signed_in';
@@ -223,7 +232,7 @@ async function welcome(conn: Conn, token: string | null): Promise<void> {
   if (conn.stage === 'closed') return;
   conn.stage = 'paired';
   const vault = readSettings().vault;
-  send(conn, { type: 'hello_ok', protocol: BROWSER_LINK_PROTOCOL, app_version: app.getVersion(), tool: tool ? { id: tool.id, name: tool.name } : null, vault_name: vault ? path.basename(vault) : null, token });
+  send(conn, { type: 'hello_ok', protocol: BROWSER_LINK_PROTOCOL, app_version: app.getVersion(), tool: tool ? linkToolOf(tool) : null, vault_name: vault ? path.basename(vault) : null, token });
   changed();
 }
 
@@ -236,7 +245,8 @@ async function hello(conn: Conn, message: Extract<BrowserMessage, { type: 'hello
   // Said again on a link already let in, it is answered with how things are now: the tool, the vault.
   if (conn.stage === 'paired' || (message.token !== null && tokenKnown(message.token))) return welcome(conn, null);
   if (conn.stage === 'waiting') return send(conn, { type: 'pairing', state: 'waiting' });
-  if (refusals && REASK.now() - refusedAt < Math.min(REASK.ms * 2 ** (refusals - 1), REASK.max)) return send(conn, { type: 'pairing', state: 'refused' });
+  // Not while the wait after a refusal lasts - unless the person pressed "ask again" in the browser, which says so.
+  if (!message.ask_again && refusals && REASK.now() - refusedAt < Math.min(REASK.ms * 2 ** (refusals - 1), REASK.max)) return send(conn, { type: 'pairing', state: 'refused' });
   conn.stage = 'waiting';
   send(conn, { type: 'pairing', state: 'waiting' });
   if (pending) {
@@ -319,7 +329,8 @@ async function ask(conn: Conn, message: Extract<BrowserMessage, { type: 'ask' }>
     // Its link closed meanwhile, or Stop came before anything began.
     if (asked.over) return;
     if (asked.stopped) return end(asked, { type: 'event', id: asked.id, kind: 'done', cancelled: true });
-    if (!readSettings().vault) return end(asked, failed('internal', 'no vault') as Extract<LinkEvent, { kind: 'error' }>);
+    const vault = readSettings().vault;
+    if (!vault || !fs.existsSync(vault)) return end(asked, failed('no_vault') as Extract<LinkEvent, { kind: 'error' }>);
     const chatId = browserChat(asked.conversation);
     // Its chat answering a message written in Cortex is busy as well.
     if (chatId && chatAnswering(chatId)) return end(asked, failed('busy') as Extract<LinkEvent, { kind: 'error' }>);
@@ -329,7 +340,7 @@ async function ask(conn: Conn, message: Extract<BrowserMessage, { type: 'ask' }>
     asked.chatId = begun.id;
     byChat.set(begun.id, asked);
   } catch (err) {
-    end(asked, failed('internal', (err instanceof Error ? err.message : String(err)).slice(0, 300)) as Extract<LinkEvent, { kind: 'error' }>);
+    end(asked, failed('internal', (err instanceof Error ? err.message : String(err)).slice(0, LIMITS.detail_chars)) as Extract<LinkEvent, { kind: 'error' }>);
   }
 }
 
@@ -367,10 +378,11 @@ function heardChat(message: ChatHeard): void {
       send(asked.conn, { type: 'event', id, kind: 'permission_closed', permission: event.id, option: event.option });
       break;
     case 'done':
+      // A turn that was stopped ends as `cancelled`, whatever its tool said of it (services/chat.ts, run).
       end(asked, { type: 'event', id, kind: 'done', cancelled: event.reason === 'cancelled' });
       break;
     case 'error':
-      end(asked, { type: 'event', id, kind: 'error', code: errorCodeOf(event.kind), detail: event.message.slice(0, 300) });
+      end(asked, { type: 'event', id, kind: 'error', code: errorCodeOf(event.kind), detail: event.message.slice(0, LIMITS.detail_chars) });
       break;
     default:
       break;
@@ -385,7 +397,7 @@ async function capture(conn: Conn, message: Extract<BrowserMessage, { type: 'cap
     send(conn, { type: 'captured', id: message.id, ok: true, path: saved.path });
   } catch (err) {
     const said = err instanceof Error ? err.message : String(err);
-    send(conn, { type: 'captured', id: message.id, ok: false, code: 'capture_failed', detail: said.split(vault).join('').slice(0, 300) });
+    send(conn, { type: 'captured', id: message.id, ok: false, code: 'capture_failed', detail: said.split(vault).join('').slice(0, LIMITS.detail_chars) });
   }
 }
 
@@ -410,6 +422,7 @@ async function handle(conn: Conn, message: BrowserMessage): Promise<void> {
     }
     case 'cancel': {
       const asked = conn.asks.get(message.id);
+      // Its turn stopped, where one runs (it then ends as `done {cancelled: true}`); else never begun.
       if (asked?.chatId) cancelChat(asked.chatId);
       else if (asked) asked.stopped = true;
       break;

@@ -9,8 +9,8 @@ import { app } from 'electron';
 import { LINE_MAX, readCortexMessage, readRendezvous } from '../shared/browserLink';
 import type { ChatEvent, CliInfo } from '../shared/chat';
 import { PAGE_TEXT_MAX } from '../electron/services/browserPage';
-import { MAX_CONNECTIONS, REASK, browserLinkStatus, decidePairing, defaultTool, errorCodeOf, onBrowserLink, onPairingAsked, pipeFor, startBrowserLink, stopBrowserLink, unpairBrowser } from '../electron/services/browserLink';
-import { MESSAGE_MAX, answerChat, browserChat, forgetChats, listChats, openChat, sendChat, shutdownChats, tapChat } from '../electron/services/chat';
+import { MAX_CONNECTIONS, REASK, browserLinkStatus, decidePairing, defaultTool, errorCodeOf, linkToolOf, onBrowserLink, onPairingAsked, pipeFor, startBrowserLink, stopBrowserLink, unpairBrowser } from '../electron/services/browserLink';
+import { MESSAGE_MAX, answerChat, beginChat, browserChat, forgetChats, listChats, openChat, sendChat, shutdownChats, tapChat } from '../electron/services/chat';
 import { listClis } from '../electron/services/clis';
 import { pythonOf } from '../electron/services/localChat';
 import { forgetSettings, readSettings, settingsPath, updateSettings } from '../electron/services/settings';
@@ -109,7 +109,12 @@ class Client {
 
 /** The tools Cortex has, as the test says: the stand-in for Claude Code, or none. */
 let toolEnv: NodeJS.ProcessEnv = { CORTEX_TEST_CLAUDE: CLAUDE };
-const tools = async (): Promise<CliInfo[]> => listClis(toolEnv);
+/** While a test holds it, the tools are not told: what is asked meanwhile waits where a slow machine would make it wait. */
+let toolsHeld: Promise<void> | null = null;
+const tools = async (): Promise<CliInfo[]> => {
+  if (toolsHeld) await toolsHeld;
+  return listClis(toolEnv);
+};
 const statuses: Array<{ allowed: boolean; connected: boolean; asking: boolean; clients: number }> = [];
 let asked = 0;
 
@@ -288,7 +293,7 @@ test('a browser not let in yet is asked about once, in Cortex; allowed, it is gi
   assert.deepEqual(decidePairing(true), { allowed: true, connected: false, asking: false });
   const ok = await again.next('hello_ok');
   const token = ok.token as string;
-  assert.deepEqual(ok, { type: 'hello_ok', protocol: 1, app_version: app.getVersion(), tool: { id: 'test-claude', name: 'Test Claude' }, vault_name: path.basename(readSettings().vault as string), token });
+  assert.deepEqual(ok, { type: 'hello_ok', protocol: 1, app_version: app.getVersion(), tool: { id: 'test-claude', name: 'Test Claude', permission: 'ask', can_ask: true }, vault_name: path.basename(readSettings().vault as string), token });
   assert.match(token, /^[A-Za-z0-9_-]{43,}$/, 'base64url');
   assert.ok(Buffer.from(token, 'base64url').length >= 32, 'of at least 32 random bytes');
   assert.equal(readSettings().browserLinkToken, createHash('sha256').update(token).digest('hex'));
@@ -475,7 +480,7 @@ test('which tool: the one last written to while it is still offered, else the fi
   toolEnv = { CORTEX_TEST_CLAUDE: CLAUDE };
   const from = client.lines.length;
   client.hello();
-  assert.deepEqual((await client.next('hello_ok', from)).tool, { id: 'test-claude', name: 'Test Claude' });
+  assert.deepEqual((await client.next('hello_ok', from)).tool, { id: 'test-claude', name: 'Test Claude', permission: 'ask', can_ask: true });
 
   // No vault: said in the hello, and a question cannot be answered.
   updateSettings((settings) => {
@@ -485,7 +490,80 @@ test('which tool: the one last written to while it is still offered, else the fi
   client.hello();
   assert.equal((await client.next('hello_ok', at)).vault_name, null);
   client.send({ type: 'ask', id: 'a2', conversation: 'c1', text: 'merhaba', page: null });
-  assert.deepEqual(await client.ended('a2'), { type: 'event', id: 'a2', kind: 'error', code: 'internal', detail: 'no vault' });
+  assert.deepEqual(await client.ended('a2'), { type: 'event', id: 'a2', kind: 'error', code: 'no_vault', detail: '' });
+  // A vault whose folder is gone is none either: nothing is started in a place that is not there.
+  const lost = temp('link-lost-');
+  updateSettings((settings) => {
+    settings.vault = lost;
+  });
+  fs.rmSync(lost, { recursive: true, force: true });
+  client.send({ type: 'ask', id: 'a3', conversation: 'c1', text: 'merhaba', page: null });
+  assert.deepEqual(await client.ended('a3'), { type: 'event', id: 'a3', kind: 'error', code: 'no_vault', detail: '' });
+});
+
+test('the browser is told how the tool asks leave, as the person chose it, and whether Cortex can hold it to asking once a page is added', async () => {
+  await fresh();
+  const tool = (id: string): CliInfo => ({ id: id as CliInfo['id'], name: id, available: true });
+  // Claude Code and Codex: the mode a new chat with them starts in. Nothing chosen, each asks first.
+  assert.deepEqual(linkToolOf(tool('test-claude')), { id: 'test-claude', name: 'test-claude', permission: 'ask', can_ask: true });
+  assert.deepEqual(linkToolOf(tool('test-codex')), { id: 'test-codex', name: 'test-codex', permission: 'ask', can_ask: true });
+  for (const [cli, mode, permission] of [['test-claude', 'acceptEdits', 'auto'], ['test-claude', 'auto', 'auto'], ['test-claude', 'plan', 'ask'], ['test-claude', 'default', 'ask'], ['test-codex', 'auto', 'auto'], ['test-codex', 'readonly', 'ask'], ['test-codex', 'ask', 'ask']] as const) {
+    process.env.CORTEX_TEST_CODEX = path.resolve('tests/fixtures/fake-codex.mjs');
+    await beginChat(cli, 'mode', mode);
+    assert.deepEqual([linkToolOf(tool(cli)).permission, linkToolOf(tool(cli)).can_ask], [permission, true], `${cli} ${mode}`);
+  }
+  // Read from what is kept, as after a start in the background: no new chat was shown its chips.
+  await beginChat('test-claude', 'mode', 'acceptEdits');
+  shutdownChats();
+  forgetChats();
+  assert.equal(linkToolOf(tool('test-claude')).permission, 'auto');
+  // A tool that names its own modes: Cortex cannot tell which of them asks, nor put it in one.
+  for (const cli of ['opencode', 'gemini', 'qwen', 'test']) assert.deepEqual([linkToolOf(tool(cli)).permission, linkToolOf(tool(cli)).can_ask], ['unknown', false], cli);
+  // Pyn on a server runs its steps there, under that server's own rules: not Cortex's to tell or to change.
+  assert.deepEqual([linkToolOf(tool('hermes')).permission, linkToolOf(tool('hermes')).can_ask], ['unknown', false]);
+  // A model server on this computer runs nothing: its one tool only saves a card, and is not offered once a page is added.
+  for (const cli of ['lmstudio', 'ollama']) assert.deepEqual([linkToolOf(tool(cli)).permission, linkToolOf(tool(cli)).can_ask], ['ask', true], cli);
+
+  // As the hello says it.
+  const { client } = await paired();
+  assert.deepEqual(client.lines.find((one) => one.type === 'hello_ok')?.tool, { id: 'test-claude', name: 'Test Claude', permission: 'auto', can_ask: true });
+});
+
+test('"ask again" from the browser passes over the wait after a refusal, and nothing else does', async () => {
+  await fresh();
+  let now = 5_000_000;
+  REASK.now = () => now;
+  const client = await Client.open();
+  client.hello();
+  await client.next('pairing');
+  await until(() => browserLinkStatus().asking, 'the question');
+  decidePairing(false);
+  await until(() => client.lines.length === 2, 'the refusal');
+  assert.equal(client.closed, false, 'refused, the link is the browser’s to close');
+  // A hello that says it is not asking again, or says nothing of it: refused unasked.
+  client.send({ type: 'hello', protocol: 1, client: 'cortex-browser', client_version: '0.0.1', token: null, ask_again: false });
+  await until(() => client.lines.length === 3, 'the answer');
+  assert.deepEqual(client.lines.at(-1), { type: 'pairing', state: 'refused' });
+  assert.equal(asked, 1);
+  // The person pressed "ask again": asked at once.
+  client.send({ type: 'hello', protocol: 1, client: 'cortex-browser', client_version: '0.0.1', token: null, ask_again: true });
+  await until(() => client.lines.length === 4, 'the answer');
+  assert.deepEqual(client.lines.at(-1), { type: 'pairing', state: 'waiting' });
+  assert.equal(asked, 2);
+  assert.equal(browserLinkStatus().asking, true);
+  decidePairing(false);
+  await until(() => client.lines.length === 5, 'the second refusal');
+  // The refusal counts as any other: without the word, the wait is the longer one now.
+  now += REASK.ms;
+  client.hello();
+  await until(() => client.lines.length === 6, 'the answer');
+  assert.deepEqual(client.lines.at(-1), { type: 'pairing', state: 'refused' });
+  // It is no way in: with a wrong token it asks the person, and gives nothing.
+  client.send({ type: 'hello', protocol: 1, client: 'cortex-browser', client_version: '0.0.1', token: 'not-the-token', ask_again: true });
+  await until(() => client.lines.length === 7, 'the answer');
+  assert.deepEqual(client.lines.at(-1), { type: 'pairing', state: 'waiting' });
+  assert.equal(client.lines.some((one) => one.type === 'hello_ok'), false);
+  decidePairing(false);
 });
 
 test('Stop from the browser ends the answer, and says it was stopped', async () => {
@@ -495,6 +573,19 @@ test('Stop from the browser ends the answer, and says it was stopped', async () 
   await until(() => client.events('a1').some((one) => one.kind === 'text'), 'the first words');
   client.send({ type: 'cancel', id: 'a1' });
   assert.deepEqual(await client.ended('a1'), { type: 'event', id: 'a1', kind: 'done', cancelled: true });
+  // Stop that comes while the tool is still being looked for, before anything began: ended as stopped, nothing begun.
+  let letGo: () => void = () => undefined;
+  toolsHeld = new Promise((done) => (letGo = done));
+  client.send({ type: 'ask', id: 'b1', conversation: 'c7', text: 'çök', page: null });
+  client.send({ type: 'cancel', id: 'b1' });
+  // Messages are taken in their order: once this one is answered, the cancel before it has been read.
+  client.send({ type: 'capture', id: 'k9', title: '', url: '', note: '' });
+  await until(() => client.lines.find((one) => one.type === 'captured' && one.id === 'k9'), 'the cancel to be read');
+  toolsHeld = null;
+  letGo();
+  assert.deepEqual(await client.ended('b1'), { type: 'event', id: 'b1', kind: 'done', cancelled: true });
+  assert.deepEqual(kinds(client.events('b1')), ['status:starting', 'done']);
+  assert.equal(browserChat('c7'), null);
   // A cancel for nothing that runs is nothing.
   client.send({ type: 'cancel', id: 'a1' });
   client.send({ type: 'cancel', id: 'never' });
