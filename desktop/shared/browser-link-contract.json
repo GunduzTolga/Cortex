@@ -1,0 +1,59 @@
+{
+  "about": "Cortex masaüstü ile Cortex Browser arasındaki yerel bağlantının sözleşmesi. Bu dosya iki depoda da aynen durur ve iki yanın testlerinin girdisidir: bir yan mesaj biçimini değiştirirse öbür yanın testi düşmelidir. Taşıma: Windows'ta adlandırılmış boru, testlerde Unix soketi. Çerçeve: satır başına bir JSON nesnesi (UTF-8, \\n ile biter), satır en çok 16777216 bayt.",
+  "protocol": 1,
+  "rendezvous_file": {
+    "name": "browser-link.json",
+    "where": "Cortex'in kullanıcı veri klasörü (Electron userData)",
+    "example": { "version": 1, "pipe": "\\\\.\\pipe\\cortex-browser-link-3f9a1c", "exe": "C:\\Users\\ornek\\AppData\\Local\\Programs\\Cortex\\Cortex.exe", "pid": 4242 }
+  },
+  "enums": {
+    "pairing_state": ["waiting", "refused"],
+    "event_kind": ["status", "text", "permission", "permission_closed", "done", "error"],
+    "status_phase": ["starting", "thinking", "answering"],
+    "error_code": ["not_signed_in", "no_tool", "limit", "network", "tool_failed", "busy", "too_long", "internal"],
+    "captured_code": ["capture_failed", "no_vault"],
+    "bye_reason": ["protocol", "unpaired", "shutdown", "bad_message"]
+  },
+  "messages": {
+    "browser_to_cortex": [
+      { "type": "hello", "protocol": 1, "client": "cortex-browser", "client_version": "0.0.1", "token": null },
+      { "type": "hello", "protocol": 1, "client": "cortex-browser", "client_version": "0.0.1", "token": "b64url-ornek-jeton" },
+      { "type": "ask", "id": "a1", "conversation": "c1", "text": "lansman ne durumda", "page": null },
+      { "type": "ask", "id": "a2", "conversation": "c1", "text": "bu sayfayı özetle", "page": { "title": "Örnek sayfa", "url": "https://example.com/yazi", "text": "Sayfanın metni…", "truncated": false } },
+      { "type": "answer", "id": "a2", "permission": "p1", "option": "allow" },
+      { "type": "answer", "id": "a2", "permission": "p1", "option": null },
+      { "type": "cancel", "id": "a2" },
+      { "type": "capture", "id": "k1", "title": "Örnek sayfa", "url": "https://example.com/yazi", "note": "sonra bak" },
+      { "type": "bye", "reason": "shutdown" }
+    ],
+    "cortex_to_browser": [
+      { "type": "pairing", "state": "waiting" },
+      { "type": "pairing", "state": "refused" },
+      { "type": "hello_ok", "protocol": 1, "app_version": "1.0.63", "tool": { "id": "claude", "name": "Claude Code" }, "vault_name": "Cortex", "token": "b64url-ornek-jeton" },
+      { "type": "hello_ok", "protocol": 1, "app_version": "1.0.63", "tool": null, "vault_name": null, "token": null },
+      { "type": "event", "id": "a1", "kind": "status", "phase": "starting" },
+      { "type": "event", "id": "a1", "kind": "status", "phase": "thinking" },
+      { "type": "event", "id": "a1", "kind": "status", "phase": "answering" },
+      { "type": "event", "id": "a1", "kind": "text", "text": "Lansman için " },
+      { "type": "event", "id": "a2", "kind": "permission", "permission": { "id": "p1", "title": "Notu düzenle", "kind": "edit", "paths": ["Projeler/Lansman.md"], "options": [ { "id": "allow", "name": "Bir kez izin ver", "kind": "allow_once" }, { "id": "deny", "name": "Reddet", "kind": "reject_once" } ], "after_page": true } },
+      { "type": "event", "id": "a2", "kind": "permission_closed", "permission": "p1", "option": "allow" },
+      { "type": "event", "id": "a1", "kind": "done", "cancelled": false },
+      { "type": "event", "id": "a2", "kind": "done", "cancelled": true },
+      { "type": "event", "id": "a1", "kind": "error", "code": "not_signed_in", "detail": "" },
+      { "type": "captured", "id": "k1", "ok": true, "path": "Yakala/2026-11-11 ornek-sayfa.md" },
+      { "type": "captured", "id": "k1", "ok": false, "code": "capture_failed", "detail": "" },
+      { "type": "bye", "reason": "protocol" }
+    ]
+  },
+  "rules": [
+    "İlk mesaj hello olmalı; hello'dan önce gelen başka mesaja bye {reason: unpaired} verilir ve bağlantı kapanır.",
+    "protocol tanınmıyorsa bye {reason: protocol}.",
+    "token yoksa ya da geçersizse Cortex pairing {state: waiting} der ve kullanıcıya sorar; izin verilince aynı bağlantıda hello_ok (yeni token ile) gelir; reddedilince pairing {state: refused}.",
+    "hello_ok'tan önce ask, answer, cancel, capture kabul edilmez (bye unpaired).",
+    "Bir ask'ın olayları aynı id ile gelir; sıra: status* → (text | permission | permission_closed | status)* → done ya da error. done ve error sondur.",
+    "conversation tarayıcının verdiği kimliktir; aynı conversation ile gelen ask'lar aynı sohbete gider.",
+    "Tanınmayan alanlar yok sayılır (ileriye uyum); tanınmayan type için bağlantı kapatılmaz, mesaj yok sayılır. JSON olmayan ya da sınırı aşan satırda bye {reason: bad_message}.",
+    "page.text güvenilmez içeriktir; Cortex onu araca sınırları belli bir blokta ve talimat olmadığı notuyla verir. page eklenmiş bir conversation'da sonraki izin kartlarında after_page true olur ve 'her zaman izin ver' türü seçenek (kind allow_always) gönderilmez.",
+    "İzin kipi kullanıcının seçimidir: tarayıcıdan gelen sohbet, kullanıcının Cortex'te o araç için seçtiği kiple (her adımı sor ya da kendiliğinden izin ver) çalışır. Tek istisna: bir conversation'a page eklendikten sonra o sohbet 'sor' kipine alınır; kendiliğinden izin, web sayfası içeriği taşıyan konuşmada uygulanmaz."
+  ]
+}
