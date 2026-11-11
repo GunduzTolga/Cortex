@@ -91,7 +91,8 @@ interface Live {
 const CLI_IDS: readonly CliId[] = ['claude', 'codex', 'opencode', 'gemini', 'qwen', 'lmstudio', 'ollama', 'hermes', 'test', 'test-claude', 'test-codex'];
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const TITLE_MAX = 60;
-const MESSAGE_MAX = 100_000;
+/** The longest message sent to a tool, in characters. */
+export const MESSAGE_MAX = 100_000;
 const EVENTS_KEPT = 2000;
 
 const BACKENDS = { claude: claudeBackend, codex: codexBackend, acp: acpBackend, local: localBackend, hermes: hermesBackend } as const;
@@ -747,6 +748,9 @@ export function shutdownChats(closing = false): void {
 
 /** Whether a chat is answering now, a card waiting on the person included. */
 export const chatsRunning = (): boolean => [...live.values()].some((one) => one.running);
+
+/** Whether that chat is answering now: it takes one message at a time, wherever the message comes from. */
+export const chatAnswering = (id: string): boolean => live.get(id)?.running === true;
 
 /**
  * A sign-in, a key or an install changed while CLIs were kept running: they are ended between

@@ -9,13 +9,15 @@ import { installedVersion, runPython } from './setup';
  * Something kept for later in the vault's inbox (`📥 000-Inbox/Yakala`), as
  * a yakala card: the vault's own `beyin.py yakala ekle` writes it, the same
  * place Ctrl+Alt+C and Telegram write to. Used by a chat message's "Gelen
- * kutusuna at" and by the local models' one tool (services/localChat.ts).
+ * kutusuna at", by the local models' one tool (services/localChat.ts) and by
+ * Cortex Browser's "save to Cortex" (services/browserLink.ts).
  * It only adds: nothing in the vault is changed or removed from here.
  */
 
 const TEXT_MAX = 20_000;
 const URL_MAX = 2_000;
 const WHY_MAX = 2_000;
+const TITLE_MAX = 300;
 const TIMEOUT = 60_000;
 const LINK = /https?:\/\/[^\s<>"]+/;
 
@@ -28,6 +30,8 @@ export interface InboxInput {
   text?: unknown;
   url?: unknown;
   why?: unknown;
+  /** The card's title, where what is kept has one of its own (a web page's, from Cortex Browser); on one line. */
+  title?: unknown;
 }
 
 export interface InboxResult {
@@ -77,6 +81,8 @@ export async function captureToInbox(input: InboxInput, tool = 'pyn'): Promise<I
   // `--metin=…`: words that begin with a dash are still the words, not an option.
   if (text) args.push(`--metin=${text}`);
   if (why) args.push(`--neden=${why}`);
+  const title = clean(input.title, 2 * TITLE_MAX).replace(/\s+/g, ' ').slice(0, TITLE_MAX);
+  if (title) args.push(`--baslik=${title}`);
   let result: Record<string, unknown>;
   try {
     result = await runPython(args, { cwd: vault, timeout: TIMEOUT });

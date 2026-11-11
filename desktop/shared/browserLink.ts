@@ -82,6 +82,24 @@ export type CortexMessage =
   | { type: 'captured'; id: string; ok: false; code: CapturedCode; detail: string }
   | { type: 'bye'; reason: ByeReason };
 
+/**
+ * The link as the window is told of it (Settings, and the question asked when a browser first connects): whether the
+ * person let Cortex Browser in, whether one is connected now, and whether one is waiting to be let in.
+ */
+export interface BrowserLinkStatus {
+  allowed: boolean;
+  connected: boolean;
+  asking: boolean;
+}
+
+export interface BrowserLinkApi {
+  status(): Promise<BrowserLinkStatus>;
+  /** The person's answer to the browser waiting: let in, or refused. */
+  decide(allow: boolean): Promise<BrowserLinkStatus>;
+  /** The leave taken back: the browser's token is forgotten and its link closed. */
+  unpair(): Promise<BrowserLinkStatus>;
+}
+
 /** The longest id a message names (an ask, a conversation, a card): a name, not a text. */
 export const ID_MAX = 200;
 
