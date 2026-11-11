@@ -105,11 +105,12 @@ class Client {
     socket.on('error', () => undefined);
     socket.on('close', () => (this.closed = true));
   }
-  static open(): Promise<Client> {
+  /** `halfOpen`: its own end stays open after Cortex has ended its end, the way a Windows pipe's does. */
+  static open(halfOpen = false): Promise<Client> {
     const pipe = said()?.pipe;
     assert.equal(typeof pipe, 'string', 'the meeting file names a pipe');
     return new Promise((resolve, reject) => {
-      const socket = net.connect(pipe as string);
+      const socket = net.connect({ path: pipe as string, allowHalfOpen: halfOpen });
       socket.once('error', reject);
       socket.once('connect', () => resolve(new Client(socket)));
     });
@@ -990,7 +991,9 @@ test('a link that says nothing is closed after a while; before a browser is let 
   await long.gone();
   assert.deepEqual(long.lines, [{ type: 'bye', reason: 'bad_message' }]);
   // Never ended: given up as soon as it is longer than a line may be, not kept until sixteen megabytes of it are in.
-  const endless = await Client.open();
+  // Told why, it is closed, not read on for as long as it goes on writing: its own end stays open here, as a Windows
+  // pipe's does (a socket's closes by itself once Cortex has ended its end, and that hid the reading on).
+  const endless = await Client.open(true);
   let written = 0;
   const piece = Buffer.alloc(8192, 0x61);
   while (!endless.closed && written < 4 * 1024 * 1024) {
@@ -998,6 +1001,7 @@ test('a link that says nothing is closed after a while; before a browser is let 
     written += piece.length;
     await new Promise((done) => setImmediate(done));
   }
+  endless.socket.end();
   await endless.gone();
   assert.deepEqual(endless.lines, [{ type: 'bye', reason: 'bad_message' }]);
   assert.ok(written <= limit + 64 * piece.length, `closed after ${written} bytes`);

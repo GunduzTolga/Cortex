@@ -73,6 +73,8 @@ import { readSettings, updateSettings } from './settings';
 export const MAX_CONNECTIONS = 8;
 /** What is waiting to be written to a browser that does not read: past this, its link is closed. */
 const WRITE_MAX = 64 * 1024 * 1024;
+/** How long a link that has been told why it is closed is left open for the line to be read. */
+const BYE_LINGER_MS = 200;
 /** The format of the meeting file. */
 const RENDEZVOUS_VERSION = 1;
 /** How long a connection may stay without a hello (LIMITS.hello_wait_ms); in an object, so a test need not wait. */
@@ -331,8 +333,15 @@ function gone(conn: Conn): void {
 function bye(conn: Conn, reason: Extract<CortexMessage, { type: 'bye' }>['reason']): void {
   if (conn.stage === 'closed') return;
   const socket = conn.socket;
-  if (!socket.destroyed) socket.end(encodeLine({ type: 'bye', reason }));
-  // A peer that never closes its end is not waited on.
+  if (!socket.destroyed) {
+    // Nothing more is read from it. Read on until the other end closed, a Windows pipe was read for as long as that
+    // end went on writing: its own end stays open after ours has ended.
+    socket.pause();
+    // Closed once the line is out, with a moment for it to be read: closed at once, an end caught in the middle of
+    // a write is told of the close before it has read why.
+    socket.end(encodeLine({ type: 'bye', reason }), () => setTimeout(() => socket.destroy(), BYE_LINGER_MS).unref());
+  }
+  // A peer that never reads the line is not waited on.
   setTimeout(() => socket.destroy(), 2000).unref();
   gone(conn);
 }
