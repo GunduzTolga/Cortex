@@ -1506,18 +1506,23 @@ class InstallRobustnessTest(unittest.TestCase):
         clock = {'now': 1000.0}
         progress.write_text(json.dumps({'pid': 4242, 'at': clock['now']}), encoding='utf-8')
         stopped = []
-        with mock.patch.object(ses, '_stop_process', stopped.append), mock.patch.object(ses, 'STALL_EVERY_SN', 0.01):
+        # The helper's word is taken as fresh whatever the clock says: this is about what is weighed, and a look
+        # between the clock moved and the word written again read it as stale and began its wait anew (it failed
+        # so once on a slow CI machine, the helper never ended).
+        with mock.patch.object(ses, '_stop_process', stopped.append), mock.patch.object(ses, 'STALL_EVERY_SN', 0.01), \
+                mock.patch.object(ses, 'PROGRESS_FRESH_SN', float('inf')):
             with ses.stall_watch(progress, folder, clock=lambda: clock['now']) as stalled:
-                for step in range(1, 8):  # 7 looks, 60 seconds apart: far past the wait, the file written each time
-                    clock['now'] += 60.0
-                    progress.write_text(json.dumps({'pid': 4242, 'at': clock['now']}), encoding='utf-8')
+                for step in range(1, 8):  # 7 minutes, far past the wait, the file written each minute
+                    # Written before the minute passes: whenever the watcher looks, however late, the file it finds
+                    # is newer than the one it saw a minute before.
                     os.utime(part, (2000.0 + step, 2000.0 + step))
+                    clock['now'] += 60.0
                     real.sleep(0.05)
                 self.assertEqual((stopped, list(stalled)), ([], []), 'written to all the while: not stuck')
-                for _ in range(4):  # and now nothing is written: ended after the wait
+                deadline = real.monotonic() + 20
+                while not stopped and real.monotonic() < deadline:  # and now nothing is written: ended after the wait
                     clock['now'] += 60.0
-                    progress.write_text(json.dumps({'pid': 4242, 'at': clock['now']}), encoding='utf-8')
-                    real.sleep(0.05)
+                    real.sleep(0.02)
                 self.assertEqual(stopped, [4242])
 
     def test_a_download_the_server_asks_to_be_tried_again_is_tried_again_not_said_refused(self):
@@ -1539,9 +1544,14 @@ class InstallRobustnessTest(unittest.TestCase):
             # A helper that says it downloads, as the real one does every second, until it is ended; nothing comes.
             before, deadline = len(ended), time.monotonic() + 10
             while len(ended) == before and time.monotonic() < deadline:
-                temp = folder / 'indirme.tmp'
-                temp.write_text(json.dumps({'mb': 3, 'toplam': 484, 'pid': 4242, 'at': time.time()}), encoding='utf-8')
-                os.replace(temp, folder / ses.PROGRESS_FILE)
+                # Written as the real helper writes it (`downloading`): in place, and a moment it is held by
+                # whoever reads it is let go by. Renamed into place it failed on Windows, where a file being read
+                # cannot be replaced (WinError 5 on CI, the watcher reading a hundred times a second here).
+                try:
+                    (folder / ses.PROGRESS_FILE).write_text(
+                        json.dumps({'mb': 3, 'toplam': 484, 'pid': 4242, 'at': time.time()}), encoding='utf-8')
+                except OSError:
+                    pass
                 time.sleep(0.01)
             return subprocess.CompletedProcess(command, 1, '', '')
         with mock.patch.object(ses, 'STALL_SN', 0.15), mock.patch.object(ses, 'STALL_EVERY_SN', 0.01), \
