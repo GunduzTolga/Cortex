@@ -23,6 +23,7 @@ import { useSetup } from './store/setup';
 import { useView, type View } from './store/view';
 import { LanguageSwitch } from './ui/LanguageSwitch';
 import { SettingsDialog } from './ui/SettingsDialog';
+import { BrowserLinkAsk } from './ui/BrowserLinkAsk';
 import { MicConsent } from './ui/MicConsent';
 import { RenderGuard } from './ui/RenderGuard';
 import { escapeLayers } from './ui/escapeLayers';
@@ -161,6 +162,7 @@ function AppWindow() {
       {/* The confirmations, prompts and menus every view asks with. */}
       <NotesDialogs />
       <MicConsent />
+      <BrowserLinkAsk />
       <Toasts />
     </>
   );

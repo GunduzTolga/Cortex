@@ -135,3 +135,19 @@ test('an ended answer’s links are read once and kept by its words; the answer 
   assert.notEqual(linksOf(coming), linksOf(coming), 'not kept while it is still being written');
   assert.deepEqual(linksOf({ ...coming, text: 'Yazıyorum: [[Plan]]' }).map((one) => one.target), ['Plan'], 'and read as it grows');
 });
+
+test('a web page added in Cortex Browser is shown with its message; a card asked after it says so', () => {
+  const turns = turnsOf([
+    { type: 'user', text: 'özetle', at: 1, page: { title: 'Örnek sayfa', url: 'https://example.com/yazi' } },
+    { type: 'permission', id: 'p1', title: 'Write Notes/Plan.md', kind: 'edit', paths: ['Notes/Plan.md'], options: [{ id: 'allow', name: 'Allow once', kind: 'allow_once' }], afterPage: true },
+    { type: 'answered', id: 'p1', option: 'allow' },
+    { type: 'done', reason: 'end_turn' },
+    { type: 'user', text: 'peki', at: 2 },
+    { type: 'permission', id: 'p2', title: 'Bash ls', kind: 'execute', paths: [], options: [{ id: 'allow', name: 'Allow once', kind: 'allow_once' }] },
+  ]);
+  assert.deepEqual(turns[0].user, { text: 'özetle', at: 1, page: { title: 'Örnek sayfa', url: 'https://example.com/yazi' } });
+  assert.equal(turns[0].asked[0].afterPage, true);
+  assert.deepEqual(turns[1].user, { text: 'peki', at: 2 }, 'a message without one carries none');
+  assert.ok(!('afterPage' in turns[1].asked[0]));
+  assert.equal(waitingOn(turns)?.id, 'p2');
+});

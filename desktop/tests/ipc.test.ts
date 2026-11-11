@@ -38,6 +38,8 @@ test('the channels are the ones the preload names, no more and no fewer', () => 
   assert.deepEqual([...handlers.keys()].sort(), named);
   assert.deepEqual(named.filter((channel) => channel.startsWith('chat:')), ['chat:addTool', 'chat:answer', 'chat:attach', 'chat:auth', 'chat:begin', 'chat:cancel', 'chat:cancelLogin', 'chat:clis', 'chat:install', 'chat:installProgress', 'chat:list', 'chat:login', 'chat:offer', 'chat:open', 'chat:remove', 'chat:removeTool', 'chat:rename', 'chat:send', 'chat:setKey', 'chat:setOption', 'chat:toInbox']);
   assert.deepEqual(named.filter((channel) => channel.startsWith('hermes:')), ['hermes:forget', 'hermes:save', 'hermes:status', 'hermes:test']);
+  // Cortex Browser's link (services/browserLink.ts): how it is, the person's answer to a browser waiting, the leave taken back.
+  assert.deepEqual(named.filter((channel) => channel.startsWith('browserLink:')), ['browserLink:decide', 'browserLink:status', 'browserLink:unpair']);
   // The vault given to the AI tools (services/mcp.ts): its lines, and Claude Code's add; neither takes anything.
   assert.deepEqual(named.filter((channel) => channel.startsWith('mcp:')), ['mcp:addToClaude', 'mcp:status']);
   assert.match(preload, /addToClaude: \(\) => invoke\('mcp:addToClaude'\)/);
@@ -344,4 +346,23 @@ test('an update that will not come down is said in the window and the notificati
     forgetUpdates();
     firstRun();
   }
+});
+
+test('Cortex Browser’s link from the window: how it is, and leave taken back; a token never crosses', async () => {
+  firstRun();
+  assert.deepEqual(await call('browserLink:status'), { allowed: false, connected: false, asking: false });
+  // No browser waits: an answer is an answer to nothing, whatever it says.
+  assert.deepEqual(await call('browserLink:decide', true), { allowed: false, connected: false, asking: false });
+  assert.equal(readSettings().browserLinkToken, null);
+  updateSettings((settings) => {
+    settings.browserLinkToken = 'a'.repeat(64);
+  });
+  const allowed = await call('browserLink:status');
+  assert.deepEqual(allowed, { allowed: true, connected: false, asking: false });
+  assert.ok(!JSON.stringify(allowed).includes('aaaa'), 'not even its digest');
+  sent.length = 0;
+  assert.deepEqual(await call('browserLink:unpair'), { allowed: false, connected: false, asking: false });
+  assert.equal(readSettings().browserLinkToken, null);
+  assert.deepEqual(sent.filter(([channel]) => channel === 'browserLink:status'), [['browserLink:status', { allowed: false, connected: false, asking: false }]], 'every window is told');
+  assert.ok(!Object.keys((await call('app:bootstrap')) as { settings: object }).join().includes('browserLink') && !JSON.stringify(await call('app:bootstrap')).includes('browserLink'), 'the settings the window is given hold nothing of the link');
 });

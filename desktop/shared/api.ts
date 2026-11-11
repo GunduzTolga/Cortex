@@ -1,3 +1,4 @@
+import type { BrowserLinkApi, BrowserLinkStatus } from './browserLink';
 import type { ChatApi, ChatPush, CliId } from './chat';
 import type { GithubApi, GithubStatus } from './github';
 import type { HermesApi } from './hermes';
@@ -143,6 +144,8 @@ export interface CortexApi {
   mcp: McpApi;
   /** The same server reached with a pairing code and nothing installed (shared/pairing.ts, Settings › Sunucu). */
   tailnet: TailnetApi;
+  /** Cortex Browser on this computer, let in to ask Pyn here (shared/browserLink.ts, Settings). */
+  browserLink: BrowserLinkApi;
   /** The app's own update from the releases (electron/services/updater.ts). */
   update: {
     /** The one downloaded and waiting, if any: a window opened after it was told asks. */
@@ -158,6 +161,8 @@ export interface CortexApi {
     github(handler: (status: GithubStatus) => void): () => void;
     /** The pairing's connection: every change of its state. */
     tailnet(handler: (status: TailnetStatus) => void): () => void;
+    /** Cortex Browser's link: a browser waiting to be let in, connected, gone; the leave given or taken back. */
+    browserLink(handler: (status: BrowserLinkStatus) => void): () => void;
     /** A chat going on: an event, its state, its list entry. */
     chat(handler: (push: ChatPush) => void): () => void;
     /** A sign-in window was closed, or a sign-in done (the tool's), or an install ended (null): ask the tools' statuses again. */

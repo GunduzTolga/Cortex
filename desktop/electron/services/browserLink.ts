@@ -102,6 +102,7 @@ let refusals = 0;
 let refusedAt = 0;
 let tools: () => Promise<CliInfo[]> = listChatClis;
 let statusHeard: (status: BrowserLinkStatus, clients: number) => void = () => undefined;
+let clientsHeard: (clients: number) => void = () => undefined;
 let askedHeard: () => void = () => undefined;
 let lastTold = '';
 
@@ -115,9 +116,14 @@ export function pipeFor(id: string, platform: NodeJS.Platform = process.platform
 
 const rendezvousPath = () => path.join(app.getPath('userData'), RENDEZVOUS_FILE);
 
-/** Where the window hears of the link (electron/ipc.ts), and the app how many browsers are there (electron/main.ts). */
+/** Where the window hears of the link (electron/ipc.ts): its state, and how many browsers have said hello on it. */
 export function onBrowserLink(listener: (status: BrowserLinkStatus, clients: number) => void): void {
   statusHeard = listener;
+}
+
+/** Where the app hears how many browsers are there now (electron/main.ts: one started hidden for a browser leaves with the last). */
+export function onBrowsersThere(listener: (clients: number) => void): void {
+  clientsHeard = listener;
 }
 
 /** Where the app hears that the person is being asked about a browser: said from the notification area when the window is not shown. */
@@ -136,10 +142,12 @@ function changed(): void {
   const told = JSON.stringify([status, clients]);
   if (told === lastTold) return;
   lastTold = told;
-  try {
-    statusHeard(status, clients);
-  } catch {
-    /* the listener's own trouble */
+  for (const tell of [() => statusHeard(status, clients), () => clientsHeard(clients)]) {
+    try {
+      tell();
+    } catch {
+      /* the listener's own trouble */
+    }
   }
 }
 

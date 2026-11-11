@@ -4,6 +4,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { moveYakala, registerIpc, startAppUpdates, stopWatching, trustPagesWhere } from './ipc';
 import { learnSystemProxy } from './services/acp';
+import { onBrowsersThere, onPairingAsked, startBrowserLink, stopBrowserLink } from './services/browserLink';
+import { chatsRunning } from './services/chat';
+import { leavesWithBrowser, secondLaunchShows, startedHidden } from './services/quietStart';
 import { readSettings } from './services/settings';
 import { settleVault, setupBusy, whenSetupIdle } from './services/setup';
 import { startTelegram } from './services/telegram';
@@ -53,7 +56,7 @@ let window: BrowserWindow | null = null;
   right, the window when asked for. And with `background` on, closing the
   window only hides it: Cortex quits from the icon's menu.
 */
-const START_HIDDEN = [process.argv.includes('--gizli'), startedByQuietInstall()].some(Boolean);
+const START_HIDDEN = [startedHidden(process.argv), startedByQuietInstall()].some(Boolean);
 /*
   A newer Cortex waiting is installed unasked only here (services/updater.ts): started with Windows, the window not
   opened since, in the first minutes - later, someone may be talking to the voice helper with the window closed.
@@ -516,11 +519,55 @@ function buildMenu(): void {
 
 app.on('web-contents-created', (_event, contents) => holdContents(contents));
 
+/*
+  Cortex Browser's link (services/browserLink.ts). A browser that connects for the first time is asked about in the
+  window; with the window not on the screen, the icon says so too - at most once a minute, however often a program
+  knocks.
+*/
+const ASK_NOTICE_EVERY = 60_000;
+let askNoticeAt = 0;
+function browserAsked(): void {
+  if (HIDDEN || (window && !window.isDestroyed() && window.isVisible() && !window.isMinimized())) return;
+  const now = Date.now();
+  if (now - askNoticeAt < ASK_NOTICE_EVERY) return;
+  askNoticeAt = now;
+  const english = readSettings().language === 'en';
+  trayNotice('Cortex', english ? 'Cortex Browser wants to connect. Open Cortex to allow or refuse it.' : 'Cortex Browser bağlanmak istiyor. İzin vermek ya da reddetmek için Cortex’i aç.');
+}
+
+/*
+  Started hidden for the browser while `background` is off (services/quietStart.ts): it leaves a while after the last
+  browser has gone - a browser that only starts again is back before then - and the setting stays the person's.
+*/
+const LEAVE_AFTER_MS = 30_000;
+let hadBrowser = false;
+let leaving: ReturnType<typeof setTimeout> | null = null;
+function browsersThere(clients: number): void {
+  if (leaving) clearTimeout(leaving);
+  leaving = null;
+  if (clients > 0) {
+    hadBrowser = true;
+    return;
+  }
+  const look = () => {
+    leaving = null;
+    const state = { startedHidden: START_HIDDEN, background: readSettings().background, seen, hadBrowser, clients: 0, busy: chatsRunning() || setupBusy() !== null };
+    if (quitting) return;
+    if (leavesWithBrowser(state)) void quitWhenSetupAllows();
+    // An answer or a setup still going: looked at again once it may have ended.
+    else if (leavesWithBrowser({ ...state, busy: false })) leaving = setTimeout(look, LEAVE_AFTER_MS);
+  };
+  if (hadBrowser) leaving = setTimeout(look, LEAVE_AFTER_MS);
+}
+
 // One instance only: a second launch brings the window that is there to the front.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => showWindow());
+  app.on('second-instance', (_event, argv) => {
+    // Unless it asked to stay hidden, as Cortex Browser asks when it starts Cortex: already running, nothing appears.
+    if (secondLaunchShows(argv)) showWindow();
+  });
 
   void app.whenReady().then(() => {
     // Windows' proxy, for the programs Cortex starts (services/acp.ts): asked now and again, since a laptop moves
@@ -560,6 +607,10 @@ if (!app.requestSingleInstanceLock()) {
     const settled = settleVault();
     // Pyn's server paired by code (services/tailnet.ts): its helper back up as the same device, or the address reached straight.
     void startTailnet();
+    // Cortex Browser's link (services/browserLink.ts): open while Cortex runs, in the notification area too.
+    onPairingAsked(browserAsked);
+    onBrowsersThere(browsersThere);
+    void startBrowserLink();
     if (!HIDDEN) {
       void settled.then(() => {
         startTelegram();
@@ -588,6 +639,8 @@ app.on('before-quit', (event) => {
     return;
   }
   quitting = true;
+  // A browser connected is told Cortex is closing, before the chats are stopped.
+  stopBrowserLink();
   stopMicrophoneWord();
   stopMicCapture();
   stopWatching();

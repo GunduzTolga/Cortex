@@ -6,6 +6,7 @@ import { restartingListener, sayMicrophone } from './services/microphone';
 import { currentListener, expectVoiceTurn, onHelperChange, startWithWindows, trayChanged } from './services/tray';
 import { defaultVaultDir, setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
+import * as browserLink from './services/browserLink';
 import { onPathReadLate } from './services/clis';
 import * as chat from './services/chat';
 import { keepAttachment } from './services/attachments';
@@ -403,6 +404,13 @@ export function registerIpc(): void {
   handle('tailnet:pair', (code) => tailnet.pairTailnet(code));
   handle('tailnet:forget', () => tailnet.forgetTailnet());
   tailnet.onTailnet((status) => broadcast('tailnet:status', status));
+
+  // Cortex Browser's link (services/browserLink.ts): the window hears how it is, answers for the person when a browser
+  // first connects, and takes the leave back. The token goes to the browser alone; nothing of it is told here.
+  handle('browserLink:status', () => browserLink.browserLinkStatus());
+  handle('browserLink:decide', (allow) => browserLink.decidePairing(allow));
+  handle('browserLink:unpair', () => browserLink.unpairBrowser());
+  browserLink.onBrowserLink((status) => broadcast('browserLink:status', status));
 
   // Notes from the phone through the person's own Telegram bot (services/telegram.ts): a key goes in and is never sent back.
   handle('telegram:status', () => telegram.telegramStatus());
