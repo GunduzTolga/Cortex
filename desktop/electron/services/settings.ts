@@ -68,10 +68,10 @@ export interface Settings {
    */
   autoUpdate: boolean;
   /**
-   * The name of this install's pipe for Cortex Browser (services/browserLink.ts): drawn once, at the first start that
-   * opens the link; null until then.
+   * Cortex Browser's link is open (services/browserLink.ts): off until the person turns it on in the settings, or
+   * Cortex is started for the browser (`--tarayici`), which turns it on for good. Off, nothing listens.
    */
-  browserLinkId: string | null;
+  browserLink: boolean;
   /**
    * The SHA-256 of the token given to Cortex Browser when the person let it connect, in hex; null while no leave is
    * given. Never the token itself: that one the browser keeps.
@@ -92,7 +92,7 @@ export function tidyName(value: unknown): string | null {
   return name || null;
 }
 
-const EMPTY: Settings = { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null, autoUpdate: true, browserLinkId: null, browserLinkToken: null };
+const EMPTY: Settings = { theme: 'system', vault: null, language: null, allFiles: false, nameIcons: false, userName: null, onboarded: false, background: true, voiceConsent: false, wakeConsent: false, hermesUrl: null, hermesProfile: null, vaultSync: false, chatTools: null, autoUpdate: true, browserLink: false, browserLinkToken: null };
 
 let cache: Settings | null = null;
 let keepOff = false;
@@ -122,7 +122,7 @@ function hydrate(raw: Record<string, unknown>): Settings {
     vaultSync: raw.vaultSync === true,
     chatTools: Array.isArray(raw.chatTools) ? [...new Set(raw.chatTools as unknown[])].filter((id): id is CliId => CHAT_TOOLS.includes(id as CliId)) : null,
     autoUpdate: raw.autoUpdate !== false,
-    browserLinkId: typeof raw.browserLinkId === 'string' && /^[0-9a-f]{12,32}$/.test(raw.browserLinkId) ? raw.browserLinkId : null,
+    browserLink: raw.browserLink === true,
     browserLinkToken: typeof raw.browserLinkToken === 'string' && /^[0-9a-f]{64}$/.test(raw.browserLinkToken) ? raw.browserLinkToken : null,
   };
 }

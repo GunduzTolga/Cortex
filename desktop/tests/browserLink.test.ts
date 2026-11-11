@@ -6,10 +6,30 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
-import { LINE_MAX, readCortexMessage, readRendezvous } from '../shared/browserLink';
+import { type BrowserLinkStatus, LIMITS, LINE_MAX, readCortexMessage, readRendezvous } from '../shared/browserLink';
 import type { ChatEvent, CliInfo } from '../shared/chat';
 import { PAGE_TEXT_MAX } from '../electron/services/browserPage';
-import { MAX_CONNECTIONS, REASK, browserLinkStatus, decidePairing, defaultTool, errorCodeOf, linkToolOf, onBrowserLink, onPairingAsked, pipeFor, startBrowserLink, stopBrowserLink, unpairBrowser } from '../electron/services/browserLink';
+import {
+  HELLO_WAIT,
+  MAX_CONNECTIONS,
+  REASK,
+  allowBrowserFromSettings,
+  browserLinkBusy,
+  browserLinkStatus,
+  decidePairing,
+  defaultTool,
+  errorCodeOf,
+  linkPermissionOf,
+  linkToolOf,
+  onBrowserLink,
+  onPairingAsked,
+  pipeFor,
+  safeDetail,
+  setBrowserLinkOn,
+  startBrowserLink,
+  stopBrowserLink,
+  unpairBrowser,
+} from '../electron/services/browserLink';
 import { MESSAGE_MAX, answerChat, beginChat, browserChat, forgetChats, listChats, openChat, sendChat, shutdownChats, tapChat } from '../electron/services/chat';
 import { listClis } from '../electron/services/clis';
 import { pythonOf } from '../electron/services/localChat';
@@ -51,6 +71,17 @@ for (const level of ['log', 'info', 'warn', 'error', 'debug'] as const) {
 const tokens: string[] = [];
 
 type Line = Record<string, unknown>;
+/** The meeting file as it is now. */
+const said = () => readRendezvous(JSON.parse(fs.readFileSync(meeting(), 'utf8')));
+/** What most checks ask of the link's state: let in, connected, asking. */
+const brief = (status: BrowserLinkStatus) => ({ allowed: status.allowed, connected: status.connected, asking: status.asking });
+/** A browser told to wait is told a code of four digits with it: looked at, and taken off for the comparison. */
+function noCode(line: Line | undefined): Line | undefined {
+  if (line?.type !== 'pairing' || line.state !== 'waiting') return line;
+  assert.match(String(line.code), /^\d{4}$/);
+  const { code: _code, ...rest } = line;
+  return rest;
+}
 /** The browser's end, stood in for. */
 class Client {
   lines: Line[] = [];
@@ -74,9 +105,10 @@ class Client {
     socket.on('close', () => (this.closed = true));
   }
   static open(): Promise<Client> {
-    const pipe = (readRendezvous(JSON.parse(fs.readFileSync(meeting(), 'utf8'))) as { pipe: string }).pipe;
+    const pipe = said()?.pipe;
+    assert.equal(typeof pipe, 'string', 'the meeting file names a pipe');
     return new Promise((resolve, reject) => {
-      const socket = net.connect(pipe);
+      const socket = net.connect(pipe as string);
       socket.once('error', reject);
       socket.once('connect', () => resolve(new Client(socket)));
     });
@@ -140,9 +172,12 @@ async function fresh(): Promise<{ vault: string; log: string }> {
   process.env.FAKE_AGENT_LOG = log;
   statuses.length = 0;
   asked = 0;
-  onBrowserLink((status, clients) => statuses.push({ ...status, clients }));
+  onBrowserLink((status, clients) => statuses.push({ ...brief(status), clients }));
   onPairingAsked(() => (asked += 1));
-  assert.equal(await startBrowserLink({ tools }), true);
+  HELLO_WAIT.ms = LIMITS.hello_wait_ms;
+  toolsHeld = null;
+  // As started by the browser: the listener opened, and kept on from then.
+  assert.equal(await startBrowserLink({ tools, asked: true }), true);
   return { vault, log };
 }
 
@@ -170,44 +205,96 @@ test.after(() => {
   shutdownChats();
 });
 
-test('where the link is: a pipe named by the install on Windows, a socket in the data folder elsewhere', () => {
-  assert.equal(pipeFor('3f9a1c0d2b4e6f80', 'win32', 'C:\\Users\\ornek\\AppData\\Roaming\\Cortex'), '\\\\.\\pipe\\cortex-browser-link-3f9a1c0d2b4e6f80');
-  assert.equal(pipeFor('3f9a1c0d2b4e6f80', 'linux', '/var/ornek/Cortex'), path.join('/var/ornek/Cortex', 'browser-link.sock'));
-  assert.equal(pipeFor('3f9a1c0d2b4e6f80', 'darwin', '/Users/ornek/Library/Application Support/Cortex'), path.join('/Users/ornek/Library/Application Support/Cortex', 'browser-link.sock'));
+test('where the link is: a pipe under a name drawn for this run on Windows, a socket in a folder of the person’s own elsewhere', () => {
+  assert.equal(pipeFor('3f9a1c0b7d2e4a65', 'win32', 'C:\\Users\\ornek\\AppData\\Roaming\\Cortex'), '\\\\.\\pipe\\cortex-browser-link-3f9a1c0b7d2e4a65');
+  assert.equal(pipeFor('3f9a1c0b7d2e4a65', 'linux', '/var/ornek/Cortex'), path.join('/var/ornek/Cortex', 'link', '3f9a1c0b7d2e.sock'));
+  assert.equal(pipeFor('3f9a1c0b7d2e4a65', 'darwin', '/Users/ornek/Library/Application Support/Cortex'), path.join('/Users/ornek/Library/Application Support/Cortex', 'link', '3f9a1c0b7d2e.sock'));
 });
 
-test('started, the link is open and the meeting file says where; stopped, a browser is told and the file is gone', async () => {
+test('the listener is closed until the person opens it, or Cortex is started for the browser; the meeting file is written at every start all the same', async () => {
   await fresh();
-  const said = readRendezvous(JSON.parse(fs.readFileSync(meeting(), 'utf8')));
-  assert.deepEqual(said, { version: 1, pipe: pipeFor(readSettings().browserLinkId as string), exe: app.getPath('exe'), pid: process.pid });
-  assert.match(readSettings().browserLinkId ?? '', /^[0-9a-f]{16}$/, 'the install’s id, drawn at the first start');
+  stopBrowserLink();
+  fs.rmSync(settingsPath(), { force: true });
+  forgetSettings();
+  // A stale file from a run that died: written over, never trusted.
+  fs.writeFileSync(meeting(), JSON.stringify({ version: 1, pipe: '\\\\.\\pipe\\cortex-browser-link-0000000000000000', exe: 'old', pid: 1 }));
+  // A first start, nobody having asked for the link: no listener, and the file says so.
+  assert.equal(await startBrowserLink({ tools }), false);
+  assert.equal(readSettings().browserLink, false);
+  assert.deepEqual(said(), { version: 1, pipe: null, exe: app.getPath('exe'), pid: process.pid });
+  assert.deepEqual(browserLinkStatus(), { on: false, listening: false, allowed: false, connected: false, asking: false, code: null, locked: false });
+  if (process.platform !== 'win32') assert.deepEqual(fs.existsSync(path.join(userData(), 'link')) ? fs.readdirSync(path.join(userData(), 'link')) : [], [], 'nothing listens anywhere');
+
+  // The switch in the settings: opened now, kept on, and the file names the pipe.
+  assert.deepEqual(await setBrowserLinkOn(true), { on: true, listening: true, allowed: false, connected: false, asking: false, code: null, locked: false });
+  assert.equal(readSettings().browserLink, true);
+  const first = said()?.pipe as string;
+  assert.deepEqual(said(), { version: 1, pipe: first, exe: app.getPath('exe'), pid: process.pid });
   assert.ok(!fs.readdirSync(userData()).some((name) => name.startsWith('browser-link.json.')), 'written whole: no temporary left beside it');
   if (process.platform !== 'win32') {
-    assert.ok(path.dirname(said?.pipe ?? '') === userData(), 'in the app’s own data folder');
-    assert.equal(fs.statSync(said?.pipe ?? '').mode & 0o777, 0o600, 'the person’s alone');
+    assert.match(path.basename(first), /^[0-9a-f]{12}\.sock$/);
+    assert.equal(path.dirname(first), path.join(userData(), 'link'), 'in a folder of the app’s own data');
+    assert.equal(fs.statSync(path.dirname(first)).mode & 0o777, 0o700, 'which only the person may enter, from before anything listens in it');
+    assert.equal(fs.statSync(first).mode & 0o777, 0o600, 'the socket the person’s alone');
   }
-  const client = await Client.open();
-  client.hello();
-  await client.next('pairing');
-  const id = readSettings().browserLinkId;
-  stopBrowserLink();
+  const { client, token } = await paired();
+  // Switched off: the browser is told, the listener is gone, the file names no pipe - and the leave given stays.
+  assert.deepEqual(await setBrowserLinkOn(false), { on: false, listening: false, allowed: true, connected: false, asking: false, code: null, locked: false });
   assert.deepEqual(await client.next('bye'), { type: 'bye', reason: 'shutdown' });
   await client.gone();
-  assert.equal(fs.existsSync(meeting()), false);
-  if (process.platform !== 'win32') assert.equal(fs.existsSync(said?.pipe ?? ''), false);
-  assert.deepEqual(browserLinkStatus(), { allowed: false, connected: false, asking: false }, 'and a question nobody is left to hear the answer to is gone');
-  // Started again - the app opened again - it is the same pipe, and a socket left by a run that died is no obstacle.
-  if (process.platform !== 'win32') fs.writeFileSync(said?.pipe ?? '', '');
-  assert.equal(await startBrowserLink({ tools }), true);
-  assert.equal(readSettings().browserLinkId, id);
-  assert.equal((readRendezvous(JSON.parse(fs.readFileSync(meeting(), 'utf8'))) as { pipe: string }).pipe, said?.pipe);
-  (await Client.open()).close();
-  // Another program's meeting file is not this one's to take away.
+  assert.equal(said()?.pipe, null);
+  if (process.platform !== 'win32') assert.equal(fs.existsSync(first), false);
+  assert.equal(readSettings().browserLink, false);
+  // What is not a yes or a no changes nothing.
+  assert.equal((await setBrowserLinkOn('yes')).on, false);
+
+  // On again: another name, and the token is still the browser's leave.
+  await setBrowserLinkOn(true);
+  const second = said()?.pipe as string;
+  assert.notEqual(second, first, 'a name drawn anew each time the listener opens');
+  const back = await Client.open();
+  back.hello(token);
+  assert.equal((await back.next('hello_ok')).token, null);
+
+  // Cortex closing: the browser is told; the file is left, for the browser to find the program by.
   stopBrowserLink();
-  fs.writeFileSync(meeting(), JSON.stringify({ version: 1, pipe: 'x', exe: 'x', pid: process.pid + 1 }));
-  stopBrowserLink();
+  assert.deepEqual(await back.next('bye'), { type: 'bye', reason: 'shutdown' });
   assert.equal(fs.existsSync(meeting()), true);
-  fs.rmSync(meeting());
+  assert.equal(said()?.exe, app.getPath('exe'));
+  // Opened again with the setting kept on: listening without being asked, under yet another name; a socket left behind is cleared.
+  if (process.platform !== 'win32') fs.writeFileSync(path.join(userData(), 'link', 'aaaaaaaaaaaa.sock'), '');
+  assert.equal(await startBrowserLink({ tools }), true);
+  assert.ok(typeof said()?.pipe === 'string' && said()?.pipe !== second);
+  if (process.platform !== 'win32') assert.deepEqual(fs.readdirSync(path.join(userData(), 'link')), [path.basename(said()?.pipe as string)]);
+
+  // Started for the browser (`--tarayici`), with the setting off: opened, and kept on from then.
+  stopBrowserLink();
+  updateSettings((settings) => {
+    settings.browserLink = false;
+  });
+  assert.equal(await startBrowserLink({ tools, asked: true }), true);
+  assert.equal(readSettings().browserLink, true);
+  // And the same word reaching a Cortex that already runs with the listener closed (a second launch): opened.
+  await setBrowserLinkOn(false);
+  assert.equal(said()?.pipe, null);
+  assert.equal((await setBrowserLinkOn(true)).listening, true);
+});
+
+test('a listener that cannot be opened is said so: the setting stays on, the file names no pipe, and the settings can tell', { skip: process.platform === 'win32' }, async () => {
+  await fresh();
+  stopBrowserLink();
+  // The folder its socket lies in cannot be made: a file stands where it would be.
+  fs.rmSync(path.join(userData(), 'link'), { recursive: true, force: true });
+  fs.writeFileSync(path.join(userData(), 'link'), '');
+  try {
+    assert.equal(await startBrowserLink({ tools }), false);
+    assert.deepEqual(browserLinkStatus(), { on: true, listening: false, allowed: false, connected: false, asking: false, code: null, locked: false });
+    assert.equal(said()?.pipe, null);
+  } finally {
+    fs.rmSync(path.join(userData(), 'link'), { force: true });
+  }
+  // Tried again from the settings once what stood in the way is gone.
+  assert.equal((await setBrowserLinkOn(true)).listening, true);
 });
 
 test('the first message is a hello: anything else the contract knows closes the link as unpaired, a kind it does not know is passed over', async () => {
@@ -254,15 +341,16 @@ test('a hello of another protocol is told so; a line that is not JSON, or longer
   await invalid.gone();
   assert.deepEqual(invalid.lines, [{ type: 'bye', reason: 'bad_message' }], 'bytes that are not UTF-8');
 
-  // Longer than the limit before its end is in sight: not waited for, not kept.
+  // An empty line is nothing; a line split across writes, and two in one write, are read as they are.
+  const { client, token } = await paired();
+  // Let in, a line may be long - and one longer than the limit before its end is in sight is not waited for, not kept.
   const endless = await Client.open();
+  endless.hello(token);
+  await endless.next('hello_ok');
   const piece = Buffer.alloc(1024 * 1024, 0x61);
   for (let sent = 0; sent <= LINE_MAX && !endless.closed; sent += piece.length) endless.socket.write(piece);
   await endless.gone();
-  assert.deepEqual(endless.lines, [{ type: 'bye', reason: 'bad_message' }]);
-
-  // An empty line is nothing; a line split across writes, and two in one write, are read as they are.
-  const { client } = await paired();
+  assert.deepEqual(endless.lines.at(-1), { type: 'bye', reason: 'bad_message' });
   const from = client.lines.length;
   client.socket.write('\n  \r\n{"type":"hel');
   client.socket.write('lo","protocol":1}\n{"type":"hello","protocol":1}\n');
@@ -274,9 +362,9 @@ test('a browser not let in yet is asked about once, in Cortex; allowed, it is gi
   await fresh();
   const client = await Client.open();
   client.hello();
-  assert.deepEqual(await client.next('pairing'), { type: 'pairing', state: 'waiting' });
+  assert.deepEqual(noCode(await client.next('pairing')), { type: 'pairing', state: 'waiting' });
   await until(() => asked === 1, 'the person to be asked');
-  assert.deepEqual(browserLinkStatus(), { allowed: false, connected: false, asking: true });
+  assert.deepEqual(brief(browserLinkStatus()), { allowed: false, connected: false, asking: true });
   // Still waiting: nothing is asked of a tool, and nothing is asked of the person twice.
   client.hello();
   await until(() => client.lines.filter((one) => one.type === 'pairing').length === 2, 'the second hello answered');
@@ -290,7 +378,7 @@ test('a browser not let in yet is asked about once, in Cortex; allowed, it is gi
   again.hello();
   await again.next('pairing');
   await until(() => browserLinkStatus().asking, 'the question');
-  assert.deepEqual(decidePairing(true), { allowed: true, connected: false, asking: false });
+  assert.deepEqual(brief(decidePairing(true)), { allowed: true, connected: false, asking: false });
   const ok = await again.next('hello_ok');
   const token = ok.token as string;
   assert.deepEqual(ok, { type: 'hello_ok', protocol: 1, app_version: app.getVersion(), tool: { id: 'test-claude', name: 'Test Claude', permission: 'ask', can_ask: true }, vault_name: path.basename(readSettings().vault as string), token });
@@ -298,13 +386,13 @@ test('a browser not let in yet is asked about once, in Cortex; allowed, it is gi
   assert.ok(Buffer.from(token, 'base64url').length >= 32, 'of at least 32 random bytes');
   assert.equal(readSettings().browserLinkToken, createHash('sha256').update(token).digest('hex'));
   assert.ok(!fs.readFileSync(settingsPath(), 'utf8').includes(token), 'the token itself is the browser’s to keep');
-  assert.deepEqual(browserLinkStatus(), { allowed: true, connected: true, asking: false });
+  assert.deepEqual(brief(browserLinkStatus()), { allowed: true, connected: true, asking: false });
   assert.deepEqual(statuses.at(-1), { allowed: true, connected: true, asking: false, clients: 1 }, 'the window is told');
 
   // The next time it connects, the token is its leave: nobody is asked, and no new token is drawn.
   again.close();
   await until(() => !browserLinkStatus().connected, 'the link to be seen closed');
-  assert.deepEqual(browserLinkStatus(), { allowed: true, connected: false, asking: false }, 'allowed, and not connected now');
+  assert.deepEqual(brief(browserLinkStatus()), { allowed: true, connected: false, asking: false }, 'allowed, and not connected now');
   const later = await Client.open();
   later.hello(token);
   assert.equal((await later.next('hello_ok')).token, null);
@@ -312,7 +400,7 @@ test('a browser not let in yet is asked about once, in Cortex; allowed, it is gi
   // A token that is not the one given is no leave: asked again.
   const other = await Client.open();
   other.hello(`${token.slice(0, -1)}${token.endsWith('A') ? 'B' : 'A'}`);
-  assert.deepEqual(await other.next('pairing'), { type: 'pairing', state: 'waiting' });
+  assert.deepEqual(noCode(await other.next('pairing')), { type: 'pairing', state: 'waiting' });
   await until(() => asked === 3, 'the person to be asked');
   // Allowed, it has a token of its own, and the earlier one is no leave any more: one browser at a time.
   decidePairing(true);
@@ -320,7 +408,7 @@ test('a browser not let in yet is asked about once, in Cortex; allowed, it is gi
   assert.notEqual(second, token);
   const old = await Client.open();
   old.hello(token);
-  assert.deepEqual(await old.next('pairing'), { type: 'pairing', state: 'waiting' });
+  assert.deepEqual(noCode(await old.next('pairing')), { type: 'pairing', state: 'waiting' });
   decidePairing(false);
 });
 
@@ -332,7 +420,7 @@ test('refused, a browser is told so and not asked about again at once: each refu
   client.hello();
   await client.next('pairing');
   await until(() => browserLinkStatus().asking, 'the question');
-  assert.deepEqual(decidePairing(false), { allowed: false, connected: false, asking: false });
+  assert.deepEqual(brief(decidePairing(false)), { allowed: false, connected: false, asking: false });
   await until(() => client.lines.length === 2, 'the refusal');
   assert.deepEqual(client.lines.at(-1), { type: 'pairing', state: 'refused' });
   assert.equal(readSettings().browserLinkToken, null);
@@ -350,7 +438,7 @@ test('refused, a browser is told so and not asked about again at once: each refu
   now += REASK.ms;
   client.hello();
   await until(() => client.lines.length === 4, 'the third answer');
-  assert.deepEqual(client.lines.at(-1), { type: 'pairing', state: 'waiting' });
+  assert.deepEqual(noCode(client.lines.at(-1)), { type: 'pairing', state: 'waiting' });
   assert.equal(asked, 2);
   decidePairing(false);
   await until(() => client.lines.length === 5, 'the second refusal');
@@ -362,17 +450,17 @@ test('refused, a browser is told so and not asked about again at once: each refu
   now += REASK.ms;
   client.hello();
   await until(() => client.lines.length === 7, 'the answer');
-  assert.deepEqual(client.lines.at(-1), { type: 'pairing', state: 'waiting' });
+  assert.deepEqual(noCode(client.lines.at(-1)), { type: 'pairing', state: 'waiting' });
   // Allowed in the end: the refusals are forgotten.
   decidePairing(true);
   await client.next('hello_ok');
   unpairBrowser();
   const fresher = await Client.open();
   fresher.hello();
-  assert.deepEqual(await fresher.next('pairing'), { type: 'pairing', state: 'waiting' });
+  assert.deepEqual(noCode(await fresher.next('pairing')), { type: 'pairing', state: 'waiting' });
   // An answer with no question is nothing.
   decidePairing(false);
-  assert.deepEqual(decidePairing(true), { allowed: false, connected: false, asking: false });
+  assert.deepEqual(brief(decidePairing(true)), { allowed: false, connected: false, asking: false });
   assert.equal(readSettings().browserLinkToken, null);
 });
 
@@ -384,7 +472,7 @@ test('one question at a time: a second browser waits on the first one’s, takes
   await until(() => browserLinkStatus().asking, 'the question');
   const second = await Client.open();
   second.hello();
-  assert.deepEqual(await second.next('pairing'), { type: 'pairing', state: 'waiting' });
+  assert.deepEqual(noCode(await second.next('pairing')), { type: 'pairing', state: 'waiting' });
   assert.equal(asked, 1);
   // The first goes (the browser started again while the card was up): the card stays, and is now about the second.
   first.close();
@@ -403,13 +491,13 @@ test('one question at a time: a second browser waits on the first one’s, takes
 test('leave taken back: the browser is told and its link closed, and its token is no leave any more', async () => {
   await fresh();
   const { client, token } = await paired();
-  assert.deepEqual(unpairBrowser(), { allowed: false, connected: false, asking: false });
+  assert.deepEqual(brief(unpairBrowser()), { allowed: false, connected: false, asking: false });
   assert.deepEqual(await client.next('bye'), { type: 'bye', reason: 'unpaired' });
   await client.gone();
   assert.equal(readSettings().browserLinkToken, null);
   const again = await Client.open();
   again.hello(token);
-  assert.deepEqual(await again.next('pairing'), { type: 'pairing', state: 'waiting' });
+  assert.deepEqual(noCode(await again.next('pairing')), { type: 'pairing', state: 'waiting' });
 });
 
 test('a question is answered by the tool a new chat in Cortex would be written to, told as it comes: starting, thinking, answering, the words, done', async () => {
@@ -455,7 +543,7 @@ test('which tool: the one last written to while it is still offered, else the fi
   const all = (...available: string[]): CliInfo[] => (['claude', 'codex', 'test', 'test-claude'] as const).map((id) => ({ id, name: id, available: available.includes(id) }));
   // No chat yet: the first tool offered.
   stopBrowserLink();
-  await startBrowserLink({ tools: async () => all('codex', 'test-claude') });
+  await startBrowserLink({ tools: async () => all('codex', 'test-claude'), asked: true });
   assert.equal((await defaultTool())?.id, 'codex');
   // A chat written to: its tool, as the window keeps the one last written to.
   const { id } = sendChat(null, 'test-claude', 'merhaba');
@@ -463,13 +551,13 @@ test('which tool: the one last written to while it is still offered, else the fi
   assert.equal((await defaultTool())?.id, 'test-claude');
   // That tool gone since: the first offered again.
   stopBrowserLink();
-  await startBrowserLink({ tools: async () => all('test') });
+  await startBrowserLink({ tools: async () => all('test'), asked: true });
   assert.equal((await defaultTool())?.id, 'test');
 
   // None at all.
   stopBrowserLink();
   toolEnv = {};
-  await startBrowserLink({ tools });
+  await startBrowserLink({ tools, asked: true });
   assert.equal(await defaultTool(), null);
   const { client } = await paired();
   assert.equal(client.lines.find((one) => one.type === 'hello_ok')?.tool, null);
@@ -529,41 +617,60 @@ test('the browser is told how the tool asks leave, as the person chose it, and w
   assert.deepEqual(client.lines.find((one) => one.type === 'hello_ok')?.tool, { id: 'test-claude', name: 'Test Claude', permission: 'auto', can_ask: true });
 });
 
-test('"ask again" from the browser passes over the wait after a refusal, and nothing else does', async () => {
+test('"ask again" passes over the wait after a refusal, once a minute at most; refused three times running, a browser is not asked about again until the person says so in the settings', async () => {
   await fresh();
   let now = 5_000_000;
   REASK.now = () => now;
   const client = await Client.open();
-  client.hello();
-  await client.next('pairing');
-  await until(() => browserLinkStatus().asking, 'the question');
-  decidePairing(false);
-  await until(() => client.lines.length === 2, 'the refusal');
+  const hello = async (extra: Line = {}) => {
+    const from = client.lines.length;
+    client.send({ type: 'hello', protocol: 1, client: 'cortex-browser', client_version: '0.0.1', token: null, ...extra });
+    return noCode(await until(() => client.lines[from], 'the answer'));
+  };
+  const refuse = async () => {
+    await until(() => browserLinkStatus().asking, 'the question');
+    const from = client.lines.length;
+    decidePairing(false);
+    await until(() => client.lines[from], 'the refusal');
+  };
+  assert.deepEqual(await hello(), { type: 'pairing', state: 'waiting' });
+  await refuse();
   assert.equal(client.closed, false, 'refused, the link is the browser’s to close');
   // A hello that says it is not asking again, or says nothing of it: refused unasked.
-  client.send({ type: 'hello', protocol: 1, client: 'cortex-browser', client_version: '0.0.1', token: null, ask_again: false });
-  await until(() => client.lines.length === 3, 'the answer');
-  assert.deepEqual(client.lines.at(-1), { type: 'pairing', state: 'refused' });
+  assert.deepEqual(await hello({ ask_again: false }), { type: 'pairing', state: 'refused' });
+  assert.deepEqual(await hello(), { type: 'pairing', state: 'refused' });
   assert.equal(asked, 1);
-  // The person pressed "ask again": asked at once.
-  client.send({ type: 'hello', protocol: 1, client: 'cortex-browser', client_version: '0.0.1', token: null, ask_again: true });
-  await until(() => client.lines.length === 4, 'the answer');
-  assert.deepEqual(client.lines.at(-1), { type: 'pairing', state: 'waiting' });
+  // The person pressed "ask again": asked at once. It is no way in: a wrong token with it asks the person, and gives nothing.
+  assert.deepEqual(await hello({ ask_again: true, token: 'not-the-token' }), { type: 'pairing', state: 'waiting' });
   assert.equal(asked, 2);
-  assert.equal(browserLinkStatus().asking, true);
-  decidePairing(false);
-  await until(() => client.lines.length === 5, 'the second refusal');
-  // The refusal counts as any other: without the word, the wait is the longer one now.
-  now += REASK.ms;
-  client.hello();
-  await until(() => client.lines.length === 6, 'the answer');
-  assert.deepEqual(client.lines.at(-1), { type: 'pairing', state: 'refused' });
-  // It is no way in: with a wrong token it asks the person, and gives nothing.
-  client.send({ type: 'hello', protocol: 1, client: 'cortex-browser', client_version: '0.0.1', token: 'not-the-token', ask_again: true });
-  await until(() => client.lines.length === 7, 'the answer');
-  assert.deepEqual(client.lines.at(-1), { type: 'pairing', state: 'waiting' });
   assert.equal(client.lines.some((one) => one.type === 'hello_ok'), false);
-  decidePairing(false);
+  await refuse();
+  // Pressed again within the minute: not asked, however often.
+  now += 20_000;
+  for (let n = 0; n < 5; n += 1) assert.deepEqual(await hello({ ask_again: true }), { type: 'pairing', state: 'refused' });
+  assert.equal(asked, 2);
+  // A minute on: once more.
+  now += 41_000;
+  assert.deepEqual(await hello({ ask_again: true }), { type: 'pairing', state: 'waiting' });
+  assert.equal(asked, 3);
+  assert.equal(browserLinkStatus().locked, false);
+  await refuse();
+  // Refused three times running: no hello asks any more, with the word or without it, now or an hour on.
+  assert.deepEqual(brief(browserLinkStatus()), { allowed: false, connected: false, asking: false });
+  assert.equal(browserLinkStatus().locked, true);
+  now += 3_600_000;
+  assert.deepEqual(await hello({ ask_again: true }), { type: 'pairing', state: 'refused' });
+  assert.deepEqual(await hello(), { type: 'pairing', state: 'refused' });
+  assert.equal(asked, 3);
+  // The person, in the settings, lets it ask again: the next hello is asked about as the first was.
+  assert.equal(allowBrowserFromSettings().locked, false);
+  assert.equal(readSettings().browserLinkToken, null, 'which lets nobody in by itself');
+  assert.deepEqual(await hello(), { type: 'pairing', state: 'waiting' });
+  assert.equal(asked, 4);
+  // And with a browser waiting, the same button lets that one in.
+  await until(() => browserLinkStatus().asking, 'the question');
+  assert.deepEqual(brief(allowBrowserFromSettings()), { allowed: true, connected: false, asking: false });
+  assert.equal(typeof (await client.next('hello_ok')).token, 'string');
 });
 
 test('Stop from the browser ends the answer, and says it was stopped', async () => {
@@ -584,7 +691,7 @@ test('Stop from the browser ends the answer, and says it was stopped', async () 
   toolsHeld = null;
   letGo();
   assert.deepEqual(await client.ended('b1'), { type: 'event', id: 'b1', kind: 'done', cancelled: true });
-  assert.deepEqual(kinds(client.events('b1')), ['status:starting', 'done']);
+  assert.deepEqual(kinds(client.events('b1')), ['done'], 'nothing was started, so nothing is said to have been');
   assert.equal(browserChat('c7'), null);
   // A cancel for nothing that runs is nothing.
   client.send({ type: 'cancel', id: 'a1' });
@@ -778,50 +885,390 @@ test('"save to Cortex" is one card in the vault’s inbox: the page’s address,
   assert.deepEqual(await until(() => client.lines.find((one) => one.type === 'captured' && one.id === 'k4'), 'the answer'), { type: 'captured', id: 'k4', ok: false, code: 'no_vault', detail: '' });
 });
 
-test('more links at once than a browser opens are not taken', async () => {
+test('a full house makes room by its oldest stranger, never by a browser let in or the one being asked about', async () => {
   await fresh();
+  const { client, token } = await paired();
+  const waiting = await Client.open();
+  waiting.hello('not-the-token');
+  await waiting.next('pairing');
+  const strangers: Client[] = [];
+  for (let n = 0; n < MAX_CONNECTIONS - 2; n += 1) strangers.push(await Client.open());
+  // Full. The browser connects again: the oldest link that never said hello goes, and no other.
+  const back = await Client.open();
+  back.hello(token);
+  assert.equal((await back.next('hello_ok')).token, null);
+  await strangers[0].gone();
+  assert.deepEqual(strangers[0].lines, []);
+  assert.deepEqual([client.closed, waiting.closed, strangers[1].closed], [false, false, false]);
+  for (const one of strangers) one.close();
+  await until(() => statuses.at(-1)?.clients === 3, 'the strangers to be seen gone');
+  // A house full of browsers let in, and the one asked about: a newcomer is the one that is not taken.
   const held: Client[] = [];
-  for (let n = 0; n < MAX_CONNECTIONS; n += 1) held.push(await Client.open());
-  held[0].hello();
-  await held[0].next('pairing');
+  for (let n = 0; n < MAX_CONNECTIONS - 3; n += 1) {
+    const one = await Client.open();
+    one.hello(token);
+    await one.next('hello_ok');
+    held.push(one);
+  }
   const extra = await Client.open();
   await extra.gone();
   assert.deepEqual(extra.lines, []);
-  // One let go makes room for another, once it is seen gone.
-  held[1].close();
-  for (let tries = 0; ; tries += 1) {
-    const one = await Client.open();
-    one.send({ type: 'hello', protocol: 2 });
-    await one.gone();
-    if (one.lines.length) {
-      assert.deepEqual(one.lines, [{ type: 'bye', reason: 'protocol' }]);
-      break;
-    }
-    assert.ok(tries < 200, 'room for another');
-    await new Promise((done) => setTimeout(done, 10));
+  assert.equal([client, waiting, back, ...held].some((one) => one.closed), false);
+  decidePairing(false);
+});
+
+test('a link that says nothing is closed after a while; before a browser is let in a line is short, and a long one is neither kept nor read', async () => {
+  await fresh();
+  HELLO_WAIT.ms = 150;
+  const silent = await Client.open();
+  await silent.gone();
+  assert.deepEqual(silent.lines, [], 'closed without a word');
+  // One that said hello and waits on the person is not: the wait is the person's.
+  const waiting = await Client.open();
+  waiting.hello();
+  await waiting.next('pairing');
+  await new Promise((done) => setTimeout(done, 400));
+  assert.equal(waiting.closed, false);
+  waiting.close();
+  await until(() => !browserLinkStatus().asking, 'the question to go with it');
+  HELLO_WAIT.ms = LIMITS.hello_wait_ms;
+
+  const limit = LIMITS.line_bytes_before_hello_ok;
+  const head = '{"type":"from-the-future","a":"';
+  const tail = '"}';
+  // A line of exactly the limit is read (and passed over, its kind not known); one byte more is a bad message.
+  const fits = await Client.open();
+  fits.socket.write(`${head}${'x'.repeat(limit - head.length - tail.length)}${tail}\n`);
+  fits.hello();
+  assert.deepEqual(noCode(await fits.next('pairing')), { type: 'pairing', state: 'waiting' });
+  fits.close();
+  const long = await Client.open();
+  long.socket.write(`${head}${'x'.repeat(limit - head.length - tail.length + 1)}${tail}\n`);
+  await long.gone();
+  assert.deepEqual(long.lines, [{ type: 'bye', reason: 'bad_message' }]);
+  // Never ended: given up as soon as it is longer than a line may be, not kept until sixteen megabytes of it are in.
+  const endless = await Client.open();
+  let written = 0;
+  const piece = Buffer.alloc(8192, 0x61);
+  while (!endless.closed && written < 4 * 1024 * 1024) {
+    await new Promise<void>((done) => endless.socket.write(piece, () => done()));
+    written += piece.length;
+    await new Promise((done) => setImmediate(done));
   }
-  for (const one of held) one.close();
+  await endless.gone();
+  assert.deepEqual(endless.lines, [{ type: 'bye', reason: 'bad_message' }]);
+  assert.ok(written <= limit + 64 * piece.length, `closed after ${written} bytes`);
+  // Waiting on the person is still "before": a long line from a browser not yet let in is a bad message too.
+  await until(() => !browserLinkStatus().asking, 'no question open');
+  const early = await Client.open();
+  early.hello();
+  await early.next('pairing');
+  early.socket.write(`${head}${'x'.repeat(limit)}${tail}\n`);
+  await early.gone();
+  assert.deepEqual(early.lines.at(-1), { type: 'bye', reason: 'bad_message' });
+
+  // Let in, a long line is taken however it arrives: in small pieces, cut through the middle of its letters.
+  const { client } = await paired();
+  const note = 'ş'.repeat(300_000);
+  const line = Buffer.from(`${JSON.stringify({ type: 'capture', id: 'k1', title: 'T', url: 'https://example.com/', note })}\n`);
+  for (let at = 0; at < line.length; at += 7919) client.socket.write(line.subarray(at, at + 7919));
+  const kept = await until(() => client.lines.find((one) => one.type === 'captured' && one.id === 'k1'), 'the long line to be read', 20_000);
+  assert.equal(kept.ok, false, 'read whole, and answered (this vault has no memory to keep it in)');
+  assert.equal(client.closed, false);
+});
+
+test('the code a waiting browser is told is the one the person is shown: of the browser being asked about, and gone with the question', async () => {
+  await fresh();
+  const first = await Client.open();
+  first.hello();
+  const code = (await first.next('pairing')).code as string;
+  assert.match(code, /^\d{4}$/);
+  await until(() => browserLinkStatus().asking, 'the question');
+  assert.equal(browserLinkStatus().code, code);
+  // Said again to the same browser, it is the same code.
+  first.hello();
+  await until(() => first.lines.length === 2, 'the second answer');
+  assert.equal(first.lines[1].code, code);
+  // Another that waits has a code of its own; the person is shown the first one's until the first goes.
+  const second = await Client.open();
+  second.hello();
+  const other = (await second.next('pairing')).code as string;
+  assert.equal(browserLinkStatus().code, code);
+  first.close();
+  await until(() => browserLinkStatus().code !== code, 'the question to pass on');
+  assert.equal(browserLinkStatus().code, other);
+  decidePairing(true);
+  await second.next('hello_ok');
+  assert.equal(browserLinkStatus().code, null);
+});
+
+test('leave taken back while a browser is on its way in: it is not let in after all, whichever step it was at', async () => {
+  await fresh();
+  const { client, token } = await paired();
+  client.close();
+  await until(() => !browserLinkStatus().connected, 'closed');
+  let letGo: () => void = () => undefined;
+  // Its hello, with a token that is good, is being answered (the tools are slow to tell) when the leave is taken back.
+  toolsHeld = new Promise((done) => (letGo = done));
+  const back = await Client.open();
+  back.hello(token);
+  await until(() => statuses.at(-1)?.clients === 1, 'the hello to be read');
+  assert.deepEqual(brief(unpairBrowser()), { allowed: false, connected: false, asking: false });
+  toolsHeld = null;
+  letGo();
+  await back.gone();
+  assert.deepEqual(back.lines, [{ type: 'bye', reason: 'unpaired' }], 'told so, and never welcomed');
+  assert.equal(browserLinkStatus().connected, false);
+
+  // Allowed, and the leave taken back before the welcome was written: the token drawn for it is given to nobody.
+  const again = await Client.open();
+  again.hello();
+  await again.next('pairing');
+  await until(() => browserLinkStatus().asking, 'the question');
+  toolsHeld = new Promise((done) => (letGo = done));
+  decidePairing(true);
+  unpairBrowser();
+  toolsHeld = null;
+  letGo();
+  await again.gone();
+  assert.equal(again.lines.some((one) => one.type === 'hello_ok'), false);
+  assert.deepEqual(again.lines.at(-1), { type: 'bye', reason: 'unpaired' });
+  assert.equal(readSettings().browserLinkToken, null);
+
+  // A browser waiting to be asked about goes with it too: nothing of the link is left open for the leave that is gone.
+  const waiting = await Client.open();
+  waiting.hello();
+  await waiting.next('pairing');
+  await until(() => browserLinkStatus().asking, 'the question');
+  unpairBrowser();
+  await waiting.gone();
+  assert.deepEqual([waiting.lines.at(-1), browserLinkStatus().asking], [{ type: 'bye', reason: 'unpaired' }, false]);
+});
+
+test('a new leave ends the one before it: a browser connected by the earlier token is told and closed', async () => {
+  await fresh();
+  const { client, token } = await paired();
+  const other = await Client.open();
+  other.hello('not-the-token');
+  await other.next('pairing');
+  await until(() => browserLinkStatus().asking, 'the question');
+  decidePairing(true);
+  const second = (await other.next('hello_ok')).token as string;
+  await client.gone();
+  assert.deepEqual(client.lines.at(-1), { type: 'bye', reason: 'unpaired' });
+  assert.equal(other.closed, false);
+  assert.notEqual(second, token);
+  assert.deepEqual(brief(browserLinkStatus()), { allowed: true, connected: true, asking: false });
+});
+
+test('a question is told the tool that answers it: its conversation’s own. A page for a tool Cortex cannot hold to asking is not sent unless the person said so', async () => {
+  await fresh();
+  const AGENT = path.resolve('tests/fixtures/fake-acp-agent.mjs');
+  process.env.CORTEX_TEST_AGENT = AGENT;
+  toolEnv = { CORTEX_TEST_CLAUDE: CLAUDE, CORTEX_TEST_AGENT: AGENT };
+  const agent = { id: 'test', name: 'Test agent', permission: 'unknown', can_ask: false };
+  const claude = { id: 'test-claude', name: 'Test Claude', permission: 'ask', can_ask: true };
+  try {
+    const { client } = await paired();
+    assert.deepEqual(client.lines.find((one) => one.type === 'hello_ok')?.tool, agent, 'the first tool offered, for a new conversation');
+    client.send({ type: 'ask', id: 'a1', conversation: 'c1', text: 'merhaba', page: null });
+    await client.ended('a1');
+    const statuses1 = client.events('a1').filter((one) => one.kind === 'status');
+    assert.deepEqual(statuses1[0], { type: 'event', id: 'a1', kind: 'status', phase: 'starting', tool: agent }, 'said with the first status');
+    assert.ok(statuses1.slice(1).every((one) => !('tool' in one)), 'and once');
+    // The person writes to Claude Code in Cortex: a new conversation would now go to it...
+    const own = sendChat(null, 'test-claude', 'merhaba');
+    await until(() => !openChat(own.id).running, 'the answer in Cortex');
+    const from = client.lines.length;
+    client.hello();
+    assert.deepEqual((await client.next('hello_ok', from)).tool, claude);
+    // ...and the conversation begun goes on with its own tool. A page for it is refused, the tool named, nothing run.
+    const asked1 = openChat(browserChat('c1')).events.filter((one) => one.type === 'user').length;
+    client.send({ type: 'ask', id: 'a2', conversation: 'c1', text: 'bu sayfayı özetle', page: PAGE });
+    assert.deepEqual(await client.ended('a2'), { type: 'event', id: 'a2', kind: 'error', code: 'page_unprotected', detail: '', tool: agent });
+    assert.deepEqual(client.events('a2').length, 1, 'no status: nothing was started');
+    assert.equal(openChat(browserChat('c1')).events.filter((one) => one.type === 'user').length, asked1, 'the tool was sent nothing');
+    assert.ok(!JSON.stringify(openChat(browserChat('c1')).events).includes(PAGE.url));
+    // The same question without its page is an ordinary one.
+    client.send({ type: 'ask', id: 'a3', conversation: 'c1', text: 'bu sayfayı özetle', page: null });
+    assert.equal((await client.ended('a3')).kind, 'done');
+    // The person, warned in the browser, says to send it all the same: sent, the tool said again.
+    client.send({ type: 'ask', id: 'a4', conversation: 'c1', text: 'bu sayfayı özetle', page: PAGE, page_ack: true });
+    assert.equal((await client.ended('a4')).kind, 'done');
+    assert.deepEqual(client.events('a4')[0], { type: 'event', id: 'a4', kind: 'status', phase: 'starting', tool: agent });
+    const user = openChat(browserChat('c1')).events.findLast((one) => one.type === 'user');
+    assert.deepEqual(user?.type === 'user' && user.page, { title: PAGE.title, url: PAGE.url });
+    // A new conversation goes to the tool last written to: the agent again, and its page is refused the same way...
+    client.send({ type: 'ask', id: 'b1', conversation: 'c9', text: 'bu sayfayı özetle', page: PAGE });
+    assert.deepEqual(await client.ended('b1'), { type: 'event', id: 'b1', kind: 'error', code: 'page_unprotected', detail: '', tool: agent });
+    assert.equal(browserChat('c9'), null, 'no chat is begun for a question refused');
+    // ...and, Claude Code written to since, to a tool Cortex can hold to asking: its page needs no such word.
+    sendChat(own.id, 'test-claude', 'devam');
+    await until(() => !openChat(own.id).running, 'the answer in Cortex');
+    client.send({ type: 'ask', id: 'a5', conversation: 'c2', text: 'bu sayfayı özetle', page: PAGE });
+    assert.equal((await client.ended('a5')).kind, 'done');
+    assert.deepEqual(client.events('a5')[0], { type: 'event', id: 'a5', kind: 'status', phase: 'starting', tool: claude });
+    assert.equal(openChat(browserChat('c2')).chat.cli, 'test-claude');
+  } finally {
+    delete process.env.CORTEX_TEST_AGENT;
+  }
+});
+
+test('the id of a question still being answered is not used again: the link is closed for it', async () => {
+  await fresh();
+  const { client } = await paired();
+  client.send({ type: 'ask', id: 'a1', conversation: 'c1', text: 'yavaş olsun', page: null });
+  await until(() => client.events('a1').some((one) => one.kind === 'text'), 'the first words');
+  const before = client.events('a1').length;
+  client.send({ type: 'ask', id: 'a1', conversation: 'c2', text: 'ikinci', page: null });
+  await client.gone();
+  assert.deepEqual(client.lines.at(-1), { type: 'bye', reason: 'bad_message' });
+  assert.equal(client.events('a1').length, before, 'nothing more was said under that id');
+  assert.equal(browserChat('c2'), null);
+  // Ended, an id is free again.
+  shutdownChats(true);
+  await until(() => !openChat(browserChat('c1')).running, 'the first to stop');
+  const { client: again } = await paired();
+  again.send({ type: 'ask', id: 'a1', conversation: 'c3', text: 'merhaba', page: null });
+  assert.equal((await again.ended('a1')).kind, 'done');
+  again.send({ type: 'ask', id: 'a1', conversation: 'c3', text: 'merhaba', page: null });
+  await until(() => again.events('a1').filter((one) => one.kind === 'done').length === 2, 'the second answer under the same id');
+});
+
+test('a failure’s detail is for a log, and never says where anything is on this computer', async () => {
+  const home = os.homedir();
+  assert.equal(safeDetail(`EACCES: permission denied, open '/var/lib/cortex/chats/index.json.tmp'`), 'EACCES: permission denied, open \'…\'');
+  assert.equal(safeDetail('Claude Code stopped: cannot read C:\\Users\\ornek\\AppData\\Roaming\\Cortex\\x.json now'), 'Claude Code stopped: cannot read … now');
+  assert.equal(safeDetail(`no such file ${path.join(home, 'notes', 'a.md')} or ~/.config/x and \\\\server\\share\\f`), 'no such file … or … and …');
+  assert.equal(safeDetail('fetch https://example.com/a/b failed: 5/7 done'), 'fetch https://example.com/a/b failed: 5/7 done', 'an address on the web is not a place on this computer');
+  assert.equal(safeDetail(`${'ş'.repeat(400)}`), 'ş'.repeat(LIMITS.detail_chars));
+  assert.equal(safeDetail('😀'.repeat(400)).length, 2 * LIMITS.detail_chars, 'cut by characters, not through one');
+
+  await fresh();
+  if (process.platform === 'win32' || process.getuid?.() === 0) return;
+  const { client } = await paired();
+  // Cortex's own failure: the chats' list cannot be written.
+  const chats = path.join(userData(), 'chats');
+  fs.mkdirSync(chats, { recursive: true });
+  fs.chmodSync(chats, 0o500);
+  try {
+    client.send({ type: 'ask', id: 'a1', conversation: 'c1', text: 'merhaba', page: null });
+    const end = await client.ended('a1');
+    assert.deepEqual([end.kind, end.code], ['error', 'internal']);
+    assert.ok(!/[\\/]/.test(end.detail as string), `a path in the detail: ${end.detail}`);
+    assert.ok(!JSON.stringify(client.lines).includes(userData()));
+  } finally {
+    fs.chmodSync(chats, 0o700);
+  }
+});
+
+test('lengths are counted in characters, and what Cortex writes is cut to the contract’s limits', async () => {
+  // A card as a tool may send it: longer in every way than the contract takes.
+  const card = linkPermissionOf({
+    type: 'permission',
+    id: 'p1',
+    title: '😀'.repeat(LIMITS.permission_title_chars + 50),
+    kind: 'k'.repeat(LIMITS.name_chars + 5),
+    paths: Array.from({ length: LIMITS.permission_paths + 5 }, (_, n) => `Notes/${n}.md`),
+    options: [
+      ...Array.from({ length: LIMITS.permission_options + 2 }, (_, n) => ({ id: `o${n}`, name: 'n'.repeat(LIMITS.name_chars + 5), kind: 'allow_once' as const })),
+    ],
+  });
+  assert.equal(card.title, '😀'.repeat(LIMITS.permission_title_chars));
+  assert.equal(card.kind.length, LIMITS.name_chars);
+  assert.equal(card.paths.length, LIMITS.permission_paths);
+  assert.deepEqual([card.options.length, card.options[0].name.length, card.after_page], [LIMITS.permission_options, LIMITS.name_chars, false]);
+  assert.notEqual(readCortexMessage({ type: 'event', id: 'a', kind: 'permission', permission: card }), null, 'as cut, it is the contract’s');
+  // After a page: said so, and no leave for good among its answers; an answer whose id the browser could not send back is left out.
+  const after = linkPermissionOf({ type: 'permission', id: 'p2', title: 't', kind: 'edit', paths: [], afterPage: true, options: [{ id: 'allow', name: 'Allow once', kind: 'allow_once' }, { id: 'always', name: 'Always', kind: 'allow_always' }, { id: 'x'.repeat(LIMITS.id_chars + 1), name: 'Long', kind: 'reject_once' }, { id: 'deny', name: 'Reject', kind: 'reject_once' }] });
+  assert.deepEqual([after.after_page, after.options.map((one) => one.id)], [true, ['allow', 'deny']]);
+  assert.equal(linkToolOf({ id: 'test-claude', name: 'n'.repeat(500), available: true }).name.length, LIMITS.name_chars);
+
+  await fresh();
+  const { client } = await paired();
+  // A hundred thousand characters of two halves each: as many characters as a question may have, twice as many halves.
+  client.send({ type: 'ask', id: 'a1', conversation: 'c1', text: '😀'.repeat(LIMITS.text_chars), page: null });
+  assert.equal((await client.ended('a1')).kind, 'done');
+  client.send({ type: 'ask', id: 'a2', conversation: 'c2', text: '😀'.repeat(LIMITS.text_chars + 1), page: null });
+  assert.deepEqual(await client.ended('a2'), { type: 'event', id: 'a2', kind: 'error', code: 'too_long', detail: '' });
+  client.send({ type: 'ask', id: 'a3', conversation: 'c3', text: 'özetle', page: { ...PAGE, text: '😀'.repeat(LIMITS.page_text_chars) } });
+  assert.equal((await client.ended('a3')).kind, 'done');
+});
+
+test('a card still open when its answer ends is closed with it, in the browser and in Cortex', async () => {
+  await fresh();
+  const { client } = await paired();
+  client.send({ type: 'ask', id: 'a1', conversation: 'c1', text: 'izin iste', page: null });
+  const card = (await until(() => client.events('a1').find((one) => one.kind === 'permission'), 'the card')).permission as { id: string };
+  client.send({ type: 'cancel', id: 'a1' });
+  assert.deepEqual(await client.ended('a1'), { type: 'event', id: 'a1', kind: 'done', cancelled: true });
+  // Stopped by the person: told closed before the end, so no card is left waiting on either side.
+  const closed = client.events('a1').findIndex((one) => one.kind === 'permission_closed');
+  assert.deepEqual(client.events('a1')[closed], { type: 'event', id: 'a1', kind: 'permission_closed', permission: card.id, option: null });
+  assert.ok(closed > 0 && closed < client.events('a1').length - 1);
+  await until(() => !openChat(browserChat('c1')).running, 'the chat to stop');
+  assert.deepEqual(openChat(browserChat('c1')).events.find((one) => one.type === 'answered'), { type: 'answered', id: card.id, option: null });
+
+  // The tool gone under a card that waits: the answer ends as a failure, which is its last word to the browser and
+  // closes the card there (the contract says so); in Cortex the card is closed by the chat itself.
+  client.send({ type: 'ask', id: 'a2', conversation: 'c2', text: 'izin iste', page: null });
+  const second = (await until(() => client.events('a2').find((one) => one.kind === 'permission'), 'the card')).permission as { id: string };
+  shutdownChats();
+  const end = await client.ended('a2');
+  assert.deepEqual([end.kind, end.code], ['error', 'tool_failed']);
+  assert.equal(client.events('a2').at(-1), end, 'nothing is said after the end');
+  await until(() => openChat(browserChat('c2')).events.some((one) => one.type === 'answered' && one.id === second.id), 'the card closed in Cortex');
+  assert.deepEqual(openChat(browserChat('c2')).events.find((one) => one.type === 'answered' && one.id === second.id), { type: 'answered', id: second.id, option: null });
+});
+
+test('Cortex is not closed to install an update unasked while a browser is there, or has just asked', async () => {
+  await fresh();
+  let now = 1_000_000;
+  REASK.now = () => now;
+  assert.equal(browserLinkBusy(), false);
+  const { client } = await paired();
+  assert.equal(browserLinkBusy(), true, 'a browser connected');
+  client.send({ type: 'ask', id: 'a1', conversation: 'c1', text: 'merhaba', page: null });
+  await client.ended('a1');
+  client.close();
+  await until(() => !browserLinkStatus().connected, 'closed');
+  assert.equal(browserLinkBusy(), true, 'gone a moment ago, a question just answered');
+  now += 9 * 60_000;
+  assert.equal(browserLinkBusy(), true);
+  now += 2 * 60_000;
+  assert.equal(browserLinkBusy(), false, 'ten minutes on, nobody is waiting on it');
 });
 
 test('the token is told to the browser and to nobody else: not to the console, not to a file', async () => {
   await fresh();
+  const seen = tokens.length;
+  consoleSaid.length = 0;
   const { client, token } = await paired();
   client.send({ type: 'ask', id: 'a1', conversation: 'c1', text: 'merhaba', page: null });
   await client.ended('a1');
-  // A wrong one, a broken line that carries one, a failure after one: none of it is written down.
+  // A wrong one, a broken line that carries one, a second leave, a leave taken back, the listener closed and opened: none of it is written down.
   const wrong = await Client.open();
   wrong.hello('KANARYA-YANLIS-JETON-0123456789abcdefghijklmnopqrstuv');
   await wrong.next('pairing');
   const broken = await Client.open();
   broken.socket.write(`{"type":"hello","protocol":1,"token":"${token}"\n`);
   await broken.gone();
+  await until(() => browserLinkStatus().asking, 'the question');
+  decidePairing(true);
+  const second = (await wrong.next('hello_ok')).token as string;
   unpairBrowser();
+  await setBrowserLinkOn(false);
+  await setBrowserLinkOn(true);
+  const { token: third } = await paired();
   stopBrowserLink();
-  assert.ok(tokens.length >= 5 && tokens.includes(token), 'the tokens this run gave were seen');
-  const secrets = [...new Set(tokens), 'KANARYA-YANLIS-JETON-0123456789abcdefghijklmnopqrstuv'];
-  for (const said of consoleSaid) for (const secret of secrets) assert.ok(!said.includes(secret), 'a token in the console');
+  // The tokens of this test alone: it holds whichever other tests ran before it, or none.
+  const given = tokens.slice(seen);
+  assert.deepEqual([...new Set(given)].sort(), [token, second, third].sort());
+  assert.equal(new Set(given).size, 3);
+  const secrets = [...given, 'KANARYA-YANLIS-JETON-0123456789abcdefghijklmnopqrstuv'];
+  for (const line of consoleSaid) for (const secret of secrets) assert.ok(!line.includes(secret), 'a token in the console');
   const files = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? files(path.join(dir, entry.name)) : entry.isFile() ? [path.join(dir, entry.name)] : []));
   const kept = files(userData());
-  assert.ok(kept.some((file) => file.endsWith('settings.json')) && kept.some((file) => file.includes(`${path.sep}chats${path.sep}`)), 'the files Cortex keeps were looked through');
+  assert.ok(kept.some((file) => file.endsWith('settings.json')) && kept.some((file) => file.endsWith('browser-link.json')) && kept.some((file) => file.includes(`${path.sep}chats${path.sep}`)), 'the files Cortex keeps were looked through');
   for (const file of kept) for (const secret of secrets) assert.ok(!fs.readFileSync(file).includes(secret), `a token in ${path.basename(file)}`);
 });

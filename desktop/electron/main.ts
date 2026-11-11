@@ -4,9 +4,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { moveYakala, registerIpc, startAppUpdates, stopWatching, trustPagesWhere } from './ipc';
 import { learnSystemProxy } from './services/acp';
-import { onBrowsersThere, onPairingAsked, startBrowserLink, stopBrowserLink } from './services/browserLink';
+import { onBrowsersThere, onPairingAsked, setBrowserLinkOn, startBrowserLink, stopBrowserLink } from './services/browserLink';
 import { chatsRunning } from './services/chat';
-import { leavesWithBrowser, secondLaunchShows, startedHidden } from './services/quietStart';
+import { asksForBrowserLink, leaveWatch, secondLaunchShows, startedHidden } from './services/quietStart';
 import { readSettings } from './services/settings';
 import { settleVault, setupBusy, whenSetupIdle } from './services/setup';
 import { startTelegram } from './services/telegram';
@@ -532,7 +532,13 @@ function browserAsked(): void {
   if (now - askNoticeAt < ASK_NOTICE_EVERY) return;
   askNoticeAt = now;
   const english = readSettings().language === 'en';
-  trayNotice('Cortex', english ? 'Cortex Browser wants to connect. Open Cortex to allow or refuse it.' : 'Cortex Browser bağlanmak istiyor. İzin vermek ya da reddetmek için Cortex’i aç.');
+  // Whoever connected says it is the browser; Cortex has not checked that, and does not say it has.
+  trayNotice(
+    'Cortex',
+    english
+      ? 'A program wants to connect as Cortex Browser. Open Cortex to allow or refuse it.'
+      : 'Bir program Cortex Browser olarak bağlanmak istiyor. İzin vermek ya da reddetmek için Cortex’i aç.',
+  );
 }
 
 /*
@@ -540,25 +546,6 @@ function browserAsked(): void {
   browser has gone - a browser that only starts again is back before then - and the setting stays the person's.
 */
 const LEAVE_AFTER_MS = 30_000;
-let hadBrowser = false;
-let leaving: ReturnType<typeof setTimeout> | null = null;
-function browsersThere(clients: number): void {
-  if (leaving) clearTimeout(leaving);
-  leaving = null;
-  if (clients > 0) {
-    hadBrowser = true;
-    return;
-  }
-  const look = () => {
-    leaving = null;
-    const state = { startedHidden: START_HIDDEN, background: readSettings().background, seen, hadBrowser, clients: 0, busy: chatsRunning() || setupBusy() !== null };
-    if (quitting) return;
-    if (leavesWithBrowser(state)) void quitWhenSetupAllows();
-    // An answer or a setup still going: looked at again once it may have ended.
-    else if (leavesWithBrowser({ ...state, busy: false })) leaving = setTimeout(look, LEAVE_AFTER_MS);
-  };
-  if (hadBrowser) leaving = setTimeout(look, LEAVE_AFTER_MS);
-}
 
 // One instance only: a second launch brings the window that is there to the front.
 if (!app.requestSingleInstanceLock()) {
@@ -567,6 +554,8 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', (_event, argv) => {
     // Unless it asked to stay hidden, as Cortex Browser asks when it starts Cortex: already running, nothing appears.
     if (secondLaunchShows(argv)) showWindow();
+    // Started again for the browser: its link is opened, and kept open from now (services/browserLink.ts).
+    if (asksForBrowserLink(argv)) void setBrowserLinkOn(true);
   });
 
   void app.whenReady().then(() => {
@@ -607,10 +596,17 @@ if (!app.requestSingleInstanceLock()) {
     const settled = settleVault();
     // Pyn's server paired by code (services/tailnet.ts): its helper back up as the same device, or the address reached straight.
     void startTailnet();
-    // Cortex Browser's link (services/browserLink.ts): open while Cortex runs, in the notification area too.
+    // Cortex Browser's link (services/browserLink.ts): while Cortex runs, in the notification area too.
     onPairingAsked(browserAsked);
-    onBrowsersThere(browsersThere);
-    void startBrowserLink();
+    onBrowsersThere(
+      leaveWatch({
+        state: () => ({ startedHidden: START_HIDDEN, background: readSettings().background, seen, busy: quitting || chatsRunning() || setupBusy() !== null }),
+        quit: () => void quitWhenSetupAllows(),
+        after: LEAVE_AFTER_MS,
+      }),
+    );
+    // Its meeting file is written at every start; it listens where the person keeps the link on, or was started for the browser.
+    void startBrowserLink({ asked: asksForBrowserLink(process.argv) });
     if (!HIDDEN) {
       void settled.then(() => {
         startTelegram();

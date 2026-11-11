@@ -176,7 +176,7 @@ const RULES: Rule[] = [
   { pattern: /^Not a setting\.$/, say: () => 'Bu bir ayar değil.' },
   { pattern: /^Not a choice this chat offers\.$/, say: () => 'Bu, sohbetin sunduğu bir seçenek değil.' },
   { pattern: /^Wait for the answer to end before changing this\.$/, say: () => 'Bunu değiştirmeden önce cevabın bitmesini bekle.' },
-  { pattern: /^This chat holds a web page’s content: it asks before each step\.$/, say: () => 'Bu sohbete web sayfası içeriği eklendi: her adımdan önce sorar, bu kip seçilemez.' },
+  { pattern: /^This chat holds a web page’s content: it asks before each step\.$/, say: () => 'Bu sohbete web sayfası içeriği eklendi: her adımdan önce sorar, bu mod seçilemez.' },
   { pattern: /^A chat needs a name\.$/, say: () => 'Sohbetin bir adı olmalı.' },
 
   // electron/services/vault.ts: choosing the vault

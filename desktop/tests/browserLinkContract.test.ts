@@ -12,9 +12,13 @@ import {
   OPTION_KINDS,
   PAIRING_STATES,
   RENDEZVOUS_FILE,
+  START_ARGUMENTS,
   STATUS_PHASES,
   TOOL_PERMISSIONS,
+  codePoints,
+  cutTo,
   encodeLine,
+  longerThan,
   parseBrowserLine,
   readBrowserMessage,
   readCortexMessage,
@@ -34,7 +38,7 @@ import { MESSAGE_MAX } from '../electron/services/chat';
 const contract = JSON.parse(fs.readFileSync('shared/browser-link-contract.json', 'utf8')) as {
   about: string;
   protocol: number;
-  rendezvous_file: { name: string; example: unknown };
+  rendezvous_file: { name: string; example: unknown; example_listener_closed: unknown; start_arguments: string[] };
   limits: Record<string, number>;
   enums: Record<string, string[]>;
   messages: { browser_to_cortex: Array<Record<string, unknown>>; cortex_to_browser: Array<Record<string, unknown>> };
@@ -46,13 +50,19 @@ test('the protocol, the line limit and the meeting file are the contract’s', (
   assert.ok(contract.about.includes(String(LINE_MAX)), 'the limit the contract names');
   assert.equal(RENDEZVOUS_FILE, contract.rendezvous_file.name);
   assert.deepEqual(readRendezvous(contract.rendezvous_file.example), contract.rendezvous_file.example);
-  assert.equal(readRendezvous({ version: 1, pipe: '', exe: 'x', pid: 1 }), null, 'a file that names no pipe is not one');
+  // Written at every start, the listener open or not: with it closed the file names the program and no pipe.
+  assert.deepEqual(readRendezvous(contract.rendezvous_file.example_listener_closed), contract.rendezvous_file.example_listener_closed);
+  assert.equal((readRendezvous(contract.rendezvous_file.example_listener_closed) as { pipe: unknown }).pipe, null);
+  assert.equal(readRendezvous({ version: 1, pipe: '', exe: 'x', pid: 1 }), null, 'an empty name is no pipe');
+  assert.equal(readRendezvous({ version: 1, pipe: 7, exe: 'x', pid: 1 }), null);
+  assert.equal(readRendezvous({ version: 1, exe: 'x', pid: 1 }), null, 'the pipe is said, or said to be none');
   assert.equal(readRendezvous('x'), null);
+  assert.deepEqual(contract.rendezvous_file.start_arguments, [...START_ARGUMENTS]);
 });
 
 test('the limits are the code’s own: the ones the link holds a message to, and the ones the chat holds a question to', () => {
   assert.deepEqual(contract.limits, { ...LIMITS });
-  assert.deepEqual(Object.keys(contract.limits).sort(), ['detail_chars', 'id_chars', 'line_bytes', 'page_text_chars', 'text_chars']);
+  assert.deepEqual(Object.keys(contract.limits).sort(), ['detail_chars', 'hello_wait_ms', 'id_chars', 'line_bytes', 'line_bytes_before_hello_ok', 'name_chars', 'page_text_chars', 'permission_options', 'permission_paths', 'permission_title_chars', 'text_chars']);
   assert.equal(LIMITS.line_bytes, LINE_MAX);
   // Not two numbers that could drift: what the chat sends a tool at most, and the longest page taken.
   assert.equal(LIMITS.text_chars, MESSAGE_MAX);
@@ -60,6 +70,14 @@ test('the limits are the code’s own: the ones the link holds a message to, and
   const id = (length: number) => parseBrowserLine(JSON.stringify({ type: 'cancel', id: 'a'.repeat(length) }));
   assert.deepEqual(id(LIMITS.id_chars), { message: { type: 'cancel', id: 'a'.repeat(LIMITS.id_chars) } });
   assert.deepEqual(id(LIMITS.id_chars + 1), { bad: true });
+  // Counted in characters as Unicode has them, not in the two halves JavaScript keeps some of them in.
+  const face = '😀';
+  assert.equal(face.length, 2);
+  assert.equal(codePoints(`a${face}ş`), 3);
+  assert.deepEqual(parseBrowserLine(JSON.stringify({ type: 'cancel', id: face.repeat(LIMITS.id_chars) })), { message: { type: 'cancel', id: face.repeat(LIMITS.id_chars) } }, 'two hundred of them is an id');
+  assert.deepEqual(parseBrowserLine(JSON.stringify({ type: 'cancel', id: face.repeat(LIMITS.id_chars + 1) })), { bad: true });
+  assert.deepEqual([longerThan('abc', 3), longerThan('abcd', 3), longerThan(face.repeat(3), 3), longerThan(face.repeat(4), 3), longerThan('', 0)], [false, true, false, true, false]);
+  assert.deepEqual([cutTo('abcdef', 3), cutTo(`${face}${face}${face}`, 2), cutTo('ab', 5), cutTo(`a${face}`, 1)], ['abc', `${face}${face}`, 'ab', 'a'], 'cut between characters, never through one');
 });
 
 test('every list of values is the code’s own, in the contract’s order', () => {
@@ -115,12 +133,15 @@ test('a field the code does not know is left out, a kind it does not know is no 
     parseBrowserLine('{"type":"ask","id":"a","conversation":"c","text":"x","page":{"title":"T","url":"https://example.com/","text":"p"}}'),
     { message: { type: 'ask', id: 'a', conversation: 'c', text: 'x', page: { title: 'T', url: 'https://example.com/', text: 'p', truncated: false } } },
   );
+  // The person's own word that a page may go to a tool Cortex cannot hold to asking: there only when it is given.
+  assert.deepEqual(parseBrowserLine('{"type":"ask","id":"a","conversation":"c","text":"x","page_ack":false}'), { message: { type: 'ask', id: 'a', conversation: 'c', text: 'x', page: null } });
+  assert.deepEqual(parseBrowserLine('{"type":"ask","id":"a","conversation":"c","text":"x","page_ack":true}'), { message: { type: 'ask', id: 'a', conversation: 'c', text: 'x', page: null, page_ack: true } });
   // A hello of a protocol not known is still a hello: it is answered with `bye {reason: protocol}`, not as a bad line.
   assert.deepEqual(parseBrowserLine('{"type":"hello","protocol":7,"shape":"new"}'), { message: { type: 'hello', protocol: 7, client: '', client_version: '', token: null } });
 });
 
 test('a line that is not JSON, not an object, or a known message without what it needs, is a bad message', () => {
-  for (const line of ['', 'hello', '{"type":"ask"', '[]', '"ask"', 'null', '7', '{}', '{"type":7}', '{"type":"ask","id":"a"}', '{"type":"ask","id":7,"conversation":"c","text":"x"}', '{"type":"hello"}', '{"type":"hello","protocol":"1"}', '{"type":"hello","protocol":1,"ask_again":"yes"}', '{"type":"answer","id":"a","permission":"p","option":7}', '{"type":"ask","id":"a","conversation":"c","text":"x","page":"text"}', '{"type":"ask","id":"a","conversation":"c","text":"x","page":{"title":"T"}}', '{"type":"capture","id":"k"}', '{"type":"cancel"}', '{"type":"ask","id":"","conversation":"c","text":"x"}']) {
+  for (const line of ['', 'hello', '{"type":"ask"', '[]', '"ask"', 'null', '7', '{}', '{"type":7}', '{"type":"ask","id":"a"}', '{"type":"ask","id":7,"conversation":"c","text":"x"}', '{"type":"hello"}', '{"type":"hello","protocol":"1"}', '{"type":"hello","protocol":1,"ask_again":"yes"}', '{"type":"ask","id":"a","conversation":"c","text":"x","page_ack":"yes"}', '{"type":"answer","id":"a","permission":"p","option":7}', '{"type":"ask","id":"a","conversation":"c","text":"x","page":"text"}', '{"type":"ask","id":"a","conversation":"c","text":"x","page":{"title":"T"}}', '{"type":"capture","id":"k"}', '{"type":"cancel"}', '{"type":"ask","id":"","conversation":"c","text":"x"}']) {
     assert.deepEqual(parseBrowserLine(line), { bad: true }, line);
   }
   // An id is a short name, not a text: one too long to be one is not taken.
@@ -145,6 +166,25 @@ test('Cortex writes nothing the contract has no word for', () => {
   assert.equal(readCortexMessage({ type: 'event', id: 'a', kind: 'error', code: 'out_of_luck', detail: '' }), null);
   assert.equal(readCortexMessage({ type: 'bye', reason: 'bored' }), null);
   assert.equal(readCortexMessage({ type: 'pairing', state: 'maybe' }), null);
+  // A browser told to wait is told the code the person sees in Cortex; one refused is told none.
+  assert.equal(readCortexMessage({ type: 'pairing', state: 'waiting' }), null);
+  assert.equal(readCortexMessage({ type: 'pairing', state: 'waiting', code: 4821 }), null);
+  assert.equal(readCortexMessage({ type: 'pairing', state: 'waiting', code: '48x1' }), null);
+  assert.deepEqual(readCortexMessage({ type: 'pairing', state: 'refused', code: '4821' }), { type: 'pairing', state: 'refused' });
+  // The tool that answers a question is said with its first status, and with the refusal of a page it cannot be held to asking for.
+  const told = { id: 'gemini', name: 'Gemini CLI', permission: 'unknown', can_ask: false };
+  assert.deepEqual(readCortexMessage({ type: 'event', id: 'a', kind: 'status', phase: 'starting', tool: told }), { type: 'event', id: 'a', kind: 'status', phase: 'starting', tool: told });
+  assert.equal(readCortexMessage({ type: 'event', id: 'a', kind: 'status', phase: 'starting', tool: { id: 'gemini' } }), null);
+  assert.equal(readCortexMessage({ type: 'event', id: 'a', kind: 'error', code: 'page_unprotected', detail: '' }), null, 'refused for its tool, the tool is named');
+  assert.notEqual(readCortexMessage({ type: 'event', id: 'a', kind: 'error', code: 'page_unprotected', detail: '', tool: told }), null);
+  // What Cortex writes keeps to the limits too.
+  const sized = (patch: Record<string, unknown>) => readCortexMessage({ type: 'event', id: 'a', kind: 'permission', permission: { id: 'p', title: 't', kind: 'edit', paths: [], options: [], after_page: false, ...patch } });
+  assert.notEqual(sized({ title: 'x'.repeat(LIMITS.permission_title_chars), paths: Array.from({ length: LIMITS.permission_paths }, () => 'a.md') }), null);
+  assert.equal(sized({ title: 'x'.repeat(LIMITS.permission_title_chars + 1) }), null);
+  assert.equal(sized({ paths: Array.from({ length: LIMITS.permission_paths + 1 }, () => 'a.md') }), null);
+  assert.equal(sized({ options: Array.from({ length: LIMITS.permission_options + 1 }, (_, n) => ({ id: `o${n}`, name: 'n', kind: 'allow_once' })) }), null);
+  assert.equal(sized({ options: [{ id: 'o', name: 'n'.repeat(LIMITS.name_chars + 1), kind: 'allow_once' }] }), null);
+  assert.equal(readCortexMessage({ type: 'hello_ok', protocol: 1, app_version: '1', tool: { id: 'x', name: 'n'.repeat(LIMITS.name_chars + 1), permission: 'ask', can_ask: true }, vault_name: null, token: null }), null);
   assert.equal(readCortexMessage({ type: 'captured', id: 'k', ok: false, code: 'no_idea', detail: '' }), null);
   const welcome = (tool: unknown) => readCortexMessage({ type: 'hello_ok', protocol: 1, app_version: '1.0.63', tool, vault_name: null, token: null });
   assert.notEqual(welcome({ id: 'claude', name: 'Claude Code', permission: 'ask', can_ask: true }), null);

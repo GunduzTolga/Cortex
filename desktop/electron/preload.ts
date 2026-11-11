@@ -116,7 +116,9 @@ const api: CortexApi = {
   },
   browserLink: {
     status: () => invoke('browserLink:status'),
+    setOn: (on) => invoke('browserLink:setOn', on),
     decide: (allow) => invoke('browserLink:decide', allow),
+    allow: () => invoke('browserLink:allow'),
     unpair: () => invoke('browserLink:unpair'),
   },
   tailnet: {

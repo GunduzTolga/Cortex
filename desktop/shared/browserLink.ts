@@ -16,11 +16,16 @@ export const BROWSER_LINK_PROTOCOL = 1;
 export const LINE_MAX = 16 * 1024 * 1024;
 /** The file in Cortex's data folder that says where the link is (Rendezvous). */
 export const RENDEZVOUS_FILE = 'browser-link.json';
+/**
+ * What the browser starts Cortex with when it finds no pipe to connect to: out of sight, and with the link opened.
+ * Given to a Cortex that already runs too (a second launch hands its arguments on), which then opens the link.
+ */
+export const START_ARGUMENTS = ['--gizli', '--tarayici'] as const;
 
 export const PAIRING_STATES = ['waiting', 'refused'] as const;
 export const EVENT_KINDS = ['status', 'text', 'permission', 'permission_closed', 'done', 'error'] as const;
 export const STATUS_PHASES = ['starting', 'thinking', 'answering'] as const;
-export const ERROR_CODES = ['not_signed_in', 'no_tool', 'no_vault', 'limit', 'network', 'tool_failed', 'busy', 'too_long', 'internal'] as const;
+export const ERROR_CODES = ['not_signed_in', 'no_tool', 'no_vault', 'limit', 'network', 'tool_failed', 'busy', 'too_long', 'page_unprotected', 'internal'] as const;
 export const CAPTURED_CODES = ['capture_failed', 'no_vault'] as const;
 export const BYE_REASONS = ['protocol', 'unpaired', 'shutdown', 'bad_message'] as const;
 
@@ -30,11 +35,62 @@ export const OPTION_KINDS = ['allow_once', 'allow_always', 'reject_once', 'rejec
 export const TOOL_PERMISSIONS = ['ask', 'auto', 'unknown'] as const;
 
 /**
- * The contract's limits. A line in bytes, an id (an ask, a conversation, a card) in characters; a question's words and
- * a page's text in characters, past which the question is refused as too long (services/chat.ts MESSAGE_MAX,
- * services/browserPage.ts PAGE_TEXT_MAX: the test holds the three to one another); the longest `detail` of a failure.
+ * The contract's limits. A line in bytes: `line_bytes`, and before the browser is let in the far smaller
+ * `line_bytes_before_hello_ok` (a hello is short; nobody not let in has anything long to say). `hello_wait_ms`: how
+ * long a connection may stay without saying hello. In characters, counted as Unicode counts them (codePoints): an id
+ * (an ask, a conversation, a card); a question's words and a page's text, past which the question is refused as too
+ * long (services/chat.ts MESSAGE_MAX, services/browserPage.ts PAGE_TEXT_MAX: the test holds them to one another);
+ * the longest `detail` of a failure. What Cortex itself writes is cut to them: a card's title, how many paths and
+ * answers it names, a name (a tool's, an answer's, the vault's).
  */
-export const LIMITS = { line_bytes: 16 * 1024 * 1024, id_chars: 200, text_chars: 100_000, page_text_chars: 200_000, detail_chars: 300 } as const;
+export const LIMITS = {
+  line_bytes: 16 * 1024 * 1024,
+  line_bytes_before_hello_ok: 65_536,
+  hello_wait_ms: 10_000,
+  id_chars: 200,
+  text_chars: 100_000,
+  page_text_chars: 200_000,
+  detail_chars: 300,
+  permission_title_chars: 500,
+  permission_paths: 50,
+  permission_options: 8,
+  name_chars: 200,
+} as const;
+
+/** A text's length in characters as Unicode has them (code points): a letter kept in two halves counts once. */
+export function codePoints(text: string): number {
+  let count = text.length;
+  for (let at = 0; at < text.length - 1; at += 1) {
+    const unit = text.charCodeAt(at);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = text.charCodeAt(at + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        count -= 1;
+        at += 1;
+      }
+    }
+  }
+  return count;
+}
+
+/** Whether a text is longer than that many characters, counted only where its length does not already say. */
+export function longerThan(text: string, max: number): boolean {
+  if (text.length <= max) return false;
+  if (text.length > max * 2) return true;
+  return codePoints(text) > max;
+}
+
+/** A text cut to that many characters, never through the middle of one. */
+export function cutTo(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let units = 0;
+  for (let taken = 0; taken < max && units < text.length; taken += 1) {
+    const unit = text.charCodeAt(units);
+    const pair = unit >= 0xd800 && unit <= 0xdbff && units + 1 < text.length && text.charCodeAt(units + 1) >= 0xdc00 && text.charCodeAt(units + 1) <= 0xdfff;
+    units += pair ? 2 : 1;
+  }
+  return text.slice(0, units);
+}
 
 export type PairingState = (typeof PAIRING_STATES)[number];
 export type StatusPhase = (typeof STATUS_PHASES)[number];
@@ -56,10 +112,15 @@ export interface LinkTool {
   can_ask: boolean;
 }
 
-/** Where the browser finds Cortex: the pipe to connect to, the program to start when nothing listens there, and the process that wrote it. */
+/**
+ * Where the browser finds Cortex, written at every start and left when Cortex closes: that the file is there says
+ * Cortex is installed and where its program is, not that it runs. `pipe`: the pipe to connect to, under a name drawn
+ * anew at each start; null while the listener is not open (the person has not turned the link on, or it could not be
+ * opened). The program to start when there is no pipe, or nothing listens on it, and the process that wrote the file.
+ */
 export interface Rendezvous {
   version: number;
-  pipe: string;
+  pipe: string | null;
   exe: string;
   pid: number;
 }
@@ -76,7 +137,12 @@ export interface LinkPage {
 export type BrowserMessage =
   /** `ask_again`: the person pressed "ask again" in the browser after a refusal; the wait after a refusal is passed over. */
   | { type: 'hello'; protocol: number; client: string; client_version: string; token: string | null; ask_again?: true }
-  | { type: 'ask'; id: string; conversation: string; text: string; page: LinkPage | null }
+  /**
+   * `page_ack`: the person was warned in the browser that the tool of this conversation may go on unasked with a page
+   * in it (its `can_ask` is false), and said to send the page all the same. Without it such a question is refused
+   * (`page_unprotected`).
+   */
+  | { type: 'ask'; id: string; conversation: string; text: string; page: LinkPage | null; page_ack?: true }
   /** The person's answer to a card; `option` null gives it up. */
   | { type: 'answer'; id: string; permission: string; option: string | null }
   | { type: 'cancel'; id: string }
@@ -94,15 +160,19 @@ export interface LinkPermission {
 }
 
 export type LinkEvent =
-  | { type: 'event'; id: string; kind: 'status'; phase: StatusPhase }
+  /** `tool`, with an ask's first status: the tool that answers this question - its conversation's own, which a new chat's default (`hello_ok.tool`) need not be. */
+  | { type: 'event'; id: string; kind: 'status'; phase: StatusPhase; tool?: LinkTool }
   | { type: 'event'; id: string; kind: 'text'; text: string }
   | { type: 'event'; id: string; kind: 'permission'; permission: LinkPermission }
   | { type: 'event'; id: string; kind: 'permission_closed'; permission: string; option: string | null }
   | { type: 'event'; id: string; kind: 'done'; cancelled: boolean }
-  | { type: 'event'; id: string; kind: 'error'; code: ErrorCode; detail: string };
+  /** `tool`, with `page_unprotected`: the tool the page was not sent to. `detail` is for a log, never a path, never shown to the person. */
+  | { type: 'event'; id: string; kind: 'error'; code: ErrorCode; detail: string; tool?: LinkTool };
 
 export type CortexMessage =
-  | { type: 'pairing'; state: PairingState }
+  /** `code`: a short number, shown in Cortex's question and in the browser at once, for the person to compare; never typed. */
+  | { type: 'pairing'; state: 'waiting'; code: string }
+  | { type: 'pairing'; state: 'refused' }
   | { type: 'hello_ok'; protocol: number; app_version: string; tool: LinkTool | null; vault_name: string | null; token: string | null }
   | LinkEvent
   | { type: 'captured'; id: string; ok: true; path: string }
@@ -111,18 +181,29 @@ export type CortexMessage =
 
 /**
  * The link as the window is told of it (Settings, and the question asked when a browser first connects): whether the
- * person let Cortex Browser in, whether one is connected now, and whether one is waiting to be let in.
+ * person keeps it open (`on`) and it is in fact listening (`listening`: on and not listening, it could not be
+ * opened); whether a browser has been let in, whether one is connected now, and whether one waits to be let in - with
+ * the code it was told, for the person to compare with what the browser shows. `locked`: refused so often in a row
+ * that no browser is asked about any more, until the person lets it ask again here.
  */
 export interface BrowserLinkStatus {
+  on: boolean;
+  listening: boolean;
   allowed: boolean;
   connected: boolean;
   asking: boolean;
+  code: string | null;
+  locked: boolean;
 }
 
 export interface BrowserLinkApi {
   status(): Promise<BrowserLinkStatus>;
+  /** The link opened or closed, and kept so. Closed, a browser connected is told and nothing listens; the leave given stays. */
+  setOn(on: boolean): Promise<BrowserLinkStatus>;
   /** The person's answer to the browser waiting: let in, or refused. */
   decide(allow: boolean): Promise<BrowserLinkStatus>;
+  /** "Allow" in the settings: the browser waiting let in; with none waiting, a browser refused too often may ask again. */
+  allow(): Promise<BrowserLinkStatus>;
   /** The leave taken back: the browser's token is forgotten and its link closed. */
   unpair(): Promise<BrowserLinkStatus>;
 }
@@ -131,7 +212,8 @@ export interface BrowserLinkApi {
 export const ID_MAX = LIMITS.id_chars;
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-const isId = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= ID_MAX;
+const isId = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && !longerThan(value, ID_MAX);
+const isName = (value: unknown): value is string => typeof value === 'string' && !longerThan(value, LIMITS.name_chars);
 const isText = (value: unknown): value is string => typeof value === 'string';
 const isOneOf = <T extends string>(list: readonly T[], value: unknown): value is T => typeof value === 'string' && (list as readonly string[]).includes(value);
 /** Left out, or null, is none. */
@@ -167,7 +249,8 @@ export function readBrowserMessage(value: unknown): BrowserMessage | null | unde
     case 'ask': {
       const page = readPage(value.page);
       if (!isId(value.id) || !isId(value.conversation) || !isText(value.text) || page === undefined) return undefined;
-      return { type: 'ask', id: value.id, conversation: value.conversation, text: value.text, page };
+      if (!none(value.page_ack) && typeof value.page_ack !== 'boolean') return undefined;
+      return { type: 'ask', id: value.id, conversation: value.conversation, text: value.text, page, ...(value.page_ack === true ? { page_ack: true as const } : {}) };
     }
     case 'answer':
       if (!isId(value.id) || !isId(value.permission) || (!none(value.option) && !isText(value.option))) return undefined;
@@ -184,10 +267,13 @@ export function readBrowserMessage(value: unknown): BrowserMessage | null | unde
   }
 }
 
-/** One line from the browser: its message, none for a `type` not known, or a bad message (the link is closed for it). */
-export function parseBrowserLine(line: string): { message: BrowserMessage | null } | { bad: true } {
+/**
+ * One line from the browser: its message, none for a `type` not known, or a bad message (the link is closed for it).
+ * `max`: the longest line taken, in bytes (LIMITS.line_bytes; less before the browser is let in).
+ */
+export function parseBrowserLine(line: string, max: number = LINE_MAX): { message: BrowserMessage | null } | { bad: true } {
   // In bytes: a letter is at most three of them, so a short line is not measured.
-  if (line.length > LINE_MAX || (line.length * 3 > LINE_MAX && new TextEncoder().encode(line).length > LINE_MAX)) return { bad: true };
+  if (line.length > max || (line.length * 3 > max && new TextEncoder().encode(line).length > max)) return { bad: true };
   let value: unknown;
   try {
     value = JSON.parse(line);
@@ -198,12 +284,17 @@ export function parseBrowserLine(line: string): { message: BrowserMessage | null
   return message === undefined ? { bad: true } : { message };
 }
 
+function readTool(value: unknown): LinkTool | null {
+  if (!isObject(value) || !isId(value.id) || !isName(value.name) || !isOneOf(TOOL_PERMISSIONS, value.permission) || typeof value.can_ask !== 'boolean') return null;
+  return { id: value.id, name: value.name, permission: value.permission, can_ask: value.can_ask };
+}
+
 function readPermission(value: unknown): LinkPermission | null {
-  if (!isObject(value) || !isId(value.id) || !isText(value.title) || !isText(value.kind) || typeof value.after_page !== 'boolean') return null;
-  if (!Array.isArray(value.paths) || !value.paths.every(isText) || !Array.isArray(value.options)) return null;
+  if (!isObject(value) || !isId(value.id) || !isText(value.title) || longerThan(value.title, LIMITS.permission_title_chars) || !isName(value.kind) || typeof value.after_page !== 'boolean') return null;
+  if (!Array.isArray(value.paths) || value.paths.length > LIMITS.permission_paths || !value.paths.every(isText) || !Array.isArray(value.options) || value.options.length > LIMITS.permission_options) return null;
   const options: LinkPermission['options'] = [];
   for (const one of value.options) {
-    if (!isObject(one) || !isText(one.id) || !isText(one.name) || !isOneOf(OPTION_KINDS, one.kind)) return null;
+    if (!isObject(one) || !isId(one.id) || !isName(one.name) || !isOneOf(OPTION_KINDS, one.kind)) return null;
     options.push({ id: one.id, name: one.name, kind: one.kind });
   }
   return { id: value.id, title: value.title, kind: value.kind, paths: [...value.paths], options, after_page: value.after_page };
@@ -213,8 +304,11 @@ function readEvent(value: Record<string, unknown>): LinkEvent | null {
   const id = value.id;
   if (!isId(id)) return null;
   switch (value.kind) {
-    case 'status':
-      return isOneOf(STATUS_PHASES, value.phase) ? { type: 'event', id, kind: 'status', phase: value.phase } : null;
+    case 'status': {
+      const tool = none(value.tool) ? null : readTool(value.tool);
+      if (!isOneOf(STATUS_PHASES, value.phase) || (!none(value.tool) && !tool)) return null;
+      return { type: 'event', id, kind: 'status', phase: value.phase, ...(tool ? { tool } : {}) };
+    }
     case 'text':
       return isText(value.text) ? { type: 'event', id, kind: 'text', text: value.text } : null;
     case 'permission': {
@@ -226,8 +320,13 @@ function readEvent(value: Record<string, unknown>): LinkEvent | null {
       return { type: 'event', id, kind: 'permission_closed', permission: value.permission, option: value.option };
     case 'done':
       return typeof value.cancelled === 'boolean' ? { type: 'event', id, kind: 'done', cancelled: value.cancelled } : null;
-    case 'error':
-      return isOneOf(ERROR_CODES, value.code) && isText(value.detail) && value.detail.length <= LIMITS.detail_chars ? { type: 'event', id, kind: 'error', code: value.code, detail: value.detail } : null;
+    case 'error': {
+      const tool = none(value.tool) ? null : readTool(value.tool);
+      if (!isOneOf(ERROR_CODES, value.code) || !isText(value.detail) || longerThan(value.detail, LIMITS.detail_chars) || (!none(value.tool) && !tool)) return null;
+      // A page refused for its tool names the tool: the browser warns the person by it.
+      if (value.code === 'page_unprotected' && !tool) return null;
+      return { type: 'event', id, kind: 'error', code: value.code, detail: value.detail, ...(tool ? { tool } : {}) };
+    }
     default:
       return null;
   }
@@ -242,27 +341,22 @@ export function readCortexMessage(value: unknown): CortexMessage | null {
   if (!isObject(value)) return null;
   switch (value.type) {
     case 'pairing':
-      return isOneOf(PAIRING_STATES, value.state) ? { type: 'pairing', state: value.state } : null;
+      if (value.state === 'refused') return { type: 'pairing', state: 'refused' };
+      return value.state === 'waiting' && isText(value.code) && /^\d{4}$/.test(value.code) ? { type: 'pairing', state: 'waiting', code: value.code } : null;
     case 'hello_ok': {
       const tool = value.tool;
       if (typeof value.protocol !== 'number' || !isText(value.app_version)) return null;
-      if (tool !== null && (!isObject(tool) || !isText(tool.id) || !isText(tool.name) || !isOneOf(TOOL_PERMISSIONS, tool.permission) || typeof tool.can_ask !== 'boolean')) return null;
-      if ((value.vault_name !== null && !isText(value.vault_name)) || (value.token !== null && !isText(value.token))) return null;
-      return {
-        type: 'hello_ok',
-        protocol: value.protocol,
-        app_version: value.app_version,
-        tool: tool === null ? null : { id: tool.id as string, name: tool.name as string, permission: tool.permission as ToolPermission, can_ask: tool.can_ask as boolean },
-        vault_name: value.vault_name,
-        token: value.token,
-      };
+      const told = tool === null ? null : readTool(tool);
+      if (tool !== null && !told) return null;
+      if ((value.vault_name !== null && !isName(value.vault_name)) || (value.token !== null && !isText(value.token))) return null;
+      return { type: 'hello_ok', protocol: value.protocol, app_version: value.app_version, tool: told, vault_name: value.vault_name, token: value.token };
     }
     case 'event':
       return readEvent(value);
     case 'captured':
       if (!isId(value.id)) return null;
       if (value.ok === true) return isText(value.path) ? { type: 'captured', id: value.id, ok: true, path: value.path } : null;
-      if (value.ok !== false || !isOneOf(CAPTURED_CODES, value.code) || !isText(value.detail) || value.detail.length > LIMITS.detail_chars) return null;
+      if (value.ok !== false || !isOneOf(CAPTURED_CODES, value.code) || !isText(value.detail) || longerThan(value.detail, LIMITS.detail_chars)) return null;
       return { type: 'captured', id: value.id, ok: false, code: value.code, detail: value.detail };
     case 'bye':
       return isOneOf(BYE_REASONS, value.reason) ? { type: 'bye', reason: value.reason } : null;
@@ -276,8 +370,9 @@ export function encodeLine(message: CortexMessage | BrowserMessage): string {
   return `${JSON.stringify(message)}\n`;
 }
 
-/** The meeting file as it is read back; null for anything that names no pipe. */
+/** The meeting file as it is read back; null for anything that is not one. Its pipe is a name, or null while the listener is closed. */
 export function readRendezvous(value: unknown): Rendezvous | null {
-  if (!isObject(value) || typeof value.version !== 'number' || !isText(value.pipe) || !value.pipe || !isText(value.exe) || typeof value.pid !== 'number') return null;
+  if (!isObject(value) || typeof value.version !== 'number' || !isText(value.exe) || typeof value.pid !== 'number') return null;
+  if (value.pipe !== null && (!isText(value.pipe) || !value.pipe)) return null;
   return { version: value.version, pipe: value.pipe, exe: value.exe, pid: value.pid };
 }

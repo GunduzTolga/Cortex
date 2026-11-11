@@ -4,7 +4,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { ChatEvent, ChatOpened, ChatPush, ChatSpend, ChatSummary, CliId, CliInfo, ConfigOption } from '../../shared/chat';
 import { ATTACHING_CLIS } from '../../shared/chat';
-import type { LinkPage, ToolPermission } from '../../shared/browserLink';
+import { type LinkPage, type ToolPermission, longerThan } from '../../shared/browserLink';
 import { heldAttachments, type HeldAttachment } from './attachments';
 import { acpBackend } from './acpChat';
 import { PAGE_TEXT_MAX, pageBlock, pageShown } from './browserPage';
@@ -642,7 +642,8 @@ export function browserChat(conversation: unknown): string | null {
 export function sendChat(id: unknown, cli: unknown, message: unknown, attachments?: unknown, browser?: FromBrowser): { id: string } {
   const files = heldAttachments(attachments);
   if (typeof message !== 'string' || (!message.trim() && !files.length)) throw new ChatRefusal('An empty message is not sent.');
-  if (message.length > MESSAGE_MAX || (browser?.page && browser.page.text.length > PAGE_TEXT_MAX)) throw new ChatRefusal('That message is too long to send.');
+  // Counted in characters as Unicode has them, as Cortex Browser's contract counts (shared/browserLink.ts).
+  if (longerThan(message, MESSAGE_MAX) || (browser?.page && longerThan(browser.page.text, PAGE_TEXT_MAX))) throw new ChatRefusal('That message is too long to send.');
   const vault = currentVault();
   let chat: Live;
   if (id === null) {
@@ -770,6 +771,9 @@ export function shutdownChats(closing = false): void {
 
 /** Whether a chat is answering now, a card waiting on the person included. */
 export const chatsRunning = (): boolean => [...live.values()].some((one) => one.running);
+
+/** The tool a chat was begun with, and keeps; null for a chat that is gone. */
+export const chatCli = (id: string): CliId | null => readIndex().chats.find((one) => one.id === id)?.cli ?? null;
 
 /** Whether that chat is answering now: it takes one message at a time, wherever the message comes from. */
 export const chatAnswering = (id: string): boolean => live.get(id)?.running === true;
