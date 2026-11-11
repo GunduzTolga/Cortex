@@ -371,7 +371,7 @@ const kept = (chat: Live) => live.get(chat.stored.id) === chat;
  * (claudeChat.ts PERMISSION_MODES, codexChat.ts MODES; both name the setting `mode`). A chat that holds a web page's
  * content runs in one of them: in a mode that allows unasked nobody reads a card, and words planted in the page would
  * reach a tool that writes and runs commands. An ACP tool names its own modes and none of them is known to ask; a model
- * server and Hermes have none: those are left as they are.
+ * server and Pyn on a server have none: those are left as they are.
  */
 const ASKING: Partial<Record<Protocol, readonly string[]>> = { claude: ['default', 'plan'], codex: ['ask', 'readonly'] };
 const askingOf = (cli: CliId) => ASKING[protocolOf(cli)] ?? null;
