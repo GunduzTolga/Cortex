@@ -23,12 +23,16 @@ karşılaştırır: dosyaya bir alan ya da değer eklenince test düşer. Dosya 
   açılışlar arasında değişmez.
 - **macOS ve Linux:** uygulamanın veri klasöründe Unix soketi, `browser-link.sock`, izinleri `0600`.
 - TCP portu açılmaz: bir web sayfası boruya ulaşamaz, güvenlik duvarı sormaz.
+- Boruyu ya da soketi kimin açabildiği: [Güven sınırı](#güven-sınırı). Windows'taki durum doğrulanmadı.
 - Uç, uygulama hazır olunca açılır ve uygulama çalıştığı sürece (pencere kapalıyken sağ altta da) açık kalır.
   Uygulama kapanırken bağlı tarayıcıya `bye {reason: shutdown}` denir.
 - Aynı anda en çok 8 bağlantı alınır.
 
-**Çerçeve:** her satır bir JSON nesnesidir (UTF-8, `\n` ile biter). Bir satır en çok 16.777.216 bayttır. Boş satır
-yok sayılır.
+**Çerçeve:** her satır bir JSON nesnesidir (UTF-8, `\n` ile biter). Boş satır yok sayılır.
+
+**Sınırlar** (sözleşmenin `limits` bölümü; kodda `LIMITS`): bir satır en çok 16.777.216 bayt; `id`, `conversation` ve
+`permission` 1-200 karakter; `ask.text` en çok 100.000, `page.text` en çok 200.000 karakter; `detail` en çok 300
+karakter. `detail` kullanıcıya gösterilecek metin değildir: tarayıcı kullanıcıya kodla konuşur.
 
 ## Buluşma dosyası
 
@@ -60,6 +64,7 @@ Tarayıcı Cortex'i bu dosyadan bulur. Adı `browser-link.json`, yeri uygulaman�
 | kullanıcı izin verir | aynı bağlantıda `hello_ok`, yeni `token` ile |
 | kullanıcı reddeder | `pairing {state: refused}`; bağlantı açık kalır |
 | retten hemen sonra yeniden `hello` | `pairing {state: refused}`, kullanıcıya sorulmadan |
+| retten sonra `hello`, `ask_again: true` | bekleme atlanır: `pairing {state: waiting}`, kullanıcıya yeniden sorulur |
 | izin verilmiş bağlantıda yeniden `hello` | güncel `hello_ok` (`token: null`): araç ya da kasa değiştiyse böyle öğrenilir |
 | `hello_ok`'tan önce `ask`, `answer`, `cancel`, `capture` | `bye {reason: unpaired}`, bağlantı kapanır |
 | JSON olmayan, nesne olmayan, gerekeni taşımayan ya da sınırı aşan satır | `bye {reason: bad_message}`, bağlantı kapanır |
@@ -74,12 +79,31 @@ Tarayıcı Cortex'i bu dosyadan bulur. Adı `browser-link.json`, yeri uygulaman�
   `pairing {state: waiting}` alır, soruyu soran bağlantı kapanırsa sırası ona geçer. İzin yalnız hakkında sorulan
   bağlantıya verilir; bekleyen öbürleri `refused` alır ve yeniden `hello` diyebilir.
 - **Ret sonrası bekleme:** ilk retten sonra 30 saniye, sonraki her retten sonra iki katı (en çok 10 dakika) boyunca
-  yeni `hello`'lar sorulmadan `refused` alır. Süre uygulama yeniden açılınca sıfırlanır.
+  yeni `hello`'lar sorulmadan `refused` alır. Süre uygulama yeniden açılınca sıfırlanır. Beklemeyi yalnız
+  `ask_again: true` atlar (kullanıcı tarayıcıda "Yeniden sor"a bastığında gönderilir); jetonun yerini tutmaz, yalnız
+  soruyu yeniden açar. Retten sonra bağlantıyı Cortex kapatmaz, tarayıcı kapatır.
 - **İzni kaldırmak:** Ayarlar › Cortex Browser bağlantısı › İzni kaldır. Özet silinir, bağlı tarayıcıya
   `bye {reason: unpaired}` denir.
 - `hello_ok.tool`, Cortex'te yeni bir sohbetin yazılacağı araçtır: bu kasada en son yazılan araç hâlâ sunuluyorsa o,
   yoksa sunulan ilk araç; hiç araç yoksa `null`. Aracın giriş yapılmış olup olmadığına burada bakılmaz; giriş yoksa
   soru `not_signed_in` ile biter. `vault_name` kasanın klasör adıdır, kasa seçilmemişse `null`.
+- `tool.permission` ve `tool.can_ask`:
+
+  | Araç | `permission` | `can_ask` |
+  | --- | --- | --- |
+  | Claude Code | kullanıcının seçtiği kip: `default`, `plan` → `ask`; `acceptEdits`, `auto` → `auto` | `true` |
+  | Codex | kullanıcının seçtiği kip: `ask`, `readonly` → `ask`; `auto` → `auto` | `true` |
+  | OpenCode, Gemini CLI, Qwen Code | `unknown` | `false` |
+  | Sunucudaki Pyn | `unknown` | `false` |
+  | LM Studio, Ollama | `ask` | `true` |
+
+  `permission`, yeni bir sohbetin başlayacağı kipten okunur. `can_ask: true`, sayfa eklenmiş konuşmada Cortex'in
+  aşağıdaki "İzin kipi ve web sayfası içeriği" bölümündeki kısıtları uygulayabildiği demektir. `can_ask: false` olan araçlarda
+  Cortex kipi değiştiremez: **bu araçlarda, sayfa içeriği eklenmiş konuşmada adımların sorulacağı garanti edilemez**;
+  tarayıcı kullanıcıyı sayfa eklemeden önce uyarır. Sunucudaki Pyn adımlarını sunucuda, oranın kurallarıyla
+  çalıştırır; Cortex bunları ne bilir ne değiştirir. Yerel model (LM Studio, Ollama) kendi başına adım çalıştırmaz.
+  Claude Code'da `ask`, kasadaki notların sormadan düzenlenmesini kapsamaz: sayfa eklenmemiş sohbette Claude Code
+  notlara sormadan yazar (masaüstü sohbetinin kuralı).
 
 ## Soru ve cevap
 
@@ -96,14 +120,14 @@ Olaylar aynı `id` ile gelir:
 | `text` | cevabın her parçası; aracın düşüncesi ve adımları gönderilmez |
 | `permission` | araç bir adım için izin isteyince |
 | `permission_closed` | kart cevaplanınca: tarayıcıdan (`answer`) ya da Cortex penceresinden |
-| `done {cancelled}` | tur bitince; `cancel` ya da Cortex'teki Durdur ile bittiyse `cancelled: true` |
+| `done {cancelled}` | tur bitince; `cancel` ya da Cortex'teki Durdur ile bittiyse `cancelled: true` (tur başlamadan gelen `cancel` de böyle biter, sohbet açılmaz) |
 | `error {code, detail}` | tur hatayla bitince |
 
 Hata kodları: `not_signed_in` (araçta ya da seçili modelin sağlayıcısında giriş yok), `limit` (abonelik limiti ya da
 kota), `network`, `tool_failed` (araç başlamadı, durdu ya da başka bir hata verdi), `busy` (o konuşma şu an bir soru
 cevaplıyor; Cortex'ten yazılmış bir mesaj da sayılır), `too_long` (soru 100.000, sayfa metni 200.000 karakteri
-aşıyor), `no_tool` (sunulan araç yok), `internal` (kasa seçilmemiş, boş soru ya da beklenmeyen bir hata; `detail`
-söyler).
+aşıyor), `no_tool` (sunulan araç yok), `no_vault` (kasa seçilmemiş ya da klasörü yerinde değil), `internal` (boş soru
+ya da beklenmeyen bir hata; `detail` söyler).
 
 - Cortex penceresinden aynı sohbete yazılan mesajın cevabı tarayıcıya gönderilmez.
 - Tarayıcı cevap ortasında koparsa tur durdurulmaz: sohbette sürer, bekleyen kart Cortex'ten cevaplanır. Kopan
@@ -128,19 +152,31 @@ söyler).
   İşaret her blok için yeniden üretilen 32 haneli rastgele bir sayıdır; sayfa metni okunduktan sonra üretilir ve
   metinde geçiyorsa başkası çekilir. Başlık ve adres tek satıra indirilir. Sohbet geçmişinde sayfanın yalnız başlığı
   ve adresi tutulur.
-- Bir konuşmaya sayfa eklendiği anda o sohbet "önce sor" kipine alınır ve orada kalır: Claude Code'da `default` (ya da
-  `plan`), Codex'te `ask` (ya da `readonly`). Claude Code aynı oturumda yeniden başlatılır. Kullanıcının araç için
-  seçimi değişmez; bu sohbette daha geniş kip Cortex penceresinden de seçilemez.
+- Bir konuşmaya sayfa eklendiği anda o sohbet soran kipe alınır, **aracın sormadan yazabildiği izinler o sohbette
+  kaldırılır** ve sohbet öyle kalır (sonraki sorularda, Cortex'ten yazılan mesajlarda ve uygulama yeniden açılınca
+  da). Kullanıcının araç için seçimi değişmez; bu sohbette daha geniş kip Cortex penceresinden de seçilemez. Sayfa
+  eklenmemiş sohbetlerde hiçbir şey değişmez.
+
+  | Araç | Sayfa eklenince |
+  | --- | --- |
+  | Claude Code | Kip `default` olur (`plan` ise kalır). Program aynı oturumda, `--allowedTools` olmadan yeniden başlatılır: kasadaki notu düzenlemek ve Stop hook'unun makbuz komutu dahil, yazan her adım kartla sorulur. Okuma izinleri aynıdır. |
+  | Codex | Kip `readonly` olur: korumalı alan salt okunur, yazmak ve komut çalıştırmak için izin istenir. (`ask` kipinde Codex kasaya sormadan yazar; yalnız korumalı alanın durdurduğunu sorar.) |
+  | LM Studio, Ollama | Modelin tek aracı (gelen kutusuna kart yazan `save_to_inbox`) sunulmaz. |
+  | OpenCode, Gemini CLI, Qwen Code | **Değişmez.** Kiplerini kendileri adlandırır; hangisinin sorduğu Cortex'te tanımlı değildir (`can_ask: false`). |
+  | Sunucudaki Pyn | **Değişmez.** Adımlar sunucuda, oranın kurallarıyla çalışır (`can_ask: false`). |
+
 - Bu sohbetin izin kartları `after_page: true` taşır ve `allow_always` türü seçenek ne tarayıcıya gönderilir ne de
-  Cortex penceresinde sunulur; yine de gönderilirse izin sayılmaz.
+  Cortex penceresinde sunulur; yine de gönderilirse izin sayılmaz. Bu kural her araçta geçerlidir.
 
 Sınırlar:
 
-- **OpenCode, Gemini CLI, Qwen Code:** kiplerini kendileri adlandırır; hangisinin her adımı sorduğu Cortex'te tanımlı
-  değildir. Sayfa eklenince bu araçların kipine dokunulmaz. Kartlardaki `after_page` ve `allow_always` kuralı
-  onlarda da geçerlidir.
-- **Claude Code** "önce sor" kipinde de kasadaki Markdown notlarına sormadan yazar (masaüstü sohbetinin kuralı,
-  `--allowedTools Edit(/**/*.md)`). Sayfa eklenmiş sohbette de böyledir.
+- **`can_ask: false` araçlar** (OpenCode, Gemini CLI, Qwen Code, Sunucudaki Pyn): sayfa içeriği eklenmiş konuşmada
+  adımların sorulacağı garanti edilemez. Araç kendi ayarıyla sormadan ilerliyorsa kart hiç çıkmaz.
+- **Claude Code'un kendi ayar dosyalarındaki izin kuralları** (kullanıcının ya da kasanın `settings.json`'ı, daha
+  önce "her zaman izin ver" ile kaydedilmiş kurallar) Cortex'in değil Claude Code'undur ve geçerli kalır: orada izin
+  verilmiş bir adım sayfa eklenmiş sohbette de sorulmaz.
+- Gerçek Claude Code ve Codex ile denenmedi: testler, bu programların belgelenen davranışını taklit eden sahte
+  programlarla koşar (izin verilmiş adım sorulmaz, verilmemiş adım sorulur).
 - Bu önlemler riski azaltır, sıfırlamaz. Son denetim kartı okuyan kullanıcıdadır.
 
 ## Kaydet
@@ -159,12 +195,30 @@ kasa seçilmemişse ya da klasörü yoksa `no_vault`, başka her durumda `captur
 
 ## Güven sınırı
 
-Sınır, aynı bilgisayardaki aynı kullanıcıdır. O kullanıcının her programı uca bağlanabilir; `token` ve tek seferlik
-onay, bağlananın kullanıcının bilerek izin verdiği program olmasını sağlar. Aynı kullanıcının kötü niyetli bir
-programı tarayıcının profilinden `token`'ı okuyabilir. Böyle bir program kullanıcının notlarını da zaten okuyabilir;
-buna karşı ek bir koruma vaat edilmez.
+Korumanın dayandığı şey `token` ve tek seferlik onaydır, uca kimin ulaşabildiği değil: izin verilmemiş bir bağlantı
+`pairing` ve `bye` dışında hiçbir şey alamaz, hiçbir şey sorduramaz. Uca ulaşabilen her program bağlanmayı
+deneyebilir ve kullanıcının önüne izin sorusu çıkarabilir (art arda soru, ret sonrası beklemeyle sınırlıdır).
 
-Windows'ta boru Node.js'in varsayılan erişim ayarlarıyla açılır; Cortex ayrıca bir erişim listesi yazmaz.
+Kullanıcının kendi hesabında çalışan kötü niyetli bir program tarayıcının profilinden `token`'ı okuyabilir. Böyle bir
+program kullanıcının notlarını da zaten okuyabilir; buna karşı ek bir koruma vaat edilmez.
+
+Uca kim ulaşabilir:
+
+- **macOS ve Linux:** soket dosyası `0600` izinlidir ve kullanıcının veri klasöründedir. Testle sabit
+  (`browserLink.test.ts`).
+- **Windows: doğrulanmadı.** Boru Node.js'in varsayılan ayarlarıyla açılır; Cortex erişim listesi yazmaz. Borunun
+  yalnız aynı kullanıcıya ve yalnız bu bilgisayara açık olduğu **iddia edilmez**. Windows'ta doğrulanacak (Cortex
+  açıkken, boru adı `browser-link.json`'daki `pipe`):
+  1. Aynı bilgisayarda **başka bir kullanıcı hesabından** boruya bağlanmayı dene (ör. o hesapla açılmış PowerShell'de
+     `[System.IO.Pipes.NamedPipeClientStream]::new('.', 'cortex-browser-link-<kimlik>', 'InOut').Connect(2000)`).
+     Beklenen: erişim reddi. Bağlanabiliyorsa bir `hello` satırı yazıp cevap gelip gelmediğine bak.
+  2. Borunun **erişim listesini oku** (ör. Sysinternals `accesschk`) ve kullanıcının kendisi, SYSTEM ve yöneticiler
+     dışında kimin hangi hakla geçtiğini yaz.
+  3. **Başka bir bilgisayardan** `\\<bilgisayar>\pipe\cortex-browser-link-<kimlik>` ile bağlanmayı dene. Beklenen: ret.
+
+  Bu adımlardaki komutlar öneridir; bu notu yazan denemedi. Sonuç ret değilse boru açılırken erişim listesi
+  daraltılmalıdır. O zamana kadar başka bir hesabın yapabileceği en fazla şey, yukarıdaki gibi izin sorusu
+  çıkarmaktır; izin verilmedikçe cevap alamaz.
 
 ## Testler
 
