@@ -4,15 +4,17 @@ import path from 'node:path';
 import { app } from 'electron';
 import type { ChatEvent, ChatOpened, ChatPush, ChatSpend, ChatSummary, CliId, CliInfo, ConfigOption } from '../../shared/chat';
 import { ATTACHING_CLIS } from '../../shared/chat';
+import type { LinkPage } from '../../shared/browserLink';
 import { heldAttachments, type HeldAttachment } from './attachments';
 import { acpBackend } from './acpChat';
+import { PAGE_TEXT_MAX, pageBlock, pageShown } from './browserPage';
 import { type Backend, type Between, type Card, ChatRefusal, type Turn, failureEvent, scrubberFor } from './chatKit';
 import { claudeBackend } from './claudeChat';
 import { codexBackend } from './codexChat';
 import { writeWhole } from './fileWrite';
 import { hermesBackend } from './hermesChat';
 import { localBackend } from './localChat';
-import { LOCAL_IDS, isServer, launchFor, listClis, protocolOf, refreshPath } from './clis';
+import { LOCAL_IDS, type Protocol, isServer, launchFor, listClis, protocolOf, refreshPath } from './clis';
 import { findLocal } from './localModels';
 import { CHAT_TOOLS, readSettings } from './settings';
 import { vaultSettled } from './setup';
@@ -52,6 +54,13 @@ interface Stored extends ChatSummary {
   options?: ConfigOption[];
   /** The last running total a tool told for this chat's session (the spend event's `total`), to take the next rise from. */
   spendMark?: { session: string; usd: number };
+  /** For a chat begun from Cortex Browser: the browser's own id for the conversation, by which its next question finds the chat (browserChat). */
+  conversation?: string;
+  /**
+   * A web page's content was added to this chat (services/browserPage.ts): from then on it asks before each step
+   * (heldToAsking), and its cards say so and offer no "always" (askPerson).
+   */
+  page?: boolean;
 }
 
 interface Index {
@@ -88,11 +97,39 @@ const EVENTS_KEPT = 2000;
 const BACKENDS = { claude: claudeBackend, codex: codexBackend, acp: acpBackend, local: localBackend, hermes: hermesBackend } as const;
 const backendOf = (cli: CliId): Backend => BACKENDS[protocolOf(cli)];
 
-let push: (message: ChatPush) => void = () => undefined;
+let toWindow: (message: ChatPush) => void = () => undefined;
 
 /** Where the window hears of the chat: electron/ipc.ts sends each push on. */
 export function onChatPush(listener: (message: ChatPush) => void): void {
-  push = listener;
+  toWindow = listener;
+}
+
+/** What a tap hears: the window's pushes, and `sent` when a turn's message has been handed to its tool. */
+export type ChatHeard = ChatPush & { sent?: true };
+const taps = new Set<(message: ChatHeard) => void>();
+
+/**
+ * Another listener beside the window: Cortex Browser's link (services/browserLink.ts), which passes a chat's answer on
+ * to the browser that asked. Its failure is its own: the chat and the window go on. Returns what takes it away.
+ */
+export function tapChat(listener: (message: ChatHeard) => void): () => void {
+  taps.add(listener);
+  return () => void taps.delete(listener);
+}
+
+function tapped(message: ChatHeard): void {
+  for (const tap of [...taps]) {
+    try {
+      tap(message);
+    } catch (err) {
+      console.warn('[chat] a listener failed:', err instanceof Error ? err.message : err);
+    }
+  }
+}
+
+function push(message: ChatPush): void {
+  toWindow(message);
+  tapped(message);
 }
 
 /* ------------------------------------------------------------------ */
@@ -222,6 +259,7 @@ const summaryOf = (stored: Stored): ChatSummary => ({
   createdAt: stored.createdAt,
   updatedAt: stored.updatedAt,
   ...(validSpend(stored.spend) ? { spend: stored.spend } : {}),
+  ...(stored.origin === 'browser' ? { origin: stored.origin } : {}),
 });
 
 /** A total read back from the list as it can be: numbers that are numbers, or none (a hand-edited or older list). */
@@ -307,13 +345,19 @@ function saveLog(chat: Live): void {
   }
 }
 
-/** A card shown, and the person's answer awaited: the option chosen, or null when refused or the turn ended first. */
+/**
+ * A card shown, and the person's answer awaited: the option chosen, or null when refused or the turn ended first.
+ * In a chat that holds a web page's content the card says so, and leave is given a step at a time: no answer that
+ * allows for good is offered, here or in the browser, and one sent anyway is no leave.
+ */
 async function askPerson(chat: Live, card: Card): Promise<string | null> {
   const id = randomUUID();
-  emit(chat, { type: 'permission', id, ...card });
+  const afterPage = chat.stored.page === true;
+  const options = afterPage ? card.options.filter((one) => one.kind !== 'allow_always') : card.options;
+  emit(chat, { type: 'permission', id, ...card, options, ...(afterPage ? { afterPage: true } : {}) });
   const option = await new Promise<string | null>((resolve) => chat.permissions.set(id, resolve));
   chat.permissions.delete(id);
-  const chosen = option !== null && card.options.some((one) => one.id === option) ? option : null;
+  const chosen = option !== null && options.some((one) => one.id === option) ? option : null;
   emit(chat, { type: 'answered', id, option: chosen });
   return chosen;
 }
@@ -321,9 +365,37 @@ async function askPerson(chat: Live, card: Card): Promise<string | null> {
 /** Whether the chat is still one of the chats: a chat deleted while it answered is not written back. */
 const kept = (chat: Live) => live.get(chat.stored.id) === chat;
 
+/**
+ * The modes of each engine in which it asks before a step that changes something, the first the one a chat is put in
+ * (claudeChat.ts PERMISSION_MODES, codexChat.ts MODES; both name the setting `mode`). A chat that holds a web page's
+ * content runs in one of them: in a mode that allows unasked nobody reads a card, and words planted in the page would
+ * reach a tool that writes and runs commands. An ACP tool names its own modes and none of them is known to ask; a model
+ * server and Hermes have none: those are left as they are.
+ */
+const ASKING: Partial<Record<Protocol, readonly string[]>> = { claude: ['default', 'plan'], codex: ['ask', 'readonly'] };
+const askingOf = (cli: CliId) => ASKING[protocolOf(cli)] ?? null;
+
+/**
+ * A chat that holds a web page's content put to asking first, before its turn: by the way a mode chosen on its chip is
+ * given to its engine (Backend.setOption; Claude Code is started again on the same session), and not kept as the
+ * person's choice for the tool, which is theirs.
+ */
+async function heldToAsking(chat: Live): Promise<void> {
+  const asking = askingOf(chat.stored.cli);
+  const mode = chat.options.find((one) => one.id === 'mode');
+  if (!asking || !mode || asking.includes(mode.current)) return;
+  setState(chat, { options: await backendOf(chat.stored.cli).setOption(chat.stored.id, chat.options, mode.id, asking[0]) });
+}
+
 /** The turn a backend runs, told through this chat. */
 function turnOf(chat: Live, signal: AbortSignal, attachments: readonly HeldAttachment[] = []): Turn {
   const stored = chat.stored;
+  // A chat reopened after a restart runs as its chips say: its engine had not seen the options kept for it, and
+  // started with the CLI's last choices while the chip showed the chat's own ("Önce sor" shown, edits accepted: 30 October).
+  const prefs: Record<string, string> = { ...(readIndex().prefs[stored.cli] ?? {}), ...(chat.stale ? Object.fromEntries(chat.options.map((one) => [one.id, one.current])) : {}) };
+  // One that holds a web page's content does not begin in a wider mode kept for the tool (heldToAsking).
+  const asking = stored.page ? askingOf(stored.cli) : null;
+  if (asking && !asking.includes(prefs.mode)) prefs.mode = asking[0];
   return {
     chatId: stored.id,
     cli: stored.cli,
@@ -331,9 +403,7 @@ function turnOf(chat: Live, signal: AbortSignal, attachments: readonly HeldAttac
     sessionId: stored.sessionId,
     attachments,
     number: chat.turn,
-    // A chat reopened after a restart runs as its chips say: its engine had not seen the options kept for it, and
-    // started with the CLI's last choices while the chip showed the chat's own ("Önce sor" shown, edits accepted: 30 October).
-    prefs: { ...(readIndex().prefs[stored.cli] ?? {}), ...(chat.stale ? Object.fromEntries(chat.options.map((one) => [one.id, one.current])) : {}) },
+    prefs,
     signal,
     emit: (event) => {
       if (!chat.running) return;
@@ -362,6 +432,9 @@ function turnOf(chat: Live, signal: AbortSignal, attachments: readonly HeldAttac
     },
     // After Stop nothing more is asked: a step that a CLI which does not stop asks leave for is refused, unshown.
     ask: (card) => (chat.running && !signal.aborted ? askPerson(chat, card) : Promise.resolve(null)),
+    sent: () => {
+      if (chat.running && !signal.aborted) tapped({ chatId: stored.id, sent: true });
+    },
   };
 }
 
@@ -374,6 +447,8 @@ async function run(chat: Live, message: string, files: readonly HeldAttachment[]
   try {
     // The vault just opened is bound to where it is first, so its hooks point there (services/setup.ts); Stop ends the wait.
     await Promise.race([vaultSettled(), new Promise((done) => stop.signal.addEventListener('abort', done, { once: true }))]);
+    // A chat that holds a web page's content asks first, whatever mode it ran in until now.
+    if (chat.stored.page && !stop.signal.aborted) await heldToAsking(chat);
     // Stopped while it waited: the CLI is not started for a turn already ended.
     const reason = stop.signal.aborted ? 'cancelled' : await backendOf(chat.stored.cli).run(turnOf(chat, stop.signal, files), message);
     // Once Stop was asked for, the turn was stopped, whatever the CLI reports: an agent asked to end while a card
@@ -522,11 +597,29 @@ export async function beginChat(cli: unknown, option: unknown, value: unknown): 
   return { id: stored.id };
 }
 
-/** A message to a chat, or to a new chat with that CLI. Answered at once with the chat's id; the answer itself comes as pushes. */
-export function sendChat(id: unknown, cli: unknown, message: unknown, attachments?: unknown): { id: string } {
+/** A question from Cortex Browser (services/browserLink.ts): the browser's own id for its conversation, and the web page the person added to it, if any. */
+export interface FromBrowser {
+  conversation: string;
+  page: LinkPage | null;
+}
+
+/** The chat of this vault that a conversation of the browser's goes on in; null where it has none yet. */
+export function browserChat(conversation: unknown): string | null {
+  const vault = readSettings().vault;
+  if (typeof conversation !== 'string' || !conversation || !vault) return null;
+  return readIndex().chats.find((one) => one.origin === 'browser' && one.conversation === conversation && one.vault === vault)?.id ?? null;
+}
+
+/**
+ * A message to a chat, or to a new chat with that CLI. Answered at once with the chat's id; the answer itself comes as pushes.
+ * `browser`, given only by Cortex Browser's link and never by the window (electron/ipc.ts hands on four arguments): a
+ * new chat is marked as the browser's, and a page added to the question goes to the tool in its block while the chat
+ * shows its title and address.
+ */
+export function sendChat(id: unknown, cli: unknown, message: unknown, attachments?: unknown, browser?: FromBrowser): { id: string } {
   const files = heldAttachments(attachments);
   if (typeof message !== 'string' || (!message.trim() && !files.length)) throw new ChatRefusal('An empty message is not sent.');
-  if (message.length > MESSAGE_MAX) throw new ChatRefusal('That message is too long to send.');
+  if (message.length > MESSAGE_MAX || (browser?.page && browser.page.text.length > PAGE_TEXT_MAX)) throw new ChatRefusal('That message is too long to send.');
   const vault = currentVault();
   let chat: Live;
   if (id === null) {
@@ -534,7 +627,7 @@ export function sendChat(id: unknown, cli: unknown, message: unknown, attachment
     // A model server, or Hermes on another machine, is asked when the chat runs; one that is off says so in the chat.
     if (!isServer(cli as CliId) && !launchFor(cli as CliId)) throw new ChatRefusal(`${cli} is not installed on this machine.`);
     const now = Date.now();
-    const stored: Stored = { id: randomUUID(), title: '', cli: cli as CliId, createdAt: now, updatedAt: now, vault, sessionId: null };
+    const stored: Stored = { id: randomUUID(), title: '', cli: cli as CliId, createdAt: now, updatedAt: now, vault, sessionId: null, ...(browser ? { origin: 'browser' as const, conversation: browser.conversation } : {}) };
     readIndex().chats.push(stored);
     chat = fresh(stored, []);
     // What the new chat showed before its first message is what its first turn starts with: run as its chips say, as a
@@ -552,13 +645,17 @@ export function sendChat(id: unknown, cli: unknown, message: unknown, attachment
   if (chat.running) throw new ChatRefusal('Wait for the answer, or stop it, before writing again.');
   if (files.length && !ATTACHING_CLIS.includes(chat.stored.cli)) throw new ChatRefusal('This tool does not take attachments.');
   chat.turn += 1;
-  emit(chat, { type: 'user', text: message, at: Date.now(), ...(files.length ? { attachments: files.map((one) => ({ name: one.name, kind: one.kind })) } : {}) });
+  const page = browser?.page ?? null;
+  // Kept with the chat before its turn begins: every card from here on is one asked after a page.
+  if (page) chat.stored.page = true;
+  emit(chat, { type: 'user', text: message, at: Date.now(), ...(files.length ? { attachments: files.map((one) => ({ name: one.name, kind: one.kind })) } : {}), ...(page ? { page: pageShown(page) } : {}) });
   if (!chat.stored.title) chat.stored.title = (message.trim() || files[0]?.name || '').replace(/\s+/g, ' ').slice(0, TITLE_MAX);
   chat.stored.updatedAt = Date.now();
   saveIndex();
   push({ chatId: chat.stored.id, summary: summaryOf(chat.stored) });
   setState(chat, { running: true });
-  void run(chat, message, files);
+  // The tool is told the page too, in its block; the chat keeps the person's words and the page's name (services/browserPage.ts).
+  void run(chat, page ? `${message}${pageBlock(page)}` : message, files);
   return { id: chat.stored.id };
 }
 
@@ -585,6 +682,9 @@ export async function setChatOption(id: unknown, option: unknown, value: unknown
   const known = chat.options.find((one) => one.id === option);
   if (!known || !known.choices.some((choice) => choice.value === value)) throw new ChatRefusal('Not a choice this chat offers.');
   if (chat.running) throw new ChatRefusal('Wait for the answer to end before changing this.');
+  // A chat that holds a web page's content stays asking first (heldToAsking): a wider mode is not taken for it.
+  const asking = chat.stored.page && option === 'mode' ? askingOf(chat.stored.cli) : null;
+  if (asking && !asking.includes(value)) throw new ChatRefusal('This chat holds a web page’s content: it asks before each step.');
   // A session chosen to continue (Hermes) binds the chat to it, and shows where its conversation left off.
   const between: Between = {
     emit: (event) => emit(chat, event),

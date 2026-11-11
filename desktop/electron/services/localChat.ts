@@ -578,6 +578,7 @@ async function answer(turn: Turn, message: string, session: Session, found: Loca
     const exchange: Wire[] = [];
     let answer = '';
     let used: number | null = null;
+    turn.sent?.();
     for (let round = 0; ; round += 1) {
       const tools = round < TOOL_ROUNDS && !toolless.has(key) ? TOOLS : undefined;
       let result: { text: string; used: number | null; calls: ToolCall[] };

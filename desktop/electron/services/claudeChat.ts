@@ -567,6 +567,7 @@ function send(proc: Proc, turn: Turn, message: string): Promise<string> {
     proc.finish = resolve;
     proc.fail = reject;
     write(proc, { type: 'user', message: { role: 'user', content: contentOf(message, turn.attachments) }, parent_tool_use_id: null });
+    turn.sent?.();
   });
 }
 

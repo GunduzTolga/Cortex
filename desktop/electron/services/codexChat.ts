@@ -440,14 +440,16 @@ export const codexBackend: Backend = {
       // Its server can end it while `turn/start` is still awaited (closed for another vault): the failure
       // is the turn's, said by the start refused below, and not left unheard for the main process.
       done.catch(() => undefined);
-      const started = (await conn.rpc.request('turn/start', {
+      const starting = conn.rpc.request('turn/start', {
         threadId,
         input: inputOf(message, turn.attachments),
         ...(current('model') ? { model: current('model') } : {}),
         ...(effort && effort !== 'default' ? { effort } : {}),
         approvalPolicy: policy.approvalPolicy,
         sandboxPolicy: policy.sandboxPolicy,
-      })) as { turn?: { id?: unknown } } | null;
+      });
+      turn.sent?.();
+      const started = (await starting) as { turn?: { id?: unknown } } | null;
       // This turn's own entry, whatever runs on its thread now: one let go while its start was awaited
       // (Stop, then its grace, other chats on the server) left the thread to its chat's next turn.
       const mine = entry as Running | null;

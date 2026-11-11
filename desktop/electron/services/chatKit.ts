@@ -57,6 +57,8 @@ export interface Turn {
   setTitle(title: string): void;
   /** Asked of the person on a card; the option chosen, or null when refused or the turn ended first. */
   ask(card: Card): Promise<string | null>;
+  /** The message has been handed to the tool: from here the wait is for its answer, not for its start. Said once a turn. */
+  sent?(): void;
 }
 
 /**

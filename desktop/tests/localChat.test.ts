@@ -201,7 +201,11 @@ test('a message goes to the model loaded in LM Studio, streamed back; Pyn’s me
   const chatId = '00000000-0000-4000-8000-000000000001';
   try {
     const first = fakeTurn(chatId, vault, 1);
+    // Said handed over once, when the message goes to the model: before any of the answer (Cortex Browser's link waits on it).
+    const handed: number[] = [];
+    first.turn.sent = () => handed.push(first.events.length);
     assert.equal(await localBackend.run(first.turn, 'merhaba'), 'end_turn');
+    assert.deepEqual(handed, [0]);
     assert.equal(bodies[0].model, 'qwen3-8b', 'the model loaded in its app, unasked');
     assert.equal(first.events.filter((one) => one.type === 'text').map((one) => (one as { text: string }).text).join(''), 'Merhaba, ben yerel modelim.');
     assert.ok(first.events.some((one) => one.type === 'thought' && one.text === 'kısaca düşündüm'), 'its thinking folded apart');
