@@ -167,7 +167,7 @@ test.after(() => {
 
 test('where the link is: a pipe named by the install on Windows, a socket in the data folder elsewhere', () => {
   assert.equal(pipeFor('3f9a1c0d2b4e6f80', 'win32', 'C:\\Users\\ornek\\AppData\\Roaming\\Cortex'), '\\\\.\\pipe\\cortex-browser-link-3f9a1c0d2b4e6f80');
-  assert.equal(pipeFor('3f9a1c0d2b4e6f80', 'linux', '/home/ornek/.config/Cortex'), path.join('/home/ornek/.config/Cortex', 'browser-link.sock'));
+  assert.equal(pipeFor('3f9a1c0d2b4e6f80', 'linux', '/var/ornek/Cortex'), path.join('/var/ornek/Cortex', 'browser-link.sock'));
   assert.equal(pipeFor('3f9a1c0d2b4e6f80', 'darwin', '/Users/ornek/Library/Application Support/Cortex'), path.join('/Users/ornek/Library/Application Support/Cortex', 'browser-link.sock'));
 });
 
