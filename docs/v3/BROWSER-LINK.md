@@ -19,10 +19,23 @@ aynen kopyalanır.
 
 ## Dinleyici
 
-- **Varsayılan kapalıdır.** Kullanıcı açana kadar hiçbir şey dinlenmez. İki yolla açılır: Ayarlar → Cortex Browser
+- **Varsayılan kapalıdır.** Açılana kadar hiçbir şey dinlenmez. İki yolla açılır: Ayarlar → Cortex Browser
   bağlantısı'ndaki anahtar, ya da Cortex'in `--tarayici` argümanıyla başlatılması (çalışan Cortex'e ikinci başlatma
-  olarak ulaşması da sayılır). İkinci yolla açılınca ayar "açık" olarak kalır (`browserLink` ayarı).
+  olarak ulaşması da sayılır).
+- **Ayar üç durumludur** (`browserLink`): dokunulmamış (`null`), açık (`"on"`), kullanıcı kapattı (`"off"`).
+
+  | Durum | Dinleyici | `--tarayici` gelince |
+  | --- | --- | --- |
+  | Dokunulmamış | kapalı | açılır, durum "açık" olur ve öyle kalır |
+  | Açık | açık (her açılışta) | bir şey değişmez |
+  | Kullanıcı kapattı | kapalı | **açılmaz**; durum değişmez |
+
+  Anahtar kapatılınca durum "kullanıcı kapattı" olur, yeniden açılınca "açık". **Kullanıcının elle kapattığı
+  bağlantıyı tarayıcı açamaz:** ne Cortex'i başlatarak ne de çalışan Cortex'e ikinci başlatmayla. Yalnız Ayarlar'daki
+  anahtar yeniden açar.
 - Anahtar kapatılınca bağlı tarayıcılara `bye {reason: shutdown}` denir, dinleyici durur, verilen izin kalır.
+- Eski ayar dosyaları: üç durumdan önce yazılmış `browserLink: true` "açık", `false` "dokunulmamış" okunur (`false`
+  o sürümde her kurulumun başlangıç değeriydi, bir tercih değil).
 - **Windows:** adlandırılmış boru, `\\.\pipe\cortex-browser-link-<16 onaltılık hane>`. Ad dinleyici her açıldığında
   yeniden, rastgele üretilir; sabit bir ad yoktur.
 - **macOS ve Linux:** uygulamanın veri klasöründe `link/<12 onaltılık hane>.sock`. `link/` klasörü dinlemeden önce
@@ -68,8 +81,17 @@ Tarayıcı Cortex'i bu dosyadan bulur. Adı `browser-link.json`, yeri uygulaman�
 - `pipe`: bağlanılacak boru (ya da soket yolu). Dinleyici kapalıyken ya da açılamadıysa `null`; uygulama düzgün
   kapanırken de `null` yazılır (kimsenin dinlemediği bir ad yazılı kalmaz). Çökmeden ya da Windows oturumu
   kapanmasından sonra eski ad kalabilir. Her açılışta değişir; tarayıcı her bağlanışta dosyayı yeniden okur.
-- `pipe` `null` ise ya da boruya bağlanılamıyorsa tarayıcı `exe`'yi `--gizli --tarayici` ile başlatır ve dosyanın
-  yeniden yazılmasını bekler. Cortex zaten çalışıyorsa bu ikinci başlatma dinleyiciyi açar ve dosyayı günceller.
+- `off`: yalnız kullanıcı bağlantıyı Ayarlar'dan kapattıysa yazılır, `true` olarak ve `pipe: null` ile birlikte;
+  öbür durumlarda alan hiç yoktur. `off: true` iken `--tarayici` dinleyiciyi açmaz; tarayıcı Cortex'i başlatmayı
+  denemez ve kullanıcıya bağlantının Cortex'in Ayarlar'ında kapalı olduğunu söyler. Kullanıcı anahtarı yeniden açınca
+  alan dosyadan kalkar.
+
+  ```json
+  { "version": 1, "pipe": null, "off": true, "exe": "C:\\…\\Cortex.exe", "pid": 4242 }
+  ```
+- `off` yoksa: `pipe` `null` ise ya da boruya bağlanılamıyorsa tarayıcı `exe`'yi `--gizli --tarayici` ile başlatır
+  ve dosyanın yeniden yazılmasını bekler. Cortex zaten çalışıyorsa bu ikinci başlatma dinleyiciyi açar ve dosyayı
+  günceller.
 - Dosya bütün olarak yazılır (yanına yazılıp yerine taşınır). `pid`, dosyayı yazan süreçtir.
 
 ## El sıkışma ve eşleme
@@ -242,6 +264,8 @@ kasa seçilmemişse ya da klasörü yoksa `no_vault`, başka her durumda `captur
   dinleyici açılır.
 - Cortex zaten çalışıyorsa `--gizli` ile ikinci başlatma hiçbir şey göstermez; `--tarayici` taşıyorsa dinleyiciyi
   açar. `--gizli` olmadan ikinci başlatma pencereyi öne getirir.
+- Kullanıcı bağlantıyı Ayarlar'dan kapattıysa `--tarayici` hiçbir başlatmada dinleyiciyi açmaz (yukarıda
+  "Dinleyici").
 - "Sağ altta çalışmaya devam et" ayarı kapalıyken gizli başlatılan ve penceresi hiç açılmamış Cortex, son tarayıcı bağlantısı
   kapandıktan 30 saniye sonra kapanır. Bir cevap ya da kurulum sürüyorsa bitmesi beklenir. Ayar değiştirilmez.
 - Kendiliğinden (sormadan) güncelleme, bir tarayıcı bağlıyken ya da son 10 dakika içinde soru geldiyse Cortex'i
@@ -287,8 +311,11 @@ Bu not Linux'ta yazıldı ve sınandı; aşağıdakiler Windows'ta hiç koşmad�
 3. **İkinci başlatmada `--tarayici`.** Cortex çalışırken `Cortex.exe --gizli --tarayici`: pencere öne gelmemeli,
    dinleyici açılmalı, buluşma dosyasında `pipe` dolmalı. Argümanların ikinci başlatmadan ilkine ulaştığı yalnız
    Linux'ta görüldü.
-4. **Kapanışta `bye`.** Uygulama kapanırken `bye {reason: shutdown}` satırının karşıya ulaşıp ulaşmadığı.
-5. **Tepsi bildirimi** (pencere kapalıyken izin sorusu) ve **gizli başlatılan Cortex'in tarayıcı gidince kapanması.**
+4. **Kullanıcının kapattığı bağlantı.** Ayarlar'dan anahtarı kapat: buluşma dosyasında `"off": true` ve
+   `"pipe": null` olmalı. Sonra `Cortex.exe --gizli --tarayici` çalıştır (Cortex açıkken, ve Cortex'i kapatıp aynı
+   komutla başlatarak): dinleyici açılmamalı, dosya aynı kalmalı. Anahtarı yeniden açınca `off` dosyadan kalkmalı.
+5. **Kapanışta `bye`.** Uygulama kapanırken `bye {reason: shutdown}` satırının karşıya ulaşıp ulaşmadığı.
+6. **Tepsi bildirimi** (pencere kapalıyken izin sorusu) ve **gizli başlatılan Cortex'in tarayıcı gidince kapanması.**
 
 ## Testler
 
