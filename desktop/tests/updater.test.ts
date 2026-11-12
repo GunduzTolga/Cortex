@@ -255,6 +255,15 @@ test('the build writes what the updater reads beside the installer, and a releas
   assert.match(desktop, /grep -Fq "path: Cortex-Setup-\$version\.exe" release\/latest\.yml/);
 });
 
+test('a pre-release never reaches an installed app: it is not made latest, and the updater does not opt into pre-releases', () => {
+  // 1.0.63 went out as a pre-release to try the Cortex Browser link on one computer first.
+  const release = fs.readFileSync('../.github/workflows/release.yml', 'utf8');
+  assert.match(release, /gh release edit "v\$VERSION" --draft=false --prerelease --latest=false/);
+  assert.match(release, /assert metadata\['version'\] != os\.environ\['VERSION'\], 'the pre-release became latest'/);
+  const updater = fs.readFileSync('electron/services/updater.ts', 'utf8');
+  assert.doesNotMatch(updater, /allowPrerelease\s*=\s*true|allowPrerelease:\s*true/);
+});
+
 test('the switch is in the settings beside the releases page, and the documents say what the updater does in the same words (G2, G3)', () => {
   // 10 November: the README said the one automatic request "can be turned off" (only an environment variable did),
   // KULLANIM said in one place that the app never updates itself and in another that it does, desktop/README "no
