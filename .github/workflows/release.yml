@@ -18,6 +18,10 @@ on:
         description: Publish the tested package as the latest stable release
         type: boolean
         default: false
+      prerelease:
+        description: With publish, a pre-release instead (not latest; the updaters read releases/latest and do not offer it)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -145,7 +149,8 @@ jobs:
   #     finds its draft again and fills it; a release already published is never touched.
   #  2. installer: the Windows installer built around those same verified bytes (not a second
   #     build of the engine), uploaded to the draft.
-  #  3. publish: both assets checked on the draft, then the draft made the latest release, then
+  #  3. publish: both assets checked on the draft, then the draft made the latest release (or, with
+  #     prerelease, a pre-release that is not latest and no updater offers), then
   #     everything downloaded again and verified as a vault's updater will.
   draft:
     if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
@@ -255,6 +260,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       VERSION: ${{ needs.build.outputs.version }}
+      PRERELEASE: ${{ inputs.prerelease }}
       PYTHONDONTWRITEBYTECODE: '1'
       BEYIN_V3_NO_SPAWN: '1'
     steps:
@@ -277,7 +283,11 @@ jobs:
               exit 1
             fi
           done
-          gh release edit "v$VERSION" --draft=false --latest
+          if [ "$PRERELEASE" = true ]; then
+            gh release edit "v$VERSION" --draft=false --prerelease --latest=false
+          else
+            gh release edit "v$VERSION" --draft=false --latest
+          fi
       - name: Download published assets and verify again
         run: |
           set -euo pipefail
@@ -293,6 +303,11 @@ jobs:
           import beyin_v3_releases as r
           import beyin_v3_update as u
           metadata, _ = r.fetch_metadata()
+          if os.environ.get('PRERELEASE') == 'true':
+              # A pre-release is never what the updaters see: the latest release stays the one before it.
+              assert metadata['version'] != os.environ['VERSION'], 'the pre-release became latest'
+              print('Pre-release published; the latest release is still ' + metadata['version'] + '.')
+              sys.exit(0)
           assert metadata['version'] == os.environ['VERSION']
           with tempfile.TemporaryDirectory() as folder:
               package, version = u._download(folder)
