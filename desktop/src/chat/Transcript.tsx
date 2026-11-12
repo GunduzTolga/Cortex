@@ -213,6 +213,7 @@ function Answer({ turn, live, onSignIn, onRetry }: { turn: Turn; live: boolean; 
 }
 
 export function Transcript({ turns, running, onSignIn, onRetry }: { turns: Turn[]; running: boolean; onSignIn?: () => void; onRetry?: (text: string) => void }) {
+  const t = useT();
   const box = useRef<HTMLDivElement>(null);
   // Following the answer while the person is at the foot of the chat; left where they are when they scrolled up.
   const atFoot = useRef(true);
@@ -247,6 +248,16 @@ export function Transcript({ turns, running, onSignIn, onRetry }: { turns: Turn[
                       </span>
                     ))}
                   </div>
+                ) : null}
+                {/* A web page added to the message in Cortex Browser: its title and address; its text went to the tool and is not kept here. */}
+                {turn.user.page ? (
+                  <span className="flex max-w-[24rem] items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2 py-1 text-[12px] text-zinc-600" title={turn.user.page.url} aria-label={`${t('chat.user.page')}: ${turn.user.page.title || turn.user.page.url}`} data-chat-user-page>
+                    <Globe size={13} className="shrink-0 text-zinc-500" />
+                    <span className="min-w-0">
+                      <span className="block truncate">{turn.user.page.title || turn.user.page.url}</span>
+                      {turn.user.page.title ? <span className="block truncate font-mono text-[10.5px] text-zinc-400">{turn.user.page.url}</span> : null}
+                    </span>
+                  </span>
                 ) : null}
                 {turn.user.text ? (
                   <div className="whitespace-pre-wrap break-words rounded-2xl rounded-br-md border border-zinc-200/80 bg-paper-2 px-4 py-2.5 text-[14px] leading-relaxed text-darkDelegation" data-chat-user>

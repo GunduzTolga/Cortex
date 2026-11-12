@@ -495,6 +495,7 @@ export const acpBackend: Backend = {
         running.set(sessionId as string, entry);
       });
       const prompt = conn.acp.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: message }] });
+      turn.sent?.();
       const result = (await Promise.race([prompt, letGo])) as { stopReason?: unknown } | null;
       return typeof result?.stopReason === 'string' ? result.stopReason : 'end_turn';
     } catch (err) {

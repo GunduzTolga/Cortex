@@ -185,6 +185,28 @@ function fakeTurn(chatId: string, vault: string, number: number, prefs: Record<s
   return { turn, events, stop, options: () => options, session: () => session };
 }
 
+test('in a chat that holds a web page’s content a local model is not given its tool: nothing is saved to the vault unasked', async () => {
+  const { server, bodies, base } = await standIn();
+  const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-'));
+  process.env.CORTEX_TEST_LMSTUDIO = base;
+  const plain = '00000000-0000-4000-8000-0000000000a1';
+  const paged = '00000000-0000-4000-8000-0000000000a2';
+  try {
+    assert.equal(await localBackend.run(fakeTurn(plain, vault, 1).turn, 'merhaba'), 'end_turn');
+    const held = fakeTurn(paged, vault, 1);
+    held.turn.afterPage = true;
+    assert.equal(await localBackend.run(held.turn, 'bu sayfayı özetle'), 'end_turn');
+    const [first, second] = bodies as Array<{ tools?: unknown[] }>;
+    assert.ok(Array.isArray(first.tools) && first.tools.length === 1, 'as ever, without a page');
+    assert.equal(second.tools, undefined, 'none offered once a page is in the chat');
+  } finally {
+    localBackend.forget(plain);
+    localBackend.forget(paged);
+    delete process.env.CORTEX_TEST_LMSTUDIO;
+    await new Promise((done) => server.close(done));
+  }
+});
+
 test('a message goes to the model loaded in LM Studio, streamed back; Pyn’s memory comes from the vault’s hook; the chat goes on where it was', async () => {
   const { server, bodies, base } = await standIn();
   const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'kasa-'));
@@ -201,7 +223,11 @@ test('a message goes to the model loaded in LM Studio, streamed back; Pyn’s me
   const chatId = '00000000-0000-4000-8000-000000000001';
   try {
     const first = fakeTurn(chatId, vault, 1);
+    // Said handed over once, when the message goes to the model: before any of the answer (Cortex Browser's link waits on it).
+    const handed: number[] = [];
+    first.turn.sent = () => handed.push(first.events.length);
     assert.equal(await localBackend.run(first.turn, 'merhaba'), 'end_turn');
+    assert.deepEqual(handed, [0]);
     assert.equal(bodies[0].model, 'qwen3-8b', 'the model loaded in its app, unasked');
     assert.equal(first.events.filter((one) => one.type === 'text').map((one) => (one as { text: string }).text).join(''), 'Merhaba, ben yerel modelim.');
     assert.ok(first.events.some((one) => one.type === 'thought' && one.text === 'kısaca düşündüm'), 'its thinking folded apart');

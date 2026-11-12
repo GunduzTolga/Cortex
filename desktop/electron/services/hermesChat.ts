@@ -615,6 +615,7 @@ export const hermesBackend: Backend = {
           turn.setSession(sessionId);
         }
         turn.setOptions([sessionOptions(sessions, sessionId)]);
+        if (!attempt) turn.sent?.();
         const reason = await streamTurn(turn, server, sessionId, message, live);
         if (reason !== GONE) return reason;
         if (attempt) throw new TurnFailure('Pyn on the server did not start a session.', null);

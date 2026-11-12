@@ -222,7 +222,11 @@ test('a new chat begins a Hermes session marked as Cortex’s; the answer, its t
   try {
     saveHermes({ url: fake.base, key: KEY });
     const { turn, events, session, options } = fakeTurn();
+    // Said handed over once, when the message goes to the server: before any of the answer (Cortex Browser's link waits on it).
+    const handed: number[] = [];
+    turn.sent = () => handed.push(events.filter((one) => one.type === 'text' || one.type === 'thought').length);
     assert.equal(await hermesBackend.run(turn, 'merhaba Hermes'), 'end_turn');
+    assert.deepEqual(handed, [0]);
     const created = fake.seen.find((one) => one.method === 'POST' && one.path === '/api/sessions');
     assert.equal(created?.body?.source, 'cortex-desktop');
     assert.match(String(created?.body?.title), /^merhaba Hermes · /);

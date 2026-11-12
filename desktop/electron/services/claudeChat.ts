@@ -61,6 +61,8 @@ interface Proc {
   retrySaid: string | null;
   /** Ends the program left without a message for IDLE. */
   idleTimer: ReturnType<typeof setTimeout> | null;
+  /** Started without the leave given beforehand (askingArgs), for a chat that holds a web page's content. */
+  guarded: boolean;
 }
 
 const procs = new Map<string, Proc>();
@@ -130,14 +132,47 @@ export function claudeOptions(prefs: Readonly<Record<string, string>>, models: A
   ];
 }
 
-/** The flags a start is given for the chat's settings, and the session it continues. */
-export function claudeArgs(base: string[], options: ConfigOption[], sessionId: string | null): string[] {
+/**
+ * The start's arguments without the steps allowed beforehand (`--allowedTools` and its rules: the vault's notes
+ * edited, the Stop hook's receipt written - clis.ts CLAUDE_ARGS), for a chat that holds a web page's content: there
+ * every step that writes is asked of the person, since the page may be what asked for it. What Claude Code may read
+ * is not changed, nor is what makes it ask the person. Rules the person keeps in Claude Code's own settings are
+ * Claude Code's, and stay.
+ */
+export function askingArgs(args: readonly string[]): string[] {
+  const out: string[] = [];
+  for (let at = 0; at < args.length; at += 1) {
+    if (args[at] !== '--allowedTools' && args[at] !== '--allowed-tools') {
+      out.push(args[at]);
+      continue;
+    }
+    // The flag takes every word up to the next flag.
+    while (at + 1 < args.length && !args[at + 1].startsWith('--')) at += 1;
+  }
+  return out;
+}
+
+/**
+ * For a chat that holds a web page's content. A vault still on the predecessor's hooks (or one whose person kept
+ * them) sums a session's transcript up into the day's note when the session ends, with no card: the page's words
+ * would reach the vault's memory that way. Those hooks stand aside for a program started with this variable, their
+ * own guard against being run by themselves; Cortex's hooks (beyin_v3_hook.py) keep no transcript text and do not
+ * look at it.
+ */
+export const PAGE_ENV: Readonly<Record<string, string>> = { BEYIN_INVOKED_BY: 'cortex-page' };
+
+/**
+ * The flags a start is given for the chat's settings, and the session it continues. `named`: the mode is said even
+ * where it is Claude Code's `default` - for a chat that holds a web page's content, where "ask first" left unsaid
+ * would be whatever the person's own Claude Code settings make the default (`defaultMode`), a wider one among them.
+ */
+export function claudeArgs(base: string[], options: ConfigOption[], sessionId: string | null, named = false): string[] {
   const current = (id: string) => options.find((one) => one.id === id)?.current;
   const args = [...base];
   const model = current('model');
   if (model && model !== 'default') args.push('--model', model);
   const mode = current('mode');
-  if (mode && mode !== 'default') args.push('--permission-mode', mode);
+  if (mode && (named || mode !== 'default')) args.push('--permission-mode', mode);
   const effort = current('effort');
   if (effort && effort !== 'default') args.push('--effort', effort);
   if (sessionId) args.push('--resume', sessionId);
@@ -455,7 +490,10 @@ async function start(turn: Turn, options: ConfigOption[]): Promise<Proc> {
   if (!launch) throw new ChatRefusal('Claude Code is not installed on this machine.');
   let child: ChildProcessWithoutNullStreams;
   try {
-    child = spawn(launch.command, claudeArgs(launch.args, options, turn.sessionId), { cwd: turn.vault, env: childEnv(launch.env), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false });
+    // A chat that holds a web page's content: no step allowed beforehand, its mode said outright, and the memory
+    // hooks of the predecessor's vaults switched off by the word they already heed (PAGE_ENV).
+    const guarded = turn.afterPage === true;
+    child = spawn(launch.command, claudeArgs(guarded ? askingArgs(launch.args) : launch.args, options, turn.sessionId, guarded), { cwd: turn.vault, env: childEnv(guarded ? { ...launch.env, ...PAGE_ENV } : launch.env), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false });
   } catch (err) {
     // Refused at once: Node throws what the system says of a start it would not make (EPERM under an antivirus), where a program not found comes as an `error` event.
     throw startFailure(err);
@@ -478,6 +516,7 @@ async function start(turn: Turn, options: ConfigOption[]): Promise<Proc> {
     notStarted: null,
     retrySaid: null,
     idleTimer: null,
+    guarded: turn.afterPage === true,
   };
   procs.set(turn.chatId, proc);
   child.stdout.setEncoding('utf8');
@@ -567,6 +606,7 @@ function send(proc: Proc, turn: Turn, message: string): Promise<string> {
     proc.finish = resolve;
     proc.fail = reject;
     write(proc, { type: 'user', message: { role: 'user', content: contentOf(message, turn.attachments) }, parent_tool_use_id: null });
+    turn.sent?.();
   });
 }
 
@@ -592,7 +632,12 @@ export const claudeBackend: Backend = {
       settings.set(turn.chatId, options);
       turn.setOptions(options);
     }
-    const proc = procs.get(turn.chatId);
+    let proc = procs.get(turn.chatId);
+    // A web page added to the chat since its program started: started again, on the same session, with no step allowed beforehand.
+    if (proc && proc.alive && !proc.turn && turn.afterPage && !proc.guarded) {
+      close(proc);
+      proc = undefined;
+    }
     if (proc && proc.alive) return send(proc, turn, message);
     const said = { any: false };
     try {

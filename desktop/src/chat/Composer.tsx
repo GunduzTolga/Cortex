@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, ChevronDown, FileText, Image as ImageIcon, Inbox, Paperclip, Settings2, ShieldQuestion, Square, X } from 'lucide-react';
+import { ArrowUp, Check, ChevronDown, FileText, Globe, Image as ImageIcon, Inbox, Paperclip, Settings2, ShieldQuestion, Square, X } from 'lucide-react';
 import { ATTACHING_CLIS, type ChatAttachment, type CliAuth, type CliId, type CliInfo, type ConfigOption, type PermissionKind } from '@shared/chat';
 import { messageOf } from '@shared/ipcError';
 import type { Key } from '../i18n';
@@ -205,6 +205,13 @@ function PermissionCard({ asked, onAnswer, visible }: { asked: Asked; onAnswer: 
         {asked.title || asked.kind}
       </p>
       {asked.paths.length ? <p className="mt-0.5 max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] text-zinc-500">{asked.paths.join(' · ')}</p> : null}
+      {/* The chat holds a web page's content (Cortex Browser): the step may be the page's wish and not the person's, and no leave for good is offered. */}
+      {asked.afterPage ? (
+        <p className="mt-2 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-zinc-600" data-chat-permission-after-page>
+          <Globe size={13} className="mt-0.5 shrink-0" />
+          {t('chat.permission.afterPage')}
+        </p>
+      ) : null}
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {asked.options.map((option) => (
           <button

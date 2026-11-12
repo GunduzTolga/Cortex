@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { CortexApi } from '../shared/api';
+import type { BrowserLinkStatus } from '../shared/browserLink';
 import type { CliId } from '../shared/chat';
 import type { GithubStatus } from '../shared/github';
 import type { TailnetStatus } from '../shared/pairing';
@@ -113,6 +114,13 @@ const api: CortexApi = {
     status: () => invoke('mcp:status'),
     addToClaude: () => invoke('mcp:addToClaude'),
   },
+  browserLink: {
+    status: () => invoke('browserLink:status'),
+    setOn: (on) => invoke('browserLink:setOn', on),
+    decide: (allow) => invoke('browserLink:decide', allow),
+    allow: () => invoke('browserLink:allow'),
+    unpair: () => invoke('browserLink:unpair'),
+  },
   tailnet: {
     status: () => invoke('tailnet:status'),
     pair: (code) => invoke('tailnet:pair', code),
@@ -160,6 +168,7 @@ const api: CortexApi = {
     vaultSync: (handler) => listen<SyncStatus>('vaultSync:status', handler),
     github: (handler) => listen<GithubStatus>('github:status', handler),
     tailnet: (handler) => listen<TailnetStatus>('tailnet:status', handler),
+    browserLink: (handler) => listen<BrowserLinkStatus>('browserLink:status', handler),
     chat: (handler) => listen('chat:event', handler),
     authChanged: (handler) => listen<CliId | null>('chat:authChanged', (cli) => handler(typeof cli === 'string' ? cli : null)),
     toolsFound: (handler) => subscribe('chat:toolsFound', handler),

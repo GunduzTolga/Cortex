@@ -26,10 +26,12 @@ export interface Asked {
   options: Array<{ id: string; name: string; kind: PermissionKind }>;
   /** The option chosen, null when refused or cancelled; undefined while it waits. */
   answer: string | null | undefined;
+  /** Asked in a chat that holds a web page's content: the card says so. */
+  afterPage?: true;
 }
 
 export interface Turn {
-  user: { text: string; at: number; attachments?: Array<{ name: string; kind: 'image' | 'file' }> } | null;
+  user: { text: string; at: number; attachments?: Array<{ name: string; kind: 'image' | 'file' }>; page?: { title: string; url: string } } | null;
   thought: string;
   steps: Step[];
   /** The answer's words, its messages one after another. */
@@ -67,7 +69,7 @@ export function turnsOf(events: readonly ChatEvent[]): Turn[] {
     if (turn && turn.retrying && event.type !== 'notice' && event.type !== 'usage') turn.retrying = null;
     switch (event.type) {
       case 'user':
-        turn = empty({ text: event.text, at: event.at, ...(event.attachments?.length ? { attachments: event.attachments } : {}) });
+        turn = empty({ text: event.text, at: event.at, ...(event.attachments?.length ? { attachments: event.attachments } : {}), ...(event.page ? { page: event.page } : {}) });
         turns.push(turn);
         lastText = null;
         break;
@@ -97,7 +99,7 @@ export function turnsOf(events: readonly ChatEvent[]): Turn[] {
         break;
       }
       case 'permission':
-        current().asked.push({ id: event.id, title: event.title, kind: event.kind, paths: event.paths, options: event.options, answer: undefined });
+        current().asked.push({ id: event.id, title: event.title, kind: event.kind, paths: event.paths, options: event.options, answer: undefined, ...(event.afterPage ? { afterPage: true as const } : {}) });
         break;
       case 'answered': {
         const asked = current().asked.find((one) => one.id === event.id);

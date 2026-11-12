@@ -120,6 +120,12 @@ function ChatList() {
                       <span className="truncate">
                         {cliName(chat.cli)} · {time(chat.updatedAt)}
                       </span>
+                      {/* Begun from Cortex Browser (shared/browserLink.ts): said, as the chat is otherwise like any other. */}
+                      {chat.origin === 'browser' ? (
+                        <span className="shrink-0 rounded bg-zinc-100 px-1 text-[9.5px] font-semibold uppercase tracking-wide text-zinc-500" title={t('chat.origin.browser.title')} data-chat-origin="browser">
+                          {t('chat.origin.browser')}
+                        </span>
+                      ) : null}
                       {(() => {
                         // What the chat has cost, at the API's price where the tool tells one (src/chat/spend.ts).
                         const spent = spendWords(chat.spend, language, t);

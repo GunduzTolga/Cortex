@@ -98,6 +98,8 @@ export interface ChatSummary {
   updatedAt: number;
   /** Absent until a turn has said what it cost. */
   spend?: ChatSpend;
+  /** Begun from Cortex Browser (shared/browserLink.ts): said in the list. Absent for a chat begun in Cortex. */
+  origin?: 'browser';
 }
 
 export interface ConfigChoice {
@@ -120,15 +122,16 @@ export type PermissionKind = 'allow_once' | 'allow_always' | 'reject_once' | 're
 
 /** What a chat shows, in the order it happened. */
 export type ChatEvent =
-  | { type: 'user'; text: string; at: number; attachments?: Array<{ name: string; kind: 'image' | 'file' }> }
+  /** `page`: a web page added to the message in Cortex Browser, by its title and address; its text went to the tool and is not kept here. */
+  | { type: 'user'; text: string; at: number; attachments?: Array<{ name: string; kind: 'image' | 'file' }>; page?: { title: string; url: string } }
   /** A piece of the answer, to be added to the message of that id. */
   | { type: 'text'; id: string; text: string }
   /** A piece of the CLI's thinking, shown folded. */
   | { type: 'thought'; id: string; text: string }
   /** A step the CLI takes - reading a note, running a command - or a later word on it: what it carries replaces what the step of that id had. */
   | { type: 'tool'; id: string; title?: string; kind?: string; status?: ToolStatus; paths?: string[]; output?: string }
-  /** The CLI asks before a step; answered from the card it shows. */
-  | { type: 'permission'; id: string; title: string; kind: string; paths: string[]; options: Array<{ id: string; name: string; kind: PermissionKind }> }
+  /** The CLI asks before a step; answered from the card it shows. `afterPage`: the chat holds a web page's content, and the card says so. */
+  | { type: 'permission'; id: string; title: string; kind: string; paths: string[]; options: Array<{ id: string; name: string; kind: PermissionKind }>; afterPage?: true }
   | { type: 'answered'; id: string; option: string | null }
   | { type: 'plan'; entries: Array<{ content: string; status: string }> }
   | { type: 'usage'; used: number; size: number; cost: number | null; currency: string | null }

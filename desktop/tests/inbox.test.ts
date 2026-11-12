@@ -74,6 +74,19 @@ test('a message goes to the vault’s own `yakala ekle`: the link as its one ite
   ]);
 });
 
+test('a web page kept from Cortex Browser is one card: its address the source, its title the card’s, the note why it was kept', { skip: !hasPython }, async () => {
+  const vault = vaultWithEngine();
+  await captureToInbox({ url: 'https://example.com/yazi', title: '  Örnek\nsayfa  ', why: 'sonra bak' }, 'cortex-browser');
+  // A title alone is nothing to keep: there is no page and no words.
+  await assert.rejects(captureToInbox({ title: 'Yalnız başlık' }, 'cortex-browser'), /Kaydedilecek bir şey yok/);
+  // An address that is no web address (a browser's own page) is kept as words, under its title all the same.
+  await captureToInbox({ url: 'chrome://settings', title: 'Ayarlar', why: '' }, 'cortex-browser');
+  assert.deepEqual(asked(vault), [
+    ['yakala', 'ekle', 'https://example.com/yazi', '--arac', 'cortex-browser', '--neden=sonra bak', '--baslik=Örnek sayfa'],
+    ['yakala', 'ekle', '--arac', 'cortex-browser', '--metin=chrome://settings', '--baslik=Ayarlar'],
+  ]);
+});
+
 test('the local model is told it has one tool that only saves, and not to promise to remember', () => {
   updateSettings((settings) => {
     settings.language = 'tr';

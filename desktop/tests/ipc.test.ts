@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { app, dialogAnswer, handlers, nativeTheme, sent } from 'electron';
-import { registerIpc, startAppUpdates, trustPagesWhere } from '../electron/ipc';
+import net from 'node:net';
+import { quietInstallAllowed, registerIpc, startAppUpdates, trustPagesWhere } from '../electron/ipc';
+import { startBrowserLink, stopBrowserLink } from '../electron/services/browserLink';
 import { forgetUpdates, startUpdates, type Updater } from '../electron/services/updater';
 import { forgetSettings, readSettings, settingsPath, settingsUnsaved, updateSettings } from '../electron/services/settings';
 import { pythonOf } from '../electron/services/localChat';
@@ -38,6 +40,8 @@ test('the channels are the ones the preload names, no more and no fewer', () => 
   assert.deepEqual([...handlers.keys()].sort(), named);
   assert.deepEqual(named.filter((channel) => channel.startsWith('chat:')), ['chat:addTool', 'chat:answer', 'chat:attach', 'chat:auth', 'chat:begin', 'chat:cancel', 'chat:cancelLogin', 'chat:clis', 'chat:install', 'chat:installProgress', 'chat:list', 'chat:login', 'chat:offer', 'chat:open', 'chat:remove', 'chat:removeTool', 'chat:rename', 'chat:send', 'chat:setKey', 'chat:setOption', 'chat:toInbox']);
   assert.deepEqual(named.filter((channel) => channel.startsWith('hermes:')), ['hermes:forget', 'hermes:save', 'hermes:status', 'hermes:test']);
+  // Cortex Browser's link (services/browserLink.ts): how it is, the person's answer to a browser waiting, the leave taken back.
+  assert.deepEqual(named.filter((channel) => channel.startsWith('browserLink:')), ['browserLink:allow', 'browserLink:decide', 'browserLink:setOn', 'browserLink:status', 'browserLink:unpair']);
   // The vault given to the AI tools (services/mcp.ts): its lines, and Claude Code's add; neither takes anything.
   assert.deepEqual(named.filter((channel) => channel.startsWith('mcp:')), ['mcp:addToClaude', 'mcp:status']);
   assert.match(preload, /addToClaude: \(\) => invoke\('mcp:addToClaude'\)/);
@@ -342,6 +346,59 @@ test('an update that will not come down is said in the window and the notificati
     assert.equal(notices().at(-1)!.title, 'Cortex 1.0.63 could not be downloaded');
   } finally {
     forgetUpdates();
+    firstRun();
+  }
+});
+
+test('Cortex Browser’s link from the window: the switch, how it is, and leave taken back; a token never crosses', async () => {
+  firstRun();
+  stopBrowserLink();
+  const off = { on: false, turnedOff: false, listening: false, allowed: false, connected: false, asking: false, code: null, locked: false };
+  assert.deepEqual(await call('browserLink:status'), off, 'closed until the person opens it');
+  // No browser waits: an answer is an answer to nothing, whatever it says, and "allow" lets nobody in.
+  assert.deepEqual(await call('browserLink:decide', true), off);
+  assert.deepEqual(await call('browserLink:allow'), off);
+  assert.equal(readSettings().browserLinkToken, null);
+  // The switch: only a yes or a no; on, the listener is open and the setting kept.
+  assert.deepEqual(await call('browserLink:setOn', 'yes'), off);
+  sent.length = 0;
+  assert.deepEqual(await call('browserLink:setOn', true), { ...off, on: true, listening: true });
+  assert.equal(readSettings().browserLink, 'on');
+  assert.deepEqual(sent.filter(([channel]) => channel === 'browserLink:status').at(-1), ['browserLink:status', { ...off, on: true, listening: true }], 'every window is told');
+  updateSettings((settings) => {
+    settings.browserLinkToken = 'a'.repeat(64);
+  });
+  const allowed = await call('browserLink:status');
+  assert.deepEqual(allowed, { ...off, on: true, listening: true, allowed: true });
+  assert.ok(!JSON.stringify(allowed).includes('aaaa'), 'not even its digest');
+  assert.deepEqual(await call('browserLink:unpair'), { ...off, on: true, listening: true });
+  assert.equal(readSettings().browserLinkToken, null);
+  // Switched off by the person: said as that, which is more than "not on" - a browser cannot open it from now.
+  assert.deepEqual(await call('browserLink:setOn', false), { ...off, turnedOff: true });
+  assert.equal(readSettings().browserLink, 'off');
+  assert.ok(!JSON.stringify(await call('app:bootstrap')).includes('browserLink'), 'the settings the window is given hold nothing of the link');
+});
+
+test('an update is not installed unasked - Cortex closed for it - while a browser is connected', async () => {
+  firstRun();
+  stopBrowserLink();
+  assert.equal(quietInstallAllowed(() => true), true, 'nobody has seen Cortex, nothing runs: as before');
+  assert.equal(quietInstallAllowed(() => false), false);
+  assert.equal(await startBrowserLink({ asked: true }), true);
+  const pipe = (JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'browser-link.json'), 'utf8')) as { pipe: string }).pipe;
+  const socket = net.connect(pipe);
+  try {
+    await new Promise<void>((done, failed) => {
+      socket.once('connect', done);
+      socket.once('error', failed);
+    });
+    socket.write('{"type":"hello","protocol":1,"token":null}\n');
+    // Its hello read (it is told to wait): a browser is there.
+    await new Promise<void>((done) => socket.once('data', () => done()));
+    assert.equal(quietInstallAllowed(() => true), false);
+  } finally {
+    socket.destroy();
+    stopBrowserLink();
     firstRun();
   }
 });

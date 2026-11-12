@@ -6,6 +6,7 @@ import { restartingListener, sayMicrophone } from './services/microphone';
 import { currentListener, expectVoiceTurn, onHelperChange, startWithWindows, trayChanged } from './services/tray';
 import { defaultVaultDir, setVault, vaultStatus } from './services/vault';
 import * as auth from './services/auth';
+import * as browserLink from './services/browserLink';
 import { onPathReadLate } from './services/clis';
 import * as chat from './services/chat';
 import { keepAttachment } from './services/attachments';
@@ -113,7 +114,7 @@ export function startAppUpdates(trayWord: (title: string, body: string) => void,
     if (kind === 'download') trayWord(title, detail);
   });
   if (!updatesWanted()) return;
-  const quiet = { unseen: () => unseen() && setup.setupBusy() === null && !chat.chatsRunning(), file: quietFile() };
+  const quiet = { unseen: () => quietInstallAllowed(unseen), file: quietFile() };
   void startUpdates((update: AppUpdate) => {
     broadcast('app:update', update);
     const english = readSettings().language === 'en';
@@ -122,6 +123,15 @@ export function startAppUpdates(trayWord: (title: string, body: string) => void,
       english ? 'It is installed when Cortex restarts. Open Cortex to restart now.' : 'Cortex yeniden başlayınca kurulur. Şimdi kurmak için Cortex’i aç.',
     );
   }, quiet).catch((err: unknown) => console.warn('[updates]', err instanceof Error ? err.message : err));
+}
+
+/**
+ * Whether a newer Cortex may be installed without a word, which closes the app: nobody has seen it since it started
+ * with Windows (`unseen`), no setup and no answer is going on, and no browser is connected or asked something a
+ * moment ago (services/browserLink.ts) - closed under it, its question would be left without an answer.
+ */
+export function quietInstallAllowed(unseen: () => boolean): boolean {
+  return unseen() && setup.setupBusy() === null && !chat.chatsRunning() && !browserLink.browserLinkBusy();
 }
 
 function windowSettings(): WindowSettings {
@@ -403,6 +413,15 @@ export function registerIpc(): void {
   handle('tailnet:pair', (code) => tailnet.pairTailnet(code));
   handle('tailnet:forget', () => tailnet.forgetTailnet());
   tailnet.onTailnet((status) => broadcast('tailnet:status', status));
+
+  // Cortex Browser's link (services/browserLink.ts): the window opens and closes it, hears how it is, answers for the
+  // person when a browser first connects, and takes the leave back. The token goes to the browser alone; nothing of it is told here.
+  handle('browserLink:status', () => browserLink.browserLinkStatus());
+  handle('browserLink:setOn', (on) => browserLink.setBrowserLinkOn(on));
+  handle('browserLink:decide', (allow) => browserLink.decidePairing(allow));
+  handle('browserLink:allow', () => browserLink.allowBrowserFromSettings());
+  handle('browserLink:unpair', () => browserLink.unpairBrowser());
+  browserLink.onBrowserLink((status) => broadcast('browserLink:status', status));
 
   // Notes from the phone through the person's own Telegram bot (services/telegram.ts): a key goes in and is never sent back.
   handle('telegram:status', () => telegram.telegramStatus());
