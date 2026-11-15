@@ -48,9 +48,29 @@ export interface EngineCallbacks {
   onInteract?(): void;
 }
 
+/** The light over the map: its tint, the lamps' glow, the night spots, the morning haze, the brain's frame(s). */
+export interface Light {
+  tint: [number, number, number];
+  glow: number;
+  spot: number;
+  haze: number;
+  brain: LightMode;
+  brainNext: LightMode;
+  brainK: number;
+}
+export function lightOfMode(mode: LightMode): Light;
+/** The light at an hour (0-24, minutes as fractions): each mode through the middle of its hours, faded at the edges. */
+export function lightAt(hour: number): Light;
+/** What each one says when clicked, by character id (Turkish; ofis-en.js has the English). */
+export const REACTIONS: Record<string, string>;
+export function springStep(p: number, v: number, dt: number, k?: number, damp?: number): [number, number];
+export function hopAt(t: number): number;
+
 export class OfficeEngine {
   constructor(canvas: HTMLCanvasElement, art: typeof Art, callbacks?: EngineCallbacks);
   mode: LightMode;
+  /** The hour the light follows, by the minute; null: the pinned mode's light. */
+  hour: number | null;
   /** The face the canvas writes in: room names, bubbles, name tags. */
   font: string;
   /** The language the map's room names are written in. */
@@ -75,4 +95,11 @@ export class OfficeEngine {
   /** The office opened: a line in the log, a word from Pyn. */
   greet(): void;
   destroy(): void;
+  /** The one clicked reacts: turns, hops, says a line. */
+  poke(agent: { id: string; pose: string; dir: string; path: unknown; seatId: string | null }): void;
+  /** The pointer at a map point, as wind for the plants it passes. */
+  wind(x: number, y: number): void;
+  /** Time by hand (recordings): the loop stops, step() moves the office on in exact frames. */
+  setManual(on: boolean): void;
+  step(seconds?: number, fps?: number): void;
 }

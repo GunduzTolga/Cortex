@@ -289,6 +289,8 @@ export function OfficeView({ visible }: { visible: boolean }) {
     const engine = engineRef.current;
     if (!engine) return;
     engine.mode = prefs.followClock ? lightForHour(now.getHours()) : 'ogle';
+    // Following the clock, the light moves by the minute (ofis-engine.js lightAt), not by the mode's hours.
+    engine.hour = prefs.followClock ? now.getHours() + now.getMinutes() / 60 : null;
     engine.font = prefs.pixel ? "'Pixelify Sans'" : "'Segoe UI', system-ui";
     engine.lang = language === 'en' ? 'en' : 'tr';
   }, [prefs.followClock, prefs.pixel, now, language]);

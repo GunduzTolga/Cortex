@@ -19,6 +19,28 @@ function paperOf(el, name, fallback) {
 const LIGHT_TINT = { sabah: [222, 232, 255], ogle: null, aksam: [255, 196, 150], gece: [66, 80, 132] };
 export const LIGHT_MODES = [['sabah', 'Sabah'], ['ogle', 'Öğle'], ['aksam', 'Akşam'], ['gece', 'Gece']];
 export function lightForHour(h) { return h >= 6 && h < 10 ? 'sabah' : h >= 10 && h < 17 ? 'ogle' : h >= 17 && h < 20 ? 'aksam' : 'gece'; }
+// The light of a pinned mode: the tint over the map, how strongly the lamps glow, the bright spots under them at night,
+// the cool morning haze. `brain` is the frame's mode (and the next one, faded in by brainK).
+const MODE_LIGHT = {
+  sabah: { tint: LIGHT_TINT.sabah, glow: 0, spot: 0, haze: 1 },
+  ogle: { tint: [255, 255, 255], glow: 0, spot: 0, haze: 0 },
+  aksam: { tint: LIGHT_TINT.aksam, glow: 0.06, spot: 0, haze: 0 },
+  gece: { tint: LIGHT_TINT.gece, glow: 0.17, spot: 1, haze: 0 },
+};
+export function lightOfMode(mode) { const m = MODE_LIGHT[mode] || MODE_LIGHT.ogle; return { ...m, tint: [...m.tint], brain: mode, brainNext: mode, brainK: 0 }; }
+// Following the clock, the light moves by the minute: each mode holds through the middle of its hours and fades into
+// the next across the hour around lightForHour's boundary (10, 17, 20, 06), so evening comes in slowly, not at once.
+const LIGHT_STOPS = [[0, 'gece'], [5.5, 'gece'], [6.5, 'sabah'], [9.5, 'sabah'], [10.5, 'ogle'], [16.5, 'ogle'], [17.5, 'aksam'], [19.5, 'aksam'], [20.5, 'gece'], [24, 'gece']];
+const smoothstep = (k) => k * k * (3 - 2 * k);
+export function lightAt(hour) {
+  const h = ((Number(hour) % 24) + 24) % 24;
+  let i = 0;
+  while (i < LIGHT_STOPS.length - 2 && LIGHT_STOPS[i + 1][0] <= h) i++;
+  const [h0, a] = LIGHT_STOPS[i], [h1, b] = LIGHT_STOPS[i + 1];
+  const k = a === b ? 0 : smoothstep(Math.max(0, Math.min(1, (h - h0) / (h1 - h0))));
+  const A = MODE_LIGHT[a], B = MODE_LIGHT[b], mix = (x, y) => x + (y - x) * k;
+  return { tint: A.tint.map((v, j) => Math.round(mix(v, B.tint[j]))), glow: mix(A.glow, B.glow), spot: mix(A.spot, B.spot), haze: mix(A.haze, B.haze), brain: a, brainNext: b, brainK: k };
+}
 const pad = (n) => String(n).padStart(2, '0');
 export const clockText = (d = new Date()) => pad(d.getHours()) + ':' + pad(d.getMinutes());
 /** The frame an animation shows at time t: always one it has, even for a clock that is not yet running (t < 0, NaN). */
@@ -110,6 +132,21 @@ const SCRIPTS = {
   tekir: [{ place: [804, 553], pose: 'sleep', dir: 'down', dur: 40, act: 'kanepede uyuyor', mood: '😴' }, { place: [804, 553], pose: 'groom', dir: 'side', dur: 5, act: 'tüylerini temizliyor', mood: '😺' }],
 };
 const START = { husnu: 'husnu', tekir: null };
+// A click is the world reacting, not a button: the one clicked turns, gives a small hop and says something like
+// themselves (asleep, they start awake). Lines in Turkish; ofis-en.js has them in English.
+export const REACTIONS = {
+  pyn: 'Hmm?', mudur: 'Buyrun?', tolga: 'Bir saniye, testler koşuyor.', defne: 'Emin misin?', baran: 'Çalışıyor, dokunma.',
+  ilgin: 'Bunun açık kaynağı var mı?', toprak: 'Bir sekme daha açayım.', asya: 'Hemen bakıyorum.', berk: 'Abi, ben mi?',
+  sena: 'Kırmızı kalemim nerede?', kaan: 'Makbuzu var mı?', elif: 'Bunu şuna bağlayalım!', umut: 'Kargo mu geldi?',
+  melis: 'Sunucuya dokunmadınız, değil mi?', husnu: 'Çay ister misin evladım?', tekir: 'Miyav.',
+};
+const WOKEN = { pyn: 'Hmm. Uyumuyordum.', husnu: 'Uyumuyordum, gözümü dinlendiriyordum.', tekir: 'Mrrr…' };
+// Plants that sway when the pointer passes them (a spring each, pushed by the pointer's speed).
+const SWAYS = new Set(['plant_tall', 'plant_small', 'plant_bush', 'pineapple_plant', 'planter_long']);
+/** One step of a damped spring toward rest: [position, velocity] after dt. */
+export function springStep(p, v, dt, k = 70, damp = 5) { const a = -k * p - damp * v; v += a * dt; p += v * dt; return [p, v]; }
+/** How high a clicked one is lifted t seconds after the click: one quick hop, then still. */
+export function hopAt(t) { return t >= 0 && t < 0.36 ? 3 * Math.sin(Math.PI * t / 0.36) : 0; }
 
 export class OfficeEngine {
   constructor(canvas, art, cb = {}) {
@@ -121,9 +158,9 @@ export class OfficeEngine {
     this.world = this.mk(this.W, this.H); this.base = this.mk(this.W, this.H); this.lightCv = this.mk(this.W, this.H);
     this.cache = new Map(); this.col = art.buildCollision();
     this.zoom = 1; this.camX = this.W / 2; this.camY = this.H / 2; this.camTarget = null;
-    this.t = 0; this.speed = 1; this.mode = 'ogle'; this.font = "'Pixelify Sans'"; this.lang = 'tr';
+    this.t = 0; this.speed = 1; this.mode = 'ogle'; this.hour = null; this.manual = false; this.font = "'Pixelify Sans'"; this.lang = 'tr';
     this.selected = null; this.hover = null; this.room = null; this.preview = null;
-    this.bubbles = []; this.meets = {}; this.led = { ...TOOL_STATUS }; this.userName = null; this.talkQueue = []; this.talkT = 0;
+    this.bubbles = []; this.meets = {}; this.react = {}; this.sway = {}; this.pointer = null; this.led = { ...TOOL_STATUS }; this.userName = null; this.talkQueue = []; this.talkT = 0;
     this.doorState = {}; this.elevator = { f: 0, open: false };
     this.objects = art.MAP.objects.map((o) => ({ ...o, s: art.SPRITES[o.sprite] }));
     this.seat = Object.fromEntries(art.MAP.seats.map((s) => [s.id, s]));
@@ -328,7 +365,7 @@ export class OfficeEngine {
     return c;
   }
   drawSparks(x) {
-    const S = this.art.SPRITES, gece = this.mode === 'gece';
+    const S = this.art.SPRITES, gece = this.light().spot >= 0.5;
     for (const s of this.sparks) {
       const pal = { renk: s.renk, gece };
       for (const [back, f] of [[10, 1], [5, 0]]) {
@@ -393,6 +430,43 @@ export class OfficeEngine {
     for (const a of this.agents) { const c = this.art.cellOf(a.id), top = a.id === 'tekir' ? 12 : 26; if (wx >= a.x - 7 && wx <= a.x + 7 && wy >= a.y - top && wy <= a.y + 2) if (!best || a.y > best.y) best = a; }
     return best;
   }
+  /** The one clicked reacts: turns to face you if standing, hops, says a line; asleep, wakes for a moment. */
+  poke(ag) {
+    const asleep = ag.pose === 'sleep', turn = !ag.path && !ag.seatId && !asleep && ag.id !== 'tekir' && ag.dir !== 'down';
+    // Turned to face you while it speaks, then back the way it was (if it has not moved on meanwhile).
+    this.react[ag.id] = { t: 0, dir: turn ? ag.dir : null, pose: ag.pose };
+    if (turn) ag.dir = 'down';
+    this.say(ag, asleep ? WOKEN[ag.id] || REACTIONS[ag.id] || 'Hı?' : REACTIONS[ag.id] || 'Efendim?', 2.6);
+  }
+  hopOf(a) { const r = this.react[a.id]; return r ? Math.round(hopAt(r.t)) : 0; }
+  /** The pointer as wind: passing a plant pushes it by how fast and which way the pointer moved. */
+  wind(wx, wy) {
+    const p = this.pointer, now = this.t; this.pointer = { x: wx, y: wy, t: now };
+    if (!p) return;
+    const vx = (wx - p.x) / Math.max(1 / 60, now - p.t || 1 / 60);
+    for (const o of this.objects) {
+      if (!SWAYS.has(o.sprite)) continue;
+      const cx = o.left + o.s.w / 2, cy = o.top + o.s.h / 2;
+      if (Math.abs(wx - cx) > o.s.w / 2 + 10 || Math.abs(wy - cy) > o.s.h / 2 + 8) continue;
+      const st = this.sway[o.id] || (this.sway[o.id] = { p: 0, v: 0 });
+      st.v = Math.max(-1.6, Math.min(1.6, st.v + vx * 0.004 * (24 / Math.max(16, o.s.h))));
+    }
+  }
+  updateSway(dt) {
+    for (const [id, st] of Object.entries(this.sway)) { [st.p, st.v] = springStep(st.p, st.v, dt); if (Math.abs(st.p) < 0.002 && Math.abs(st.v) < 0.01) delete this.sway[id]; }
+    for (const [id, r] of Object.entries(this.react)) {
+      r.t += dt; if (r.t < 2.6) continue;
+      const ag = this.byId[id]; if (r.dir && ag && !ag.path && ag.dir === 'down' && ag.pose === r.pose) ag.dir = r.dir;
+      delete this.react[id];
+    }
+  }
+  /** An object as the map has it; a swaying plant leans from its pot (sheared about its foot). */
+  drawObject(x, o, pal) {
+    const c = this.frame(o.sprite, this.objFrame(o), o.flip, pal), st = this.sway[o.id];
+    if (!st) { x.drawImage(c, o.left, o.top); return; }
+    const k = Math.max(-0.35, Math.min(0.35, st.p)), w = o.s.w, h = o.s.h;
+    x.save(); x.translate(o.left + w / 2, o.top + h); x.transform(1, 0, -k, 1, 0, 0); x.drawImage(c, -w / 2, -h); x.restore();
+  }
   bind() {
     const cv = this.cv; let down = null;
     this.onWheel = (e) => { e.preventDefault(); this.zoomAt(Math.exp(-e.deltaY * 0.0016), e.clientX, e.clientY); this.cb.onInteract && this.cb.onInteract(); };
@@ -400,24 +474,38 @@ export class OfficeEngine {
     this.onMove = (e) => {
       if (down) { const dx = e.clientX - down.x, dy = e.clientY - down.y; if (!down.drag && Math.hypot(dx, dy) > 4) { down.drag = true; this.camTarget = null; this.cb.onInteract && this.cb.onInteract(); } if (down.drag) { this.camX = down.cx - dx / this.zoom; this.camY = down.cy - dy / this.zoom; this.clampCam(); } return; }
       const [wx, wy] = this.toWorld(e.clientX, e.clientY), h = this.hit(wx, wy); const id = h ? h.id : null;
+      this.wind(wx, wy);
       if (id !== this.hover) { this.hover = id; this.cb.onHover && this.cb.onHover(id); }
     };
     this.onUp = (e) => {
       if (!down) return; const wasDrag = down.drag; down = null; if (wasDrag) return;
       this.cb.onInteract && this.cb.onInteract();
       const [wx, wy] = this.toWorld(e.clientX, e.clientY), h = this.hit(wx, wy);
-      if (h) { this.select(h.id); return; }
+      if (h) { this.select(h.id); this.poke(h); return; }
       const rid = this.art.roomAt(Math.floor(wx / 16), Math.floor(wy / 16));
       this.select(null); this.room = rid; this.cb.onRoom && this.cb.onRoom(rid);
     };
-    this.onLeave = () => { if (this.hover) { this.hover = null; this.cb.onHover && this.cb.onHover(null); } };
+    this.onLeave = () => { this.pointer = null; if (this.hover) { this.hover = null; this.cb.onHover && this.cb.onHover(null); } };
     cv.addEventListener('wheel', this.onWheel, { passive: false }); cv.addEventListener('pointerdown', this.onDown); cv.addEventListener('pointermove', this.onMove); cv.addEventListener('pointerup', this.onUp); cv.addEventListener('pointerleave', this.onLeave);
   }
   destroy() { this.active = false; cancelAnimationFrame(this.raf); const cv = this.cv; cv.removeEventListener('wheel', this.onWheel); cv.removeEventListener('pointerdown', this.onDown); cv.removeEventListener('pointermove', this.onMove); cv.removeEventListener('pointerup', this.onUp); cv.removeEventListener('pointerleave', this.onLeave); }
   // ── Döngü
   loop = (now) => {
     // A frame's time can come before the start's: dt never goes below zero.
-    const dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000)) * this.speed; this.last = now; this.t += dt; this.rect = this.cv.getBoundingClientRect();
+    if (this.manual) return;
+    const dt = Math.max(0, Math.min(0.05, (now - this.last) / 1000)) * this.speed; this.last = now;
+    this.tick(dt);
+    if (this.active) this.raf = requestAnimationFrame(this.loop);
+  };
+  /**
+   * Time by hand, for a recording that does not depend on the machine's speed: the loop stops and step(seconds)
+   * moves the office on in exact 1/fps frames, drawing each. Off again with manual = false (setManual).
+   */
+  setManual(on) { this.manual = !!on; cancelAnimationFrame(this.raf); if (!on && this.active) { this.last = performance.now(); this.raf = requestAnimationFrame(this.loop); } }
+  step(seconds = 1 / 30, fps = 30) { const n = Math.max(1, Math.round(seconds * fps)); for (let i = 0; i < n; i++) this.tick((1 / fps) * this.speed); }
+  tick(dt) {
+    this.t += dt; this.rect = this.cv.getBoundingClientRect();
+    this.updateSway(dt);
     for (const a of this.agents) this.updateAgent(a, dt);
     this.updateMeets(dt); this.updateTalk(dt / this.speed);
     for (const b of this.bubbles) b.t += dt; this.bubbles = this.bubbles.filter((b) => b.t < b.dur);
@@ -427,8 +515,7 @@ export class OfficeEngine {
     this.renderWorld(); this.renderScreen();
     if (this.preview) this.drawPreview();
     this.snapT += dt / this.speed; if (this.snapT > 0.3) { this.snapT = 0; this.cb.onSnapshot && this.cb.onSnapshot(this.snapshot()); }
-    if (this.active) this.raf = requestAnimationFrame(this.loop);
-  };
+  }
   updateDoors(dt) {
     for (const o of this.objects) {
       if (o.sprite !== 'door_glass') continue;
@@ -457,16 +544,17 @@ export class OfficeEngine {
     for (const a of this.agents) items.push({ y: a.y, a });
     items.sort((p, q) => p.y - q.y);
     for (const it of items) {
-      if (it.o) { const o = it.o, pal = o.tool && o.sprite.startsWith('rack_led_') ? { led: A.LED[this.led[o.tool]] } : null; x.drawImage(this.frame(o.sprite, this.objFrame(o), o.flip, pal), o.left, o.top); continue; }
+      if (it.o) { const o = it.o, pal = o.tool && o.sprite.startsWith('rack_led_') ? { led: A.LED[this.led[o.tool]] } : null; this.drawObject(x, o, pal); continue; }
       const a = it.a, P = (a.id === 'tekir' ? A.CAT_POSES : A.POSES)[a.pose] || A.POSES.idle, fps = a.pose === 'carry' && !a.path ? 0 : P.fps;
-      const f = Math.floor(a.animT * fps) % P.frames, cell = A.cellOf(a.id), lx = Math.round(a.x) - cell.footX, ly = Math.round(a.y) - cell.footY;
+      const f = Math.floor(a.animT * fps) % P.frames;
+      const cell = A.cellOf(a.id), hop = this.hopOf(a), lx = Math.round(a.x) - cell.footX, ly = Math.round(a.y) - cell.footY - hop;
       const item = a.carry || a.hold, an = item ? A.anchors(a.id, a.pose, a.dir, f) : null;
       const drawItem = () => { const s = A.ITEMS[item]; if (!s) return; x.drawImage(this.frame(item, 0, false), lx + an.hand[0] - s.ax, ly + an.hand[1] - s.ay); };
       if (item && a.dir === 'up') drawItem();
       x.drawImage(this.charFrame(a.id, a.pose, a.dir, f), lx, ly);
       if (item && a.dir !== 'up') drawItem();
     }
-    for (const o of tops) x.drawImage(this.frame(o.sprite, this.objFrame(o), o.flip), o.left, o.top);
+    for (const o of tops) this.drawObject(x, o, null);
     this.renderLight(x);
   }
   drawClocks(x) {
@@ -478,22 +566,25 @@ export class OfficeEngine {
       if (o.sprite === 'clock_big') { x.fillStyle = '#a33f40'; const sa = d.getSeconds() / 60 * Math.PI * 2; for (let i = 0; i <= 8; i++) x.fillRect(Math.round(cx + Math.sin(sa) * i - 0.5), Math.round(cy - Math.cos(sa) * i - 0.5), 1, 1); }
     }
   }
+  /** The light now: by the minute while the office follows the clock (hour set), else the pinned mode's. */
+  light() { return this.hour == null ? lightOfMode(this.mode) : lightAt(this.hour); }
   renderLight(x) {
-    const tint = LIGHT_TINT[this.mode]; if (!tint) return;
-    const L = this.lightCv.getContext('2d'), night = this.mode === 'gece', eve = this.mode === 'aksam';
+    const lt = this.light(), tint = lt.tint;
+    if (tint.every((v) => v >= 255) && lt.glow <= 0 && lt.haze <= 0) return;
+    const L = this.lightCv.getContext('2d');
     L.globalCompositeOperation = 'source-over'; L.globalAlpha = 1; L.fillStyle = `rgb(${tint.join(',')})`; L.fillRect(0, 0, this.W, this.H);
-    if (night || eve) {
+    if (lt.glow > 0.001) {
       L.globalCompositeOperation = 'lighter';
       for (const l of this.lights) {
         if (l.tool && this.led[l.tool] === 'off') continue;
-        const base = (night ? 0.17 : 0.06) * l.k;
+        const base = lt.glow * l.k;
         for (const [k, a] of [[1, base * 0.55], [0.75, base * 0.8], [0.5, base], [0.28, base * 1.2]]) { L.globalAlpha = a; L.fillStyle = l.color; L.beginPath(); L.arc(Math.round(l.x), Math.round(l.y), Math.round(l.r * k), 0, Math.PI * 2); L.fill(); }
       }
       L.globalAlpha = 1;
     }
     x.globalCompositeOperation = 'multiply'; x.drawImage(this.lightCv, 0, 0);
-    if (night) { x.globalCompositeOperation = 'lighter'; for (const l of this.lights) { if (l.k < 1 || (l.tool && this.led[l.tool] === 'off')) continue; x.globalAlpha = 0.07; x.fillStyle = l.color; x.beginPath(); x.arc(Math.round(l.x), Math.round(l.y), Math.round(l.r * 0.4), 0, Math.PI * 2); x.fill(); } x.globalAlpha = 1; }
-    if (this.mode === 'sabah') { x.globalCompositeOperation = 'screen'; x.fillStyle = 'rgba(40,52,80,0.10)'; x.fillRect(0, 0, this.W, this.H); }
+    if (lt.spot > 0.001) { x.globalCompositeOperation = 'lighter'; for (const l of this.lights) { if (l.k < 1 || (l.tool && this.led[l.tool] === 'off')) continue; x.globalAlpha = 0.07 * lt.spot; x.fillStyle = l.color; x.beginPath(); x.arc(Math.round(l.x), Math.round(l.y), Math.round(l.r * 0.4), 0, Math.PI * 2); x.fill(); } x.globalAlpha = 1; }
+    if (lt.haze > 0.001) { x.globalCompositeOperation = 'screen'; x.fillStyle = `rgba(40,52,80,${(0.10 * lt.haze).toFixed(3)})`; x.fillRect(0, 0, this.W, this.H); }
     x.globalCompositeOperation = 'source-over';
   }
   renderScreen() {
@@ -502,8 +593,11 @@ export class OfficeEngine {
     c.setTransform(dpr, 0, 0, dpr, 0, 0); c.imageSmoothingEnabled = false;
     if (this.B) {
       // The brain, the lit map in it, the sparks over it: one picture, drawn where the camera puts the frame.
-      const m = this.B.margin, f = this.full.getContext('2d'); f.imageSmoothingEnabled = false;
-      f.clearRect(0, 0, this.B.w, this.B.h); f.drawImage(this.brainFrame(this.mode), 0, 0); f.drawImage(this.world, m.left, m.top); this.drawSparks(f);
+      // Following the clock, the next mode's brain fades in over the hour the map's light changes in.
+      const m = this.B.margin, f = this.full.getContext('2d'), lt = this.light(); f.imageSmoothingEnabled = false;
+      f.clearRect(0, 0, this.B.w, this.B.h); f.drawImage(this.brainFrame(lt.brain), 0, 0);
+      if (lt.brainK > 0.01 && lt.brainNext !== lt.brain) { f.globalAlpha = lt.brainK; f.drawImage(this.brainFrame(lt.brainNext), 0, 0); f.globalAlpha = 1; }
+      f.drawImage(this.world, m.left, m.top); this.drawSparks(f);
       const [sx, sy] = this.toScreen(-m.left, -m.top);
       c.drawImage(this.full, Math.round(sx * dpr) / dpr, Math.round(sy * dpr) / dpr, this.B.w * this.zoom, this.B.h * this.zoom);
     } else {

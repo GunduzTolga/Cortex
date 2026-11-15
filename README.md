@@ -63,7 +63,7 @@ Cortex'le birlikte bir düşünme ortağı gelir: ananas **Pyn**. Seni tanır, f
 <table>
   <tr>
     <td width="50%"><img src="docs/gorseller/notlar.png" alt="Notlar: lansman planı notu, özellikler, görevler, uyarı kutusu ve geri bağlantılar"><br><sub><b>Notlar:</b> Obsidian'sız okuma ve yazma; wiki bağlantıları, görevler, uyarı kutuları, geri bağlantılar.</sub></td>
-    <td width="50%"><img src="docs/gorseller/beyin.png" alt="Beyin: bir beynin içine çizilmiş piksel sanatı ofis; ekip son notlar hakkında konuşuyor"><br><sub><b>Beyin:</b> Pyn'in ekibi beynin içindeki ofiste çalışır; son notların hakkında konuşabilirler.</sub></td>
+    <td width="50%"><img src="docs/gorseller/beyin.webp" alt="Beyin: bir beynin içine çizilmiş piksel sanatı ofis; akşam olurken ekip çalışıyor, tıklanan kişi cevap veriyor"><br><sub><b>Beyin:</b> Pyn'in ekibi beynin içindeki ofiste çalışır; ışık saate göre yavaşça değişir, tıkladığın kişi sana döner. Son notların hakkında konuşabilirler.</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/gorseller/grafik.png" alt="Grafik: lansman notları ve aralarındaki bağlantılar"><br><sub><b>Grafik:</b> notların ve aralarındaki bağlantılar; yanındaki rehber bağlantı bekleyen ve yazılmayı bekleyen notları gösterir.</sub></td>
