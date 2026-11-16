@@ -21,8 +21,19 @@ body {
   --ananas-paper-3: #eae4d6;
   --ananas-ink: #1b1712;
   --ananas-ink-2: #2b2721;
-  --ananas-gold: #e8b23a;
-  --ananas-signal: #ffd23e;
+  /* Pinea sarısı: ürün ailesinin tek sarısı, Pyn logosundaki #FEC104 (Tolga 2026-11-16).
+     Aile tek yerde, aynı ton (oklch h 85), yalnız açıklık değişir:
+       gold        #fec104  L 0.84  dolgu, rozet, çerçeve; üstündeki yazı mürekkep (10,9:1)
+       signal      #ffd579  L 0.89  hover ve vurgu zemini, gold'un açığı
+       koyu-altin  #7d5e01  L 0.50  açık zeminde metin, bağlantı, ikon ve ince çizgi (kâğıtta
+                                     5,3:1; #eae4d6'da 4,8:1). Açık zeminde gold metin olmaz (1,4:1).
+       golge-altin #ce9c03  L 0.72  çizimde gölge (Pyn yüzü SVG'leri; gold'a oranı eskisi gibi 1,5)
+       orta-altin  #a17904  L 0.60  iki temada aynı kalan grafik noktası (desktop GraphView;
+                                     kâğıtta 3,5:1, koyu zeminde 4,4:1)
+     Koyu temada sarı metin gold'un kendisi (#1c1a16 zeminde 10,6:1).
+     Aynı değerler desktop/src/index.css'te (--color-gold, --color-signal, --color-warn). */
+  --ananas-gold: #fec104;
+  --ananas-signal: #ffd579;
   --ananas-sand: #cdbfa3;
   --ananas-line: #d5d1c7;
 
@@ -30,7 +41,7 @@ body {
   --ananas-tugla: #b4472f;
   --ananas-yosun: #5c6b4a;
   --ananas-menekse: #7a6a9e;
-  --ananas-koyu-altin: #c98a2e;
+  --ananas-koyu-altin: #7d5e01;
   --ananas-arduvaz: #3f6670;
 
   --ananas-display: 'Fraunces', Georgia, 'Times New Roman', serif;
@@ -74,6 +85,8 @@ body {
   --ananas-ton-yosun: var(--ananas-yosun);
   --ananas-ton-menekse: var(--ananas-menekse);
   --ananas-ton-koyu-altin: var(--ananas-koyu-altin);
+  /* İnce altın çizgi (etkin sekme): kâğıtta sarı çizgi seçilmez, koyu altın olur. */
+  --ananas-altin-cizgi: var(--ananas-koyu-altin);
   --ananas-ton-tugla: var(--ananas-tugla);
   --ananas-ton-soluk: #a5a198;
 
@@ -85,7 +98,7 @@ body {
   --background-modifier-border-hover: #a5a198;
   --background-modifier-border-focus: var(--ananas-ink);
   --background-modifier-hover: rgba(27, 23, 18, 0.06);
-  --background-modifier-active-hover: rgba(232, 178, 58, 0.22);
+  --background-modifier-active-hover: rgba(254, 193, 4, 0.22);
 
   --text-normal: var(--ananas-ink);
   --text-muted: #75716a;
@@ -93,8 +106,8 @@ body {
   --text-accent: var(--ananas-arduvaz);
   --text-accent-hover: var(--ananas-ink);
   --text-on-accent: var(--ananas-ink);
-  --text-selection: rgba(255, 210, 62, 0.45);
-  --text-highlight-bg: rgba(255, 210, 62, 0.55);
+  --text-selection: rgba(255, 213, 121, 0.45);
+  --text-highlight-bg: rgba(255, 213, 121, 0.55);
 
   --interactive-normal: var(--ananas-paper-2);
   --interactive-hover: #fff4dc;
@@ -142,7 +155,8 @@ body {
   --ananas-ton-arduvaz: #7fa6b0;
   --ananas-ton-yosun: #a3b48a;
   --ananas-ton-menekse: #b6a7dc;
-  --ananas-ton-koyu-altin: #e8b23a;
+  --ananas-ton-koyu-altin: var(--ananas-gold);
+  --ananas-altin-cizgi: var(--ananas-gold);
   --ananas-ton-tugla: #de8467;
   --ananas-ton-soluk: #8a847a;
 
@@ -160,7 +174,7 @@ body {
   --background-modifier-border-hover: #75716a;
   --background-modifier-border-focus: var(--ananas-gold);
   --background-modifier-hover: rgba(243, 239, 228, 0.06);
-  --background-modifier-active-hover: rgba(232, 178, 58, 0.2);
+  --background-modifier-active-hover: rgba(254, 193, 4, 0.2);
 
   --text-normal: var(--ananas-paper);
   --text-muted: #a5a198;
@@ -168,8 +182,8 @@ body {
   --text-accent: var(--ananas-gold);
   --text-accent-hover: var(--ananas-signal);
   --text-on-accent: var(--ananas-ink);
-  --text-selection: rgba(232, 178, 58, 0.35);
-  --text-highlight-bg: rgba(232, 178, 58, 0.4);
+  --text-selection: rgba(254, 193, 4, 0.35);
+  --text-highlight-bg: rgba(254, 193, 4, 0.4);
 
   --interactive-normal: var(--ananas-ink-2);
   --interactive-hover: #3a352d;
@@ -551,9 +565,9 @@ button.mod-cta:active {
   box-shadow: 4px 4px 0 0 var(--ananas-hard);
 }
 
-/* Etkin sekme: altın bir kalem çizgisiyle işaretli. */
+/* Etkin sekme: altın bir kalem çizgisiyle işaretli (açıkta koyu altın). */
 .workspace-tab-header.is-active {
-  box-shadow: inset 0 2px 0 0 var(--ananas-gold);
+  box-shadow: inset 0 2px 0 0 var(--ananas-altin-cizgi);
 }
 
 /* ── Pano (Dashboard) ─────────────────────────────────────────────────────

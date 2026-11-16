@@ -33,7 +33,7 @@ Yeni yüz **temiz bir vektör çizim** olacak: mühürle aynı aileden, kalın m
 
 Pyn'in tarifi baştan beri bu; yeni çizim bu tarife sadık kalacak:
 
-- **Gövde:** dik, uzunca bir **ananas**, hardal altını (`#E8B23A`).
+- **Gövde:** dik, uzunca bir **ananas**, Pinea sarısı (`#FEC104`).
 - **Kabuk:** açık okunan bir **baklava (eşkenar dörtgen) kafes**; ananasın küçük meyvecikleri.
 - **Taç:** sert, sivri, **zeytin yeşili yapraklar**; biraz dağınık ve **hafifçe bir yana eğik**.
 - **Yüz:**
@@ -56,7 +56,7 @@ Pyn'in tarifi baştan beri bu; yeni çizim bu tarife sadık kalacak:
 Mührün SVG'si aşağıda; yeni yüz bu çizgi diliyle konuşmalı.
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" stroke-linecap="round" stroke-linejoin="round"><circle cx="100" cy="100" r="94" fill="#e8b23a" stroke="#1b1712" stroke-width="7"/><circle cx="100" cy="100" r="82" fill="none" stroke="#1b1712" stroke-width="2.4"/><!-- ortada: siyah ananas silueti, taç beş sivri yaprak, kabukta altın baklava kafes --></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" stroke-linecap="round" stroke-linejoin="round"><circle cx="100" cy="100" r="94" fill="#fec104" stroke="#1b1712" stroke-width="7"/><circle cx="100" cy="100" r="82" fill="none" stroke="#1b1712" stroke-width="2.4"/><!-- ortada: siyah ananas silueti, taç beş sivri yaprak, kabukta altın baklava kafes --></svg>
 ```
 
 - **Kontur:** kalın mürekkep (`#1B1712`), uçlar ve köşeler yuvarlak. 256'lık çizimde yaklaşık 6–8 birim.
@@ -66,14 +66,14 @@ Mührün SVG'si aşağıda; yeni yüz bu çizgi diliyle konuşmalı.
   |---|---|
   | kâğıt | `#F3EFE4` |
   | mürekkep | `#1B1712` |
-  | altın | `#E8B23A` |
-  | parlak sarı | `#FFD23E` (vurgu, ışık) |
-  | koyu altın | `#C98A2E` (gölge) |
+  | altın (Pinea sarısı) | `#FEC104` |
+  | parlak sarı | `#FFD579` (vurgu, ışık) |
+  | gölge altını | `#CE9C03` (gölge) |
   | yosun yeşili | `#5C6B4A` (yaprak) |
   | açık yosun | `#A3B48A` (yaprak ışığı) |
   | kum | `#CDBFA3` |
 
-- **Gölgelendirme:** düz renk alanları. En fazla bir gölge tonu (koyu altın) ve bir ışık tonu (parlak sarı).
+- **Gölgelendirme:** düz renk alanları. En fazla bir gölge tonu (gölge altını) ve bir ışık tonu (parlak sarı).
 - **Doku:** benek, gürültü ya da kâğıt dokusu yok. Bir yarım ton (halftone) dokunuşu istersen yalnız büyük boyutta kalsın ve 64 pikselin altında hiç görünmesin.
 - **Oran:** yüz tanınır olsun diye kafa ve burun biraz büyük tutulabilir, ama çizim sevimli değil, karakterli kalmalı.
 

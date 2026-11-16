@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.64" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.64-E8B23A">
+  <img alt="Sürüm 1.0.64" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.64-FEC104">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">

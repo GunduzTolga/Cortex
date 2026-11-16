@@ -806,7 +806,7 @@ def pyn_profile(folder, packaged):
         return 'ms-appdata:///local/' + name if packaged else str(folder / name)
     return {'guid': PROFILE_GUID, 'name': 'Pyn', 'commandline': '%SystemRoot%\\System32\\cmd.exe /k pyn',
             'startingDirectory': '%USERPROFILE%', 'icon': image('pyn-ikon.png'), 'tabTitle': 'Pyn',
-            'suppressApplicationTitle': True, 'tabColor': '#E8B23A', 'backgroundImage': image('pyn-muhur-200.png'),
+            'suppressApplicationTitle': True, 'tabColor': '#FEC104', 'backgroundImage': image('pyn-muhur-200.png'),
             'backgroundImageAlignment': 'bottomRight', 'backgroundImageStretchMode': 'none',
             'backgroundImageOpacity': 0.18}
 
