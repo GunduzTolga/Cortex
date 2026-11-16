@@ -21,12 +21,16 @@ const path = require('node:path');
  *   and without it a first install went to the processor (30 October);
  * - the app's own version is the engine's (VERSION): the app tells an engine's
  *   age by it.
+ *
+ * Python and the Vulkan build are Windows' only (package.json, `build.win.extraResources`): on Linux the
+ * engine runs on the system's Python, which the .deb asks for (`build.deb.depends`, python3), and the voice
+ * build is a Windows one (whisper-vulkan-win-x64).
  */
 /** The Vulkan build the engine pins: its address and its SHA-256, as scripts/vulkan-paket.mjs reads them. */
 const VULKAN_PIN = /VULKAN_BUILD = \{[\s\S]*?'url': '([^']+)'[\s\S]*?'sha256': '([0-9a-f]{64})'/;
 const digest = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
-function problems(desktop) {
+function problems(desktop, platform = 'win32') {
   const found = [];
   const version = fs.readFileSync(path.join(desktop, '..', 'VERSION'), 'utf8').trim();
   const own = JSON.parse(fs.readFileSync(path.join(desktop, 'package.json'), 'utf8')).version;
@@ -40,6 +44,8 @@ function problems(desktop) {
   } else if (!fs.existsSync(path.join(engine, `beyin-v3-${version}.manifest.json`))) {
     found.push(`cortex-paket/beyin-v3-${version}.manifest.json yok; önce: npm run cortex-paket`);
   }
+
+  if (platform !== 'win32') return found;
 
   const pin = JSON.parse(fs.readFileSync(path.join(desktop, 'python.json'), 'utf8'));
   const python = path.join(desktop, 'python-paket', `${pin.file}.paket`);
@@ -61,15 +67,16 @@ function problems(desktop) {
 }
 
 /** electron-builder's hook: the build stops, with what is missing, before anything is packed. */
-module.exports = async function beforePack() {
-  const found = problems(path.resolve(__dirname, '..'));
+module.exports = async function beforePack(context) {
+  const found = problems(path.resolve(__dirname, '..'), context?.electronPlatformName ?? 'win32');
   if (found.length) throw new Error(`Kurulum dosyası eksik kaynakla yapılmaz:\n- ${found.join('\n- ')}`);
 };
 module.exports.problems = problems;
 
-// Run alone (`node scripts/check-resources.cjs`): the same check, its answer as an exit code.
+// Run alone (`node scripts/check-resources.cjs`): the same check, its answer as an exit code;
+// `--linux` checks what a Linux package carries.
 if (require.main === module) {
-  const found = problems(path.resolve(__dirname, '..'));
+  const found = problems(path.resolve(__dirname, '..'), process.argv.includes('--linux') ? 'linux' : 'win32');
   for (const one of found) console.error(one);
   process.exit(found.length ? 1 : 0);
 }

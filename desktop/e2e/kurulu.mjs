@@ -249,7 +249,8 @@ try {
   check('the bundle is packed beside it', fs.existsSync(path.join(placed.resources, 'app.asar')), path.join(placed.resources, 'app.asar'));
   // Everything the build was given to carry (package.json, extraResources: the engine package, Python's installer, the
   // voice's Vulkan build, the seal, the licences), byte for byte: what scripts/check-resources.cjs asks of the build.
-  const wrong = resourceProblems(desktop, pkg.build.extraResources, placed.resources);
+  // Python's installer and the voice's build are Windows' own (`build.win.extraResources`), beside what every platform carries.
+  const wrong = resourceProblems(desktop, [...pkg.build.extraResources, ...(pkg.build.win.extraResources ?? [])], placed.resources);
   check('what the installer carries is installed, byte for byte: the engine package, Python, the voice’s build, the seal', wrong.length === 0, wrong.join('\n       '));
 
   say('\nOpened');

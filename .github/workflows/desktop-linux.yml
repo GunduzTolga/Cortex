@@ -1,0 +1,114 @@
+name: desktop-linux
+
+# Cortex's desktop app (desktop/) as a Linux package: the .deb (the one Cortex OS installs) and an AppImage, built
+# on Ubuntu and kept for a week, then the .deb tried as a person's first day goes - installed with apt, which pulls
+# its dependencies (the system's Python 3 among them: the engine runs on it, the package carries no Python of its
+# own), the installed app opened under Xvfb, a vault made and the engine set up and asked in it
+# (e2e/kurulu-linux.mjs). Not a release: release.yml publishes the Windows installer only.
+#
+# Only when the app or what it reads changes, as desktop.yml.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-linux.yml'
+      - 'template/**'
+      - 'scripts/**'
+      - 'VERSION'
+      - 'tema/ananas/marka/**'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-linux.yml'
+      - 'template/**'
+      - 'scripts/**'
+      - 'VERSION'
+      - 'tema/ananas/marka/**'
+  workflow_dispatch:
+
+# A newer push to a pull request stops the run its older one started.
+concurrency:
+  group: desktop-linux-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  linux-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Bagimliliklar
+        run: npm ci
+
+      # The tests desktop.yml runs on Windows, here on Linux: the platform's own branches are the ones taken.
+      - name: Testler
+        run: npm test
+
+      # The engine the app sets up in a vault, carried inside it: this commit's own, built by the system's
+      # python3 as a release builds it.
+      - name: Cortex paketi
+        run: npm run cortex-paket
+
+      - name: Uygulama
+        run: npm run build
+
+      - name: Linux paketleri
+        run: npx electron-builder --linux deb AppImage --publish never
+
+      - name: Paketin icindekiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          deb="release/cortex_${version}_amd64.deb"
+          test -s "$deb"
+          test -s "release/cortex_${version}_x86_64.AppImage"
+          dpkg-deb -I "$deb"
+          dpkg-deb -c "$deb" > release/icerik.txt
+          for file in usr/share/applications/cortex.desktop usr/share/icons/hicolor/512x512/apps/cortex.png opt/Cortex/cortex "opt/Cortex/resources/cortex/beyin-v3-$version.zip"; do
+            grep -Fq " ./$file" release/icerik.txt || { echo "pakette yok: $file"; exit 1; }
+          done
+          ls -l release/*.deb release/*.AppImage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cortex-linux
+          path: |
+            desktop/release/*.deb
+            desktop/release/*.AppImage
+          if-no-files-found: error
+          retention-days: 7
+
+      # The .deb installed as a person installs it, with apt pulling what it depends on, then the installed app
+      # opened and its first day walked (e2e/kurulu-linux.mjs). After the package is kept: a run that fails here does
+      # not take the week's copy with it.
+      - name: Kurulum (apt)
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends "./release/cortex_${version}_amd64.deb" xvfb xauth
+
+      - name: Kurulu uygulama
+        run: xvfb-run -a -s '-screen 0 1440x900x24' node e2e/kurulu-linux.mjs --motor
+        timeout-minutes: 15
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: desktop-linux-kurulu-uygulama
+          path: desktop/e2e/screenshots/kurulu-linux/
+          if-no-files-found: ignore
+          retention-days: 7
