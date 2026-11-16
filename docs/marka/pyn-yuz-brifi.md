@@ -1,5 +1,7 @@
 # Pyn'in yüzü: Claude Design brifi
 
+> **Kullanımdan kalktı (1.0.65, Tolga 2026-11-16):** Pyn'in tek görünüşü açılan kafalı siyah maskot (`pyn-logo`). Gözlüklü yüz artık hiçbir yerde kullanılmıyor; Obsidian'daki boş sekme de maskotu gösteriyor. `pyn-yuz/` ve `pyn-yuz-256.png` silinmedi, silme kararı Tolga'da.
+>
 > **Teslim alındı (1.0.9):** çizimler `tema/ananas/marka/pyn-yuz/` içinde; PNG'yi `py -3 scripts/marka_uret.py yuz <teslim>/pyn-yuz` üretir.
 
 Bu brifi Claude Design'a ver. Ek olarak iki dosyayı yükle:

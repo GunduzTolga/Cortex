@@ -14,8 +14,10 @@ zemindeki benekler atılır) ve şunları yazar:
                                   başlığı (ekran ölçeğine göre seçilir)
 - pyn-oturan-512.png            : oturan Pyn (ilk açılış ekranı, kurulum sihirbazı)
 - pyn-ananas-512.png            : ananas Pyn (ilk açılışın son adımı)
-- pyn-yuz/*.svg            : Pyn'in yüzü, vektör (sohbet, Obsidian'da boş sekme); `yuz` adımı
-- pyn-yuz-256.png          : aynı yüzün PNG'si, SVG okumayan yerler için; `yuz` adımı
+- pyn-logo-272.png         : logo, Obsidian'da boş sekme (136 px'in iki katı); `bos-sekme` adımı da yazar
+- pyn-yuz/*.svg            : gözlüklü yüz, vektör; `yuz` adımı. KULLANIMDAN KALKTI (Tolga 2026-11-16: Pyn'in tek
+                             görünüşü açılan kafalı maskot); hiçbir yer kullanmıyor, silme kararı Tolga'da
+- pyn-yuz-256.png          : aynı yüzün PNG'si; `yuz` adımı. Kullanımdan kalktı, yukarıdaki gibi
 
 `yakala` adımı Not al penceresinin mikrofon düğmesini çizer (`tema/ananas/marka/yakala/`):
 yuvarlak, sert gölgeli, kenarları yumuşatılmış; boşta, dinlerken, yazarken ve hazırlanırken,
@@ -33,6 +35,7 @@ Ardından: py -3 scripts/ananas_tema.py uret
     py -3 scripts/marka_uret.py
     py -3 scripts/marka_uret.py kurulum
     py -3 scripts/marka_uret.py tepsi
+    py -3 scripts/marka_uret.py bos-sekme
     py -3 scripts/marka_uret.py yuz "C:\\...\\Pyn'in Yüz Tasarımı\\pyn-yuz"
     py -3 scripts/marka_uret.py yakala
 
@@ -182,8 +185,17 @@ def logo():
         note.resize((size, size), Image.LANCZOS).save(OUT / f'pyn-yakala-{size}.png', optimize=True)
     cutout(SOURCES / 'pyn-oturan.webp', despeckle=True).resize((512, 512), Image.LANCZOS).save(OUT / 'pyn-oturan-512.png', optimize=True)
     cutout(SOURCES / 'pyn-ananas.webp', despeckle=True).resize((512, 512), Image.LANCZOS).save(OUT / 'pyn-ananas-512.png', optimize=True)
+    empty_tab()
     for path in sorted(OUT.glob('pyn-*')):
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
+
+
+def empty_tab():
+    """Pyn in Obsidian's empty tab (ananas.css, 136 px): the logo at twice that, from pyn-logo-512.png, so the theme
+    carries 66 KB and not the 512's 164 KB. A dark theme shows the seal (pyn-muhur-200.png): the black Pyn on its cream
+    disc, as it would be lost on the dark page alone."""
+    Image.open(OUT / 'pyn-logo-512.png').resize((272, 272), Image.LANCZOS).save(OUT / 'pyn-logo-272.png', optimize=True)
+    print(f"{(OUT / 'pyn-logo-272.png').stat().st_size:8d}  {(OUT / 'pyn-logo-272.png').relative_to(ROOT)}")
 
 
 def without_provenance(svg):
@@ -392,6 +404,8 @@ if __name__ == '__main__':
         mic_buttons()
     elif sys.argv[1:2] == ['kurulum']:
         installer_images()
+    elif sys.argv[1:2] == ['bos-sekme']:
+        empty_tab()
     elif sys.argv[1:2] == ['yuz']:
         face(sys.argv[2] if len(sys.argv) > 2 else '.')
     else:

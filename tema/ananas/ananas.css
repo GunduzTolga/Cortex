@@ -534,11 +534,12 @@ button.mod-cta:active {
   width: 136px;
   height: 136px;
   margin: 0 auto 6px;
-  background: var(--ananas-pyn-yuz) center / contain no-repeat;
+  background: var(--ananas-pyn) center / contain no-repeat;
 }
 
+/* Koyu zeminde siyah maskot kaybolur: krem daireli mühür. */
 .theme-dark .workspace-leaf-content[data-type="empty"] .empty-state-container::before {
-  background-image: var(--ananas-pyn-yuz-koyu);
+  background-image: var(--ananas-logo);
 }
 
 .workspace-leaf-content[data-type="empty"] .empty-state-action-list::before {
