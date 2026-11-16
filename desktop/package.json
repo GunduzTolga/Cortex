@@ -1,7 +1,7 @@
 {
   "name": "cortex-desktop",
   "productName": "Cortex",
-  "version": "1.0.64",
+  "version": "1.0.65",
   "description": "Cortex'in masaüstü uygulaması: kasayı Obsidian gibi okur ve yazar.",
   "homepage": "https://github.com/GunduzTolga/Cortex",
   "private": true,

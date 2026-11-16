@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img alt="Sürüm 1.0.64" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.64-FEC104">
+  <img alt="Sürüm 1.0.65" src="https://img.shields.io/badge/s%C3%BCr%C3%BCm-1.0.65-FEC104">
   <img alt="Windows uygulaması" src="https://img.shields.io/badge/uygulama-Windows-1B1712">
   <img alt="Motor: Windows, macOS, Linux" src="https://img.shields.io/badge/motor-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-1B1712">
   <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-1B1712">
@@ -195,6 +195,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
+| [1.0.65](docs/v3/releases/1.0.65.md) | Sarı artık ürün ailesinin sarısı, Pyn logosundaki #FEC104: düğmeler, Not al mikrofonu, kurulum sihirbazı ve Pyn'in yüzü bu sarıda. Açık temada sarı yazılar ve ince işaretler aynı tonun koyu altınıyla okunuyor (kâğıtta 5,3:1). Cortex Browser'ın adı Pinea Browser oldu. |
 | [1.0.64](docs/v3/releases/1.0.64.md) | Gizli değer maskesi `OPENAI_API_KEY=…`, `os.environ["…"] =` ve `setx` gibi biçimleri de kapsıyor, tokenizer kodunu artık sır saymıyor; taşınmış kasa `--rebind-state` ile yeniden bağlanıyor; Windows'ta açılamayacak not adları ve bozuk karakterli girişler yazılmadan reddediliyor. Ön sürüm 1.0.63'ün Cortex Browser bağlantısı bu sürümle geliyor. |
 | [1.0.62](docs/v3/releases/1.0.62.md) | İlk kez kuran için baştan sona gözden geçirildi: takılan girişte yeniden dene ve vazgeç var, araç açılmayınca ve internet yokken neden ve çare söyleniyor, "Hey Pyn" zayıf bilgisayarda daha çabuk ve duyduğunu belli ederek açılıyor, takılan indirmeler fark ediliyor, şirket ağının proxy'si kullanılıyor, güncelleme Ayarlar'dan kapatılabiliyor |
 | [1.0.61](docs/v3/releases/1.0.61.md) | İnen güncelleme artık gerçekten kuruluyor: Cortex Windows'la açıldığında, pencere açılmadan önce, sessizce. Önceden yalnız "Yeniden başlat"a ya da "Çıkış"a basılınca kuruluyordu. Electron 43.8.7 (güvenlik yaması). |
