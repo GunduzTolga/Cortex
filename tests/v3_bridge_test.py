@@ -1,5 +1,8 @@
 """Global boundary adapters exercised in isolated homes, never user hook settings."""
+import contextlib
 import hashlib
+import importlib.machinery
+import io
 import json
 import os
 from pathlib import Path
@@ -7,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 from v3_package_helpers import inherited_env, install
@@ -508,6 +512,34 @@ class BridgeTest(unittest.TestCase):
         cut = json.dumps(dict(self.payload, event_id='cut', prompt='x' * 1_100_000)).encode('utf-8')
         self.assertEqual(self.raw(cut), {})
         self.assertEqual(len(self.queued()), 1)
+
+
+
+class BridgeUsageNameTest(unittest.TestCase):
+    """The usage line names the bridge script on every Python version.
+
+    Python 3.14 argparse builds the default program name from __main__.__spec__: when the
+    process was started with -m, an in-process bridge.main() printed "python3 -m <module>"
+    instead of the script name the hook command runs."""
+
+    def usage(self, argv0):
+        output = io.StringIO()
+        started_with_dash_m = importlib.machinery.ModuleSpec('unittest.__main__', None)
+        with mock.patch.object(sys.modules['__main__'], '__spec__', started_with_dash_m), \
+                mock.patch.object(sys, 'argv', argv0), mock.patch.object(sys, 'stdin', io.StringIO()), \
+                contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as stopped:
+            bridge.main(['--help'])
+        self.assertEqual(stopped.exception.code, 0)
+        return output.getvalue().splitlines()[0]
+
+    def test_usage_names_the_script_even_when_the_process_started_with_dash_m(self):
+        self.assertTrue(self.usage([str(SCRIPTS / 'beyin_v3_bridge.py')]).startswith('usage: beyin_v3_bridge.py '))
+        self.assertTrue(self.usage(['/elsewhere/embedder.py']).startswith('usage: embedder.py '))
+
+    def test_usage_falls_back_to_the_bridge_name_without_argv(self):
+        for argv in ([], ['']):
+            with self.subTest(argv=argv):
+                self.assertTrue(self.usage(argv).startswith('usage: beyin_v3_bridge.py '))
 
 
 if __name__ == '__main__':

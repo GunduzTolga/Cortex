@@ -219,7 +219,11 @@ def shell_command(argv):
 def main(argv=None):
     if hasattr(sys.stdin, 'reconfigure'):
         sys.stdin.reconfigure(encoding='utf-8-sig', errors='replace')
-    parser = argparse.ArgumentParser(description=__doc__)
+    # Python 3.14 argparse names the program after __main__.__spec__, so a bridge main()
+    # called inside a process started with -m printed "python3 -m <module>" in its usage.
+    # Keep the script name (basename of argv[0]) on every version, as the hook command shows.
+    prog = os.path.basename(sys.argv[0]) if sys.argv and sys.argv[0] else 'beyin_v3_bridge.py'
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__)
     parser.add_argument('--vault', type=Path, required=True)
     parser.add_argument('--state', type=Path, help='Defaults to the installed vault runtime locator')
     parser.add_argument('--harness', choices=('claude', 'codex', 'antigravity'), required=True)
