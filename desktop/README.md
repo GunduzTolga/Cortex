@@ -109,9 +109,10 @@ npm run dev          # Vite + Electron, değişiklikte yeniden başlar
 | `npm run e2e` | Derler ve gerçek Electron uygulamasını Playwright ile sürer. Pencere hiç gösterilmez: ekran dışında çizilir, `capturePage` ile fotoğraflanır (`e2e/screenshots/`). Linux'ta Xvfb altında çalışır. `CORTEX_SHOW=1` pencereyi gösterir. |
 | `npm run vitrin` | README'nin görüntüleri (`docs/gorseller/`): uygulama Türkçe arayüzle, örnek bir lansman kasasıyla, aynı gizli pencerede ekran dışında çizilir; sohbetin ve Beyin'in cevaplarını LM Studio'nun yerine geçen bir test sunucusu yazar. |
 | `npm run package` | Windows NSIS kurulum dosyası (`release/Cortex-Setup-X.Y.Z.exe`, yanında güncelleyicinin okuduğu `latest.yml`). Önce bu checkout'un motor paketini (`npm run cortex-paket`: `cortex-paket/beyin-v3-<VERSION>.zip` ve dosya özetleri) derler, sabitlenmiş Python kurucusunu (`npm run python-paket`) indirir ya da SHA-256'sı doğruysa olanı kullanır. electron-builder paketlemeden önce `scripts/check-resources.cjs` ile denetler: motor paketi `VERSION`'daki sürümde değilse, Python kurucusu yoksa ya da özeti tutmuyorsa, `package.json` sürümü `VERSION`'la aynı değilse kurulum dosyası yapılmaz (CI'da da). Windows'ta çalıştır; Linux'ta son adım wine ister. |
-| `npm run check-resources` | Aynı denetim tek başına. |
+| `npm run package:linux` | Linux paketi: `release/cortex_X.Y.Z_amd64.deb` (Debian 13, Ubuntu 24.04 ve benzerleri; Cortex OS bunu kurar). AppImage yapılmaz: Ubuntu 24.04 ve sonrasında AppArmor kullanıcı ad alanlarını kısıtladığı için Chromium'un kum havuzu AppImage'da açılmıyor, libfuse2 de varsayılan kurulu değil; `.deb` kum havuzunu kendi AppArmor profiliyle açar. Motor paketi Windows'taki gibi gelir; Python gelmez: `.deb` sistemin Python 3'ünü (`python3 (>= 3.11)`) bağımlılık olarak ister. Sesle yazma Linux'ta yok (Vulkan derlemesi Windows'a özel), güncelleyici de yok (paket yöneticisi günceller). Uygulama `/opt/Cortex`'e, komut `cortex`, menüde "Cortex". Kurulu paketi denemek: `sudo apt install ./release/cortex_*.deb`, sonra root olmayan bir kullanıcıyla `xvfb-run -a node e2e/kurulu-linux.mjs --motor`. |
+| `npm run check-resources` | Aynı denetim tek başına (`--linux`: Linux paketinin taşıdıkları). |
 
-CI: `.github/workflows/desktop.yml`. `desktop/`, `template/`, `scripts/`, `VERSION` ya da `tema/ananas/marka/` değiştiğinde Windows'ta çalışır: tip denetimi, testler, uçtan uca koşu, sonra kurulum dosyası. Kurulum dosyası bir hafta boyunca iş akışının çıktısı (`cortex-setup-windows`) olarak indirilebilir.
+CI: `.github/workflows/desktop.yml`. `desktop/`, `template/`, `scripts/`, `VERSION` ya da `tema/ananas/marka/` değiştiğinde Windows'ta çalışır: tip denetimi, testler, uçtan uca koşu, sonra kurulum dosyası. Kurulum dosyası bir hafta boyunca iş akışının çıktısı (`cortex-setup-windows`) olarak indirilebilir. `.github/workflows/desktop-linux.yml` aynı değişikliklerde Ubuntu'da testleri koşar, `.deb`'i derleyip bir hafta saklar (`cortex-linux`), sonra `.deb`'i apt ile kurup kurulu uygulamayı Xvfb altında açar, kasa ve motor kurar (`desktop-linux-kurulu-uygulama`). Yayımlamaz.
 
 ### Klasörler
 
@@ -133,7 +134,7 @@ scripts/    derleme, geliştirme, test ve e2e betikleri
 - **Ana süreç cümleleri:** kaydı ya da taşımayı reddeden cümleler ana süreçte İngilizce yazılır; Türkçe arayüzde pencere onları Türkçe gösterir (`shared/refusalsTr.ts`, eksik kalanı bir test yakalar). Bir aracın ya da modelin kendi hata metni olduğu gibi kalır.
 - **Yazım denetimi:** Sözlükler Google'dan indirilmediği için Chromium'un Hunspell denetimi sözlüksüz kalır. Yazım yalnız platformun kendi denetleyicisinin kullanıldığı yerde denetlenir.
 - **Linkler:** Obsidian'ın setext başlıkları, özellik değerindeki linkler ve aynı adlı iki notun Obsidian'ın kendi dizinine göre çözülmesi desteklenmiyor (`core/vaultNotes.ts` başında yazıyor).
-- **macOS ve Linux:** Kod çalışır ama CI'da denenmiyor ve kurulum dosyası üretilmiyor.
+- **macOS:** Kod çalışır ama CI'da denenmiyor ve kurulum dosyası üretilmiyor. **Linux:** `.deb` CI'da derlenip deneniyor ama sürümle yayımlanmıyor; sesle yazma ve güncelleyici yok.
 
 ## İmza
 

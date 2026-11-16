@@ -179,7 +179,7 @@ function packageDirs(): string[] {
 
 /** The Python installer that came with the app, beside it or where the desktop build puts it while developing. */
 /**
- * whisper.cpp built for Vulkan, as the installer carries it (scripts/vulkan-paket.mjs, package.json extraResources):
+ * whisper.cpp built for Vulkan, as the installer carries it (scripts/vulkan-paket.mjs, package.json build.win.extraResources):
  * given to `ses kur`, which checks its digest and takes it instead of downloading it. The release it is published in
  * answered 404 once the repository went private, and a first install on an AMD card went to the processor (30 October).
  */

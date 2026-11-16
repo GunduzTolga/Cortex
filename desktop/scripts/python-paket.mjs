@@ -7,8 +7,8 @@ import path from 'node:path';
  * installer, signed by the Python Software Foundation, pinned by its SHA-256.
  * The app runs it, quietly and for this user only, when the machine has no
  * Python for Cortex's engine (electron/services/setup.ts, the first-run
- * screen). It goes among the app's resources as `python/` (package.json,
- * extraResources), named `.paket`; a file already here with the right digest is kept.
+ * screen). It goes among the Windows installer's resources as `python/`
+ * (package.json, build.win.extraResources), named `.paket`; a file already here with the right digest is kept.
  */
 const pin = JSON.parse(fs.readFileSync('python.json', 'utf8'));
 const out = path.resolve('python-paket');

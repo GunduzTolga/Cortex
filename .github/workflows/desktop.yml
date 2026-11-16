@@ -30,6 +30,11 @@ on:
       - 'tema/ananas/marka/**'
   workflow_dispatch:
 
+# Reads the repository only: the Vulkan build is fetched with the run's token, which reading is enough for, and the
+# installer is kept as an artifact, not published.
+permissions:
+  contents: read
+
 # A newer push to a pull request stops the run its older one started.
 concurrency:
   group: desktop-${{ github.event.pull_request.number || github.ref }}

@@ -49,7 +49,14 @@ const require = createRequire(import.meta.url);
 const packaged = JSON.parse(fs.readFileSync('package.json', 'utf8')) as {
   name: string;
   version: string;
-  build: { appId: string; productName: string; nsis: Record<string, unknown>; extraResources: Array<{ from: string; to: string; filter?: string[] }> };
+  build: {
+    appId: string;
+    productName: string;
+    nsis: Record<string, unknown>;
+    extraResources: Array<{ from: string; to: string; filter?: string[] }>;
+    win: { extraResources?: Array<{ from: string; to: string; filter?: string[] }> };
+    linux: { extraResources?: Array<{ from: string; to: string; filter?: string[] }> };
+  };
 };
 const LOCAL = 'C:\\Users\\deneme\\AppData\\Local';
 const template = (name: string) => fs.readFileSync(path.join('node_modules', 'app-builder-lib', 'templates', 'nsis', name), 'utf8');
@@ -170,7 +177,8 @@ test('what the installer carries is listed from the build’s own settings, and 
 });
 
 test('every filter in the build’s settings is one the run can read, and one it cannot is refused, not passed over', () => {
-  for (const one of packaged.build.extraResources) for (const pattern of one.filter ?? []) assert.doesNotThrow(() => filterTest(pattern), pattern);
+  const every = [...packaged.build.extraResources, ...(packaged.build.win.extraResources ?? []), ...(packaged.build.linux.extraResources ?? [])];
+  for (const one of every) for (const pattern of one.filter ?? []) assert.doesNotThrow(() => filterTest(pattern), pattern);
   const zip = filterTest('beyin-v3-*.zip');
   assert.ok(zip('beyin-v3-1.0.61.zip'));
   assert.ok(!zip('beyin-v3-1.0.61.zip.sha256') && !zip('alt/beyin-v3-1.0.61.zip') && !zip('beyin-v3-1x0.manifest.json'));
