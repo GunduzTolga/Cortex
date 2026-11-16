@@ -220,8 +220,8 @@ def face(source):
 
 
 PAPER, INK, GOLD, MUTED = '#f3efe4', '#1b1712', '#fec104', '#75716a'
-# Pinea yellow's middle tone (tema/ananas/ananas.css, orta-altin): a thin line or glyph that must read on a light
-# and a dark background alike, as the menu icons do (3.8:1 on Windows' light menu, 3.5:1 on its dark one).
+# Pinea yellow's middle tone (tema/ananas/ananas.css, orta-altin): the gold of a thin glyph on a light menu
+# (3.8:1 on Windows' light menu; the bright gold is 1.6:1 there).
 GOLD_MID = '#a17904'
 FONTS = ROOT / 'tema' / 'ananas' / 'fonts-ttf'
 DESKTOP_BUILD = ROOT / 'desktop' / 'build'
@@ -334,44 +334,52 @@ def tray_icons():
 MENU_GLYPHS = ('mikrofon-acik', 'mikrofon-kapali', 'not', 'ayarlar', 'cik')
 
 
+# The menu's glyphs drawn in gold, and the gold each menu takes: Windows draws the menu light or dark, and no one
+# gold reads on both (the bright one is 1.6:1 on a light menu, the middle one only 3.5:1 on a dark one). The light set
+# is `menu-<name>-<size>.png`, the dark one `menu-<name>-koyu-<size>.png`; desktop/electron/services/tray.ts picks.
+GOLD_GLYPHS = ('not', 'ayarlar', 'cik')
+MENU_GOLDS = (('', GOLD_MID), ('-koyu', GOLD))  # light menu 3.8:1, dark menu 8.7:1
+
+
 def menu_icons():
-    """The notification-area menu's icons (tepsi/menu-<name>-<16|32>.png): the microphone listening
-    (red) or off (grey, struck through), a note, a gear, the power sign. The middle gold and mid-tones, so
-    they read on Windows' light menus and dark ones alike (the bright gold is 1.6:1 on white); drawn eight
-    times larger and brought down."""
+    """The notification-area menu's icons (tepsi/menu-<name>[-koyu]-<16|32>.png): the microphone listening
+    (red) or off (grey, struck through), a note, a gear, the power sign. The red and the grey read on Windows'
+    light menus and dark ones alike; the gold ones come twice, the middle gold for a light menu and the bright
+    one for a dark menu (GOLD_GLYPHS). Drawn eight times larger and brought down."""
     from PIL import ImageDraw
+    import math
     folder = OUT / 'tepsi'
     folder.mkdir(parents=True, exist_ok=True)
     for name in MENU_GLYPHS:
-        for size in (16, 32):
-            k = 8
-            u = size * k / 16  # one point of the 16 px design, in drawing pixels
-            img = Image.new('RGBA', (size * k, size * k), (0, 0, 0, 0))
-            d = ImageDraw.Draw(img)
-            w = round(1.6 * u)
-            if name.startswith('mikrofon'):
-                c = LISTENING if name == 'mikrofon-acik' else '#8f8a80'
-                d.rounded_rectangle([5.2 * u, 1.2 * u, 10.8 * u, 9.6 * u], radius=2.8 * u, fill=c)
-                d.arc([3 * u, 4 * u, 13 * u, 12.2 * u], 0, 180, fill=c, width=w)
-                d.line([8 * u, 12.2 * u, 8 * u, 14.2 * u], fill=c, width=w)
-                d.line([5.4 * u, 14.6 * u, 10.6 * u, 14.6 * u], fill=c, width=w)
-                if name == 'mikrofon-kapali':
-                    d.line([2.4 * u, 2.4 * u, 13.6 * u, 13.6 * u], fill=c, width=round(1.8 * u))
-            elif name == 'not':
-                d.rounded_rectangle([3 * u, 1.5 * u, 13 * u, 14.5 * u], radius=1.2 * u, outline=GOLD_MID, width=w)
-                for y in (5.2, 8, 10.8):
-                    d.line([5.4 * u, y * u, 10.6 * u, y * u], fill=GOLD_MID, width=round(1.2 * u))
-            elif name == 'ayarlar':
-                import math
-                cx = cy = 8 * u
-                for i in range(8):
-                    a = i * math.pi / 4
-                    d.line([cx + math.cos(a) * 4 * u, cy + math.sin(a) * 4 * u, cx + math.cos(a) * 6.8 * u, cy + math.sin(a) * 6.8 * u], fill=GOLD_MID, width=round(2.2 * u))
-                d.ellipse([cx - 4.8 * u, cy - 4.8 * u, cx + 4.8 * u, cy + 4.8 * u], outline=GOLD_MID, width=round(2.2 * u))
-            elif name == 'cik':
-                d.arc([2.6 * u, 3 * u, 13.4 * u, 13.8 * u], -60, 240, fill=GOLD_MID, width=w)
-                d.line([8 * u, 1.4 * u, 8 * u, 8 * u], fill=GOLD_MID, width=w)
-            img.resize((size, size), Image.LANCZOS).save(folder / f'menu-{name}-{size}.png', optimize=True)
+        for suffix, gold in (MENU_GOLDS if name in GOLD_GLYPHS else (('', None),)):
+            for size in (16, 32):
+                k = 8
+                u = size * k / 16  # one point of the 16 px design, in drawing pixels
+                img = Image.new('RGBA', (size * k, size * k), (0, 0, 0, 0))
+                d = ImageDraw.Draw(img)
+                w = round(1.6 * u)
+                if name.startswith('mikrofon'):
+                    c = LISTENING if name == 'mikrofon-acik' else '#8f8a80'
+                    d.rounded_rectangle([5.2 * u, 1.2 * u, 10.8 * u, 9.6 * u], radius=2.8 * u, fill=c)
+                    d.arc([3 * u, 4 * u, 13 * u, 12.2 * u], 0, 180, fill=c, width=w)
+                    d.line([8 * u, 12.2 * u, 8 * u, 14.2 * u], fill=c, width=w)
+                    d.line([5.4 * u, 14.6 * u, 10.6 * u, 14.6 * u], fill=c, width=w)
+                    if name == 'mikrofon-kapali':
+                        d.line([2.4 * u, 2.4 * u, 13.6 * u, 13.6 * u], fill=c, width=round(1.8 * u))
+                elif name == 'not':
+                    d.rounded_rectangle([3 * u, 1.5 * u, 13 * u, 14.5 * u], radius=1.2 * u, outline=gold, width=w)
+                    for y in (5.2, 8, 10.8):
+                        d.line([5.4 * u, y * u, 10.6 * u, y * u], fill=gold, width=round(1.2 * u))
+                elif name == 'ayarlar':
+                    cx = cy = 8 * u
+                    for i in range(8):
+                        a = i * math.pi / 4
+                        d.line([cx + math.cos(a) * 4 * u, cy + math.sin(a) * 4 * u, cx + math.cos(a) * 6.8 * u, cy + math.sin(a) * 6.8 * u], fill=gold, width=round(2.2 * u))
+                    d.ellipse([cx - 4.8 * u, cy - 4.8 * u, cx + 4.8 * u, cy + 4.8 * u], outline=gold, width=round(2.2 * u))
+                elif name == 'cik':
+                    d.arc([2.6 * u, 3 * u, 13.4 * u, 13.8 * u], -60, 240, fill=gold, width=w)
+                    d.line([8 * u, 1.4 * u, 8 * u, 8 * u], fill=gold, width=w)
+                img.resize((size, size), Image.LANCZOS).save(folder / f'menu-{name}{suffix}-{size}.png', optimize=True)
     for path in sorted(folder.glob('menu-*')):
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
 

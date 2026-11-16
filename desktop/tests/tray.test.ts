@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
 import { app } from 'electron';
 import type { VoiceStatus } from '../shared/setup';
 import type { ListenerWord } from '../shared/setup';
-import { keepStartWithWindows, listensAlways, startWithWindows, trayItems, trayTooltip } from '../electron/services/tray';
+import { keepStartWithWindows, listensAlways, menuIconStem, startWithWindows, trayItems, trayTooltip, type TrayIcon } from '../electron/services/tray';
 
 const voice = (change: Partial<VoiceStatus>): VoiceStatus => ({
   installed: true,
@@ -104,4 +106,25 @@ test('Cortex starts with Windows only as the installed app', () => {
   } finally {
     stub.isPackaged = false;
   }
+});
+
+test('a dark menu takes the bright gold icons, a light menu the middle gold ones; every picture named is there', () => {
+  // The bright gold is 1.6:1 on a light Windows menu, the middle gold 3.5:1 on a dark one (scripts/marka_uret.py tepsi).
+  assert.equal(menuIconStem('not', true), 'menu-not-koyu');
+  assert.equal(menuIconStem('ayarlar', true), 'menu-ayarlar-koyu');
+  assert.equal(menuIconStem('cik', true), 'menu-cik-koyu');
+  assert.equal(menuIconStem('not', false), 'menu-not');
+  // The red and the grey microphone, and Pyn's seal, read on both and have one picture.
+  assert.equal(menuIconStem('mikrofon-acik', true), 'menu-mikrofon-acik');
+  assert.equal(menuIconStem('mikrofon-kapali', true), 'menu-mikrofon-kapali');
+  assert.equal(menuIconStem('pyn', true), 'pyn-kapali');
+  const folder = path.resolve('..', 'tema', 'ananas', 'marka', 'tepsi');
+  const icons: TrayIcon[] = ['mikrofon-acik', 'mikrofon-kapali', 'not', 'pyn', 'ayarlar', 'cik'];
+  for (const dark of [false, true])
+    for (const icon of icons)
+      for (const size of [16, 32]) {
+        const file = path.join(folder, `${menuIconStem(icon, dark)}-${size}.png`);
+        assert.ok(fs.existsSync(file), `${dark ? 'dark' : 'light'} menu: ${path.basename(file)} is drawn`);
+      }
+  assert.notDeepEqual(fs.readFileSync(path.join(folder, 'menu-not-koyu-16.png')), fs.readFileSync(path.join(folder, 'menu-not-16.png')), 'the dark set is its own picture');
 });
