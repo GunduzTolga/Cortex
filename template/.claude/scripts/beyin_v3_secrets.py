@@ -15,31 +15,32 @@ import sqlite3
 # ASCII only (?a), so a non-ASCII letter cannot turn into an identifier character.
 # SECRET_KEY, AWS_SECRET_ACCESS_KEY, SSH_PRIVATE_KEY and DB_PASS end in KEY or PASS rather than in
 # the bare word, so those endings are listed too; the name must still end there (SECRET_KEY_ID stays).
-# Hugging Face tokenizer attributes (pad_token, eos_token, ...) are model vocabulary, not credentials:
-# tokenizer.pad_token = tokenizer.eos_token must not mask a note or make Jev refuse the query. Only
-# the exact attribute names are skipped; SPLUNK_TOKEN and PAD_TOKEN_SECRET still mask.
-_SECRET_NAME = (r"(?!(?:pad|eos|bos|unk|sep|cls|mask)_token(?a:(?![a-z0-9_])))"
-                r"(?a:(?:[a-z_][a-z0-9_]*_|_)?)"
+_SECRET_NAME = (r"(?a:(?:[a-z_][a-z0-9_]*_|_)?)"
                 r"(?:api[_ -]?key|access[_ -]?token|token|secret[_ -]?(?:access[_ -]?)?key|"
                 r"private[_ -]?key|secret|password|passwd|pass)")
-_SECRET_VALUE = r"""(?:\\{0,8}["\']\S{8,}\\{0,8}["\']|[^"\'\s,;][^\s,;]{7,})"""
+# A value that only names where the secret comes from is not the secret, whatever the name says:
+# a dotted reference (tokenizer.eos_token, settings.SECRET) or a call or subscript
+# (os.getenv(...), userdata.get(...), form.cleaned_data[...]). Identifier parts carry no digit, so
+# abcd.1234.efgh still masks. A tokenizer special token (<|eot_id|>, <mask>, [PAD]) is model vocabulary
+# rather than a credential; the exception follows the value, so PAD_TOKEN=<a real key> still masks.
+# The value ends at a space, a separator, a closing bracket or a quote (also a JSON-escaped one, as
+# Jev scans json.dumps output).
+_VALUE_END = r"""(?:[\s,;)\]}"\'`\\]|$)"""
+_NOT_A_SECRET = (r"""(?!\\{0,8}["\'`]?(?:<[^<>\s]{1,200}>|\[[A-Z0-9_]{1,40}\])\\{0,8}["\'`]?""" + _VALUE_END +
+                 r"""|(?a:[a-z_]+(?:\.[a-z_]+)*[(\[]|[a-z_]+(?:\.[a-z_]+)+""" + _VALUE_END + r"""))""")
+_SECRET_VALUE = _NOT_A_SECRET + r"""(?:\\{0,8}["\']\S{8,}\\{0,8}["\']|[^"\'\s,;][^\s,;]{7,})"""
+_QUOTE = r"""\\{0,8}["\'`]"""
+# A quoted value inside code: only the characters up to the closing quote, so a following argument
+# ('Machine') is kept.
+_QUOTED_VALUE = r"""(?P<value>(?!\[REDACTED\])[^"\'`\s]{8,}(?=""" + _QUOTE + r"""))"""
 
 
 BUILTIN_PATTERNS = (
     re.compile(r"(?i)(?<=[?&])" + _SECRET_NAME + r"=[^&\s]{8,}"),
     # The left boundary is case-sensitive ASCII: under (?i) the class would also match İ, ı and the
     # Kelvin sign, so OPENAİ_API_KEY=... (Caps Lock on a Turkish keyboard) slipped through.
-    # A quoted name may close a subscript: os.environ["NAME"] = "value". The quote is required, so a
-    # Markdown reference link such as [token]: url stays text.
     re.compile(r"""(?i)(?-i:(?<![a-zA-Z0-9_]))(?:\\{0,8}["\']?""" + _SECRET_NAME +
-               r"""(?:\\{0,8}["\']\]|\\{0,8}["\']?))\s*[:=]\s*""" + _SECRET_VALUE),
-    # Commands that separate the name from the value without = or a colon: Windows setx and
-    # [Environment]::SetEnvironmentVariable, fish set -x. A space also separates prose words, so an
-    # unquoted value needs a digit: "setx OPENAI_API_KEY komutunu kullan" stays text.
-    re.compile(r"""(?i)(?-i:(?<![a-zA-Z0-9_-]))(?:(?:setx(?:[ \t]+/m)?|set[ \t]+-[a-z]{0,3}x[a-z]{0,3})"""
-               r"""[ \t]+["\']?""" + _SECRET_NAME + r"""["\']?[ \t]+|setenvironmentvariable\([ \t]*["\']"""
-               + _SECRET_NAME + r"""["\'][ \t]*,[ \t]*)"""
-               r"""(?:\\{0,8}["\']\S{8,}\\{0,8}["\']|(?=[^\s,;]*\d)[^"\'\s,;][^\s,;]{7,})"""),
+               r"""\\{0,8}["\']?)\s*[:=]\s*""" + _SECRET_VALUE),
     re.compile(r"(?<=://)[^/\s?#:]*:[^/\s?#]*(?=@[^/\s?#@]+)"),
     re.compile(r"\bgh(?:p|o|u|s|r)_[A-Za-z0-9]{20,255}\b"),
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,255}\b"),
@@ -72,6 +73,31 @@ BUILTIN_PATTERNS = (
 )
 
 
+# Forms where the name is not followed by = or a colon. These replace only the value and keep the
+# name, its quotes and what follows, so the note still reads as code: os.environ["X"] = "[REDACTED]".
+VALUE_PATTERNS = (
+    # A quoted name closing a subscript: os.environ["NAME"] = "value", process.env[`NAME`] = `value`.
+    # The value must be a literal; os.environ["NAME"] = getpass.getpass() reads it from elsewhere. The
+    # quote around the name is required, so a Markdown reference link such as [token]: url stays text.
+    re.compile(r"""(?i)(?P<head>\[\s*""" + _QUOTE + _SECRET_NAME + _QUOTE + r"""\s*\]\s*=\s*""" + _QUOTE + r""")"""
+               + _QUOTED_VALUE),
+    # A call whose first argument is the name and second a literal value: os.environ.setdefault,
+    # os.putenv, [Environment]::SetEnvironmentVariable (arguments may continue on the next line).
+    re.compile(r"""(?i)(?P<head>(?-i:(?<![a-zA-Z0-9_]))(?:setdefault|putenv|setenvironmentvariable)\(\s*"""
+               + _QUOTE + _SECRET_NAME + _QUOTE + r"""\s*,\s*""" + _QUOTE + r""")""" + _QUOTED_VALUE),
+    # Commands that separate the name from the value with a space: Windows setx and fish
+    # set -x / --export (flags in any order). A space also separates prose words, so an unquoted value
+    # must end the command and carry a digit or be 20 characters long, and may not be a variable or an
+    # expression ($X, %X%, (...)): "setx API_KEY 2024-01-01 tarihinde değişti" stays text.
+    re.compile(r"""(?i)(?P<head>(?-i:(?<![a-zA-Z0-9_-]))(?:setx(?:[ \t]+/m)?|set"""
+               r"""(?=(?:[ \t]+-(?:-[a-z]{2,12}|[a-z]{1,4})){0,3}[ \t]+-(?:-export|[a-z]{0,3}x[a-z]{0,3})(?![a-z-]))"""
+               r"""(?:[ \t]+-(?:-[a-z]{2,12}|[a-z]{1,4})){1,4})"""
+               r"""[ \t]+["\']?""" + _SECRET_NAME + r"""["\']?[ \t]+(?P<q>["\'])?)"""
+               r"""(?P<value>(?!\[REDACTED\])(?(q)[^"\'\s]{8,}(?=["\'])|"""
+               r"""(?![$%(])(?=[^\s,;]*\d|[^\s,;]{20})[^"\'\s,;][^\s,;]{7,}"""
+               r"""(?=[ \t]*(?:\r?\n|$|/m(?![a-z0-9])|[;&|]))))"""),
+)
+
 def _custom_literals(state):
     """Load bounded literal values, not executable regular expressions."""
     path = Path(state) / 'secret-patterns.txt'
@@ -96,6 +122,9 @@ def redact(text, state):
     if not isinstance(text, str):
         raise ValueError('secret filter input must be text')
     result, count = text, 0
+    for pattern in VALUE_PATTERNS:
+        result, matches = pattern.subn(r'\g<head>[REDACTED]', result)
+        count += matches
     for pattern in BUILTIN_PATTERNS:
         result, matches = pattern.subn('[REDACTED]', result)
         count += matches

@@ -103,34 +103,88 @@ class SecretEnvAssignmentsTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(redact(f'{name}={VALUE}', self.state), ('[REDACTED]', 1))
 
-    def test_subscript_and_command_forms_redact(self):
-        # The name is not followed by = or a colon here: a closing subscript, or a command that
-        # separates name and value with a space or a comma.
-        for text, expected in (
-                (f'os.environ["TYPESAFE_API_KEY"] = "{VALUE}"', 'os.environ[[REDACTED]'),
-                (f"os.environ['OPENAI_API_KEY']='{VALUE}'", 'os.environ[[REDACTED]'),
-                (f'process.env["MY_SECRET"] = "{VALUE}";', 'process.env[[REDACTED];'),
-                (f'setx TYPESAFE_API_KEY "{VALUE}"', '[REDACTED]'),
-                (f'setx /M TYPESAFE_API_KEY {VALUE}', '[REDACTED]'),
-                (f'SETX OPENAI_API_KEY "{VALUE}" /M', '[REDACTED] /M'),
-                (f'[Environment]::SetEnvironmentVariable("TYPESAFE_API_KEY", "{VALUE}", "User")',
-                 '[Environment]::[REDACTED], "User")'),
-                (f"[System.Environment]::SetEnvironmentVariable('DB_PASSWORD','{VALUE}','Machine')",
-                 '[System.Environment]::[REDACTED])'),
-                (f'set -gx TYPESAFE_API_KEY "{VALUE}"', '[REDACTED]'),
-                (f'set -Ux MY_SECRET {VALUE}', '[REDACTED]'),
-                (f'setx AWS_SECRET_ACCESS_KEY {VALUE}', '[REDACTED]')):
+    def test_subscript_call_and_command_forms_redact_only_the_value(self):
+        # The name is not followed by = or a colon here: a closing subscript, a call argument, or a
+        # command that separates name and value with a space. Only the value is replaced: the name,
+        # its quotes and the arguments after the value stay, so os.environ[[REDACTED] (read as a wiki
+        # link) and a swallowed 'Machine' argument no longer appear.
+        for template in (
+                'os.environ["TYPESAFE_API_KEY"] = "{v}"',
+                "os.environ['OPENAI_API_KEY']='{v}'",
+                'process.env["MY_SECRET"] = "{v}";',
+                'os.environ[ "OPENAI_API_KEY" ] = "{v}"',
+                'process.env[`MY_SECRET`] = `{v}`',
+                'os.environ.setdefault("OPENAI_API_KEY", "{v}")',
+                "os.putenv('OPENAI_API_KEY', '{v}')",
+                'setx TYPESAFE_API_KEY "{v}"',
+                'setx /M TYPESAFE_API_KEY {v}',
+                'SETX OPENAI_API_KEY "{v}" /M',
+                'setx AWS_SECRET_ACCESS_KEY {v}',
+                'setx GH_TOKEN abcdefghijklmnopqrstuvwxyz',
+                '[Environment]::SetEnvironmentVariable("TYPESAFE_API_KEY", "{v}", "User")',
+                "[System.Environment]::SetEnvironmentVariable('DB_PASSWORD','{v}','Machine')",
+                '[Environment]::SetEnvironmentVariable("TYPESAFE_API_KEY",\n    "{v}", "User")',
+                'set -gx TYPESAFE_API_KEY "{v}"',
+                'set -Ux MY_SECRET {v}',
+                'set --export TYPESAFE_API_KEY "{v}"',
+                'set -x -g TYPESAFE_API_KEY {v}',
+                'set -g -x MY_SECRET {v}; echo ok',
+                'set --global --export MY_SECRET "{v}"'):
+            text = template.format(v=VALUE)
+            expected = text.replace(VALUE, '[REDACTED]').replace('abcdefghijklmnopqrstuvwxyz', '[REDACTED]')
             with self.subTest(text=text):
                 self.assertEqual(redact(text, self.state), (expected, 1))
-        # A space also separates prose words: an unquoted command value needs a digit.
+        # A space also separates prose words: an unquoted command value must end the command and carry
+        # a digit (or be 20 characters long); a variable, an expression or a date in a sentence stays.
         for text in ('setx TYPESAFE_API_KEY komutunu kullan', 'set -x GITHUB_TOKEN değişkenini oku',
                      'setx TYPESAFE_API_KEY ""', 'setx PATH "%PATH%;C:\\Tools\\bin"',
                      'setx TYPESAFE_BASE_URL https://example.com/v1', 'reset -x MY_TOKEN abcdefgh12',
                      'set -x\nGITHUB_TOKEN abcdefgh12', f'[token]: https://example.com/{VALUE}',
                      '[Environment]::GetEnvironmentVariable("TYPESAFE_API_KEY", "User")',
-                     'x["pad_token"] = tokenizer.eos_token'):
+                     'x["pad_token"] = tokenizer.eos_token',
+                     'setx GITHUB_TOKEN $GITHUB_TOKEN2', 'setx GH_TOKEN %GH_TOKEN_2%',
+                     'setx API_KEY 2024-01-01 tarihinde değişti', 'setx API_KEY (Get-Content key1.txt)',
+                     'set -x GITHUB_TOKEN $GITHUB_TOKEN_2024',
+                     '[Environment]::SetEnvironmentVariable("TYPESAFE_API_KEY", $key2024, "User")'):
             with self.subTest(text=text):
                 self.assertEqual(redact(text, self.state), (text, 0))
+
+    def test_code_expression_on_the_right_is_not_a_secret(self):
+        # Reading a secret from somewhere else is not the secret: a dotted reference or a call keeps
+        # the note readable and Jev answering. A literal on the right still masks.
+        store = runtime.MemoryStore(self.state, self.vault)
+        for text in ('os.environ["OPENAI_API_KEY"] = getpass.getpass("Key: ")',
+                     "os.environ['HF_TOKEN'] = userdata.get('HF_TOKEN')",
+                     'data["password"] = form.cleaned_data["password"]',
+                     'config["secret"] = settings.SECRET',
+                     'OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")',
+                     "HF_TOKEN = userdata.get('HF_TOKEN')",
+                     'password = settings.DATABASE_PASSWORD',
+                     'client = Client(api_key=config.openai_api_key)'):
+            with self.subTest(text=text):
+                self.assertEqual(redact(text, self.state), (text, 0))
+                advisor._safe(store, {'excerpt': text})
+        for text in (f'data["password"] = "{VALUE}"', f'password = {VALUE}',
+                     'PASSWORD=abcd.1234.efgh', 'config["secret"] = "settings.SECRET"'):
+            with self.subTest(text=text):
+                self.assertEqual(redact(text, self.state)[1], 1)
+
+    def test_special_token_values_are_not_credentials_whatever_the_name(self):
+        # The exception follows the value, not the name: a special token literal (<|...|>, <...>,
+        # [PAD]) or a reference to another token is model vocabulary. PAD_TOKEN=<real value> masks.
+        for text in ('eot_token = "<|eot_id|>"', 'image_token = "<|image_pad|>"',
+                     'self.end_token = "<|endoftext|>"', "chat_token='<|im_start|>'",
+                     'cls_token = "[CLS_TOKEN]"', 'self.eot_token = tokenizer.eot_token',
+                     '{"bos_token": "<|begin_of_text|>", "eos_token": "<|end_of_text|>"}'):
+            with self.subTest(text=text):
+                self.assertEqual(redact(text, self.state), (text, 0))
+        for template in ('PAD_TOKEN={v}', 'export SEP_TOKEN="{v}"', 'MASK_TOKEN={v}',
+                         'env["PAD_TOKEN"] = "{v}"', 'eos_token: {v}'):
+            text = template.format(v=VALUE)
+            with self.subTest(text=text):
+                masked, count = redact(text, self.state)
+                self.assertEqual(count, 1)
+                self.assertNotIn(VALUE, masked)
 
     def test_prefixed_query_assignment_preserves_other_parameters(self):
         for name in NAMES:
