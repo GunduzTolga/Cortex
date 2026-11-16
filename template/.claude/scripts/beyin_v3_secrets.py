@@ -15,7 +15,11 @@ import sqlite3
 # ASCII only (?a), so a non-ASCII letter cannot turn into an identifier character.
 # SECRET_KEY, AWS_SECRET_ACCESS_KEY, SSH_PRIVATE_KEY and DB_PASS end in KEY or PASS rather than in
 # the bare word, so those endings are listed too; the name must still end there (SECRET_KEY_ID stays).
-_SECRET_NAME = (r"(?a:(?:[a-z_][a-z0-9_]*_|_)?)"
+# Hugging Face tokenizer attributes (pad_token, eos_token, ...) are model vocabulary, not credentials:
+# tokenizer.pad_token = tokenizer.eos_token must not mask a note or make Jev refuse the query. Only
+# the exact attribute names are skipped; SPLUNK_TOKEN and PAD_TOKEN_SECRET still mask.
+_SECRET_NAME = (r"(?!(?:pad|eos|bos|unk|sep|cls|mask)_token(?a:(?![a-z0-9_])))"
+                r"(?a:(?:[a-z_][a-z0-9_]*_|_)?)"
                 r"(?:api[_ -]?key|access[_ -]?token|token|secret[_ -]?(?:access[_ -]?)?key|"
                 r"private[_ -]?key|secret|password|passwd|pass)")
 
