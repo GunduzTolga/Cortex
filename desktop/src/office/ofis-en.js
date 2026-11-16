@@ -13,8 +13,8 @@ const titled = (title) => '“' + (NOTE_EN[title] || title) + '”';
 
 // office-art.js CHARACTERS[id].bio: [Turkish, English], by character id.
 const BIOS = {
-  pyn: ['Ofisin patronu, huysuz bakışlı bir ananas. Az konuşur, her şeyi bir "Hmm." ile onaylar; ekibiyle gizlice gurur duyar.',
-    'The office boss, a grumpy-looking pineapple. Says little and approves everything with a "Hmm."; secretly proud of the team.'],
+  pyn: ['Ofisin patronu: kafası kapak gibi açılan, içinden ananas çıkan siyah bir maskot. Az konuşur, her şeyi bir "Hmm." ile onaylar; ekibiyle gizlice gurur duyar.',
+    'The office boss: a black mascot whose head opens like a lid, a pineapple inside. Says little and approves everything with a "Hmm."; secretly proud of the team.'],
   mudur: ['Ofisin müdürü, bu beynin sahibi. Lacivert takımını hiç çıkarmaz; işler yolunda gidince kollarını kavuşturup gülümser.',
     'The office manager, the owner of this brain. Never out of the navy suit; when things go well, folds their arms and smiles.'],
   tolga: ['Cortex\'i yazan yazılımcı; bu ofisin her tuğlası onun klavyesinden çıktı. Hızlı karar verir, tek pikseli kaçırmaz, terminali sevmez: her şey uygulamanın içinden kurulsun. Gece ikide "yarın devam" der, sabah ilk o gelir.',
