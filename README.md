@@ -195,7 +195,7 @@ Tam açıklama: [Gizlilik ve güvenlik](docs/KULLANIM.md#gizlilik-ve-güvenlik).
 
 | Sürüm | Öne çıkan |
 | --- | --- |
-| [1.0.65](docs/v3/releases/1.0.65.md) | Sarı artık ürün ailesinin sarısı, Pyn logosundaki #FEC104: düğmeler, Not al mikrofonu, kurulum sihirbazı ve Pyn'in yüzü bu sarıda. Açık temada sarı yazılar ve ince işaretler aynı tonun koyu altınıyla okunuyor (kâğıtta 5,3:1). Cortex Browser'ın adı Pinea Browser oldu. |
+| [1.0.65](docs/v3/releases/1.0.65.md) | Sarı artık ürün ailesinin sarısı, Pyn logosundaki #FEC104: düğmeler, Not al mikrofonu, kurulum sihirbazı ve Pyn'in yüzü bu sarıda. Açık temada sarı yazılar ve ince işaretler aynı tonun koyu altınıyla okunuyor (kâğıtta 5,3:1). Cortex Browser'ın adı Cone Browser oldu. |
 | [1.0.64](docs/v3/releases/1.0.64.md) | Gizli değer maskesi `OPENAI_API_KEY=…`, `os.environ["…"] =` ve `setx` gibi biçimleri de kapsıyor, tokenizer kodunu artık sır saymıyor; taşınmış kasa `--rebind-state` ile yeniden bağlanıyor; Windows'ta açılamayacak not adları ve bozuk karakterli girişler yazılmadan reddediliyor. Ön sürüm 1.0.63'ün Cortex Browser bağlantısı bu sürümle geliyor. |
 | [1.0.62](docs/v3/releases/1.0.62.md) | İlk kez kuran için baştan sona gözden geçirildi: takılan girişte yeniden dene ve vazgeç var, araç açılmayınca ve internet yokken neden ve çare söyleniyor, "Hey Pyn" zayıf bilgisayarda daha çabuk ve duyduğunu belli ederek açılıyor, takılan indirmeler fark ediliyor, şirket ağının proxy'si kullanılıyor, güncelleme Ayarlar'dan kapatılabiliyor |
 | [1.0.61](docs/v3/releases/1.0.61.md) | İnen güncelleme artık gerçekten kuruluyor: Cortex Windows'la açıldığında, pencere açılmadan önce, sessizce. Önceden yalnız "Yeniden başlat"a ya da "Çıkış"a basılınca kuruluyordu. Electron 43.8.7 (güvenlik yaması). |
