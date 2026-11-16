@@ -219,7 +219,10 @@ def face(source):
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
 
 
-PAPER, INK, GOLD, MUTED = '#f3efe4', '#1b1712', '#e8b23a', '#75716a'
+PAPER, INK, GOLD, MUTED = '#f3efe4', '#1b1712', '#fec104', '#75716a'
+# Pinea yellow's middle tone (tema/ananas/ananas.css, orta-altin): a thin line or glyph that must read on a light
+# and a dark background alike, as the menu icons do (3.8:1 on Windows' light menu, 3.5:1 on its dark one).
+GOLD_MID = '#a17904'
 FONTS = ROOT / 'tema' / 'ananas' / 'fonts-ttf'
 DESKTOP_BUILD = ROOT / 'desktop' / 'build'
 
@@ -333,8 +336,9 @@ MENU_GLYPHS = ('mikrofon-acik', 'mikrofon-kapali', 'not', 'ayarlar', 'cik')
 
 def menu_icons():
     """The notification-area menu's icons (tepsi/menu-<name>-<16|32>.png): the microphone listening
-    (red) or off (grey, struck through), a note, a gear, the power sign. Gold and mid-tones, so they
-    read on Windows' light menus and dark ones alike; drawn eight times larger and brought down."""
+    (red) or off (grey, struck through), a note, a gear, the power sign. The middle gold and mid-tones, so
+    they read on Windows' light menus and dark ones alike (the bright gold is 1.6:1 on white); drawn eight
+    times larger and brought down."""
     from PIL import ImageDraw
     folder = OUT / 'tepsi'
     folder.mkdir(parents=True, exist_ok=True)
@@ -354,19 +358,19 @@ def menu_icons():
                 if name == 'mikrofon-kapali':
                     d.line([2.4 * u, 2.4 * u, 13.6 * u, 13.6 * u], fill=c, width=round(1.8 * u))
             elif name == 'not':
-                d.rounded_rectangle([3 * u, 1.5 * u, 13 * u, 14.5 * u], radius=1.2 * u, outline=GOLD, width=w)
+                d.rounded_rectangle([3 * u, 1.5 * u, 13 * u, 14.5 * u], radius=1.2 * u, outline=GOLD_MID, width=w)
                 for y in (5.2, 8, 10.8):
-                    d.line([5.4 * u, y * u, 10.6 * u, y * u], fill=GOLD, width=round(1.2 * u))
+                    d.line([5.4 * u, y * u, 10.6 * u, y * u], fill=GOLD_MID, width=round(1.2 * u))
             elif name == 'ayarlar':
                 import math
                 cx = cy = 8 * u
                 for i in range(8):
                     a = i * math.pi / 4
-                    d.line([cx + math.cos(a) * 4 * u, cy + math.sin(a) * 4 * u, cx + math.cos(a) * 6.8 * u, cy + math.sin(a) * 6.8 * u], fill=GOLD, width=round(2.2 * u))
-                d.ellipse([cx - 4.8 * u, cy - 4.8 * u, cx + 4.8 * u, cy + 4.8 * u], outline=GOLD, width=round(2.2 * u))
+                    d.line([cx + math.cos(a) * 4 * u, cy + math.sin(a) * 4 * u, cx + math.cos(a) * 6.8 * u, cy + math.sin(a) * 6.8 * u], fill=GOLD_MID, width=round(2.2 * u))
+                d.ellipse([cx - 4.8 * u, cy - 4.8 * u, cx + 4.8 * u, cy + 4.8 * u], outline=GOLD_MID, width=round(2.2 * u))
             elif name == 'cik':
-                d.arc([2.6 * u, 3 * u, 13.4 * u, 13.8 * u], -60, 240, fill=GOLD, width=w)
-                d.line([8 * u, 1.4 * u, 8 * u, 8 * u], fill=GOLD, width=w)
+                d.arc([2.6 * u, 3 * u, 13.4 * u, 13.8 * u], -60, 240, fill=GOLD_MID, width=w)
+                d.line([8 * u, 1.4 * u, 8 * u, 8 * u], fill=GOLD_MID, width=w)
             img.resize((size, size), Image.LANCZOS).save(folder / f'menu-{name}-{size}.png', optimize=True)
     for path in sorted(folder.glob('menu-*')):
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')

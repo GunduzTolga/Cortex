@@ -28,8 +28,9 @@ body {
        koyu-altin  #7d5e01  L 0.50  açık zeminde metin, bağlantı, ikon ve ince çizgi (kâğıtta
                                      5,3:1; #eae4d6'da 4,8:1). Açık zeminde gold metin olmaz (1,4:1).
        golge-altin #ce9c03  L 0.72  çizimde gölge (Pyn yüzü SVG'leri; gold'a oranı eskisi gibi 1,5)
-       orta-altin  #a17904  L 0.60  iki temada aynı kalan grafik noktası (desktop GraphView;
-                                     kâğıtta 3,5:1, koyu zeminde 4,4:1)
+       orta-altin  #a17904  L 0.60  açık ve koyu zeminde aynı kalan nokta ve simge: desktop
+                                     GraphView (kâğıtta 3,5:1, koyuda 4,4:1), tepsi menüsü
+                                     ikonları (Windows menüsünde 3,8:1 / 3,5:1)
      Koyu temada sarı metin gold'un kendisi (#1c1a16 zeminde 10,6:1).
      Aynı değerler desktop/src/index.css'te (--color-gold, --color-signal, --color-warn). */
   --ananas-gold: #fec104;
