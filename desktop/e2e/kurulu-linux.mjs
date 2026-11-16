@@ -15,8 +15,8 @@ import { distinctColours, resourceProblems, waitFor } from '../scripts/kurulu-ya
  *
  *   node e2e/kurulu-linux.mjs [--motor] [--cikti <klasör>]
  *
- * Under X (`xvfb-run -a` on a runner or in a container): the window is shown as a person's is. As root, as in a
- * container, Chromium starts only without its sandbox, so `--no-sandbox` is given then and only then.
+ * Under X (`xvfb-run -a` on a runner or in a container): the window is shown as a person's is, as a person runs it -
+ * not as root, with Chromium's sandbox on (the .deb's own: SUID chrome-sandbox or its AppArmor profile).
  *
  * What it saw is kept in e2e/screenshots/kurulu-linux/ (or `--cikti`): pictures of the window, and `uygulama.log` - the
  * checks, what the app wrote to its console, what its page logged and what the engine answered.
@@ -33,6 +33,10 @@ for (let at = 2; at < process.argv.length; at += 1) {
 }
 if (process.platform !== 'linux') {
   console.error('e2e/kurulu-linux.mjs yalnız Linux\'ta çalışır: .deb paketini dener.');
+  process.exit(2);
+}
+if (typeof process.getuid === 'function' && process.getuid() === 0) {
+  console.error('e2e/kurulu-linux.mjs root olarak çalışmaz: uygulama bir kişinin açtığı gibi, kum havuzu açık denenir. Root olmayan bir kullanıcıyla çalıştır.');
   process.exit(2);
 }
 
@@ -158,11 +162,10 @@ try {
   const env = {};
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined && !['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'CORTEX_HIDDEN'].includes(key)) env[key] = value;
   env.CORTEX_NO_UPDATE = '1';
-  const root = typeof process.getuid === 'function' && process.getuid() === 0;
   app = await electron.launch({
     executablePath: placed.exe,
     cwd: os.homedir(),
-    args: [`--user-data-dir=${userData}`, ...(root ? ['--no-sandbox'] : []), ...(process.env.CORTEX_SOFTWARE === '1' ? ['--disable-gpu'] : [])],
+    args: [`--user-data-dir=${userData}`, ...(process.env.CORTEX_SOFTWARE === '1' ? ['--disable-gpu'] : [])],
     env,
     timeout: 120_000,
   });

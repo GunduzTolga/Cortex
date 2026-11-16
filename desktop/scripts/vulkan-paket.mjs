@@ -7,7 +7,7 @@ import path from 'node:path';
 /**
  * whisper.cpp built for Vulkan, as the installer carries it: the build the engine pins (VULKAN_BUILD in
  * template/.claude/scripts/beyin_v3_ses.py, url and SHA-256), put among the app's resources as `whisper-vulkan/`
- * (package.json, extraResources) and given to `ses kur` (electron/services/setup.ts), which checks its digest
+ * (package.json, build.win.extraResources: Windows' only) and given to `ses kur` (electron/services/setup.ts), which checks its digest
  * and takes it instead of downloading it. The release it is published in answered 404 once the repository
  * went private (30 October); fetched here with the person's own `gh` login where a plain download is refused.
  * A file already here with the right digest is kept.

@@ -23,7 +23,7 @@
     "vulkan-paket": "node scripts/vulkan-paket.mjs",
     "package": "npm run cortex-paket && npm run python-paket && npm run vulkan-paket && npm run build && electron-builder --win",
     "package:dir": "npm run cortex-paket && npm run python-paket && npm run vulkan-paket && npm run build && electron-builder --win --dir",
-    "package:linux": "npm run cortex-paket && npm run build && electron-builder --linux deb AppImage --publish never",
+    "package:linux": "umask 022 && npm run cortex-paket && npm run build && electron-builder --linux deb --publish never",
     "check-resources": "node scripts/check-resources.cjs"
   },
   "devDependencies": {
@@ -148,8 +148,7 @@
     },
     "linux": {
       "target": [
-        "deb",
-        "AppImage"
+        "deb"
       ],
       "executableName": "cortex",
       "artifactName": "cortex_${version}_${arch}.${ext}",

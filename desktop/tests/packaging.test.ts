@@ -54,6 +54,20 @@ test('packaging builds the engine package and fetches Python first, and checks t
   const engine = packaged.build.extraResources.find((one) => one.from === 'cortex-paket');
   assert.deepEqual(engine?.filter, ['beyin-v3-*.zip', 'beyin-v3-*.manifest.json'], 'the package’s digests go with it');
   // Where electron/services/setup.ts looks for it (vulkanPackage).
+  // What the Windows installer carries is what it carried before Linux was added: the shared list and Windows' own,
+  // the same nine, from the same places to the same places.
+  const windows = [...packaged.build.extraResources, ...(packaged.build.win.extraResources ?? [])].map((one) => `${one.from} -> ${one.to}`).sort();
+  assert.deepEqual(windows, [
+    '../LICENSE -> LICENSE',
+    '../MARKA.md -> MARKA.md',
+    '../tema/ananas/marka/pyn-muhur-200.png -> pyn-muhur-200.png',
+    '../tema/ananas/marka/pyn.ico -> pyn.ico',
+    '../tema/ananas/marka/tepsi -> tepsi',
+    'cortex-paket -> cortex',
+    'licenses -> licenses',
+    'python-paket -> python',
+    'vulkan-paket -> whisper-vulkan',
+  ]);
   // Windows' own (whisper-vulkan-win-x64): carried by the installer only, where setup.ts looks for it (vulkanPackage).
   assert.deepEqual(packaged.build.win.extraResources?.find((one) => one.from === 'vulkan-paket'), { from: 'vulkan-paket', to: 'whisper-vulkan', filter: ['whisper-vulkan-*.zip'] });
   assert.deepEqual(packaged.build.win.extraResources?.find((one) => one.from === 'python-paket'), { from: 'python-paket', to: 'python', filter: ['python-*.exe.paket'] });
@@ -68,9 +82,12 @@ test('the Linux package carries the engine but neither Python’s Windows instal
   const builder = steps.findIndex((one) => one.startsWith('electron-builder'));
   assert.ok(steps.indexOf('npm run cortex-paket') >= 0 && steps.indexOf('npm run cortex-paket') < builder, steps.join(' | '));
   assert.ok(!steps.includes('npm run python-paket') && !steps.includes('npm run vulkan-paket'), steps.join(' | '));
-  assert.match(steps[builder], /--linux deb\b/);
-  assert.match(steps[builder], /--publish never/);
-  assert.deepEqual(packaged.build.linux.target.slice(0, 1), ['deb'], 'the .deb first: the one Cortex OS installs');
+  assert.equal(steps[builder], 'electron-builder --linux deb --publish never');
+  // The files in the .deb are 0644/0755 whatever the builder's umask.
+  assert.equal(steps[0], 'umask 022');
+  // The .deb only: an AppImage does not start on Ubuntu 24.04 and later (AppArmor keeps Chromium's sandbox from user
+  // namespaces, its chrome-sandbox cannot be SUID, libfuse2 is not installed), where the .deb brings its own profile.
+  assert.deepEqual(packaged.build.linux.target, ['deb']);
   // The engine runs on the system's Python (electron/services/localChat.ts, pythonCandidates: python3 first), as new as
   // the engine needs (3.11, the engine's floor); Debian 13 and Ubuntu 24.04 name some libraries with a t64 suffix, older
   // ones without: either is taken.
@@ -160,9 +177,25 @@ test('what is missing, stale or not the pinned file is named, and nothing when a
 
 test('electron-builder hands the hook the platform it packs for, and the hook checks for that one', async () => {
   const hook = createRequire(import.meta.url)(path.resolve('scripts', 'check-resources.cjs')) as (context?: { electronPlatformName?: string }) => Promise<void>;
-  const source = fs.readFileSync(path.join('scripts', 'check-resources.cjs'), 'utf8');
-  assert.match(source, /problems\(path\.resolve\(__dirname, '\.\.'\), context\?\.electronPlatformName \?\? 'win32'\)/);
   assert.equal(typeof hook, 'function');
+  // The hook as electron-builder loads it, from a scripts/ folder of a desktop/ that has the engine package and
+  // neither Python's installer nor the Vulkan build: what a Linux build has.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'paketle-kanca-'));
+  const desktop = path.join(root, 'desktop');
+  fs.mkdirSync(path.join(desktop, 'scripts'), { recursive: true });
+  fs.copyFileSync(path.join('scripts', 'check-resources.cjs'), path.join(desktop, 'scripts', 'check-resources.cjs'));
+  fs.writeFileSync(path.join(root, 'VERSION'), '1.2.3\n');
+  fs.writeFileSync(path.join(desktop, 'package.json'), JSON.stringify({ version: '1.2.3' }));
+  fs.writeFileSync(path.join(desktop, 'python.json'), JSON.stringify({ file: 'python-3.12.10-amd64.exe', sha256: '0'.repeat(64) }));
+  fs.mkdirSync(path.join(desktop, 'cortex-paket'));
+  fs.writeFileSync(path.join(desktop, 'cortex-paket', 'beyin-v3-1.2.3.zip'), '');
+  fs.writeFileSync(path.join(desktop, 'cortex-paket', 'beyin-v3-1.2.3.manifest.json'), '{}');
+  const copied = createRequire(import.meta.url)(path.join(desktop, 'scripts', 'check-resources.cjs')) as (context?: { electronPlatformName?: string }) => Promise<void>;
+  await copied({ electronPlatformName: 'linux' });
+  await assert.rejects(copied({ electronPlatformName: 'win32' }), /python-paket\/python-3\.12\.10-amd64\.exe\.paket yok/);
+  // A context without the name (an older electron-builder) is checked as Windows was before: nothing less is asked.
+  await assert.rejects(copied(), /python-paket/);
+  fs.rmSync(root, { recursive: true, force: true });
   // The same name electron-builder's own BeforePackContext gives it.
   const types = fs.readFileSync(path.join('node_modules', 'app-builder-lib', 'out', 'configuration.d.ts'), 'utf8');
   assert.match(types, /interface PackContext \{[^}]*readonly electronPlatformName: string;/);
@@ -277,9 +310,11 @@ test('the installer CI builds is installed, opened and uninstalled on the same r
 test('CI builds the Linux packages, keeps them, then installs the .deb with apt and walks the installed app’s first day', () => {
   const workflow = fs.readFileSync(path.join('..', '.github', 'workflows', 'desktop-linux.yml'), 'utf8').replace(/\r\n/g, '\n');
   const names = [...workflow.matchAll(/^      - (?:name: (.+)|uses: (\S+))$/gm)].map((found) => found[1] ?? found[2]);
-  const order = ['Cortex paketi', 'Linux paketleri', 'Kurulum (apt)', 'Kurulu uygulama'].map((name) => names.indexOf(name));
+  const order = ['Cortex paketi', 'Linux paketi', 'Kurulum (apt)', 'Kurulu uygulama'].map((name) => names.indexOf(name));
   assert.ok(order.every((at, n) => at >= 0 && (n === 0 || at > order[n - 1])), names.join(' | '));
-  assert.match(workflow, /run: npx electron-builder --linux deb AppImage --publish never/);
+  assert.match(workflow, /run: umask 022 && npx electron-builder --linux deb --publish never/);
+  assert.doesNotMatch(workflow, /AppImage|--no-sandbox/);
+  assert.match(workflow, /^permissions:\n  contents: read$/m);
   // Kept before it is tried, as desktop.yml keeps the installer: a failed try does not take the week's copy with it.
   assert.ok(workflow.indexOf('name: cortex-linux') < workflow.indexOf('- name: Kurulum (apt)'));
   assert.match(workflow, /run: xvfb-run -a .*node e2e\/kurulu-linux\.mjs --motor/);
