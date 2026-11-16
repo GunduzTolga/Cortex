@@ -18,22 +18,33 @@ import sqlite3
 _SECRET_NAME = (r"(?a:(?:[a-z_][a-z0-9_]*_|_)?)"
                 r"(?:api[_ -]?key|access[_ -]?token|token|secret[_ -]?(?:access[_ -]?)?key|"
                 r"private[_ -]?key|secret|password|passwd|pass)")
-# A value that only names where the secret comes from is not the secret, whatever the name says:
-# a dotted reference (tokenizer.eos_token, settings.SECRET) or a call or subscript
-# (os.getenv(...), userdata.get(...), form.cleaned_data[...]). Identifier parts carry no digit, so
-# abcd.1234.efgh still masks. A tokenizer special token (<|eot_id|>, <mask>, [PAD]) is model vocabulary
-# rather than a credential; the exception follows the value, so PAD_TOKEN=<a real key> still masks.
+# A value that only names where the secret comes from is not the secret, whatever the name says: a
+# dotted reference (tokenizer.eos_token, settings.SECRET) or a call or subscript that closes and ends
+# the value (os.getenv(...), userdata.get(...), form.cleaned_data[...]). The reference starts with a
+# lowercase letter and its identifier parts carry no digit, so PASSWORD=MySecret.Pass,
+# PASSWORD=Secret(2024)!x and abcd.1234.efgh still mask. A tokenizer special token (<|eot_id|>,
+# <extra_token_0>, [PAD]) is model vocabulary rather than a credential; the exception follows the value,
+# so PAD_TOKEN=<a real key> masks, and so does a key written inside angle brackets (<abcd1234efgh...>).
 # The value ends at a space, a separator, a closing bracket or a quote (also a JSON-escaped one, as
 # Jev scans json.dumps output).
 _VALUE_END = r"""(?:[\s,;)\]}"\'`\\]|$)"""
-_NOT_A_SECRET = (r"""(?!\\{0,8}["\'`]?(?:<[^<>\s]{1,200}>|\[[A-Z0-9_]{1,40}\])\\{0,8}["\'`]?""" + _VALUE_END +
-                 r"""|(?a:[a-z_]+(?:\.[a-z_]+)*[(\[]|[a-z_]+(?:\.[a-z_]+)+""" + _VALUE_END + r"""))""")
+_SPECIAL_TOKEN = (r"""(?a:<\|?/?[a-z][a-z_./-]{0,60}(?:_?\d{1,4})?\|?>|\[(?-i:[A-Z][A-Z_]{0,30})\])""")
+_CODE_REFERENCE = (r"""(?a:(?-i:[a-z_])[a-z_]*(?=[.(\[])(?:\.[a-z_]+|\([^()\n]*\)|\[[^\[\]\n]*\])+)""")
+_NOT_A_SECRET = (r"""(?!\\{0,8}["\'`]?""" + _SPECIAL_TOKEN + r"""\\{0,8}["\'`]?""" + _VALUE_END +
+                 r"""|""" + _CODE_REFERENCE + _VALUE_END + r""")""")
 _SECRET_VALUE = _NOT_A_SECRET + r"""(?:\\{0,8}["\']\S{8,}\\{0,8}["\']|[^"\'\s,;][^\s,;]{7,})"""
 _QUOTE = r"""\\{0,8}["\'`]"""
-# A quoted value inside code: only the characters up to the closing quote, so a following argument
-# ('Machine') is kept.
-_QUOTED_VALUE = r"""(?P<value>(?!\[REDACTED\])[^"\'`\s]{8,}(?=""" + _QUOTE + r"""))"""
-
+# A string literal in code: an optional prefix (f, b, r, rb), then any quote kind, triple and typographic
+# quotes included. The value runs to the matching closing quote, so it may hold spaces or the other
+# quote kind, and a following argument ('Machine') is kept. A typographic value stops at either quote
+# of its pair. The value is at most 1024 characters, so a line of unclosed openings cannot make every
+# opening scan the rest of the line (a longer literal is not masked; a PEM key has its own pattern).
+_LITERAL_OPEN = r'(?:[rbuf]{1,2})?\\{0,8}(?:"""|' + r"'''" + r'|["\'`\u201c\u2018])'
+_LITERAL_VALUE = (r'(?P<value>(?!\[REDACTED\])(?:'
+                  r'(?<=""")(?:(?!""")[^\n]){8,1024}(?=""")|'
+                  r"(?<=''')(?:(?!''')[^\n]){8,1024}(?=''')|"
+                  r'(?<=\u201c)[^\u201c\u201d\n]{8,1024}(?=\u201d)|(?<=\u2018)[^\u2018\u2019\n]{8,1024}(?=\u2019)|'
+                  r'(?<=")[^"\n]{8,1024}(?=")|' + r"(?<=')[^'\n]{8,1024}(?=')|" + r'(?<=`)[^`\n]{8,1024}(?=`)))')
 
 BUILTIN_PATTERNS = (
     re.compile(r"(?i)(?<=[?&])" + _SECRET_NAME + r"=[^&\s]{8,}"),
@@ -79,24 +90,27 @@ VALUE_PATTERNS = (
     # A quoted name closing a subscript: os.environ["NAME"] = "value", process.env[`NAME`] = `value`.
     # The value must be a literal; os.environ["NAME"] = getpass.getpass() reads it from elsewhere. The
     # quote around the name is required, so a Markdown reference link such as [token]: url stays text.
-    re.compile(r"""(?i)(?P<head>\[\s*""" + _QUOTE + _SECRET_NAME + _QUOTE + r"""\s*\]\s*=\s*""" + _QUOTE + r""")"""
-               + _QUOTED_VALUE),
+    re.compile(r"""(?i)(?P<head>\[\s*""" + _QUOTE + _SECRET_NAME + _QUOTE + r"""\s*\]\s*=\s*""" + _LITERAL_OPEN +
+               r""")""" + _LITERAL_VALUE),
     # A call whose first argument is the name and second a literal value: os.environ.setdefault,
     # os.putenv, [Environment]::SetEnvironmentVariable (arguments may continue on the next line).
     re.compile(r"""(?i)(?P<head>(?-i:(?<![a-zA-Z0-9_]))(?:setdefault|putenv|setenvironmentvariable)\(\s*"""
-               + _QUOTE + _SECRET_NAME + _QUOTE + r"""\s*,\s*""" + _QUOTE + r""")""" + _QUOTED_VALUE),
+               + _QUOTE + _SECRET_NAME + _QUOTE + r"""\s*,\s*""" + _LITERAL_OPEN + r""")""" + _LITERAL_VALUE),
     # Commands that separate the name from the value with a space: Windows setx and fish
     # set -x / --export (flags in any order). A space also separates prose words, so an unquoted value
     # must end the command and carry a digit or be 20 characters long, and may not be a variable or an
-    # expression ($X, %X%, (...)): "setx API_KEY 2024-01-01 tarihinde değişti" stays text.
+    # expression ($X, %X%, (...)): "setx API_KEY 2024-01-01 tarihinde değişti" stays text. The command
+    # ends at a line end, a switch (/M, /S host), a redirection (>nul, 2>&1), ; & | # ( or the closing
+    # backtick of Markdown inline code; a closing backtick or parenthesis is not part of the value.
     re.compile(r"""(?i)(?P<head>(?-i:(?<![a-zA-Z0-9_-]))(?:setx(?:[ \t]+/m)?|set"""
                r"""(?=(?:[ \t]+-(?:-[a-z]{2,12}|[a-z]{1,4})){0,3}[ \t]+-(?:-export|[a-z]{0,3}x[a-z]{0,3})(?![a-z-]))"""
                r"""(?:[ \t]+-(?:-[a-z]{2,12}|[a-z]{1,4})){1,4})"""
-               r"""[ \t]+["\']?""" + _SECRET_NAME + r"""["\']?[ \t]+(?P<q>["\'])?)"""
-               r"""(?P<value>(?!\[REDACTED\])(?(q)[^"\'\s]{8,}(?=["\'])|"""
-               r"""(?![$%(])(?=[^\s,;]*\d|[^\s,;]{20})[^"\'\s,;][^\s,;]{7,}"""
-               r"""(?=[ \t]*(?:\r?\n|$|/m(?![a-z0-9])|[;&|]))))"""),
+               r"""[ \t]+["\']?""" + _SECRET_NAME + r"""["\']?[ \t]+(?P<q>`?["\'\u201c\u201d\u2018\u2019])?)"""
+               r"""(?P<value>(?!\[REDACTED\])(?(q)[^"\'`\s\u201c\u201d\u2018\u2019]{8,}(?=`?["\'\u201c\u201d\u2018\u2019])|"""
+               r"""(?![$%(])(?=[^\s,;`)]*\d|[^\s,;`)]{20})[^"\'`\s,;)][^\s,;`)]{7,}"""
+               r"""(?=[ \t]*(?:\r?\n|$|/[a-z]|\d?>|[;&|`#(])|[`)])))"""),
 )
+
 
 def _custom_literals(state):
     """Load bounded literal values, not executable regular expressions."""
