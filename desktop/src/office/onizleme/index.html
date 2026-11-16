@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Ofis önizleme</title>
+<link rel="stylesheet" href="/node_modules/@fontsource/pixelify-sans/500.css">
+<link rel="stylesheet" href="/node_modules/@fontsource/pixelify-sans/600.css">
+<style>
+html,body{margin:0;background:#F3EFE4}canvas{display:block;width:100vw;height:100vh}</style>
+<canvas id="c"></canvas>
+<script type="module">
+// The office alone, outside the app: for looking at a style and recording it (e2e/ofis-video.mjs).
+//   ?saat=18.5  the light at that hour   ?mod=gece  a pinned mode   ?dil=en  in English
+//   ?elle        time by hand: window.__ofis.step(seconds) moves it on in exact frames
+import { OfficeEngine } from '../ofis-engine.js';
+import * as art from '../office-art.js';
+const q = new URLSearchParams(location.search);
+await Promise.all(['500 13px', '600 12px'].map((f) => document.fonts?.load(`${f} 'Pixelify Sans'`))).catch(() => undefined);
+const engine = new OfficeEngine(document.getElementById('c'), art, {});
+engine.lang = q.get('dil') === 'en' ? 'en' : 'tr';
+if (q.has('saat')) engine.hour = Number(q.get('saat'));
+if (q.has('mod')) engine.mode = q.get('mod');
+if (q.has('elle')) engine.setManual(true);
+engine.greet();
+window.__ofis = engine;
+window.__ready = true;
+</script>
