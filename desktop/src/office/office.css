@@ -16,9 +16,8 @@
   --ofis-yazi: #1b1712;
   --ofis-yazi-ikincil: #4a4339;
   --ofis-soluk: #7d7568;
-  /* Pinea yellow (src/index.css): on paper the gold word is the deep gold; the bright one fills. */
+  /* Pinea yellow (src/index.css): on paper the gold word is the deep gold. */
   --ofis-altin: #7d5e01;
-  --ofis-altin-acik: #fec104;
   --ofis-yesil: #2e8b4a;
   --ofis-tehlike: #c4452f;
   --ofis-oda-cerceve: #2f8f93;
@@ -629,7 +628,6 @@
   --ofis-yazi-ikincil: #c9c2b4;
   --ofis-soluk: #9a9387;
   --ofis-altin: #fec104;
-  --ofis-altin-acik: #ffd579;
   --ofis-yesil: #6cc489;
   --ofis-tehlike: #e6866b;
   --ofis-oda-cerceve: #5cb8bc;

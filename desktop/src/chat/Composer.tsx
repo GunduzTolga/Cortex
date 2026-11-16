@@ -111,7 +111,7 @@ function ChipSelect({
                 >
                   <span className="w-3.5 shrink-0 text-darkDelegation">{one.value === value ? <Check size={13} /> : null}</span>
                   <span className="truncate">{one.name}</span>
-                  {one.dot ? <span className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${one.dot === 'on' ? 'bg-good' : one.dot === 'down' ? 'bg-bad' : 'bg-gold'}`} data-chat-choice-dot={one.dot} /> : null}
+                  {one.dot ? <span className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${one.dot === 'on' ? 'bg-good' : one.dot === 'down' ? 'bg-bad' : 'bg-warn'}`} data-chat-choice-dot={one.dot} /> : null}
                 </button>
               </li>
             ))}
