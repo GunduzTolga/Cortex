@@ -35,6 +35,116 @@ class NotePartialWrite(NoteConflict):
         self.details = dict(details, write_occurred=True, cause=type(cause).__name__)
 
 
+class Utf8InputError(UnicodeError):
+    """Note or task input that is not standard UTF-8; raised before anything is written.
+
+    A lone surrogate or a CESU-8 pair is refused, never repaired or replaced: a silent
+    U+FFFD would change the user's text, and a surrogate in a path reaches the disk as
+    a file name other clients cannot read. A UnicodeError (so also a ValueError): every
+    handler that caught the bare codec error before still catches this one.
+    """
+
+
+_SURROGATE = re.compile('[\ud800-\udfff]')
+_UTF8_ADVICE = '; nothing was written, send standard UTF-8 (lone surrogates and CESU-8 are refused)'
+
+
+def _encoded_surrogate(raw, at, first, last):
+    """The surrogate a three-byte ED.. sequence carries (CESU-8, WTF-8); 0 when there is none."""
+    if (len(raw) >= at + 3 and raw[at] == 0xED and first <= raw[at + 1] <= last
+            and 0x80 <= raw[at + 2] <= 0xBF):
+        return 0xD000 | ((raw[at + 1] & 0x3F) << 6) | (raw[at + 2] & 0x3F)
+    return 0
+
+
+def _pair(high, low):
+    return 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00)
+
+
+def _byte_problem(raw, start, where):
+    high = _encoded_surrogate(raw, start, 0xA0, 0xAF)
+    low = _encoded_surrogate(raw, start + 3, 0xB0, 0xBF) if high else 0
+    if low:
+        return 'CESU-8 encoded U+%X (surrogate pair U+%04X U+%04X) at %s' % (
+            _pair(high, low), high, low, where)
+    single = _encoded_surrogate(raw, start, 0xA0, 0xBF)
+    if single:
+        return 'encoded lone surrogate U+%04X at %s' % (single, where)
+    return 'invalid UTF-8 sequence starting with byte 0x%02X at %s' % (raw[start], where)
+
+
+def utf8_problem(raw, start):
+    """Name the invalid UTF-8 at raw[start] (UnicodeDecodeError.start) for an error message."""
+    return _byte_problem(raw, start, 'byte %d' % start)
+
+
+def decode_utf8(raw, what='source'):
+    """Strict UTF-8 decode of a stored note; the error names CESU-8 and lone surrogates."""
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError as exc:
+        raise Utf8InputError(what + ' is not valid UTF-8: ' + utf8_problem(raw, exc.start) +
+                             '; it was left unchanged, save it again as standard UTF-8') from exc
+
+
+def require_utf8_text(value, what):
+    """Refuse a str that holds surrogate code points; other types are the caller's business.
+
+    A decoded str keeps a surrogate only where no character could be formed: JSON joins
+    a valid \\ud83d\\ude00 escape pair into one character. A high/low pair left as two
+    code points came from CESU-8 or UTF-16 units decoded one by one; POSIX argv and
+    streams carry undecodable bytes as U+DC80..U+DCFF (surrogateescape).
+    """
+    if not isinstance(value, str):
+        return value
+    match = _SURROGATE.search(value)
+    if match is None:
+        return value
+    at = match.start()
+    where = 'character %d' % at
+    first = ord(value[at])
+    second = ord(value[at + 1]) if at + 1 < len(value) else 0
+    if 0xD800 <= first <= 0xDBFF and 0xDC00 <= second <= 0xDFFF:
+        problem = 'CESU-8/UTF-16 surrogate pair U+%04X U+%04X instead of U+%X at %s' % (
+            first, second, _pair(first, second), where)
+    else:
+        problem = 'unpaired surrogate U+%04X at %s' % (first, where)
+        if 0xDC80 <= first <= 0xDCFF:
+            end = at
+            while end < len(value) and 0xDC80 <= ord(value[end]) <= 0xDCFF:
+                end += 1
+            escaped = bytes(ord(char) - 0xDC00 for char in value[at:end])
+            if _encoded_surrogate(escaped, 0, 0xA0, 0xBF):
+                problem = _byte_problem(escaped, 0, where) + ' (undecodable input bytes)'
+            else:
+                problem += ' (undecodable input byte 0x%02X)' % escaped[0]
+    raise Utf8InputError(what + ' is not valid UTF-8: ' + problem + _UTF8_ADVICE)
+
+
+def require_utf8_values(value, what):
+    """require_utf8_text over JSON-like data: dict keys and values, list items."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            require_utf8_text(key, what + ' key')
+            require_utf8_values(item, what + '.' + key if isinstance(key, str) else what)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            require_utf8_values(item, '%s[%d]' % (what, index))
+    else:
+        require_utf8_text(value, what)
+    return value
+
+
+def _require_request_text(request):
+    require_utf8_text(request.get('content'), 'content')
+    edits = request.get('edits')
+    if isinstance(edits, list):
+        for index, edit in enumerate(edits):
+            if isinstance(edit, dict):
+                for key in ('old', 'new'):
+                    require_utf8_text(edit.get(key), 'edits[%d].%s' % (index, key))
+
+
 def _unlinked(path):
     """Also reject junctions on Python 3.11, which has no Path.is_junction()."""
     try:
@@ -45,18 +155,56 @@ def _unlinked(path):
         raise ValueError('symlink or junction path rejected')
 
 
-def _checked_source(engine, source):
-    from beyin_v3_sync import EXCLUDED_DIRS, EXCLUDED_FILES
-    if not isinstance(source, str) or not source or '\\' in source or ':' in source:
+# Superscript digits count too: Windows opens COM\u00b9 and LPT\u00b2 as ports.
+_DEVICE_DIGITS = '1-9\u00b9\u00b2\u00b3'
+_DEVICE_NAME = re.compile(r'(?i)(?:con|prn|aux|nul|conin\$|conout\$|com[%s]|lpt[%s])(?:\..*)?'
+                          % (_DEVICE_DIGITS, _DEVICE_DIGITS))
+_LEGACY_DEVICE_NAME = re.compile(r'(?i)(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?')
+
+
+def _windows_device(part):
+    # Windows drops trailing dots and spaces before the extension: "con .md" is CON.
+    stem, dot, rest = part.partition('.')
+    return _DEVICE_NAME.fullmatch(stem.rstrip(' .') + dot + rest) is not None
+
+
+def _source_name(source, *, creating):
+    """The name rules every note path shares; creating adds the stricter portable set.
+
+    A new note or task must open on every client of a synced vault (Windows, macOS,
+    Linux). Reading and editing an existing note keeps the looser set, so a file
+    already named knowledge/Neden?.md on macOS or Linux stays readable and editable.
+    """
+    if (not isinstance(source, str) or not source or '\\' in source or ':' in source or
+            (creating and any(ord(char) < 32 or ord(char) == 127 or char in '<>"|?*'
+                              for char in source))):
         raise ValueError('use a vault-relative Markdown path with / separators')
+    # A surrogate reaches the filesystem as a raw CESU-8 byte name (POSIX) or an
+    # unpaired UTF-16 name (Windows): a file no other client can read back.
+    require_utf8_text(source, 'source')
     parts = source.split('/')
     if any(not part or part in ('.', '..') or part.startswith('.') or
            part.endswith((' ', '.')) for part in parts):
         raise ValueError('only visible vault-relative sources are supported')
     # Windows trims trailing dots/spaces and treats these names as device paths.
-    if any(re.fullmatch(r'(?i)(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?', part)
-           for part in parts):
+    device = _windows_device if creating else _LEGACY_DEVICE_NAME.fullmatch
+    if any(device(part) for part in parts):
         raise ValueError('device paths are not sources')
+    return parts
+
+
+def validate_source_name(source):
+    """Refuse a name Windows cannot hold before note-create or task-create journals it.
+
+    On Linux CON.md or a.md:akis.md is an ordinary file; written there, it is synced
+    to a Windows client where it cannot be checked out or opens a device instead.
+    """
+    _source_name(source, creating=True)
+
+
+def _checked_source(engine, source):
+    from beyin_v3_sync import EXCLUDED_DIRS, EXCLUDED_FILES
+    parts = _source_name(source, creating=False)
     folded = [part.casefold() for part in parts]
     if Path(source).suffix.lower() != '.md':
         raise ValueError('only Markdown sources are supported')
@@ -215,7 +363,7 @@ def read(engine, source):
         source = path.relative_to(engine.root).as_posix()
         _refuse_tracked_view(engine, source)
         raw = _bytes(path)
-        text = raw.decode('utf-8') if raw is not None else None
+        text = decode_utf8(raw) if raw is not None else None
         if text is not None:
             _human(text)
     return {'source': source, 'sha256': _hash(raw) if raw is not None else None,
@@ -246,6 +394,7 @@ def _apply(engine, request, committed):
     if expected is not None and (not isinstance(expected, str) or
                                  not re.fullmatch('[0-9a-f]{64}', expected)):
         raise ValueError('expected_sha256 must be a SHA-256 hex digest or null')
+    _require_request_text(request)  # Before the lock: invalid text touches nothing at all.
     with locked(engine) as folder:
         path = source_path(engine, source)  # Revalidate after waiting for the lock.
         source = path.relative_to(engine.root).as_posix()
@@ -255,13 +404,15 @@ def _apply(engine, request, committed):
         if actual != expected:
             raise NoteConflict('source changed; note-read again and rebuild the targeted edits')
         if raw is None:
+            # A missing note is created here: the same portable name rule as note-create.
+            validate_source_name(source)
             if 'edits' in request or not isinstance(request.get('content'), str):
                 raise ValueError('new source requires content and expected_sha256:null')
             text = request['content']
         else:
             if 'content' in request or not isinstance(request.get('edits'), list) or not request['edits']:
                 raise ValueError('existing source requires nonempty targeted edits, not content')
-            text = raw.decode('utf-8')
+            text = decode_utf8(raw)
             _human(text)
             for edit in request['edits']:
                 if not isinstance(edit, dict):

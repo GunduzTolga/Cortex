@@ -19,7 +19,7 @@ _MODULE_DIR = str(Path(__file__).resolve().parent)
 if _MODULE_DIR not in sys.path:
     sys.path.insert(0, _MODULE_DIR)
 
-from beyin_v3 import (GENERATION_KEY, HARNESSES, MAX_RECEIPT_LINKS, REJECTED_AT, RETIRED_STATUSES, MemoryStore, ReceiptConflict,
+from beyin_v3 import (GENERATION_KEY, HARNESSES, MAX_RECEIPT_LINKS, REJECTED_AT, RETIRED_STATUSES, MemoryStore, ReceiptConflict, _receipt_lf,
                       RevisionConflict, _json, _path_redirected, _plain_link, _rejected_inference, _status_word, records_generation,
                       rejected_dependents, resolve_supersedes, supersedes_inputs)
 from beyin_v3_index import applied_keys, dir_key, exclusions as index_exclusions, prune as prune_excluded
@@ -31,6 +31,7 @@ from beyin_v3_projections import (is_receipt_view_source, is_receipt_view_confli
 from beyin_v3_preferences import read as read_preferences
 from beyin_v3_secrets import redact as redact_secrets, record as record_redactions
 from beyin_v3_notes import (NoteConflict, locked as note_locked,
+                            validate_source_name, require_utf8_text, require_utf8_values,
                             read as note_read_source, apply as note_apply_edits)
 
 
@@ -1043,7 +1044,8 @@ class SyncEngine:
                         row = db.execute('SELECT payload FROM receipts WHERE id=?', (event['event_id'],)).fetchone()
                         if row:
                             previous = json.loads(row[0])
-                            if (previous['summary'], previous['refs'], previous.get('links')) != (event['summary'], event['refs'], event.get('links')):
+                            if ((_receipt_lf(previous['summary']), previous['refs'], previous.get('links')) !=
+                                    (_receipt_lf(event['summary']), event['refs'], event.get('links'))):
                                 raise ReceiptConflict('event id collision during recovery')
                         db.execute('INSERT OR IGNORE INTO receipts VALUES (?,?)', (event['event_id'], _json(event)))
                     completed.append(entry)
@@ -1067,10 +1069,15 @@ class SyncEngine:
                                            'runtime journal: ' + target.relative_to(self.state).as_posix()})
         return completed, conflicts, warnings
 
-    def _receipt_event(self, relative):
-        """Rebuild a receipts row from its immutable source; ValueError when the file is not a valid receipt."""
+    def _receipt_event(self, relative, expected_summary=None):
+        """Rebuild a receipts row from its immutable source; ValueError when the file is not a valid receipt.
+
+        expected_summary is the indexed summary for this event, when there is one: it settles a
+        legacy summary that ended in CR (see below) without rewriting either side.
+        """
         path = self._path(relative, existing=True)
-        # Bytes, not read_text: universal newlines would turn '\r' into '\n' and fake an event id collision.
+        # Bytes, not read_text: the summary keeps the bytes an older writer stored, so the
+        # indexed row and old views it produced can still be matched exactly.
         text = path.read_bytes().decode('utf-8')
         if _has_conflict_markers(text):
             raise ValueError('unresolved git conflict markers; resolve the merge before sync')
@@ -1086,7 +1093,16 @@ class SyncEngine:
         if not isinstance(refs, list) or not refs or any(
                 not isinstance(ref, str) or not ref or Path(ref).is_absolute() or '..' in Path(ref).parts for ref in refs):
             raise ValueError('missing or invalid refs')
-        summary = body[:-1] if body.endswith('\n') else body
+        # The writer ends the body with one line ending of the wrapper's own kind: LF as written,
+        # CRLF after a git autocrlf checkout. Strip exactly that one, so a whole-file CRLF
+        # checkout does not leave a stray CR at the end of the summary.
+        first_line = text.splitlines(keepends=True)[0]
+        ending = '\r\n' if first_line.endswith('\r\n') else '\r' if first_line.endswith('\r') else '\n'
+        summary = body[:-len(ending)] if body.endswith(ending) else body[:-1] if body.endswith(('\n', '\r')) else body
+        # A legacy summary ending in CR fused with the LF wrapper into CRLF. The indexed row
+        # tells the two apart; keep its exact text instead of guessing.
+        if expected_summary is not None and _receipt_lf(body) == _receipt_lf(expected_summary + '\n'):
+            summary = expected_summary
         if not summary.strip():
             raise ValueError('empty receipt summary')
         event = {'event_id': event_id, 'summary': summary, 'refs': [Path(ref).as_posix() for ref in refs], 'harness': harness}
@@ -1136,12 +1152,14 @@ class SyncEngine:
                 continue
             rel = 'receipts/' + name
             try:
-                event = self._receipt_event(rel)
+                event = self._receipt_event(rel, known.get(name, {}).get('summary'))
                 if name in known:
                     # Indexed receipts stay authoritative, but a source that no longer matches them means
                     # another device wrote the same event_id and a merge kept its file (#205).
                     old = known[name]
-                    if (old['summary'], old['refs'], old.get('links')) != (event['summary'], event['refs'], event.get('links')):
+                    # A newline-only difference (git autocrlf) is the same receipt, not a second writer.
+                    if ((_receipt_lf(old['summary']), old['refs'], old.get('links')) !=
+                            (_receipt_lf(event['summary']), event['refs'], event.get('links'))):
                         conflicts.append({'source': rel, 'kind': 'receipt_divergence',
                                           'reason': 'receipt source differs from indexed receipt; event_id reused on another device'})
                     continue
@@ -1474,8 +1492,13 @@ class SyncEngine:
     def note_create(self, source, text, metadata=None):
         if not isinstance(text, str) or not text.strip() or (metadata is not None and not isinstance(metadata, dict)):
             raise ValueError('note text and metadata required')
+        # Before the note lock and the journal intent: invalid text writes nothing.
+        # The source name gets the same check in validate_source_name below.
+        require_utf8_text(text, 'text')
+        require_utf8_values(metadata, 'metadata')
         if text.lstrip().startswith('---'):
             raise ValueError('text must be body only; put frontmatter fields in metadata')
+        validate_source_name(source)  # Before the journal intent: nothing is written.
         if not source.startswith(('notes/', 'knowledge/')) or not source.endswith('.md'):
             raise ValueError('new semantic notes belong under notes/ or knowledge/')
         self._refuse_excluded(source)
@@ -1538,8 +1561,12 @@ class SyncEngine:
     def task_create(self, source, text, metadata):
         if not isinstance(source, str) or not source.startswith('tasks/') or not source.endswith('.md'):
             raise ValueError('task-create source must be a tasks/ Markdown path')
+        validate_source_name(source)  # Before the journal intent: nothing is written.
         if not isinstance(text, str) or not text.strip() or not isinstance(metadata, dict):
             raise ValueError('task body and metadata required')
+        # Same rule as note-create, before the journal intent.
+        require_utf8_text(text, 'text')
+        require_utf8_values(metadata, 'metadata')
         if text.lstrip().startswith('---'):
             raise ValueError('text must be body only; put frontmatter fields in metadata')
         self._refuse_excluded(source)
@@ -1627,7 +1654,8 @@ class SyncEngine:
             raise ValueError('event id and summary required')
         if harness not in HARNESSES + ('manual',) or not isinstance(refs, list) or not refs:
             raise ValueError('harness and refs required')
-        summary, redacted = self._protect(summary)
+        # New summaries are stored with LF only, whatever the caller's platform typed.
+        summary, redacted = self._protect(_receipt_lf(summary))
         refs = [self.store._source(ref) for ref in refs]
         links = self._links(links)
         source = 'receipts/' + _hash(event_id) + '.md'
@@ -1651,9 +1679,10 @@ class SyncEngine:
                 row = (_json(old),)
             if row:
                 old = json.loads(row[0])
-                if old['summary'] != summary or old['refs'] != refs or old.get('links', []) != links:
+                if _receipt_lf(old['summary']) != summary or old['refs'] != refs or old.get('links', []) != links:
                     raise ReceiptConflict('event id collision')
                 event = old
+                summary = old['summary']  # A replay keeps the stored text, legacy CRLF included, and the first writer.
             receipt_metadata = {'kind': 'receipt', 'event_id': event_id, 'harness': event['harness'], 'refs': refs, 'visibility': 'internal'}
             if links:
                 receipt_metadata['links'] = links
@@ -1664,15 +1693,15 @@ class SyncEngine:
             content = render(receipt_metadata, summary + '\n')
             path = self._path(source)
             if path.exists():
-                # Byte comparison: universal-newline text would call a '\r' summary a manual change.
-                if path.read_bytes() != content.encode('utf-8'):
+                # Only line endings may differ (git autocrlf); metadata, spacing and real edits still conflict.
+                if _receipt_lf(path.read_bytes()) != _receipt_lf(content.encode('utf-8')):
                     raise ReceiptConflict('receipt source manually changed')
             else:
                 self._intent(source, None, content, 'receipt', event)
         result = self.sync()
         if self._write_blockers(result, source):
             raise ReceiptConflict('receipt projection conflict')
-        if self._path(source, existing=True).read_bytes() != content.encode('utf-8'):
+        if _receipt_lf(self._path(source, existing=True).read_bytes()) != _receipt_lf(content.encode('utf-8')):
             raise ReceiptConflict('receipt source changed before readback')
         self.store.submit_receipt(event_id, summary, refs, event['harness'], links=links)
         self._record_redactions(redacted)

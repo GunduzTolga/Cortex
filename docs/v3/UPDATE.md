@@ -105,7 +105,7 @@ Yalnız satır sonu farkı değişiklik sayılmaz: `core.autocrlf` ya da bir edi
 | `legacy_review` | Eski V2 runner'ı elle değiştirilmiş ([MIGRATION](MIGRATION.md)). |
 | `network` | GitHub'a ulaşılamadı. |
 | `disk_full` | Diskte yer kalmadı. |
-| `vault_moved` | Vault taşınmış ya da kopyalanmış; `beyin.py relocate` (aşağıda). |
+| `vault_moved` | Vault taşınmış ya da kopyalanmış; `beyin.py relocate` ya da kurucuda eski `--state` ile `--rebind-state` (aşağıda). |
 
 ## Vault'u taşımak ya da kopyalamak
 
@@ -118,6 +118,8 @@ python3 beyin.py relocate
 - Eski klasör artık yoksa (ya da orada bu state'e bağlı kurulu bir vault kalmadıysa) vault taşınmıştır: hafıza yeni yere bağlanır, hook komutları `.bak` yedekleriyle yeniden yazılır, başlatıcı ve eklentiler yeni yolla yenilenir. Sonuç `relocated`.
 - Eski klasör hâlâ aynı state'e bağlı kurulu bir vault ise bu klasör bir kopyadır: iki vault bir hafızayı paylaşmaz. Kopyaya bu makinenin kendi varsayılan state klasörü açılır, kurulum kaydı oraya taşınır, `.beyin-runtime.json` ve hook komutları yeni state'i gösterir. İndeks notlardan yeniden kurulur; state'teki ayarlar varsayılandan başlar. Özgün vault'a ve state'ine dokunulmaz. Sonuç `separated`.
 - Zaten bu klasöre bağlıysa hiçbir şey yazılmaz: `unchanged`.
+
+Kurucuyu taşınmış bir vault'ta eski state'le çalıştırırsan (`install_v3.py --vault <yeni yol> --state <eski state>`) kurucu indeks eski yola bağlıyken hiçbir şey yazmadan durur; bilerek yeniden bağlamak için `--rebind-state` ekle. Eski yol hâlâ duruyorsa reddeder, indeksi önce `memory-before-rebind.sqlite3` olarak yedekler; kurallar [MULTI-MACHINE](MULTI-MACHINE.md)'de.
 
 Masaüstü uygulaması bunu bir vault'u her açışında kendisi yapar. State'te kurulum kaydı yoksa (vault başka bir bilgisayardan geldiyse) `relocate` `vault_moved` koduyla durur ve yeniden kurmanı söyler; o zaman paketin `install_v3.py` komutu bu makine için yeni bir state sabitler ve diğer bilgisayarın yollarını taşıyan kurulum dosyalarını (başlatıcı, eklentiler, Kiro hook dosyası) bu makinenin sürümüyle değiştirir; bulduğu kopyalar kurulum kaydında `original` olarak kalır.
 

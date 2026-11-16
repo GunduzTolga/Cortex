@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -513,9 +514,161 @@ def uninstalled_content(name, item, current, previous, kept):
                          " (content differs)") from None
 
 
+REBIND_BACKUP = "memory-before-rebind"
+
+
+def recorded_vault(state):
+    """The vault root this state's index is bound to (metadata.vault_root); None without one.
+
+    Read-only, like every check before the install transaction: --plan calls it too."""
+    database = Path(state) / "memory.sqlite3"
+    try:
+        if database.is_symlink() or not database.is_file():
+            return None  # the runtime refuses a linked database itself
+        connection = sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
+        try:
+            row = connection.execute("SELECT value FROM metadata WHERE key='vault_root'").fetchone()
+        finally:
+            connection.close()
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc) or "busy" in str(exc):
+            raise failure("Cortex'in hafızası şu an başka bir iş için kullanılıyor; birkaç saniye sonra yeniden "
+                          "dene.", "updater_busy") from exc
+        return None  # no metadata table yet: nothing is bound
+    except (OSError, sqlite3.Error):
+        return None
+    return row[0] if row and isinstance(row[0], str) else None
+
+
+def _same_directory(first, second):
+    try:
+        return os.path.samefile(first, second)
+    except (OSError, ValueError):
+        return False
+
+
+def _gone(path):
+    """True only when nothing is at path. An unreadable or unreachable location is no proof."""
+    try:
+        os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return True
+    except (OSError, ValueError):
+        return False
+    return False
+
+
+def _pinned_state(vault):
+    """The state root vault/.beyin-runtime.json names, resolved; None when absent or unreadable."""
+    try:
+        data = json.loads((Path(vault) / ".beyin-runtime.json").read_text(encoding="utf-8-sig"))
+        value = data.get("state") if isinstance(data, dict) else None
+        if not isinstance(value, str) or not value.strip() or "\0" in value:
+            return None
+        path = Path(value).expanduser()
+        return path.resolve() if path.is_absolute() else None
+    except (OSError, ValueError, UnicodeError, RuntimeError):
+        return None
+
+
+def vault_rebind(vault, state, manifest, allowed):
+    """May this state's index follow its vault to the folder being installed? Writes nothing.
+
+    The index names the vault root it was built for and refuses any other, so two vaults never
+    share one index. A moved vault is still the same vault, but an install that left the old
+    binding behind reported success while every hook and command then stopped. So: without
+    --rebind-state the install stops here, before any write. With it, the binding moves only
+    when the recorded folder is gone, or is this same folder under another name, or is a copy
+    that provably reads another state root; and only when this vault carries the runtime pin
+    this state's install record wrote. A missing path alone also describes an unmounted disk,
+    which is why the flag stays explicit. Returns the recorded path to replace, or None."""
+    bound = recorded_vault(state)
+    if bound is None or bound == str(vault):
+        return None
+    old = Path(bound)
+    if not allowed:
+        raise failure("Bu hafıza (state) başka bir kasa yoluna bağlı: " + bound + " (bu kurulum: " + str(vault) +
+                      "). Kasayı buraya taşıdıysan ya da adını değiştirdiysen kurucuyu aynı --state ile "
+                      "--rebind-state ekleyerek yeniden çalıştır (ya da kasada beyin.py relocate çalıştır).",
+                      "vault_moved")
+    if not old.is_absolute():
+        raise failure("Yeniden bağlama reddedildi: kayıtlı kasa yolu (" + bound + ") bu bilgisayarda mutlak bir "
+                      "yol değil; bu hafıza bu bilgisayarda oluşturulmamış.", "rebind_refused")
+    if not _gone(old) and not _same_directory(old, vault):
+        other = _pinned_state(old) if old.is_dir() else None
+        if (other is None or os.path.normcase(str(other)) == os.path.normcase(str(state))
+                or _same_directory(other, state)):
+            raise failure("Yeniden bağlama reddedildi: eski kasa yolu (" + bound + ") hala duruyor ya da "
+                          "denetlenemiyor; aynı hafızayı kullanan ikinci bir kopya olabilir. Eski klasör artık "
+                          "kullanılmıyorsa taşı ya da adını değiştirip yeniden dene; ikisini de tutacaksan bu "
+                          "kopyayı state klasörünün bir kopyasıyla kur.", "rebind_refused")
+    item = manifest.get("files", {}).get(".beyin-runtime.json")
+    baseline = (base64.b64decode(item["installed_content"])
+                if isinstance(item, dict) and item.get("installed_content") else None)
+    pin = Path(vault) / ".beyin-runtime.json"
+    current = pin.read_bytes() if pin.is_file() and not pin.is_symlink() else None
+    if not line_endings_only(baseline, current):
+        raise failure("Yeniden bağlama reddedildi: bu kasanın .beyin-runtime.json dosyası bu hafızanın kurulum "
+                      "kaydının yazdığı dosya değil; kasanın .beyin-runtime.json dosyasında yazan state "
+                      "klasörünü --state ile ver.", "rebind_refused")
+    return bound
+
+
+def rebind_index(state, old, vault):
+    """Copy memory.sqlite3 aside, then move its binding from old to vault in one transaction.
+
+    The writer lock is taken first, so the copy and the change see the same database; a second
+    connection makes the copy, since a backup read through the locking connection never ends.
+    An earlier rebind's copy is never overwritten: the next one gets .1, .2 and so on."""
+    database = Path(state) / "memory.sqlite3"
+    index = 0
+    while True:
+        backup = Path(state) / (REBIND_BACKUP + ("." + str(index) if index else "") + ".sqlite3")
+        try:
+            os.close(os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+            break
+        except FileExistsError:
+            index += 1
+    connection = sqlite3.connect(database, timeout=10, isolation_level=None)
+    try:
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as exc:
+            backup.unlink(missing_ok=True)
+            raise failure("Cortex'in hafızası şu an başka bir iş için kullanılıyor; birkaç saniye sonra yeniden "
+                          "dene.", "updater_busy") from exc
+        try:
+            row = connection.execute("SELECT value FROM metadata WHERE key='vault_root'").fetchone()
+            if not row or row[0] != old:
+                raise failure("Hafızanın kasa bağı yeniden bağlama sırasında değişti; kurucuyu yeniden çalıştır.",
+                              "rebind_refused")
+            reader = sqlite3.connect(database, timeout=10)
+            try:
+                target = sqlite3.connect(backup)
+                try:
+                    reader.backup(target)
+                finally:
+                    target.close()
+            finally:
+                reader.close()
+            connection.execute("UPDATE metadata SET value=? WHERE key='vault_root'", (str(vault),))
+            connection.execute("COMMIT")
+        except BaseException:
+            try:
+                connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            backup.unlink(missing_ok=True)  # the binding is unchanged, and so is the database
+            raise
+    finally:
+        connection.close()
+    return backup
+
+
 def _install(vault, state, uninstall=False, plan_only=False, version="0.0.0", legacy_hashes=None,
              legacy_skill_hashes=None, migration=None, migration_plan=None, accept_customized=(),
-             keep_customized=(), exclude_components=(), include_components=(), backup_customized=False):
+             keep_customized=(), exclude_components=(), include_components=(), backup_customized=False,
+             rebind_state=False):
     vault, state = vault.resolve(), state.resolve()
     if not vault.is_dir() or state == vault or vault in state.parents:
         raise ValueError("Existing vault and state outside vault required")
@@ -561,6 +714,9 @@ def _install(vault, state, uninstall=False, plan_only=False, version="0.0.0", le
         if kept_user_text:
             result["kept_user_text"] = sorted(kept_user_text)
         return result
+    # Before any write and in plan mode too, so an update in a moved vault stops here instead of
+    # reporting success over an index that still names the old folder.
+    rebind = vault_rebind(vault, state, manifest, rebind_state)
     # A record whose engine is gone from the vault altogether describes a vault no longer here: the folder deleted
     # and made again where it was (the desktop's first run makes Documents\Cortex, and default_state is per vault
     # path), or emptied. Read as it is, every file in it was one the person had deleted, and a fresh install stopped
@@ -939,8 +1095,11 @@ Use Markdown source files as truth; run `python3 beyin.py sync` in the vault roo
                 if name == ".beyin-runtime.json":
                     # The pin of an install this state has no record of: the vault was moved or
                     # copied, and its own state is elsewhere (beyin.py relocate binds it again).
-                    raise failure("Bu kasa başka bir Cortex kurulumuna bağlı (.beyin-runtime.json); kasa taşınmış ya da "
-                                  "kopyalanmış olabilir. Önce kasada beyin.py relocate çalıştır, sonra yeniden dene.",
+                    pinned = _pinned_state(vault)
+                    raise failure("Bu kasa başka bir Cortex kurulumuna bağlı (.beyin-runtime.json" +
+                                  (": " + str(pinned) if pinned is not None else "") + "); kasa taşınmış ya da "
+                                  "kopyalanmış olabilir. Önce kasada beyin.py relocate çalıştır, sonra yeniden dene; "
+                                  "ya da kurucuyu o state klasörüyle (--state) ve --rebind-state ile yeniden çalıştır.",
                                   "vault_moved")
                 raise failure("Kasada Cortex'in yazacağı " + name + " dosyası zaten var ve içeriği farklı; üzerine "
                               "yazılmadı. Dosyayı başka bir yere taşıyıp yeniden dene.", "update_conflict")
@@ -990,8 +1149,16 @@ Use Markdown source files as truth; run `python3 beyin.py sync` in the vault roo
     else:
         next_manifest.pop("excluded_components", None)
     if plan_only:
-        return {"planned": planned, "manifest": next_manifest, "modes": modes, "removed": removed, "preserved_excluded": preserved_excluded,
+        plan = {"planned": planned, "manifest": next_manifest, "modes": modes, "removed": removed, "preserved_excluded": preserved_excluded,
                 "legacy_backups": legacy_backups}
+        if rebind is not None:
+            plan["rebind"] = {"from": rebind, "to": str(vault)}
+        return plan
+    # Every conflict check above has passed. vault_rebind proved the old binding serves no other
+    # vault, so a rerun after a failure below finds it already moved and needs no flag.
+    rebound = None
+    if rebind is not None:
+        rebound = {"from": rebind, "to": str(vault), "backup": str(rebind_index(state, rebind, vault))}
     spec = importlib.util.spec_from_file_location('beyin_install_transaction', ROOT / 'template/.claude/scripts/beyin_v3_update.py')
     updater = importlib.util.module_from_spec(spec); spec.loader.exec_module(updater)
     operations = []
@@ -1033,6 +1200,8 @@ Use Markdown source files as truth; run `python3 beyin.py sync` in the vault roo
               'skills':{'synced':[s for s in ('beyin','beyin-doktor','beyin-guncelle') if not is_component_excluded(f'.agents/skills/{s}/', user_excluded)],'conflicts':[], 'mode':'managed'}}
     if legacy_backups:
         result['legacy_backups'] = legacy_backups
+    if rebound:
+        result['rebound'] = rebound
     if theme == 'yenilendi':
         result['theme'] = theme
     # V2 flush sentinels whose writer provably died: the cutover went ahead, and the summaries
@@ -1077,7 +1246,7 @@ def package_defaults():
 
 def install(vault, state, uninstall=False, plan_only=False, version=None, legacy_hashes=None,
             legacy_skill_hashes=None, accept_customized=(), keep_customized=(),
-            exclude_components=(), include_components=(), backup_customized=False):
+            exclude_components=(), include_components=(), backup_customized=False, rebind_state=False):
     package = package_defaults()
     if package is not None:
         if version is not None and version != package['version']:
@@ -1097,7 +1266,7 @@ def install(vault, state, uninstall=False, plan_only=False, version=None, legacy
         return _install(vault, state, uninstall, plan_only, version, legacy_hashes, legacy_skill_hashes,
                         accept_customized=accept_customized, keep_customized=keep_customized,
                         exclude_components=exclude_components, include_components=include_components,
-                        backup_customized=backup_customized)
+                        backup_customized=backup_customized, rebind_state=rebind_state)
     directory = ROOT / 'template/.claude/scripts'
     if (Path(state).resolve() / 'update-journal.json').exists():
         spec = importlib.util.spec_from_file_location('beyin_install_recovery', directory / 'beyin_v3_update.py')
@@ -1113,7 +1282,7 @@ def install(vault, state, uninstall=False, plan_only=False, version=None, legacy
                             legacy_skill_hashes=legacy_skill_hashes, migration=module, migration_plan=plan,
                             accept_customized=accept_customized, keep_customized=keep_customized,
                             exclude_components=exclude_components, include_components=include_components,
-                            backup_customized=backup_customized)
+                            backup_customized=backup_customized, rebind_state=rebind_state)
     finally:
         sys.path.remove(str(directory))
 
@@ -1128,7 +1297,8 @@ def plan_report(plan):
             "keep": sorted(plan["manifest"].get("kept_legacy", [])),
             "excluded": sorted(plan["manifest"].get("excluded_components", [])),
             "removed": sorted(plan.get("removed", [])),
-            "preserved_excluded": sorted(plan.get("preserved_excluded", []))}
+            "preserved_excluded": sorted(plan.get("preserved_excluded", [])),
+            **({"rebind": plan["rebind"]} if plan.get("rebind") else {})}
 
 
 def main():
@@ -1149,7 +1319,14 @@ def main():
                         help="disable/exclude a managed component, skill, adapter, or launcher; repeatable")
     parser.add_argument("--include-component", action="append", default=[], metavar="COMPONENT",
                         help="re-enable a previously excluded component; repeatable")
+    parser.add_argument("--rebind-state", action="store_true",
+                        help="kasa taşındı ya da adı değişti: --state hafızasını kasanın yeni yoluna bağla "
+                             "(eski yol hala duruyorsa reddedilir; hafıza önce yedeklenir)")
     args = parser.parse_args()
+    if args.rebind_state and (args.uninstall or args.reconcile_hooks):
+        parser.error("--rebind-state yalnız kurulumla kullanılır")
+    if args.rebind_state and args.state is None:
+        parser.error("--rebind-state için --state gerekir: kasanın .beyin-runtime.json dosyasında yazan state klasörü")
     spec = importlib.util.spec_from_file_location("beyin_cli_defaults", ROOT / "scripts/beyin_v3.py")
     defaults = importlib.util.module_from_spec(spec); spec.loader.exec_module(defaults)
     default_state = defaults.default_state
@@ -1172,7 +1349,8 @@ def main():
         result = install(args.vault, args.state or default_state(args.vault.resolve()), args.uninstall,
                          plan_only=args.plan, accept_customized=accepted, keep_customized=kept,
                          exclude_components=excluded,
-                         include_components=included, backup_customized=args.backup_customized_legacy)
+                         include_components=included, backup_customized=args.backup_customized_legacy,
+                         rebind_state=args.rebind_state)
         print(json.dumps(plan_report(result) if args.plan else result))
     except Exception as exc:
         print(json.dumps(error_report(exc)), file=sys.stderr)
