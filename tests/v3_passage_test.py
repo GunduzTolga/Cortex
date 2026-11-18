@@ -55,6 +55,20 @@ class Vault(unittest.TestCase):
         (self.store.state_dir / passage.CONFIG_NAME).write_text(json.dumps(values), encoding='utf-8')
 
 
+class TurkishWrapperTest(Vault):
+    """The per-turn (passage) path drops the wrappers too; the note path alone was not enough."""
+
+    def test_question_wrappers_do_not_pick_the_note(self):
+        self.ingest('quartz', 'Quartz observatory calibration: the quota is wasted on rescans.', 'knowledge/quartz.md')
+        self.ingest('memo', 'Toplantı notları: hakkında konuşulanlar, notlarda geçenler, neler biliyoruz listesi.',
+                    'notes/memo.md')
+        self.ingest('rent', 'Kira sözleşmesi Mart ayında yenilenir.', 'notes/rent.md')
+        self.assertEqual(self.sources('Quartz hakkında notlarda neler biliyoruz'), ['knowledge/quartz.md'])
+        self.assertEqual(self.sources('Kira hakkında notlarda neler var'), ['notes/rent.md'])
+        self.assertEqual(runtime.query_words('Quartz hakkında notlarda neler biliyoruz'), {'quartz'})
+        self.assertEqual(runtime.query_words('not notlarda'), {'not'})
+
+
 class SplitTest(unittest.TestCase):
     def test_spans_are_verbatim_and_heading_aware(self):
         text = '# Başlık\r\n\r\nİlk paragraf.\r\n#etiket satırı\r\n\r\n## Alt\n```python\n# yorum\n\nx = 1\n```\n\nSon.\n'

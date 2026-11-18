@@ -150,7 +150,8 @@ def project_context(vault, state, project_id, project_name, budget=1200, today_i
                     continue
                 # An explicit project_id is authoritative, a mismatch or invalid value included:
                 # two folders can share a name. The name fallback is only for records without it.
-                if 'project_id' in record:
+                # An empty property (Obsidian writes `project_id:` as null) counts as no field.
+                if record.get('project_id') not in (None, ''):
                     match = isinstance(record['project_id'], str) and record['project_id'] == project_id
                 else:
                     match = bool(wanted and str(record.get('project') or '').strip().casefold() == wanted)

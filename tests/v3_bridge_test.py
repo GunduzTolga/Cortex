@@ -364,6 +364,21 @@ class BridgeTest(unittest.TestCase):
             self.assertNotIn(leaked, text)
         self.assertIn('(bu proje disinda 2 tarihi gelmis gorev)', text)
 
+    def test_empty_project_id_property_falls_back_to_the_name(self):
+        engine = SyncEngine(self.vault, self.state)
+        for value in (None, ''):
+            with self.subTest(value=value):
+                source = self.vault / 'tasks/empty.md'
+                source.parent.mkdir(exist_ok=True)
+                source.write_text('---\n' + json.dumps({
+                    'id': 'empty', 'kind': 'task', 'revision': 1, 'title': 'empty-canary', 'status': 'active',
+                    'due_at': '2026-09-01', 'owner': 'user', 'project': self.project.name,
+                    'project_id': value, 'visibility': 'internal'}) + '\n---\nTask body\n', encoding='utf-8')
+                engine.sync()
+                text = bridge.project_context(self.vault, self.state, 'a' * 24, self.project.name,
+                                              today_iso='2026-09-02')
+                self.assertIn('empty-canary', text)
+
     def test_task_create_accepts_only_a_folder_identity_as_project_id(self):
         engine = SyncEngine(self.vault, self.state)
         for value in (42, 'Same Name', 'A' * 24, 'a' * 23, 'a' * 25):

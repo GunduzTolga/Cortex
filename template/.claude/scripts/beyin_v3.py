@@ -683,8 +683,9 @@ _AFTER_NE = ("zaman", "kadar", "vakit")
 
 
 def query_words(text):
-    """The words of a question as the search takes them: stems, without question words or
-    the conjugated verbs that say how it is asked (_VERB_FORM)."""
+    """The words of a question as the search takes them: stems, without question words,
+    the wrappers of a question about the notes (STRICT_WRAPPERS) or the conjugated verbs that
+    say how it is asked (_VERB_FORM). The strict per-turn (passage) search reads these."""
     text = _APOSTROPHE_SUFFIX.sub("", str(text))
     text = unicodedata.normalize("NFKD", text.casefold())
     text = "".join(c for c in text if not unicodedata.combining(c)).replace("ı", "i")
@@ -695,7 +696,8 @@ def query_words(text):
         asked = ((previous == "ne" and word.startswith(_AFTER_NE))
                  or (word.startswith("kadar") and (asked or previous in ("o", "bu", "su"))))
         previous = word
-        if asked or word in QUESTION_FORMS or (_VERB_FORM.match(word) and not _MIS_NOUN_PLURAL.match(word)):
+        if asked or word in QUESTION_FORMS or word in STRICT_WRAPPERS \
+                or (_VERB_FORM.match(word) and not _MIS_NOUN_PLURAL.match(word)):
             continue
         words.append(word)
     return {_stem(word) for word in words} - STOPWORDS
