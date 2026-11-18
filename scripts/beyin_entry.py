@@ -687,11 +687,16 @@ def main(argv=None):
     human = ('--human' in argv or sys.stdout.isatty()) and not force_json
     argv = [arg for arg in argv if arg not in ('--human', '--json')]
     if human:
-        # A piped or redirected Windows console uses a legacy code page (cp1252 has no s-cedilla);
-        # an unencodable character must print as '?' instead of failing the whole command.
+        # A piped or redirected Windows stream uses a legacy code page (cp1252 has no s-cedilla, no
+        # emoji): redirected output is written as UTF-8 so stored text and source paths survive. An
+        # interactive terminal keeps its encoding; there an unencodable character prints as '?'
+        # instead of failing the whole command.
         for stream in (sys.stdout, sys.stderr):
             if hasattr(stream, 'reconfigure'):
-                stream.reconfigure(errors='replace')
+                if stream.isatty():
+                    stream.reconfigure(errors='replace')
+                else:
+                    stream.reconfigure(encoding='utf-8', errors='replace')
     command = argv[0] if argv else 'doctor'
     if command in ('note-read', 'note-edit'):
         human = False  # An agent reads these as JSON (sha256, status), on a terminal too.
