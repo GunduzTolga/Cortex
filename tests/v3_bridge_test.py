@@ -346,6 +346,43 @@ class BridgeTest(unittest.TestCase):
         self.assertIn('Tarihi gelen gorevler:', text)
         self.assertIn('- Deploy v2: Run ansible', text)
 
+    def test_explicit_task_project_id_never_falls_back_to_same_display_name(self):
+        engine = SyncEngine(self.vault, self.state)
+        for suffix, project_id in (('local', 'a' * 24), ('foreign', 'b' * 24), ('broken', 'c' * 24)):
+            engine.task_create('tasks/' + suffix + '.md', 'Task body', {
+                'id': suffix, 'title': suffix + '-canary', 'next_action': suffix + '-next',
+                'status': 'active', 'due_at': '2026-09-01', 'owner': 'user',
+                'project': self.project.name, 'project_id': project_id})
+        # A hand-edited, invalid identity is still explicit: it never falls back to the name.
+        broken = self.vault / 'tasks/broken.md'
+        broken.write_bytes(broken.read_bytes().replace(b'"' + b'c' * 24 + b'"', b'42'))
+        self.assertIn(b'"project_id": 42', broken.read_bytes())
+        engine.sync()
+        text = bridge.project_context(self.vault, self.state, 'a' * 24, self.project.name, today_iso='2026-09-02')
+        self.assertIn('local-canary', text)
+        for leaked in ('foreign-canary', 'foreign-next', 'broken-canary'):
+            self.assertNotIn(leaked, text)
+        self.assertIn('(bu proje disinda 2 tarihi gelmis gorev)', text)
+
+    def test_task_create_accepts_only_a_folder_identity_as_project_id(self):
+        engine = SyncEngine(self.vault, self.state)
+        for value in (42, 'Same Name', 'A' * 24, 'a' * 23, 'a' * 25):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                engine.task_create('tasks/bad.md', 'Task body', {
+                    'id': 'bad', 'title': 'bad', 'status': 'active', 'owner': 'user', 'project_id': value})
+        self.assertFalse((self.vault / 'tasks/bad.md').exists())
+
+    def test_task_without_project_id_still_matches_by_display_name(self):
+        engine = SyncEngine(self.vault, self.state)
+        record = engine.task_create('tasks/legacy.md', 'Task body', {
+            'id': 'legacy', 'title': 'legacy-canary', 'status': 'active',
+            'due_at': '2026-09-01', 'owner': 'user', 'project': self.project.name})
+        self.assertNotIn('project_id', record)  # no identity is invented from the display name
+        self.assertNotIn('project_id', (self.vault / 'tasks/legacy.md').read_text(encoding='utf-8'))
+        engine.sync()
+        text = bridge.project_context(self.vault, self.state, 'a' * 24, self.project.name, today_iso='2026-09-02')
+        self.assertIn('legacy-canary', text)
+
     def test_different_cwd_receipts_do_not_leak_across_projects(self):
         bridge.save_project_context(self.state, True)
         self.invoke(dict(self.payload, event_id='start-a'))
