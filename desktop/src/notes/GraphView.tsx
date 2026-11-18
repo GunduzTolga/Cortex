@@ -36,8 +36,9 @@ function paletteColour(name: string, fallback: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
 
-/** The colours the palette has, in an order where neighbours differ. */
-const COLOURS = ['#3f6670', '#7a6a9e', '#a8761f', '#5c6b4a', '#b4472f', '#4f7d96', '#8c5a7a', '#6f7d3f', '#9a6b4f', '#56524c'];
+/** The colours the palette has, in an order where neighbours differ. The gold is Pinea's at a middle lightness
+ *  (tema/ananas/ananas.css), a dot that reads on paper (3.5:1) and at night (4.4:1) alike. */
+const COLOURS = ['#3f6670', '#7a6a9e', '#a17904', '#5c6b4a', '#b4472f', '#4f7d96', '#8c5a7a', '#6f7d3f', '#9a6b4f', '#56524c'];
 
 function colourOf(node: GraphNode, folders: Map<string, string>): string {
   if (node.kind === 'tag') return '#5c6b4a';

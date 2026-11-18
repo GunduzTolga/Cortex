@@ -154,7 +154,7 @@ function Answer({ turn, live, onSignIn, onRetry }: { turn: Turn; live: boolean; 
           <ul className="mb-2 space-y-0.5 text-[12.5px] text-zinc-600" data-chat-plan>
             {turn.plan.map((entry, at) => (
               <li key={at} className="flex items-start gap-2">
-                <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-sm border ${entry.status === 'completed' ? 'border-good bg-good' : entry.status === 'in_progress' ? 'border-gold bg-gold/40' : 'border-zinc-300'}`} />
+                <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-sm border ${entry.status === 'completed' ? 'border-good bg-good' : entry.status === 'in_progress' ? 'border-warn bg-gold/40' : 'border-zinc-300'}`} />
                 <span className={entry.status === 'completed' ? 'text-zinc-400 line-through' : ''}>{entry.content}</span>
               </li>
             ))}

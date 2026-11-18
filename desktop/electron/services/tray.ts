@@ -1,4 +1,4 @@
-import { app, Menu, nativeImage, Tray } from 'electron';
+import { app, Menu, nativeImage, nativeTheme, Tray } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { hotkeyLabel, HOTKEYS, type ListenerSeen, wakePhraseLabel, type VoiceStatus, type WakeTrouble } from '../../shared/setup';
@@ -196,8 +196,30 @@ const trayPicture = (listening: boolean) =>
     [24, 1.5],
     [32, 2],
   ]);
+/** The menu's icons drawn in gold: one set for a light menu (the middle gold), one for a dark menu (the bright gold). */
+const GOLD_ICONS: ReadonlySet<TrayIcon> = new Set<TrayIcon>(['not', 'ayarlar', 'cik']);
+
+/**
+ * The picture's name for an icon in a light or a dark menu (scripts/marka_uret.py tepsi): the gold ones have a set
+ * for each, `menu-<icon>` and `menu-<icon>-koyu`, as no one gold reads on both (the bright one is 1.6:1 on a light
+ * menu, the middle one 3.5:1 on a dark one). The red and the grey microphone, and Pyn's seal, read on both.
+ */
+export function menuIconStem(icon: TrayIcon, dark: boolean): string {
+  if (icon === 'pyn') return 'pyn-kapali';
+  return dark && GOLD_ICONS.has(icon) ? `menu-${icon}-koyu` : `menu-${icon}`;
+}
+
+/**
+ * Whether the menu is drawn dark. Electron draws the tray's menu as a native menu, and `shouldUseDarkColors` is the
+ * app's own light or dark: the person's choice in Settings › General › Theme (`themeSource`, services/theme.ts) or,
+ * set to System, Windows' "Choose your default app mode" (AppsUseLightTheme). It is not Windows' mode (the taskbar's,
+ * SystemUsesLightTheme), which can differ. That the native menu follows the app's choice is Electron's doing and is
+ * to be tried on Windows; the tests' stand-in Electron has no nativeTheme, and a menu read as light there.
+ */
+const menuIsDark = (): boolean => Boolean(nativeTheme?.shouldUseDarkColors);
+
 const menuPicture = (icon: TrayIcon) =>
-  picture(icon === 'pyn' ? 'pyn-kapali' : `menu-${icon}`, [
+  picture(menuIconStem(icon, menuIsDark()), [
     [16, 1],
     [32, 2],
   ]);
@@ -514,7 +536,8 @@ export function startTray(given: { open(): void; settings(): void; askWake(): vo
   if (tray) return;
   handlers = given;
   tray = new Tray(trayPicture(false));
-  // Either click shows the menu, built anew so it says how things are now; a double click opens the window.
+  // Either click shows the menu, built anew so it says how things are now - and draws its icons for the theme the
+  // menu has now: a theme changed while Cortex runs (nativeTheme 'updated') needs no menu kept up to date.
   const popUp = () => tray?.popUpContextMenu(menu());
   tray.on('click', popUp);
   tray.on('right-click', popUp);

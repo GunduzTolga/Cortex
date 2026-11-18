@@ -1569,7 +1569,7 @@ def gather_context():
 
 # Ananas: paper and ink. Ivory ground, ink outlines with a hard unblurred offset shadow, gold as the one accent.
 PALETTE = {'bg': '#f3efe4', 'card': '#fffaf0', 'card_line': '#1b1712', 'shadow': '#1b1712', 'line': '#1b1712',
-           'text': '#1b1712', 'soft': '#56524c', 'muted': '#75716a', 'faint': '#a5a198', 'accent': '#e8b23a',
+           'text': '#1b1712', 'soft': '#56524c', 'muted': '#75716a', 'faint': '#a5a198', 'accent': '#fec104',
            'accent_text': '#1b1712', 'key': '#fffaf0', 'key_line': '#1b1712', 'ok': '#5c6b4a', 'bad': '#b4472f'}
 KIND_LABEL = {'youtube': 'VİDEO', 'x': 'TWEET', 'mail': 'MAİL', 'github': 'REPO', 'pdf': 'PDF', 'makale': 'SAYFA'}
 

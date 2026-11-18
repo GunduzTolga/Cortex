@@ -14,8 +14,10 @@ zemindeki benekler atılır) ve şunları yazar:
                                   başlığı (ekran ölçeğine göre seçilir)
 - pyn-oturan-512.png            : oturan Pyn (ilk açılış ekranı, kurulum sihirbazı)
 - pyn-ananas-512.png            : ananas Pyn (ilk açılışın son adımı)
-- pyn-yuz/*.svg            : Pyn'in yüzü, vektör (sohbet, Obsidian'da boş sekme); `yuz` adımı
-- pyn-yuz-256.png          : aynı yüzün PNG'si, SVG okumayan yerler için; `yuz` adımı
+- pyn-logo-272.png         : logo, Obsidian'da boş sekme (136 px'in iki katı); `bos-sekme` adımı da yazar
+- pyn-yuz/*.svg            : gözlüklü yüz, vektör; `yuz` adımı. KULLANIMDAN KALKTI (Tolga 2026-11-16: Pyn'in tek
+                             görünüşü açılan kafalı maskot); hiçbir yer kullanmıyor, silme kararı Tolga'da
+- pyn-yuz-256.png          : aynı yüzün PNG'si; `yuz` adımı. Kullanımdan kalktı, yukarıdaki gibi
 
 `yakala` adımı Not al penceresinin mikrofon düğmesini çizer (`tema/ananas/marka/yakala/`):
 yuvarlak, sert gölgeli, kenarları yumuşatılmış; boşta, dinlerken, yazarken ve hazırlanırken,
@@ -33,6 +35,7 @@ Ardından: py -3 scripts/ananas_tema.py uret
     py -3 scripts/marka_uret.py
     py -3 scripts/marka_uret.py kurulum
     py -3 scripts/marka_uret.py tepsi
+    py -3 scripts/marka_uret.py bos-sekme
     py -3 scripts/marka_uret.py yuz "C:\\...\\Pyn'in Yüz Tasarımı\\pyn-yuz"
     py -3 scripts/marka_uret.py yakala
 
@@ -182,8 +185,17 @@ def logo():
         note.resize((size, size), Image.LANCZOS).save(OUT / f'pyn-yakala-{size}.png', optimize=True)
     cutout(SOURCES / 'pyn-oturan.webp', despeckle=True).resize((512, 512), Image.LANCZOS).save(OUT / 'pyn-oturan-512.png', optimize=True)
     cutout(SOURCES / 'pyn-ananas.webp', despeckle=True).resize((512, 512), Image.LANCZOS).save(OUT / 'pyn-ananas-512.png', optimize=True)
+    empty_tab()
     for path in sorted(OUT.glob('pyn-*')):
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
+
+
+def empty_tab():
+    """Pyn in Obsidian's empty tab (ananas.css, 136 px): the logo at twice that, from pyn-logo-512.png, so the theme
+    carries 66 KB and not the 512's 164 KB. A dark theme shows the seal (pyn-muhur-200.png): the black Pyn on its cream
+    disc, as it would be lost on the dark page alone."""
+    Image.open(OUT / 'pyn-logo-512.png').resize((272, 272), Image.LANCZOS).save(OUT / 'pyn-logo-272.png', optimize=True)
+    print(f"{(OUT / 'pyn-logo-272.png').stat().st_size:8d}  {(OUT / 'pyn-logo-272.png').relative_to(ROOT)}")
 
 
 def without_provenance(svg):
@@ -219,7 +231,10 @@ def face(source):
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
 
 
-PAPER, INK, GOLD, MUTED = '#f3efe4', '#1b1712', '#e8b23a', '#75716a'
+PAPER, INK, GOLD, MUTED = '#f3efe4', '#1b1712', '#fec104', '#75716a'
+# Pinea yellow's middle tone (tema/ananas/ananas.css, orta-altin): the gold of a thin glyph on a light menu
+# (3.8:1 on Windows' light menu; the bright gold is 1.6:1 there).
+GOLD_MID = '#a17904'
 FONTS = ROOT / 'tema' / 'ananas' / 'fonts-ttf'
 DESKTOP_BUILD = ROOT / 'desktop' / 'build'
 
@@ -331,43 +346,52 @@ def tray_icons():
 MENU_GLYPHS = ('mikrofon-acik', 'mikrofon-kapali', 'not', 'ayarlar', 'cik')
 
 
+# The menu's glyphs drawn in gold, and the gold each menu takes: Windows draws the menu light or dark, and no one
+# gold reads on both (the bright one is 1.6:1 on a light menu, the middle one only 3.5:1 on a dark one). The light set
+# is `menu-<name>-<size>.png`, the dark one `menu-<name>-koyu-<size>.png`; desktop/electron/services/tray.ts picks.
+GOLD_GLYPHS = ('not', 'ayarlar', 'cik')
+MENU_GOLDS = (('', GOLD_MID), ('-koyu', GOLD))  # light menu 3.8:1, dark menu 8.7:1
+
+
 def menu_icons():
-    """The notification-area menu's icons (tepsi/menu-<name>-<16|32>.png): the microphone listening
-    (red) or off (grey, struck through), a note, a gear, the power sign. Gold and mid-tones, so they
-    read on Windows' light menus and dark ones alike; drawn eight times larger and brought down."""
+    """The notification-area menu's icons (tepsi/menu-<name>[-koyu]-<16|32>.png): the microphone listening
+    (red) or off (grey, struck through), a note, a gear, the power sign. The red and the grey read on Windows'
+    light menus and dark ones alike; the gold ones come twice, the middle gold for a light menu and the bright
+    one for a dark menu (GOLD_GLYPHS). Drawn eight times larger and brought down."""
     from PIL import ImageDraw
+    import math
     folder = OUT / 'tepsi'
     folder.mkdir(parents=True, exist_ok=True)
     for name in MENU_GLYPHS:
-        for size in (16, 32):
-            k = 8
-            u = size * k / 16  # one point of the 16 px design, in drawing pixels
-            img = Image.new('RGBA', (size * k, size * k), (0, 0, 0, 0))
-            d = ImageDraw.Draw(img)
-            w = round(1.6 * u)
-            if name.startswith('mikrofon'):
-                c = LISTENING if name == 'mikrofon-acik' else '#8f8a80'
-                d.rounded_rectangle([5.2 * u, 1.2 * u, 10.8 * u, 9.6 * u], radius=2.8 * u, fill=c)
-                d.arc([3 * u, 4 * u, 13 * u, 12.2 * u], 0, 180, fill=c, width=w)
-                d.line([8 * u, 12.2 * u, 8 * u, 14.2 * u], fill=c, width=w)
-                d.line([5.4 * u, 14.6 * u, 10.6 * u, 14.6 * u], fill=c, width=w)
-                if name == 'mikrofon-kapali':
-                    d.line([2.4 * u, 2.4 * u, 13.6 * u, 13.6 * u], fill=c, width=round(1.8 * u))
-            elif name == 'not':
-                d.rounded_rectangle([3 * u, 1.5 * u, 13 * u, 14.5 * u], radius=1.2 * u, outline=GOLD, width=w)
-                for y in (5.2, 8, 10.8):
-                    d.line([5.4 * u, y * u, 10.6 * u, y * u], fill=GOLD, width=round(1.2 * u))
-            elif name == 'ayarlar':
-                import math
-                cx = cy = 8 * u
-                for i in range(8):
-                    a = i * math.pi / 4
-                    d.line([cx + math.cos(a) * 4 * u, cy + math.sin(a) * 4 * u, cx + math.cos(a) * 6.8 * u, cy + math.sin(a) * 6.8 * u], fill=GOLD, width=round(2.2 * u))
-                d.ellipse([cx - 4.8 * u, cy - 4.8 * u, cx + 4.8 * u, cy + 4.8 * u], outline=GOLD, width=round(2.2 * u))
-            elif name == 'cik':
-                d.arc([2.6 * u, 3 * u, 13.4 * u, 13.8 * u], -60, 240, fill=GOLD, width=w)
-                d.line([8 * u, 1.4 * u, 8 * u, 8 * u], fill=GOLD, width=w)
-            img.resize((size, size), Image.LANCZOS).save(folder / f'menu-{name}-{size}.png', optimize=True)
+        for suffix, gold in (MENU_GOLDS if name in GOLD_GLYPHS else (('', None),)):
+            for size in (16, 32):
+                k = 8
+                u = size * k / 16  # one point of the 16 px design, in drawing pixels
+                img = Image.new('RGBA', (size * k, size * k), (0, 0, 0, 0))
+                d = ImageDraw.Draw(img)
+                w = round(1.6 * u)
+                if name.startswith('mikrofon'):
+                    c = LISTENING if name == 'mikrofon-acik' else '#8f8a80'
+                    d.rounded_rectangle([5.2 * u, 1.2 * u, 10.8 * u, 9.6 * u], radius=2.8 * u, fill=c)
+                    d.arc([3 * u, 4 * u, 13 * u, 12.2 * u], 0, 180, fill=c, width=w)
+                    d.line([8 * u, 12.2 * u, 8 * u, 14.2 * u], fill=c, width=w)
+                    d.line([5.4 * u, 14.6 * u, 10.6 * u, 14.6 * u], fill=c, width=w)
+                    if name == 'mikrofon-kapali':
+                        d.line([2.4 * u, 2.4 * u, 13.6 * u, 13.6 * u], fill=c, width=round(1.8 * u))
+                elif name == 'not':
+                    d.rounded_rectangle([3 * u, 1.5 * u, 13 * u, 14.5 * u], radius=1.2 * u, outline=gold, width=w)
+                    for y in (5.2, 8, 10.8):
+                        d.line([5.4 * u, y * u, 10.6 * u, y * u], fill=gold, width=round(1.2 * u))
+                elif name == 'ayarlar':
+                    cx = cy = 8 * u
+                    for i in range(8):
+                        a = i * math.pi / 4
+                        d.line([cx + math.cos(a) * 4 * u, cy + math.sin(a) * 4 * u, cx + math.cos(a) * 6.8 * u, cy + math.sin(a) * 6.8 * u], fill=gold, width=round(2.2 * u))
+                    d.ellipse([cx - 4.8 * u, cy - 4.8 * u, cx + 4.8 * u, cy + 4.8 * u], outline=gold, width=round(2.2 * u))
+                elif name == 'cik':
+                    d.arc([2.6 * u, 3 * u, 13.4 * u, 13.8 * u], -60, 240, fill=gold, width=w)
+                    d.line([8 * u, 1.4 * u, 8 * u, 8 * u], fill=gold, width=w)
+                img.resize((size, size), Image.LANCZOS).save(folder / f'menu-{name}{suffix}-{size}.png', optimize=True)
     for path in sorted(folder.glob('menu-*')):
         print(f'{path.stat().st_size:8d}  {path.relative_to(ROOT)}')
 
@@ -380,6 +404,8 @@ if __name__ == '__main__':
         mic_buttons()
     elif sys.argv[1:2] == ['kurulum']:
         installer_images()
+    elif sys.argv[1:2] == ['bos-sekme']:
+        empty_tab()
     elif sys.argv[1:2] == ['yuz']:
         face(sys.argv[2] if len(sys.argv) > 2 else '.')
     else:

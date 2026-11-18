@@ -536,8 +536,8 @@ function browserAsked(): void {
   trayNotice(
     'Cortex',
     english
-      ? 'A program wants to connect as Cortex Browser. Open Cortex to allow or refuse it.'
-      : 'Bir program Cortex Browser olarak bağlanmak istiyor. İzin vermek ya da reddetmek için Cortex’i aç.',
+      ? 'A program wants to connect as Cone Browser. Open Cortex to allow or refuse it.'
+      : 'Bir program Cone Browser olarak bağlanmak istiyor. İzin vermek ya da reddetmek için Cortex’i aç.',
   );
 }
 

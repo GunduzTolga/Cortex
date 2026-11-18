@@ -112,7 +112,7 @@ function ChatList() {
                       {waiting[chat.id] ? (
                         <ShieldQuestion size={13} className="shrink-0 text-darkDelegation" aria-label={t('chat.waiting.badge')} data-chat-waiting />
                       ) : open[chat.id]?.running ? (
-                        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-gold" data-chat-running />
+                        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-warn" data-chat-running />
                       ) : null}
                       <span className="truncate">{chat.title || t('chat.untitled')}</span>
                     </span>

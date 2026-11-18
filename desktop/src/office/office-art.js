@@ -688,10 +688,14 @@ wall('diploma_0', 16, 16, {}, (b) => { framed(b, 1, 1, 14, 12, O[2]); b.r(3, 3, 
 wall('diploma_1', 16, 16, {}, (b) => { framed(b, 1, 1, 14, 12, K[2]); b.r(3, 3, 10, 8, O[5]); b.hl(4, 4, 8, W[3]); b.hl(5, 6, 6, K[4]); b.hl(4, 8, 5, K[4]); oval(b, 9, 7, 3, 3, B[2]); });
 wall('portrait_pineapple', 24, 32, {}, (b) => {
   b.r(0, 0, 24, 31, O[1]); b.r(1, 1, 22, 29, O[3]); b.hl(1, 1, 22, O[4]); b.r(3, 3, 18, 25, W[1]); b.r(4, 4, 16, 23, B[1]);
-  oval(b, 7, 12, 10, 14, O[3]); for (let y = 13; y < 25; y += 2) for (let x = 8 + (y % 4 === 1 ? 1 : 0); x < 17; x += 2) b.p(x, y, O[1]);
-  b.hl(8, 17, 3, O[0]); b.hl(13, 17, 3, O[0]); b.p(9, 18, K[0]); b.p(14, 18, K[0]); b.r(11, 19, 2, 2, O[1]); b.hl(10, 22, 4, O[0]);
-  rows(b, 7, 5, ['..K..L....', '.LKJ.KL.K.', 'KJJLKJJLJ.', '.KJJJJKJ..', '...JKJ....']);
-  b.r(10, 25, 4, 2, B[0]); b.p(11, 24, B[0]); b.shadow(1, 31, 23, 1, SH2);
+  // Pyn'in portresi, maskot olarak (drawPyn): açılmış kapak, içinden ananas, krem yüzde iki iri göz
+  const Y = '#fec104', y = '#ce9c03';
+  for (const [x, yy] of [[10, 5], [12, 4], [14, 5], [11, 6], [13, 6], [15, 6]]) b.p(x, yy, Y);
+  oval(b, 9, 7, 8, 7, Y); for (let j = 7; j < 14; j++) for (let i = 9; i < 17; i++) if (b.g(i, j) === Y && ((i + j) % 3 === 0 || (i - j + 30) % 3 === 0)) b.p(i, j, y);
+  oval(b, 4, 5, 7, 5, K[1]); b.p(6, 6, K[2]); for (const [x, yy] of [[9, 8], [10, 7], [8, 9]]) b.p(x, yy, K[7]);
+  oval(b, 6, 11, 13, 13, K[1]); b.r(9, 11, 7, 2, Y); b.hl(8, 13, 9, K[7]); b.p(7, 15, K[2]); b.p(8, 14, K[2]);
+  oval(b, 7, 16, 11, 6, K[7]); b.vl(10, 17, 3, K[0]); b.vl(14, 17, 3, K[0]);
+  b.r(9, 24, 7, 3, K[1]); b.shadow(1, 31, 23, 1, SH2);
 });
 wall('trophy_shelf', 32, 16, {}, (b) => {
   b.hl(0, 12, 32, W[1]); b.hl(0, 11, 32, W[4]); b.hl(1, 13, 30, W[2]); b.shadow(1, 14, 31, 1, SH2);
@@ -1106,8 +1110,8 @@ const RS = RAMPS;
 /** 12 ajan + Pyn + müdür + Tolga + Tekir. look: üretecin kullandığı parçalar (renkler palet içinden).
  *  Müdürün adı kasanın sahibinin adıdır (ilk açılışta sorulan hitap; ofis-engine.js nameTheManager). */
 export const CHARACTERS = {
-  pyn: { name: 'Pyn', role: 'Patron', roleEn: 'Boss', tool: null, color: '#F2C14E', kind: 'pyn', label: 'CORTEX · PATRON', home: 'pyn',
-    bio: 'Ofisin patronu, huysuz bakışlı bir ananas. Az konuşur, her şeyi bir "Hmm." ile onaylar; ekibiyle gizlice gurur duyar.', look: { body: [O[1], O[3], O[4]], leaf: [G[1], G[2], G[3], G[4]], tie: [B[0], B[1]] } },
+  pyn: { name: 'Pyn', role: 'Patron', roleEn: 'Boss', tool: null, color: '#FEC104', kind: 'pyn', label: 'CORTEX · PATRON', home: 'pyn',
+    bio: 'Ofisin patronu: kafası kapak gibi açılan, içinden ananas çıkan siyah bir maskot. Az konuşur, her şeyi bir "Hmm." ile onaylar; ekibiyle gizlice gurur duyar.', look: { body: [K[0], K[1], K[2], K[7]] } },
   mudur: { name: 'Müdür', role: 'Müdür', roleEn: 'Manager', tool: null, color: '#F5F0E6', kind: 'mudur', label: 'CORTEX · MÜDÜR', home: 'mudur',
     bio: 'Ofisin müdürü, bu beynin sahibi. Lacivert takımını hiç çıkarmaz; işler yolunda gidince kollarını kavuşturup gülümser.',
     // Not drawn as Tolga (the developer, below): the manager is named after whoever owns the vault, and for Cortex's own
@@ -1371,62 +1375,94 @@ function drawHuman(b, L, pose, dir, f) {
   return r;
 }
 
-// ── Pyn: ananas patron
+// ── Pyn: patron. Pyn'in tek görünüşü (Tolga 2026-11-16): siyah, yuvarlak kafalı maskot; kafası kapak gibi açılır,
+// içinden Pinea sarısı (#FEC104) bir ananas çıkar; krem yüzünde iki iri göz (tema/ananas/marka/pyn-logo-512.png).
+// Sarı palet dışıdır (PALETTE'in 62 anahtarı dolu); tonları tema/ananas/ananas.css'teki aileden.
+const PINEA = { Y: '#fec104', y: '#ce9c03', d: '#7d5e01', L: '#ffd579' };
 function drawPyn(b, L, pose, dir, f) {
-  const r = rig(pose, dir, f), by = r.by, oy = by + r.hy, [Bd, Bm, Bl] = L.body, [L0, L1, L2, L3] = L.leaf;
+  const r = rig(pose, dir, f), by = r.by, oy = by + r.hy, [Kd, Km, Kh, Kc] = L.body, side = dir === 'side', back = dir === 'up';
   const walking = pose === 'walk' || pose === 'carry';
   const sway = walking ? [0, 1, 0, -1][f] : (pose === 'idle' ? f : 0);
-  // yapraklar
-  const crown = dir === 'side'
-    ? ['.....K......', '...L.KL.....', '...KLJK..L..', '.KL.JKJ.KJ..', '..KJJLJJK...', '...JJJKJJ...', '....IJJJI...']
-    : ['......K.....', '...L..KL..K.', '...KL.KJ.KL.', '....KLJKJK..', '.KL.JKJJKJKJ', '..KJJLJJKJJ.', '...JJJKJJJ..', '....IJJJJI..'];
-  const cy = dir === 'side' ? 3 : 2;
-  crown.forEach((row, j) => { const sx = j < 3 ? sway : 0; for (let i = 0; i < 12; i++) { const ch = row[i]; if (ch === '.') continue; b.p(2 + i + sx, cy + j + oy, { I: L0, J: L1, K: L2, L: L3 }[ch]); } });
-  // gövde
-  const bx = dir === 'side' ? 4 : 3, bw = dir === 'side' ? 9 : 10, top = 9 + oy, bh = r.seat ? 16 : 17;
-  oval(b, bx, top, bw, bh, Bm);
-  for (let y = top; y < top + bh; y++) for (let x = bx; x < bx + bw; x++) { if (!b.g(x, y) || b.g(x, y) !== Bm) continue; const a = (x + y) % 4, c = (x - y + 40) % 4; if (a === 0 || c === 0) b.p(x, y, Bd); else if (a === 2 && c === 2) b.p(x, y, Bl); }
-  b.p(bx + 2, top + 2, O[5]); b.p(bx + 1, top + 4, O[5]);
-  // yüz
-  if (dir === 'down') {
-    const ey = 15 + oy;
-    b.r(4, ey - 2, 8, 9, Bm); for (let y = ey - 2; y < ey + 7; y++) for (let x = 4; x < 12; x++) if ((x + y) % 4 === 0 && (x === 4 || x === 11 || y === ey - 2)) b.p(x, y, Bd);   // sade yüz alanı
-    if (r.eyes === 'closed') { b.hl(5, ey + 1, 2, O[0]); b.hl(9, ey + 1, 2, O[0]); }
-    else { b.hl(5, ey, 2, O[0]); b.hl(9, ey, 2, O[0]); b.p(5, ey + 1, K[7]); b.p(6, ey + 1, K[0]); b.p(9, ey + 1, K[0]); b.p(10, ey + 1, K[7]); }
-    b.p(4, ey - 2, O[0]); b.p(5, ey - 2, O[0]); b.p(6, ey - 1, O[0]); b.p(9, ey - 1, O[0]); b.p(10, ey - 2, O[0]); b.p(11, ey - 2, O[0]);   // huysuz kaşlar
-    b.r(7, ey + 2, 2, 2, O[1]); b.p(6, ey + 3, O[1]); b.p(9, ey + 3, O[1]); b.p(7, ey + 2, O[2]); b.hl(7, ey + 4, 2, O[0]);   // büyük burun
-    if (r.mouth >= 2) b.r(7, ey + 5, 2, r.mouth === 3 ? 2 : 1, K[0]); else b.hl(6, ey + 6, 4, O[0]);
-    b.r(7, 21 + by, 2, 1, L.tie[0]); b.r(7, 22 + by, 2, 2, L.tie[1]); b.p(7, 24 + by, L.tie[1]); b.p(8, 24 + by, L.tie[0]);  // kravat
-  } else if (dir === 'side') {
-    const ey = 15 + oy;
-    if (r.eyes === 'closed') b.hl(10, ey + 1, 2, O[0]); else { b.hl(10, ey, 2, O[1]); b.p(11, ey + 1, K[0]); b.p(10, ey + 1, K[0]); }
-    b.p(10, ey - 2, O[0]); b.p(11, ey - 1, O[0]);
-    b.r(13, ey + 2, 2, 2, O[2]); b.p(13, ey + 2, O[3]); b.p(14, ey + 3, O[1]); b.p(12, ey + 2, O[1]);  // burun dışarı taşar
-    b.hl(11, ey + 5, 2, O[0]); b.r(11, 21 + by, 2, 3, L.tie[1]); b.p(12, 21 + by, L.tie[0]);
+  const closed = pose === 'sleep';
+  const hx = side ? 2 : 1, hw = side ? 13 : 14;            // kafa: gövdenin iki katı, logodaki gibi
+  // kapak: kafanın arkasına menteşeli, sol üste açılmış yarım kubbe; düz (kesik) kenarı krem
+  const lidUp = !closed && pose === 'idle' && f ? -1 : 0, ly = oy + lidUp;
+  if (!closed) {
+    for (let y = 0; y < 9; y++) for (let x = 0; x < 10; x++) {
+      const dx = (x - 4.5) / 4.6, dy = (y - 4) / 3.6, inside = dx * dx + dy * dy <= 1.08, cut = 6 * x + 7 * y;
+      if (!inside) continue;
+      if (cut < 62) b.p(x, y + 1 + ly, (x + y) % 4 === 0 && x + y < 6 && x > 0 ? Kh : Km);
+      else if (cut < 70) b.p(x, y + 1 + ly, Kc);
+    }
   }
+  // ananas: yaprak uçları (yürürken sallanır), sonra meyve; kafanın içinden çıkar
+  const fx = side ? 6 : 5;
+  if (!closed) {
+    for (const [x, y, c] of [[3, 0, 'L'], [3, 1, 'Y'], [3, 2, 'Y'], [5, 1, 'L'], [5, 2, 'Y'], [5, 3, 'Y'], [1, 2, 'Y'], [1, 3, 'y'], [7, 2, 'Y'], [7, 3, 'y'], [2, 3, 'Y'], [4, 3, 'Y'], [6, 4, 'y'], [2, 4, 'y']]) {
+      const sx = y < 3 ? sway : 0; b.p(fx + x + sx, 1 + y + oy, PINEA[c]);
+    }
+    oval(b, fx, 4 + oy, 7, 7, PINEA.Y);
+    for (let y = 4 + oy; y < 11 + oy; y++) for (let x = fx; x < fx + 7; x++) if (b.g(x, y) === PINEA.Y && ((x + y) % 3 === 0 || (x - y + 30) % 3 === 0)) b.p(x, y, PINEA.y);
+    b.p(fx + 1, 5 + oy, PINEA.L); b.p(fx + 2, 5 + oy, PINEA.L);
+  }
+  // kafa: siyah; açık ağız (iç kısım koyu), ananas onun içinden; önde krem kesik kenar
+  const top = 8 + oy, hh = 13;
+  for (let y = top; y < top + hh; y++) for (let x = hx; x < hx + hw; x++) {
+    const dx = (x - (hx + (hw - 1) / 2)) / (hw / 2), dy = (y - (top + (hh - 1) / 2)) / (hh / 2);
+    if (dx * dx + dy * dy > 1.08) continue;
+    if (!closed && y <= top + 1 && b.g(x, y) && b.g(x, y) !== null && Object.values(PINEA).includes(b.g(x, y))) continue;   // ananas önde
+    b.p(x, y, Km);
+  }
+  if (closed) {   // uyurken kapak kapalı: kafanın tepesi yuvarlak, kesik krem çizgi; bir yaprak ucu dışarıda
+    oval(b, hx + 1, 5 + oy, hw - 2, 8, Km); for (let x = hx + 2; x < hx + hw - 2; x += 2) b.p(x, 9 + oy, Kc);
+    b.p(hx + hw - 3, 6 + oy, PINEA.Y); b.p(hx + hw - 2, 5 + oy, PINEA.L);
+  } else {
+    const rim = back ? [[hx + 2, top - 1], [hx + hw - 3, top - 1]] : [];
+    for (let x = hx + 2; x < hx + hw - 2; x++) b.p(x, top + 2, back ? Kd : Kc);          // ön kesik kenar (arkadan iç)
+    b.p(hx + 1, top + 1, Kc); b.p(hx + hw - 2, top + 1, Kc);
+    for (const [x, y] of rim) b.p(x, y, Kc);
+  }
+  b.p(hx + 2, top + 4, Kh); b.p(hx + 1, top + 6, Kh); b.p(hx + 3, top + 6, Kh);   // yarım ton parıltı
+  // yüz: krem maske, iki iri göz; arkadan görünmez
+  if (!back) {
+    const mx = side ? 8 : 3, mw = side ? 7 : 10, ey = 14 + oy;
+    oval(b, mx, 13 + oy, mw, 7, Kc);
+    const eyes = side ? [11] : [6, 9];
+    for (const x of eyes) {
+      if (r.eyes === 'closed') { b.p(x - 1, ey + 2, Kd); b.p(x, ey + 2, Kd); }
+      else if (r.eyes === 'half') { b.p(x, ey + 1, Kd); b.p(x, ey + 2, Kd); }
+      else if (r.eyes === 'down') { b.p(x, ey + 2, Kd); b.p(x, ey + 3, Kd); }
+      else { b.p(x, ey, Kd); b.p(x, ey + 1, Kd); b.p(x, ey + 2, Kd); }
+    }
+    if (r.mouth >= 2) b.r(side ? 12 : 7, 17 + oy, side ? 1 : 2, r.mouth === 3 ? 2 : 1, Kd);
+  }
+  // gövde
+  const bx = side ? 6 : 5, bw = side ? 5 : 6;
+  for (let y = 19 + by; y < 26 + (r.seat ? 0 : 0); y++) for (let x = bx; x < bx + bw; x++) if (!b.g(x, y)) b.p(x, y, Km);
+  b.p(bx, 25, null); b.p(bx + bw - 1, 25, null);
   // kollar
-  const ay = 18 + by, arm = (x, y) => b.p(x, y, Bd);
-  if (dir === 'side') {
-    if (r.arms[1] === 'fwd') { arm(9, ay); arm(10, ay + 1); arm(11, ay + 1); b.hand = [12, ay + 1]; }
-    else if (r.arms[1] === 'gesture') { arm(10, ay); arm(11, ay - 1); b.hand = [12, ay - 2]; }
+  const ay = 21 + by, arm = (x, y) => b.p(x, y, Km);
+  if (side) {
+    if (r.arms[1] === 'fwd') { arm(10, ay); arm(11, ay + 1); arm(12, ay + 1); b.hand = [13, ay + 1]; }
+    else if (r.arms[1] === 'gesture') { arm(11, ay); arm(12, ay - 1); b.hand = [13, ay - 2]; }
     else { const sw = r.swing; arm(8, ay); arm(8 + sw, ay + 1); arm(8 + sw, ay + 2); b.hand = [8 + sw, ay + 3]; }
   } else {
     const m = r.arms;
-    [0, 1].forEach((side) => {
-      const x = side ? 13 : 2, inw = side ? -1 : 1, mode = m[side];
-      if (mode === 'side') { const dy = side ? -r.swing : r.swing; arm(x, ay); arm(x, ay + 1); arm(x, ay + 2 + dy); if (side) b.hand = [x, ay + 3 + dy]; }
-      else if (mode === 'fwd' || mode === 'type' || mode === 'phone' || mode === 'lap') { arm(x, ay); arm(x + inw, ay + 1); arm(x + inw * 2, ay + 2 - (mode === 'type' ? (side ? r.t : 1 - r.t) : 0)); b.hand = [8, ay + 2]; if (mode === 'phone' && side) { b.r(7, ay, 2, 3, K[1]); b.p(7, ay, r.t ? C[4] : C[3]); } }
+    [0, 1].forEach((s) => {
+      const x = s ? 11 : 4, inw = s ? -1 : 1, mode = m[s];
+      if (mode === 'side') { const dy = s ? -r.swing : r.swing; arm(x, ay); arm(x, ay + 1); arm(x, ay + 2 + dy); if (s) b.hand = [x, ay + 3 + dy]; }
+      else if (mode === 'fwd' || mode === 'type' || mode === 'phone' || mode === 'lap') { arm(x, ay); arm(x + inw, ay + 1); arm(x + inw * 2, ay + 2 - (mode === 'type' ? (s ? r.t : 1 - r.t) : 0)); b.hand = [8, ay + 2]; if (mode === 'phone' && s) { b.r(7, ay, 2, 3, K[3]); b.p(7, ay, r.t ? C[4] : C[3]); } }
       else if (mode === 'chest') { arm(x, ay); arm(x + inw, ay + 1); b.hand = [x + inw * 2, ay + 1]; }
       else if (mode === 'mouth') { arm(x, ay); arm(x + inw, ay - 1); b.hand = [x + inw * 2, ay - 2]; }
-      else if (mode === 'gesture') { arm(x, ay); arm(x + 1, ay - 1); b.hand = [x + 2, ay - 2]; }
+      else if (mode === 'gesture') { arm(x, ay); arm(x + inw * -1, ay - 1); b.hand = [x - inw * 2, ay - 2]; }
       else if (mode === 'gesture2') { arm(x, ay); arm(x, ay + 1); b.hand = [x, ay + 2]; }
-      else if (mode === 'up') { arm(x, ay); arm(x, ay - 1); arm(x, ay - 2); arm(x - 1, ay - 3); b.hand = [x - 1, ay - 4]; }
+      else if (mode === 'up') { arm(x, ay); arm(x, ay - 1); arm(x, ay - 2); arm(x - inw, ay - 3); b.hand = [x - inw, ay - 4]; }
     });
   }
-  // bacaklar
-  if (r.seat) { b.r(5, 26, 2, 1, Bd); b.r(9, 26, 2, 1, Bd); b.r(4, 27, 3, 2, W[1]); b.r(9, 27, 3, 2, W[1]); }
-  else if (dir === 'side') { const s = r.spread; b.r(7 - (s >> 1), 26, 1, 2, Bd); b.r(8 + (s >> 1), 26, 1, 2, Bd); b.r(6 - (s >> 1), 28, 3, 1, W[1]); b.r(8 + (s >> 1), 28, 3, 1, W[2]); }
-  else { [5, 9].forEach((x, i) => { const l = r.lift[i]; b.r(x + (i ? 0 : 1), 26, 1, 2 - l, Bd); b.r(x, 28 - l, 3, 1, W[1]); b.hl(x, 28 - l, 3, i ? W[2] : W[1]); }); }
+  // bacaklar: kısa, siyah; ayaklar yuvarlak
+  if (r.seat) { b.r(4, 26, 3, 2, Km); b.r(9, 26, 3, 2, Km); b.hl(4, 27, 3, Kd); b.hl(9, 27, 3, Kd); }
+  else if (side) { const s = r.spread; b.r(7 - (s >> 1), 26, 1, 2, Km); b.r(9 + (s >> 1), 26, 1, 2, Km); b.r(6 - (s >> 1), 28, 3, 1, Kd); b.r(8 + (s >> 1), 28, 3, 1, Kd); }
+  else { [5, 9].forEach((x, i) => { const l = r.lift[i]; b.r(x + (i ? 0 : 1), 26, 1, 2 - l, Km); b.r(x, 28 - l, 3, 1, Kd); }); }
   b.outline();
   return r;
 }

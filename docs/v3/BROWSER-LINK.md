@@ -1,9 +1,9 @@
-# Cortex Browser bağlantısı: teknik not
+# Cone Browser bağlantısı: teknik not
 
-Cortex masaüstü uygulaması, aynı bilgisayardaki Cortex Browser'ın (ayrı bir ürün) bağlanabileceği yerel bir uç
+Cortex masaüstü uygulaması, aynı bilgisayardaki Cone Browser'ın (ayrı bir ürün) bağlanabileceği yerel bir uç
 açabilir. Tarayıcıdaki asistan soruyu bu uca yollar; cevabı Cortex'te kullanılan yapay zeka aracı verir ve konuşma
 Cortex'in sohbet listesinde durur. Bu not ucu, buluşma dosyasını, mesajları ve güven sınırını Cortex'in tarafından
-anlatır. Kullanıcıya dönük anlatım: [kullanım rehberi](../KULLANIM.md#cortex-browser-bağlantısı).
+anlatır. Kullanıcıya dönük anlatım: [kullanım rehberi](../KULLANIM.md#cone-browser-bağlantısı).
 
 Kod: `desktop/electron/services/browserLink.ts` (uç), `desktop/shared/browserLink.ts` (mesaj türleri ve sınırlar),
 `desktop/electron/services/browserPage.ts` (sayfa bloğu), `desktop/electron/services/chat.ts` (sohbet),
@@ -19,7 +19,7 @@ aynen kopyalanır.
 
 ## Dinleyici
 
-- **Varsayılan kapalıdır.** Açılana kadar hiçbir şey dinlenmez. İki yolla açılır: Ayarlar → Cortex Browser
+- **Varsayılan kapalıdır.** Açılana kadar hiçbir şey dinlenmez. İki yolla açılır: Ayarlar → Cone Browser
   bağlantısı'ndaki anahtar, ya da Cortex'in `--tarayici` argümanıyla başlatılması (çalışan Cortex'e ikinci başlatma
   olarak ulaşması da sayılır).
 - **Ayar üç durumludur** (`browserLink`): dokunulmamış (`null`), açık (`"on"`), kullanıcı kapattı (`"off"`).
@@ -116,7 +116,7 @@ Tarayıcı Cortex'i bu dosyadan bulur. Adı `browser-link.json`, yeri uygulaman�
 
 - **Kod:** `pairing {state: waiting}` dört haneli bir `code` taşır. Aynı kod Cortex'in izin penceresinde gösterilir;
   kullanıcı tarayıcıdakiyle karşılaştırır, yazmaz. Cortex bağlananın kim olduğunu denetleyemez; pencere bunu
-  "Bir program Cortex Browser olarak bağlanmak istiyor" diye söyler. Kod, soru başka bir bekleyen bağlantıya
+  "Bir program Cone Browser olarak bağlanmak istiyor" diye söyler. Kod, soru başka bir bekleyen bağlantıya
   geçerse onunkiyle değişir.
 - **Jeton:** izin verilince 32 rastgele bayttan base64url bir `token` üretilir ve yalnız o bağlantıya, yalnız ilk
   `hello_ok`'ta yollanır. Cortex ayarlarında jetonun SHA-256 özetini saklar (`browserLinkToken`), kendisini saklamaz
@@ -129,9 +129,9 @@ Tarayıcı Cortex'i bu dosyadan bulur. Adı `browser-link.json`, yeri uygulaman�
 - **Art arda soru sınırı:** ilk retten sonra 30 saniye, sonraki her retten sonra iki katı (en çok 10 dakika) boyunca
   yeni `hello`'lar sorulmadan `refused` alır. `ask_again: true` bu beklemeyi atlar, ama dakikada en çok bir kez; jetonun
   yerini tutmaz, yalnız soruyu yeniden açar. Art arda üç retten sonra hiçbir `hello` soru açmaz: kullanıcı Ayarlar →
-  Cortex Browser bağlantısı → "Yeniden sormasına izin ver" diyene ya da Cortex yeniden açılana kadar. Aynı yerdeki
+  Cone Browser bağlantısı → "Yeniden sormasına izin ver" diyene ya da Cortex yeniden açılana kadar. Aynı yerdeki
   "İzin ver" düğmesi, bekleyen bir bağlantı varsa onu içeri alır.
-- **İzni kaldırmak:** Ayarlar → Cortex Browser bağlantısı → İzni kaldır. Özet silinir; izinli, izin bekleyen ve
+- **İzni kaldırmak:** Ayarlar → Cone Browser bağlantısı → İzni kaldır. Özet silinir; izinli, izin bekleyen ve
   `hello`'su o anda karşılanmakta olan her bağlantı `bye {reason: unpaired}` ile kapanır. Karşılama sırasında jeton
   yeniden doğrulanır: izin o arada kaldırıldıysa ya da başkasına verildiyse `hello_ok` gönderilmez.
 - `hello_ok.tool`, **yeni** bir konuşmanın yazılacağı araçtır: bu kasada en son yazılan araç hâlâ sunuluyorsa o,
@@ -279,7 +279,7 @@ deneyebilir ve kullanıcının önüne izin sorusu çıkarabilir. Bu sınırlıd
 için dakikada bir, art arda üç retten sonra hiç soru yok; tepsi bildirimi dakikada en çok bir. İzinsiz bir bağlantı
 64 KB'tan uzun satır yollayamaz, `hello` demeden 10 saniyeden uzun kalamaz ve yer dolunca ilk o düşer.
 
-Bağlanan programın gerçekten Cortex Browser olduğunu Cortex denetleyemez. Kullanıcı, izin penceresindeki kodu
+Bağlanan programın gerçekten Cone Browser olduğunu Cortex denetleyemez. Kullanıcı, izin penceresindeki kodu
 tarayıcıdakiyle karşılaştırarak denetler; tarayıcı da bağlandığı ucun aynı kullanıcının süreci olduğunu `hello`
 göndermeden önce kendisi doğrular (sözleşmenin 16. kuralı).
 
