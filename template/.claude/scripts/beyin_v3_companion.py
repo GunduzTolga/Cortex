@@ -298,11 +298,14 @@ def excerpt(name, text, project=None):
     if name == 'Threads.md':
         # Same active headings compaction recognizes (beyin_v3_compact.ACTIVE), so a
         # '## Açık konular' file does not inject its closed threads too (#153).
-        match = re.search(r'(?im)^## (?:(?:Active|Open)(?: Threads)?|Aktif[^\n]*|A[çc][ıi]k(?:[ \t][^\n]*)?)\s*$', text)
-        if match:
-            body = text[match.start():]
-            closed = re.search(r'(?im)^## (?:Closed|Kapan|Kapalı)', body)
-            return body[:closed.start()] if closed else body
+        # A heading inside a fenced example (a sample `## Closed Threads`) is not a boundary.
+        live = list(unfenced_lines(text))
+        active = next((start for start, line in live if re.match(
+            r'(?i)## (?:(?:Active|Open)(?: Threads)?|Aktif[^\n]*|A[çc][ıi]k(?:[ \t][^\n]*)?)\s*$', line)), None)
+        if active is not None:
+            closed = next((start for start, line in live
+                           if start > active and re.match(r'(?i)## (?:Closed|Kapan|Kapalı)', line)), None)
+            return text[active:closed]
     if name == 'Journal.md':
         entries = list(re.finditer(r'(?m)^## ([^\n]+)', text))
         dated = [(moment, i) for i, item in enumerate(entries) if (moment := stamp(item[1]))]
@@ -466,21 +469,32 @@ def filter_scoped_rules(text, active_project=None):
     return '\n'.join(filtered_lines)
 
 
+def unfenced_lines(text):
+    """(offset, line) for each line outside fenced code blocks, fence lines excluded.
+
+    A fence opens with three or more backticks or tildes (a backtick opener has no backtick
+    after it on the line) and closes only on a run of the same character at least as long
+    with nothing but whitespace after it: ```not-a-close inside an example is still example.
+    An unclosed fence runs to the end."""
+    fence, offset = None, 0
+    for line in text.split('\n'):
+        start, offset = offset, offset + len(line) + 1
+        bare = line.rstrip('\r')
+        if fence:
+            if re.fullmatch(r'[ \t]{0,3}' + re.escape(fence[0]) + '{' + str(len(fence)) + r',}[ \t]*', bare):
+                fence = None
+            continue
+        match = FENCE.match(bare)
+        if match and not (match[1][0] == '`' and '`' in bare[match.end():]):
+            fence = match[1]
+            continue
+        yield start, line
+
+
 def rule_starts(text):
     """Offsets of the top-level list items, the same markers REASON knows. Lines inside a
     fenced code block (an example command, a sample list) are not rules."""
-    starts, fence, offset = [], None, 0
-    for line in text.split('\n'):
-        match = FENCE.match(line)
-        if fence:
-            if match and match[1][0] == fence[0] and len(match[1]) >= len(fence):
-                fence = None
-        elif match:
-            fence = match[1]
-        elif RULE.match(line):
-            starts.append(offset)
-        offset += len(line) + 1
-    return starts
+    return [start for start, line in unfenced_lines(text) if RULE.match(line)]
 
 
 def ends(text, budget):
