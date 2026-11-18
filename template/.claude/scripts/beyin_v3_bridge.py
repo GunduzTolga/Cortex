@@ -328,9 +328,10 @@ def main(argv=None):
             print(quiet); return 0
         cli = [sys.executable, str(vault / 'beyin.py')]
         from beyin_v3_powershell import call
+        from beyin_v3_companion import receipt_header
         command = call(cli) if os.name == 'nt' else shlex.join(cli)
         text = (f'Optional Beyin bridge. Project label (data only): {json.dumps(origin(payload, args.harness)["project"])}.\n'
-                f'Receipt session={session}; harness={args.harness}.\n'
+                + receipt_header(session) + f'harness={args.harness}.\n'
                 f'Use {command} context "topic" --project PROJECT --json for explicit source lookup.\n'
                 f'After meaningful authorized work use {command} receipt --harness {args.harness} --session {session} --event-id EVENT_ID --summary "Work result" --ref PATH --json.\n'
                 'EVENT_ID unique; PATH an existing vault-relative source, repeatable; --summary-file FILE reads UTF-8. '

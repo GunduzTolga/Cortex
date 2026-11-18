@@ -13,7 +13,7 @@ import unittest
 from unittest import mock
 import zipfile
 
-from v3_package_helpers import inherited_env, install
+from v3_package_helpers import inherited_env, install, without_hook_clock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'template/.claude/scripts'
@@ -476,7 +476,7 @@ class BridgeTest(unittest.TestCase):
         text = self.invoke(dict(self.payload, event_id='broken'))['hookSpecificOutput']['additionalContext']
         self.assertIn('receipt --harness codex', text)
         self.assertNotIn('Project context', text)
-        self.assertEqual(text, baseline)
+        self.assertEqual(without_hook_clock(text), without_hook_clock(baseline))
         (self.state / 'project-context.json').write_text('[true]', encoding='utf-8')
         self.assertFalse(bridge.read_project_context(self.state))
 
