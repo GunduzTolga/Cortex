@@ -47,6 +47,25 @@ class StrictRetrieveTest(unittest.TestCase):
     def sources(self, query, **kwargs):
         return [record['source'] for record in self.store.retrieve(query, **kwargs)['records']]
 
+    def test_turkish_question_wrappers_do_not_pick_the_note(self):
+        # "hakkında", "notlarda", "neler", "biliyoruz" say how the question is asked; left in,
+        # a note that merely contains them won over the note about the topic.
+        self.ingest('memo', 'Toplantı notları: hakkında konuşulanlar, notlarda geçenler, neler biliyoruz listesi.',
+                    'notes/memo.md')
+        self.ingest('rent', 'Kira sözleşmesi Mart ayında yenilenir.', 'notes/rent.md')
+        self.assertEqual(self.sources('Quartz hakkında notlarda neler biliyoruz', strict=True),
+                         ['knowledge/goplus-quota.md'])
+        self.assertEqual(self.sources('Kira hakkında notlarda neler var', strict=True), ['notes/rent.md'])
+
+    def test_wrappers_do_not_remove_an_explicit_topic_with_the_same_stem(self):
+        self.assertEqual(self.module._strict_query_tokens('not notlarda'), {'not'})
+        self.assertEqual(self.module._strict_query_tokens('konu konusunda'), {'konu'})
+        self.assertEqual(self.module._strict_query_tokens('hakkında Quartz notlarda'), {'quartz'})
+        self.assertEqual(self.module._strict_query_tokens('HAKKINDA İlgili Kira'), {'kira'})
+        self.ingest('topic-note', 'Konu bilgisi burada.', 'notes/topic.md')
+        self.assertEqual(self.sources('konu', strict=True), ['notes/topic.md'])
+        self.assertEqual(self.sources('konu konusunda', strict=True), ['notes/topic.md'])
+
     def test_single_shared_word_is_not_a_match_in_strict_mode(self):
         self.assertEqual(self.sources('is the budget approved', strict=False), ['daily/2026-09-11.md'])
         self.assertEqual(self.sources('is the budget approved', strict=True), [])

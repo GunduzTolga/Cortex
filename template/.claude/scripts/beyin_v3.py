@@ -701,6 +701,24 @@ def query_words(text):
     return {_stem(word) for word in words} - STOPWORDS
 
 
+# How a Turkish question about the notes is worded, not what it is about: "Quartz hakkında
+# notlarda neler biliyoruz". Left in, they stemmed to "hakk", "not", "neler", "biliyoruz" and a
+# note that merely contained those words won over the note about Quartz. Removed as whole words
+# before stemming, and only in strict mode: a real topic with the same stem ("not notlarda",
+# "konu konusunda") stays, and they are not global stopwords.
+STRICT_WRAPPERS = frozenset((
+    "hakkinda", "ilgili", "konusunda", "notlarda", "notlarimizda", "neler", "biliyoruz", "okumaliyim",
+))
+
+
+def _strict_query_tokens(query):
+    """_tokens(query) without the Turkish question wrappers in STRICT_WRAPPERS."""
+    text = _APOSTROPHE_SUFFIX.sub("", str(query))
+    text = unicodedata.normalize("NFKD", text.casefold())
+    text = "".join(c for c in text if not unicodedata.combining(c)).replace("ı", "i")
+    return _tokens(re.sub(r"[a-z0-9]+", lambda word: " " if word.group() in STRICT_WRAPPERS else word.group(), text))
+
+
 def _strict_terms(terms):
     """Filter out non-topical terms in strict mode (#358).
 
@@ -1502,7 +1520,7 @@ class MemoryStore:
         terms = query_tokens - STOPWORDS - project_tokens
         scoped_listing = project is not None and bool(query_tokens & project_tokens) and not (query_tokens - STOPWORDS - project_tokens)
         if strict:
-            terms = _strict_terms(terms)
+            terms = _strict_terms(_strict_query_tokens(query) - STOPWORDS - project_tokens)
             if not terms and not scoped_listing and not snapshot:
                 if candidate_only:
                     return []
