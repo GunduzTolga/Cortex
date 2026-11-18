@@ -252,13 +252,27 @@ def hygiene(vault, state, names=NAMES, target=None):
     return report
 
 
-def hygiene_notice(report):
-    """One line at the top of the session context, only when a handoff file is over its limit."""
+def hygiene_notice(report, *, parallel=False):
+    """One line at the top of the session context, only when a handoff file is over its limit.
+
+    With parallel-session notices on, an oversized Last-Session.md holds other sessions' fresh
+    cards: compacting them just to clear the warning archives live handoffs, so the line offers
+    a limit that fits the file instead."""
     over = [f'{name} is {report["files"][name]["chars"]} chars (limit {report["files"][name]["limit"]})'
             for name in report.get('over_limit', [])]
     if not over:
         return ''
     python = 'py -3' if sys.platform == 'win32' else 'python3'
+    if parallel and 'Last-Session.md' in report.get('over_limit', []):
+        suggested = ((report['files']['Last-Session.md']['chars'] + 999) // 1000) * 1000
+        if suggested <= LIMIT_RANGE[1]:
+            advice = (f'If these cards are still needed, consider: {python} beyin.py preferences '
+                      f'--last-session-chars {suggested} (fits the current file, not future growth). ')
+        else:
+            advice = 'The file exceeds the supported limit; coordinate a handoff review before archiving. '
+        return ('Memory hygiene: ' + '; '.join(over) + '. Parallel-session notices are enabled. '
+                "Do not compact other sessions' fresh cards just to clear this warning. " + advice +
+                'Only edit your own card; coordinate compaction after other sessions finish.\n')
     return ('Memory hygiene: ' + '; '.join(over) + f'. Before other memory writes run: {python} beyin.py companion-compact '
             '(moves old entries verbatim to a private archive, deletes nothing). Do not read the whole file; '
             'afterwards rewrite in place, never append.\n')
@@ -657,7 +671,9 @@ def context(store, budget, session, harness, query='', receipt='', warning='', p
     hygiene_line = ''
     if target is not None:
         try:
-            hygiene_line = hygiene_notice(hygiene(store.vault_root, store.state_dir, tuple(LIMITS), target))
+            from beyin_v3_parallel import enabled as parallel_enabled
+            hygiene_line = hygiene_notice(hygiene(store.vault_root, store.state_dir, tuple(LIMITS), target),
+                                          parallel=parallel_enabled(store.state_dir))
         except Exception:
             hygiene_line = ''  # A size check must never cost the session its context.
     # The clock costs about as much as the shorter wording saves; the record budget stays the same.

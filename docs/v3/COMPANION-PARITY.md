@@ -106,8 +106,12 @@ Düzeltme dört parçadır:
   makineye özeldir. Bozuk bir sınır dosyası sessizce ezilmez, varsayılanlar kullanılır.
 - **Görünürlük.** Sınır aşılırsa companion bağlamının ilk satırı tek bir `Memory hygiene:`
   uyarısıdır. Uyarı dosya adını, gerçek boyutu ve sınırı yazar, ajana dosyayı baştan sona
-  okumamasını ve `companion-compact` çalıştırmasını söyler. Uyarı bağlam bütçesinin
-  içindedir. `doctor` bütün companion dosyalarının boyutunu `companion_hygiene` altında
+  okumamasını ve `companion-compact` çalıştırmasını söyler. Paralel oturum bildirimi
+  açıkken `Last-Session.md` sınırı aşılırsa uyarı bunun yerine başka oturumların taze
+  kartlarını sırf uyarıyı kaldırmak için arşivlememeyi söyler ve dosyayı sığdıran,
+  1.000 karaktere yuvarlanmış `--last-session-chars` önerisini gösterir (en çok 200.000;
+  daha büyük dosyada koordineli inceleme önerilir). Ayar kendiliğinden değişmez. Uyarı
+  bağlam bütçesinin içindedir. `doctor` bütün companion dosyalarının boyutunu `companion_hygiene` altında
   raporlar; `--human` çıktısında sınırı aşan her dosya için bir satır görünür. Bu bir
   senkronizasyon arızası değildir, `doctor` durumunu değiştirmez. `Kurallar.md`,
   `Core.md`/`Soul.md` ve `Journal.md` bilerek birikir; boyutları yalnız bilgi olarak
