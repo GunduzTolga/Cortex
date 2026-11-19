@@ -1,6 +1,7 @@
 """User-owned companion bootstrap and compact, source-verified session context."""
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -650,11 +651,25 @@ def person_sources(vault, target=None):
     return found
 
 
+def _wall_clock():
+    """Local time with its offset. BEYIN_FAKE_NOW (ISO 8601, read as flush.py reads it) pins it for
+    tests; an unreadable value falls back to the real clock instead of breaking a hook."""
+    fake = os.environ.get('BEYIN_FAKE_NOW')
+    if fake:
+        try:
+            parsed = datetime.fromisoformat(fake)
+            return parsed if parsed.tzinfo else parsed.astimezone()
+        except ValueError:
+            pass
+    return datetime.now().astimezone()
+
+
 def receipt_header(session):
     """Receipt session plus the local wall time with its offset, for the session card heading.
 
-    Always this machine's clock: a value in the client payload is never trusted."""
-    now = datetime.now().astimezone().strftime('%Y-%m-%d %H:%M %z')
+    This machine's clock (or the environment's BEYIN_FAKE_NOW): a value in the client payload
+    is never trusted."""
+    now = _wall_clock().strftime('%Y-%m-%d %H:%M %z')
     return f'Receipt session={session}; now={now}; '
 
 

@@ -86,6 +86,15 @@ class HookClockTest(unittest.TestCase):
                                           extra=('--project-root', str(self.root / 'Projects')))
         self.assert_clock(text, before, after)
 
+    def test_environment_pins_the_clock_for_tests_and_a_bad_value_falls_back(self):
+        # BEYIN_FAKE_NOW, as flush.py reads it, so two hook runs a minute apart compare equal.
+        self.env['BEYIN_FAKE_NOW'] = '2031-02-03T04:05:59+03:00'
+        text, _, _ = self.invoke('beyin_v3_hook.py', 'UserPromptSubmit', 'claude', 'Nebula calibration quartz')
+        self.assertEqual(re.findall(CLOCK, text), ['2031-02-03 04:05 +0300'])
+        self.env['BEYIN_FAKE_NOW'] = 'not a time'
+        text, before, after = self.invoke('beyin_v3_hook.py', 'UserPromptSubmit', 'claude', 'Nebula calibration quartz')
+        self.assert_clock(text, before, after)
+
     def test_without_hook_clock_only_removes_the_clock(self):
         text = 'Receipt session=abc; now=2026-11-19 01:30 +0300; --harness CLIENT.\nbody now=x'
         self.assertEqual(without_hook_clock(text), 'Receipt session=abc; now=<clock>; --harness CLIENT.\nbody now=x')
