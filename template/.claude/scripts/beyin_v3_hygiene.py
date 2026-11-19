@@ -745,13 +745,12 @@ def _capture_time(path):
 
     A clone, a sync client or a restore rewrites mtimes, so a week-old capture would read as new;
     the note's own date survives that. A missing or malformed date falls back to the mtime.
+    A read error reaches the folder report: without the frontmatter even whether a card is still
+    waiting is unknown, so it is not guessed from the mtime.
     """
     modified = path.stat().st_mtime
-    try:
-        with path.open(encoding='utf-8', errors='replace') as handle:
-            head = handle.read(4096)
-    except OSError:
-        return modified
+    with path.open(encoding='utf-8', errors='replace') as handle:
+        head = handle.read(4096)
     values = _front_values(head, ('created', 'tur', 'durum', 'yakalandi'))
     if values.get('tur') == 'yakala' and values.get('durum') == 'islendi':
         return None  # a capture card the agent already processed is no longer waiting

@@ -16,7 +16,7 @@ import time
 import unittest
 from unittest.mock import patch
 from concurrent.futures import ThreadPoolExecutor
-from v3_package_helpers import clean_environ, isolated_path
+from v3_package_helpers import clean_environ, isolated_path, without_hook_clock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'template/.claude/scripts'
@@ -276,7 +276,7 @@ class HookInstallerTest(unittest.TestCase):
         contexts = []
         for harness in ('codex', 'claude'):
             response = self.invoke(payload, harness)
-            contexts.append(response['hookSpecificOutput']['additionalContext'])
+            contexts.append(without_hook_clock(response['hookSpecificOutput']['additionalContext']))
             self.assertIn('Synthetic Reviewer', contexts[-1])
             self.assertIn('notes/task.md', contexts[-1])
         self.assertEqual(contexts[0], contexts[1])

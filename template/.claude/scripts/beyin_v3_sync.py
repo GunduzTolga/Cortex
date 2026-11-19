@@ -1570,7 +1570,7 @@ class SyncEngine:
         if text.lstrip().startswith('---'):
             raise ValueError('text must be body only; put frontmatter fields in metadata')
         self._refuse_excluded(source)
-        allowed = {'id', 'title', 'kind', 'revision', 'status', 'owner', 'project', 'visibility', 'facts', 'next_action', 'priority', 'due_at', 'updated_at', 'created_at', 'completion_contract', 'completion_criterion', 'evidence_refs'}
+        allowed = {'id', 'title', 'kind', 'revision', 'status', 'owner', 'project', 'project_id', 'visibility', 'facts', 'next_action', 'priority', 'due_at', 'updated_at', 'created_at', 'completion_contract', 'completion_criterion', 'evidence_refs'}
         if set(metadata) - allowed:
             raise ValueError('unsupported task metadata')
         metadata = dict(metadata)
@@ -1596,6 +1596,11 @@ class SyncEngine:
         for field in ('title', 'project', 'next_action', 'updated_at', 'created_at'):
             if field in metadata and not isinstance(metadata[field], str):
                 raise ValueError('task metadata text fields must be strings')
+        # The folder identity the global bridge reports (sha256 of the project path, 24 hex);
+        # never derived here from the display name, which two folders can share.
+        if 'project_id' in metadata and not (isinstance(metadata['project_id'], str)
+                                             and re.fullmatch(r'[0-9a-f]{24}', metadata['project_id'])):
+            raise ValueError('project_id must be the 24-character project folder identity')
         metadata, meta_redacted = self._protect_metadata(metadata)
         redacted += meta_redacted
         metadata.update(kind='task', revision=1)

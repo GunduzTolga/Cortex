@@ -112,3 +112,10 @@ def rewrite_zip(source, target, mutate):
         for name, content in files.items():
             archive.writestr(name, content)
     return Path(target)
+
+
+def without_hook_clock(text):
+    """A hook context with its `now=` wall-clock stamp masked: two contexts built a minute apart
+    are otherwise equal. Only the stamp format the hooks print is replaced."""
+    import re
+    return re.sub(r'now=\d{4}-\d{2}-\d{2} \d{2}:\d{2} [+-]\d{4};', 'now=<clock>;', text)

@@ -683,8 +683,9 @@ _AFTER_NE = ("zaman", "kadar", "vakit")
 
 
 def query_words(text):
-    """The words of a question as the search takes them: stems, without question words or
-    the conjugated verbs that say how it is asked (_VERB_FORM)."""
+    """The words of a question as the search takes them: stems, without question words,
+    the wrappers of a question about the notes (STRICT_WRAPPERS) or the conjugated verbs that
+    say how it is asked (_VERB_FORM). The strict per-turn (passage) search reads these."""
     text = _APOSTROPHE_SUFFIX.sub("", str(text))
     text = unicodedata.normalize("NFKD", text.casefold())
     text = "".join(c for c in text if not unicodedata.combining(c)).replace("ı", "i")
@@ -695,10 +696,29 @@ def query_words(text):
         asked = ((previous == "ne" and word.startswith(_AFTER_NE))
                  or (word.startswith("kadar") and (asked or previous in ("o", "bu", "su"))))
         previous = word
-        if asked or word in QUESTION_FORMS or (_VERB_FORM.match(word) and not _MIS_NOUN_PLURAL.match(word)):
+        if asked or word in QUESTION_FORMS or word in STRICT_WRAPPERS \
+                or (_VERB_FORM.match(word) and not _MIS_NOUN_PLURAL.match(word)):
             continue
         words.append(word)
     return {_stem(word) for word in words} - STOPWORDS
+
+
+# How a Turkish question about the notes is worded, not what it is about: "Quartz hakkında
+# notlarda neler biliyoruz". Left in, they stemmed to "hakk", "not", "neler", "biliyoruz" and a
+# note that merely contained those words won over the note about Quartz. Removed as whole words
+# before stemming, and only in strict mode: a real topic with the same stem ("not notlarda",
+# "konu konusunda") stays, and they are not global stopwords.
+STRICT_WRAPPERS = frozenset((
+    "hakkinda", "ilgili", "konusunda", "notlarda", "notlarimizda", "neler", "biliyoruz", "okumaliyim",
+))
+
+
+def _strict_query_tokens(query):
+    """_tokens(query) without the Turkish question wrappers in STRICT_WRAPPERS."""
+    text = _APOSTROPHE_SUFFIX.sub("", str(query))
+    text = unicodedata.normalize("NFKD", text.casefold())
+    text = "".join(c for c in text if not unicodedata.combining(c)).replace("ı", "i")
+    return _tokens(re.sub(r"[a-z0-9]+", lambda word: " " if word.group() in STRICT_WRAPPERS else word.group(), text))
 
 
 def _strict_terms(terms):
@@ -1502,7 +1522,7 @@ class MemoryStore:
         terms = query_tokens - STOPWORDS - project_tokens
         scoped_listing = project is not None and bool(query_tokens & project_tokens) and not (query_tokens - STOPWORDS - project_tokens)
         if strict:
-            terms = _strict_terms(terms)
+            terms = _strict_terms(_strict_query_tokens(query) - STOPWORDS - project_tokens)
             if not terms and not scoped_listing and not snapshot:
                 if candidate_only:
                     return []

@@ -52,6 +52,35 @@ except ImportError:
 EXTENDED_TERMINAL_STATUSES = frozenset(TERMINAL_STATUSES | {'completed', 'tamamlandi', 'iptal', 'closed'})
 
 DATE_PATTERN = re.compile(r'(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?')
+FENCE_OPEN = re.compile(r' {0,3}(`{3,}|~{3,})')
+ERROR_CODES = frozenset(('PermissionError', 'FileNotFoundError', 'NotADirectoryError', 'IsADirectoryError',
+                         'OSError', 'UnicodeDecodeError', 'ValueError', 'TypeError', 'RuntimeError',
+                         'ImportError', 'RecursionError', 'not_found'))
+
+
+def _live_lines(lines):
+    """Lines outside fenced code blocks: a fenced example (`status: done`, `### Topic`) is not live.
+
+    A fence opens with three or more backticks or tildes indented at most three spaces (a backtick
+    opener has no backtick in its info string) and closes only on a run of the same character at
+    least as long, followed by nothing but whitespace. An unclosed fence runs to the end.
+    """
+    fence = None
+    for line in lines:
+        if fence:
+            if re.fullmatch(r' {0,3}' + re.escape(fence[0]) + '{' + str(len(fence)) + r',}[ \t]*\r?', line):
+                fence = None
+            continue
+        opened = FENCE_OPEN.match(line)
+        if opened and not (opened[1][0] == '`' and '`' in line[opened.end():]):
+            fence = opened[1]
+            continue
+        yield line
+
+
+def _error_code(value):
+    """Only a diagnostic code leaves a scan, never exception text or a source path."""
+    return value if value in ERROR_CODES else 'scan_error'
 
 
 def _is_safe_file(path: Path) -> bool:
@@ -137,7 +166,7 @@ def _parse_timestamp(val: str) -> float | None:
         return None
 
 
-def _note_frontmatter_timestamp(path: Path, front_keys: tuple[str, ...]) -> float | None:
+def _note_frontmatter_timestamp(path: Path, front_keys: tuple[str, ...], onerror=None) -> float | None:
     """Timestamp from frontmatter keys, prioritizing explicit metadata for sync immunity."""
     try:
         with path.open(encoding='utf-8', errors='replace') as handle:
@@ -149,6 +178,9 @@ def _note_frontmatter_timestamp(path: Path, front_keys: tuple[str, ...]) -> floa
                 ts = _parse_timestamp(raw)
                 if ts is not None:
                     return ts
+    except OSError as exc:
+        if onerror is not None:
+            onerror(exc)
     except Exception:
         pass
     return None
@@ -184,13 +216,15 @@ def _path_key(path: Path) -> tuple:
             return (str(path).lower(),)
 
 
-def _find_top_matching_dirs(vault: Path, matcher, extra_exact: tuple[str, ...] = ()) -> list[Path]:
+def _find_top_matching_dirs(vault: Path, matcher, extra_exact: tuple[str, ...] = (), onerror=None) -> list[Path]:
     vault = Path(vault).resolve()
     matched = []
     seen = set()
     try:
         entries = sorted(vault.iterdir())
-    except OSError:
+    except OSError as exc:
+        if onerror is not None:
+            onerror(exc)
         return []
 
     for entry in entries:
@@ -212,6 +246,14 @@ def _find_top_matching_dirs(vault: Path, matcher, extra_exact: tuple[str, ...] =
     return matched
 
 
+def _inbox_unavailable(reason, error=None):
+    report = {'count': 0, 'oldest_days': None, 'attention': True, 'folders': [],
+              'status': 'unavailable', 'reason': reason}
+    if error is not None:
+        report['error'] = _error_code(error)
+    return report
+
+
 def scan_inbox(vault: Path, now: float, state: Path | None = None) -> dict:
     """Scan inbox items using the unified hygiene inbox report (#253).
 
@@ -224,10 +266,12 @@ def scan_inbox(vault: Path, now: float, state: Path | None = None) -> dict:
     if state is not None:
         try:
             cfg, valid = read_inbox_settings(state)
-            if valid and cfg.get('folders'):
-                folders = cfg['folders']
-        except Exception:
-            folders = None
+        except Exception as exc:
+            return _inbox_unavailable('inbox_settings_unreadable', type(exc).__name__)
+        if not valid:  # a damaged list must not silently become auto-discovery
+            return _inbox_unavailable('inbox_settings_invalid')
+        if cfg.get('folders'):
+            folders = cfg['folders']
 
     try:
         rep = inbox_report(vault, state=state, now=now, folders=folders)
@@ -240,20 +284,22 @@ def scan_inbox(vault: Path, now: float, state: Path | None = None) -> dict:
                 if oldest_days is None or od > oldest_days:
                     oldest_days = od
 
-        return {
+        result = {
             'count': total_notes,
             'oldest_days': oldest_days,
             'attention': rep.get('attention', False),
             'folders': folder_rows,
         }
+        if rep.get('error') or any('error' in row for row in folder_rows):
+            result.update(status='partial' if folder_rows else 'unavailable',
+                          reason='inbox_scan_failed', attention=True)
+            if rep.get('error'):
+                result['error'] = _error_code(rep['error'])
+            result['folders'] = [dict(row, error=_error_code(row['error'])) if 'error' in row else row
+                                 for row in folder_rows]
+        return result
     except Exception as exc:
-        return {
-            'count': 0,
-            'oldest_days': None,
-            'attention': False,
-            'folders': [],
-            'error': str(exc),
-        }
+        return _inbox_unavailable('inbox_scan_failed', type(exc).__name__)
 
 
 def _scan_keys(vault, state):
@@ -263,7 +309,7 @@ def _scan_keys(vault, state):
     return exclusions(state, vault)[0]
 
 
-def _scan_allowed(path, vault, excluded):
+def _scan_allowed(path, vault, excluded, onerror=None):
     from beyin_v3_index import dir_key
     try:
         parts = path.relative_to(vault).parts[:-1]
@@ -274,7 +320,11 @@ def _scan_allowed(path, vault, excluded):
         with path.open(encoding='utf-8', errors='replace') as handle:
             values = _front_values(handle.read(4096), ('visibility', 'trust', 'trusted'))
         return values.get('visibility') != 'private' and values.get('trust') != 'untrusted' and values.get('trusted') != 'false'
-    except (ValueError, OSError):
+    except OSError as exc:
+        if onerror is not None:
+            onerror(exc)
+        return False
+    except ValueError:
         return False
 
 
@@ -294,11 +344,18 @@ def scan_stale_tasks(vault: Path, now: float, stale_days: int = 14, state: Path 
     seen_dirs = set()
     task_folders = []
     seen_files = set()
+    # Only exception class names leave this scan: a source name or a raw filesystem
+    # message may carry private information.
+    errors = []
+
+    def scan_error(exc):
+        errors.append(type(exc).__name__)
 
     def is_task_dir(name: str, folded: str) -> bool:
         return 'task' in folded or 'gorev' in folded
 
-    for folder in _find_top_matching_dirs(vault, is_task_dir, extra_exact=('tasks', '500-tasks', 'gorevler')):
+    for folder in _find_top_matching_dirs(vault, is_task_dir, extra_exact=('tasks', '500-tasks', 'gorevler'),
+                                          onerror=scan_error):
         try:
             res = folder.resolve()
             key = _path_key(res)
@@ -321,12 +378,13 @@ def scan_stale_tasks(vault: Path, now: float, stale_days: int = 14, state: Path 
                 pass
 
     for folder in task_folders:
-        for root, dirs, files in os.walk(folder):
+        for root, dirs, files in os.walk(folder, onerror=scan_error):
             dirs[:] = [d for d in dirs if not d.startswith('.') and d not in CODE_DIRS
                        and not sensitive_excluded(d) and not (Path(root) / d).is_symlink()]
             for f in files:
                 file_path = Path(root) / f
-                if not _scan_allowed(file_path, vault, excluded) or file_path.suffix.lower() != '.md':
+                if file_path.suffix.lower() != '.md' or not _scan_allowed(file_path, vault, excluded,
+                                                                          onerror=scan_error):
                     continue
 
                 f_key = _path_key(file_path)
@@ -336,8 +394,11 @@ def scan_stale_tasks(vault: Path, now: float, stale_days: int = 14, state: Path 
 
                 try:
                     text = file_path.read_text(encoding='utf-8', errors='replace')
-                except OSError:
+                except OSError as exc:
+                    scan_error(exc)
                     continue
+                # A fenced example (`status: done`, `# Heading`) is not the task's own status or title.
+                live_lines = list(_live_lines(text.splitlines()))
 
                 status_val = _front_values(text[:4096], ('status', 'durum'), fold_values=True)
                 status = status_val.get('status') or status_val.get('durum') or 'open'
@@ -346,7 +407,7 @@ def scan_stale_tasks(vault: Path, now: float, stale_days: int = 14, state: Path 
 
                 # Check markdown content for status / checkboxes if not terminal from frontmatter
                 if status not in EXTENDED_TERMINAL_STATUSES:
-                    for line in text.splitlines():
+                    for line in live_lines:
                         m = re.match(r'(?i)^status:\s*([a-zA-Z_-]+)', line.strip())
                         if m:
                             st = m.group(1).lower()
@@ -361,7 +422,7 @@ def scan_stale_tasks(vault: Path, now: float, stale_days: int = 14, state: Path 
                 raw_title_val = _front_values(text[:4096], ('title', 'baslik'), fold_values=False)
                 title = raw_title_val.get('title') or raw_title_val.get('baslik') or ''
                 if not title:
-                    for line in text.splitlines():
+                    for line in live_lines:
                         sline = line.strip()
                         if sline.startswith('#'):
                             title = sline.lstrip('#').strip()
@@ -371,10 +432,14 @@ def scan_stale_tasks(vault: Path, now: float, stale_days: int = 14, state: Path 
 
                 # Date priority: frontmatter ONLY (sync immunity).
                 # Follow core invariant (beyin_v3.py:639): "file mtime is not a date: synced vaults rewrite it".
+                errors_before = len(errors)
                 ts = _note_frontmatter_timestamp(
                     file_path,
-                    ('updated_at', 'updated', 'modified', 'last_modified', 'date_modified', 'created_at', 'created', 'date', 'tarih')
+                    ('updated_at', 'updated', 'modified', 'last_modified', 'date_modified', 'created_at', 'created', 'date', 'tarih'),
+                    onerror=scan_error,
                 )
+                if len(errors) != errors_before:
+                    continue
 
                 try:
                     rel = file_path.relative_to(vault).as_posix()
@@ -404,7 +469,7 @@ def scan_stale_tasks(vault: Path, now: float, stale_days: int = 14, state: Path 
                         stale_tasks.append(task_info)
 
     stale_tasks.sort(key=lambda x: x['age_days'], reverse=True)
-    return {
+    report = {
         'open_count': len(open_tasks),
         'stale_count': len(stale_tasks),
         'undated_count': len(undated_tasks),
@@ -412,6 +477,9 @@ def scan_stale_tasks(vault: Path, now: float, stale_days: int = 14, state: Path 
         'stale_tasks': stale_tasks,
         'undated_tasks': undated_tasks,
     }
+    if errors:
+        report.update(status='partial', reason='task_scan_incomplete', errors=sorted(set(errors)))
+    return report
 
 
 def scan_knowledge_digest(vault: Path, now: float, digest_days: int = 7, state: Path | None = None) -> dict:
@@ -553,7 +621,9 @@ def scan_companion(vault: Path, state: Path | None = None, now: float | None = N
         if _is_safe_file(threads_file):
             try:
                 text = threads_file.read_text(encoding='utf-8', errors='replace')
-                lines = text.splitlines()
+                # Fenced examples (a sample `### Topic` or `## Closed`) are not live threads or sections.
+                lines = list(_live_lines(text.splitlines()))
+                text = '\n'.join(lines)
                 in_active = False
                 has_active_section = False
                 active_lines = []
@@ -623,6 +693,10 @@ def scan_companion(vault: Path, state: Path | None = None, now: float | None = N
 
 def generate_recommendations(inbox: dict, tasks: dict, digest: dict, companion: dict) -> list[str]:
     recs = []
+    if inbox.get('status') in ('partial', 'unavailable'):
+        recs.append('Gelen kutusu taramasi eksik; sayi yalniz okunabilen klasorleri kapsiyor. Klasor erisimini ve inbox-report.json ayarini kontrol edin.')
+    if tasks.get('status') == 'partial':
+        recs.append('Gorev taramasi eksik; sayilar yalniz okunabilen kaynaklari kapsiyor. Dosya/klasor erisimini kontrol edip triage komutunu yeniden calistirin.')
     if inbox.get('count', 0) > 0:
         recs.append(
             f"Gelen kutusunda bekleyen {inbox['count']} kaynak var. Kalici bilgi notlarina donusturmek icin 'beyin-yakala' kullanin."
@@ -689,14 +763,28 @@ def format_human(report: dict) -> str:
     lines = ['=== Ikinci Beyin Sindirim ve Durum Raporu (Triage) ===\n']
     inbox = report.get('inbox', {})
     lines.append('[Gelen Kutusu / Yakalananlar]')
-    lines.append(f"  Bekleyen kaynak: {inbox.get('count', 0)}")
+    if inbox.get('status') == 'unavailable':
+        reason = str(inbox.get('reason', 'inbox_scan_failed'))
+        detail = 'inbox-report.json: ' if reason.startswith('inbox_settings_') else ''
+        lines.append('  Taranamadi: ' + detail + _strip_terminal_controls(reason))
+        if inbox.get('error'):
+            lines.append('  Hata: ' + _error_code(inbox['error']))
+    elif inbox.get('status') == 'partial':
+        lines.append(f"  Taranabilen bekleyen kaynak: {inbox.get('count', 0)} (eksik tarama)")
+        if inbox.get('error'):
+            lines.append('  Hata: ' + _error_code(inbox['error']))
+    else:
+        lines.append(f"  Bekleyen kaynak: {inbox.get('count', 0)}")
     folders = inbox.get('folders', [])
     if folders:
         for f in folders:
-            fn = f.get('folder', '')
+            fn = _strip_terminal_controls(str(f.get('folder', '')))
             cnt = f.get('notes', 0)
             od = f.get('oldest_days')
-            if od is not None:
+            if 'error' in f:
+                detail = f'{cnt} not sayilabildi; tarama eksik' if cnt else 'Taranamadi'
+                lines.append(f"  - {fn}: {detail} ({_error_code(f['error'])})")
+            elif od is not None:
                 lines.append(f"  - {fn}: {cnt} not (en eski: {od} gun once)")
             else:
                 lines.append(f"  - {fn}: {cnt} not")
@@ -709,7 +797,11 @@ def format_human(report: dict) -> str:
     undated_count = tasks.get('undated_count', 0)
     stale_thresh = tasks.get('stale_days_threshold', 14)
     lines.append(f"[Hareketsiz Gorevler] (>{stale_thresh} gun)")
-    summary_parts = [f"Acik gorev: {tasks.get('open_count', 0)}", f"Hareketsiz: {stale_count}"]
+    if tasks.get('status') == 'partial':
+        lines.append('  Gorev taramasi eksik; sayilar yalniz okunabilen kaynaklari kapsiyor.')
+        summary_parts = [f"Taranabilen acik gorev: {tasks.get('open_count', 0)}", f"Hareketsiz: {stale_count}"]
+    else:
+        summary_parts = [f"Acik gorev: {tasks.get('open_count', 0)}", f"Hareketsiz: {stale_count}"]
     if undated_count > 0:
         summary_parts.append(f"Tarihsiz: {undated_count}")
     lines.append('  ' + ', '.join(summary_parts))

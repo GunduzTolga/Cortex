@@ -195,6 +195,44 @@ class HygieneCliTest(unittest.TestCase):
         self.assertIn('Memory hygiene: Last-Session.md is 3024 chars (limit 3000).', self.hook())
         self.assertNotIn('Threads.md is', self.hook())
 
+    def test_parallel_last_session_notice_keeps_other_cards_and_offers_a_limit(self):
+        # With parallel sessions on, the oversized Last-Session holds other sessions' fresh
+        # cards: compacting them to clear the warning archives live handoffs.
+        path = self.write('Last-Session.md', '# Son oturum\n' + 'x' * 3958)
+        self.run_cli('sync')
+        self.run_cli('preferences', '--parallel-sessions', 'on')
+        before = path.read_bytes()
+        text = self.hook()
+        self.assertIn('preferences --last-session-chars 4000', text)
+        self.assertIn("Do not compact other sessions' fresh cards", text)
+        self.assertNotIn('companion-compact', text)
+        self.assertEqual(path.read_bytes(), before)
+        self.run_cli('preferences', '--parallel-sessions', 'off')
+        text = self.hook()
+        self.assertIn('Before other memory writes run:', text)
+        self.assertNotIn('--last-session-chars', text)
+
+    def test_parallel_notice_bounds_and_threads_keep_the_compact_advice(self):
+        report = {'over_limit': ['Last-Session.md'], 'files': {'Last-Session.md': {'chars': 200001, 'limit': 3000}}}
+        text = companion_module.hygiene_notice(report, parallel=True)
+        self.assertIn('exceeds the supported limit', text)
+        self.assertNotIn('--last-session-chars', text)
+        self.assertNotIn('companion-compact', text)
+        report = {'over_limit': ['Threads.md'], 'files': {'Threads.md': {'chars': 9000, 'limit': 8000}}}
+        text = companion_module.hygiene_notice(report, parallel=True)
+        self.assertIn('Before other memory writes run:', text)
+        self.assertNotIn('--last-session-chars', text)
+        self.assertEqual(companion_module.hygiene_notice({'over_limit': []}, parallel=True), '')
+
+    def test_invalid_parallel_settings_keep_the_usual_notice(self):
+        self.write('Last-Session.md', 'x' * 4001)
+        self.run_cli('sync')
+        self.state.mkdir(exist_ok=True)
+        (self.state / 'parallel-sessions.json').write_text('{broken', encoding='utf-8')
+        text = self.hook()
+        self.assertIn('Before other memory writes run:', text)
+        self.assertNotIn('--last-session-chars', text)
+
     def test_limits_are_configurable_machine_local_and_validated_before_saving(self):
         self.oversized()
         saved = self.run_cli('preferences', '--last-session-chars', '0', '--threads-chars', '200000')

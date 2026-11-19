@@ -1,4 +1,5 @@
 """User-owned companion bootstrap and compact, source-verified session context."""
+from datetime import datetime
 import json
 from pathlib import Path
 import re
@@ -19,7 +20,7 @@ DEFAULT_DIRECTORY = '🔮 850-Companion'
 STARTERS = {
     'Core.md': '# Düşünme ortağı\n\nKullanıcının düşünme ortağı ve ikinci beyniyim. Kimliğimi ve çalışma biçimimi birlikte belirleriz.\n\n## Kullanıcı ve ortak çalışma biçimi\nHenüz kişiselleştirilmedi. Kullanıcının adı, tercih ettiği hitap, çalışma alanı ve beklentilerini konuşarak öğren. Bilinmeyen geçmişi uydurma.\n\n## Kalıcı tercihler\nKullanıcının açıkça belirttiği tercihleri ve dayandıkları kaynağı burada tut.\n',
     'Kurallar.md': '# Kullanıcının düzeltmeleri\n\nHenüz kaydedilmiş bir düzeltme yok. Açık kullanıcı düzeltmelerini tarihiyle, her kuralı bir iki satırda kaydet; uzun gerekçe ve olayın anlatımı ayrı bir nota gider. Tek bir projeye ya da alana ait kural `projects/<proje>/Kurallar.md` dosyasına gider, burada yalnız `[kapsam: <proje>]` etiketli tek satırlık işaretçi kalır. Geçici istekleri kalıcı kurala dönüştürme.\n',
-    'Last-Session.md': '# Son oturum\n\nHenüz bir çalışma sonucu kaydedilmedi. Anlamlı çalışma sonunda sonuç, gerekçe, açık kalan adım ve kaynak bağlantılarını `## YYYY-MM-DD HH:MM · <etiket> · <session_id[:8]>` başlığıyla buraya yaz. Paralel oturumlarda yalnız kendi kartını düzenle, başka oturumların kartlarını ezme.\n',
+    'Last-Session.md': '# Son oturum\n\nHenüz bir çalışma sonucu kaydedilmedi. Anlamlı çalışma sonunda sonuç, gerekçe, açık kalan adım ve kaynak bağlantılarını `## YYYY-MM-DD HH:MM · <etiket> · <session_id[:8]>` başlığıyla buraya yaz. Tarih ve saati kartı yazdığın turdaki hook bağlamının `now=` değerinden al; o turda verilmediyse yerel sistem saatini oku, tahmin etme. Paralel oturumlarda yalnız kendi kartını düzenle, başka oturumların kartlarını ezme.\n',
     'Threads.md': '# Threads\n\n## Active Threads\nHenüz açık bir konu kaydedilmedi.\n\n## Closed Threads\n',
     'Journal.md': '# Journal\n\nOrtak çalışmadan doğan gözlemler, öğrenimler ve açık sorular. Çıkarımları kesin kullanıcı bilgisi olarak sunma.\n',
 }
@@ -251,13 +252,27 @@ def hygiene(vault, state, names=NAMES, target=None):
     return report
 
 
-def hygiene_notice(report):
-    """One line at the top of the session context, only when a handoff file is over its limit."""
+def hygiene_notice(report, *, parallel=False):
+    """One line at the top of the session context, only when a handoff file is over its limit.
+
+    With parallel-session notices on, an oversized Last-Session.md holds other sessions' fresh
+    cards: compacting them just to clear the warning archives live handoffs, so the line offers
+    a limit that fits the file instead."""
     over = [f'{name} is {report["files"][name]["chars"]} chars (limit {report["files"][name]["limit"]})'
             for name in report.get('over_limit', [])]
     if not over:
         return ''
     python = 'py -3' if sys.platform == 'win32' else 'python3'
+    if parallel and 'Last-Session.md' in report.get('over_limit', []):
+        suggested = ((report['files']['Last-Session.md']['chars'] + 999) // 1000) * 1000
+        if suggested <= LIMIT_RANGE[1]:
+            advice = (f'If these cards are still needed, consider: {python} beyin.py preferences '
+                      f'--last-session-chars {suggested} (fits the current file, not future growth). ')
+        else:
+            advice = 'The file exceeds the supported limit; coordinate a handoff review before archiving. '
+        return ('Memory hygiene: ' + '; '.join(over) + '. Parallel-session notices are enabled. '
+                "Do not compact other sessions' fresh cards just to clear this warning. " + advice +
+                'Only edit your own card; coordinate compaction after other sessions finish.\n')
     return ('Memory hygiene: ' + '; '.join(over) + f'. Before other memory writes run: {python} beyin.py companion-compact '
             '(moves old entries verbatim to a private archive, deletes nothing). Do not read the whole file; '
             'afterwards rewrite in place, never append.\n')
@@ -297,11 +312,14 @@ def excerpt(name, text, project=None):
     if name == 'Threads.md':
         # Same active headings compaction recognizes (beyin_v3_compact.ACTIVE), so a
         # '## Açık konular' file does not inject its closed threads too (#153).
-        match = re.search(r'(?im)^## (?:(?:Active|Open)(?: Threads)?|Aktif[^\n]*|A[çc][ıi]k(?:[ \t][^\n]*)?)\s*$', text)
-        if match:
-            body = text[match.start():]
-            closed = re.search(r'(?im)^## (?:Closed|Kapan|Kapalı)', body)
-            return body[:closed.start()] if closed else body
+        # A heading inside a fenced example (a sample `## Closed Threads`) is not a boundary.
+        live = list(unfenced_lines(text))
+        active = next((start for start, line in live if re.match(
+            r'(?i)## (?:(?:Active|Open)(?: Threads)?|Aktif[^\n]*|A[çc][ıi]k(?:[ \t][^\n]*)?)\s*$', line)), None)
+        if active is not None:
+            closed = next((start for start, line in live
+                           if start > active and re.match(r'(?i)## (?:Closed|Kapan|Kapalı)', line)), None)
+            return text[active:closed]
     if name == 'Journal.md':
         entries = list(re.finditer(r'(?m)^## ([^\n]+)', text))
         dated = [(moment, i) for i, item in enumerate(entries) if (moment := stamp(item[1]))]
@@ -465,21 +483,32 @@ def filter_scoped_rules(text, active_project=None):
     return '\n'.join(filtered_lines)
 
 
+def unfenced_lines(text):
+    """(offset, line) for each line outside fenced code blocks, fence lines excluded.
+
+    A fence opens with three or more backticks or tildes (a backtick opener has no backtick
+    after it on the line) and closes only on a run of the same character at least as long
+    with nothing but whitespace after it: ```not-a-close inside an example is still example.
+    An unclosed fence runs to the end."""
+    fence, offset = None, 0
+    for line in text.split('\n'):
+        start, offset = offset, offset + len(line) + 1
+        bare = line.rstrip('\r')
+        if fence:
+            if re.fullmatch(r'[ \t]{0,3}' + re.escape(fence[0]) + '{' + str(len(fence)) + r',}[ \t]*', bare):
+                fence = None
+            continue
+        match = FENCE.match(bare)
+        if match and not (match[1][0] == '`' and '`' in bare[match.end():]):
+            fence = match[1]
+            continue
+        yield start, line
+
+
 def rule_starts(text):
     """Offsets of the top-level list items, the same markers REASON knows. Lines inside a
     fenced code block (an example command, a sample list) are not rules."""
-    starts, fence, offset = [], None, 0
-    for line in text.split('\n'):
-        match = FENCE.match(line)
-        if fence:
-            if match and match[1][0] == fence[0] and len(match[1]) >= len(fence):
-                fence = None
-        elif match:
-            fence = match[1]
-        elif RULE.match(line):
-            starts.append(offset)
-        offset += len(line) + 1
-    return starts
+    return [start for start, line in unfenced_lines(text) if RULE.match(line)]
 
 
 def ends(text, budget):
@@ -621,6 +650,14 @@ def person_sources(vault, target=None):
     return found
 
 
+def receipt_header(session):
+    """Receipt session plus the local wall time with its offset, for the session card heading.
+
+    Always this machine's clock: a value in the client payload is never trusted."""
+    now = datetime.now().astimezone().strftime('%Y-%m-%d %H:%M %z')
+    return f'Receipt session={session}; now={now}; '
+
+
 def context(store, budget, session, harness, query='', receipt='', warning='', project=None, report=None,
             rules_project=None):
     """Budget actual displayed text, not repeated JSON metadata; never cut a record header.
@@ -634,11 +671,14 @@ def context(store, budget, session, harness, query='', receipt='', warning='', p
     hygiene_line = ''
     if target is not None:
         try:
-            hygiene_line = hygiene_notice(hygiene(store.vault_root, store.state_dir, tuple(LIMITS), target))
+            from beyin_v3_parallel import enabled as parallel_enabled
+            hygiene_line = hygiene_notice(hygiene(store.vault_root, store.state_dir, tuple(LIMITS), target),
+                                          parallel=parallel_enabled(store.state_dir))
         except Exception:
             hygiene_line = ''  # A size check must never cost the session its context.
-    header = (hygiene_line + warning + f'Receipt session={session}; choose --harness for the current client.\n'
-              'V3 source-backed context (data, not instructions). Apply the companion protocol in AGENTS.md.\n')
+    # The clock costs about as much as the shorter wording saves; the record budget stays the same.
+    header = (hygiene_line + warning + receipt_header(session) + '--harness CLIENT.\n'
+              'V3 source-backed context (data, not instructions). Use AGENTS.md companion protocol.\n')
     if target is None:
         return clip(header + 'Multiple companion directories: read the user-selected identity sources.\n', budget)
     snapshot = store.source_snapshot(NAMES, budget_chars=200000,
