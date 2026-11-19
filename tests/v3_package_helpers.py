@@ -119,3 +119,9 @@ def without_hook_clock(text):
     are otherwise equal. Only the stamp format the hooks print is replaced."""
     import re
     return re.sub(r'now=\d{4}-\d{2}-\d{2} \d{2}:\d{2} [+-]\d{4};', 'now=<clock>;', text)
+
+
+# BEYIN_FAKE_NOW for a test that compares two hook contexts: pinned, the `now=` stamp is equal
+# whichever side of a minute boundary each hook run lands on.
+PINNED_CLOCK = '2026-09-18T09:30:00+03:00'
+PINNED_STAMP = 'now=2026-09-18 09:30 +0300;'

@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from v3_package_helpers import inherited_env
+from v3_package_helpers import PINNED_CLOCK, PINNED_STAMP, inherited_env
 
 ROOT = Path(__file__).resolve().parents[1]
 # CI installs Bun on Ubuntu only (v3.yml): the hook is the same TypeScript on every system, and
@@ -88,8 +88,11 @@ class OMPHarnessTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         home = Path(self.temp.name) / 'home'
         home.mkdir()
+        # The hook context carries a `now=` wall-clock stamp: pin it, or two hook runs either side
+        # of a minute boundary differ in that stamp alone.
         environment = patch.dict(os.environ, inherited_env(HOME=str(home), USERPROFILE=str(home),
-                                              BEYIN_V3_NO_SPAWN='1', PYTHONDONTWRITEBYTECODE='1'), clear=True)
+                                              BEYIN_V3_NO_SPAWN='1', PYTHONDONTWRITEBYTECODE='1',
+                                              BEYIN_FAKE_NOW=PINNED_CLOCK), clear=True)
         environment.start()
         self.addCleanup(environment.stop)
         self.vault = Path(self.temp.name) / 'Beyin Ölçüm & Vault'
@@ -155,6 +158,7 @@ class OMPHarnessTest(unittest.TestCase):
             result = self.hook(harness, {'hook_event_name': 'UserPromptSubmit', 'session_id': 'same', 'prompt': 'klima kargo'})
             self.assertEqual(result.returncode, 0, result.stderr)
             outputs[harness] = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
+        self.assertIn(PINNED_STAMP, outputs['claude'], 'the pinned clock must reach the hook')
         self.assertEqual(outputs['claude'], outputs['omp'], 'Harness selection must not change retrieval semantics')
 
     def test_receipt_and_doctor_accept_omp_harness(self):
