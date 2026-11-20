@@ -131,6 +131,16 @@ class EsitleTest(unittest.TestCase):
         self.assertIsNone(esitle.secret_in('token = aaaaaaaaaaaaaaaaaaaa'))
         self.assertEqual(esitle.secret_in('api_key = Zq8vR2kLm9Xp4Tn7Wc'), 'password or key')
 
+    def test_a_static_call_on_a_secret_named_class_is_no_assignment(self):
+        # PHP/Laravel `Password::sendResetLink(...)` read as `password: <random>` and stopped a sync (2026-11-19).
+        for line in ("$status = Password::sendResetLink($request->only('email'));",
+                     "    Password::reset($request->only('email', 'password', 'token'), function ($user) {",
+                     "$plain = Token::createFromRequestHeadersQuietly($request);"):
+            self.assertIsNone(esitle.secret_in(line), line)
+        self.assertEqual(esitle.secret_in('api_key = Zq8vR2kLm9Xp4Tn7Wc'), 'password or key')
+        self.assertEqual(esitle.secret_in('parola: Xy7kQ2mZ9pL4vR8tW'), 'password or key')
+        self.assertEqual(esitle.secret_in('PASSWORD=Qm4vZ8xR2kT9pL7w'), 'password or key')
+
     def test_a_conflict_is_backed_out_of_and_both_sides_stay(self):
         b = self.clone('b')
         (self.a / 'ilk.md').write_text('# A tarafı\n', encoding='utf-8')
