@@ -68,8 +68,9 @@ PATTERNS = (
     ('JWT', re.compile(r'\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}')),
 )
 # "parola: Xy7…", "api_key = …": counted only where the value looks random (a placeholder or a plain word is not).
+# `(?![:=])`: a static call (`Password::sendResetLink(…)`), `==` or `:=` is no assignment.
 ASSIGNMENT = re.compile(
-    r'\b(?:password|passwd|parola|şifre|sifre|secret|token|api[_-]?key|access[_-]?key)\b["\']?\s*[:=]\s*["\']?([^\s"\'`<>]{16,})',
+    r'\b(?:password|passwd|parola|şifre|sifre|secret|token|api[_-]?key|access[_-]?key)\b["\']?\s*[:=](?![:=])\s*["\']?([^\s"\'`<>]{16,})',
     re.I)
 PLACEHOLDER = re.compile(r'(\$\{|\$\(|xxx|\.\.\.|<|example|ornek|örnek|placeholder|your[_-]|changeme)', re.I)
 
