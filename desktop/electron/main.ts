@@ -18,6 +18,7 @@ import { keepStartWithWindows, listeningNow, startTray, trayNotice } from './ser
 import { WINDOW_DEFAULT, WINDOW_MIN, keepWindowState, readWindowState, windowSizesFor } from './services/windowState';
 import { SHOW_ANYWAY_MS, failedLoadStep } from './services/pageLoad';
 import { applyTheme } from './services/theme';
+import { recordOpening } from './services/timings';
 import { startedByQuietInstall } from './services/updater';
 
 const DEV_SERVER = process.env.VITE_DEV_SERVER_URL;
@@ -291,6 +292,8 @@ async function pageNotLoaded(win: BrowserWindow): Promise<void> {
 let maximizeOnShow = false;
 /** Whether the window made last has been shown yet: its first frame, or the wait for it, shows it once. */
 let firstShown = false;
+/** Whether no window has been made yet this run: the first one's showing is the app's opening (services/timings.ts). */
+let firstWindow = true;
 function reveal(win: BrowserWindow): void {
   seen = true;
   firstShown = true;
@@ -303,6 +306,10 @@ function reveal(win: BrowserWindow): void {
 
 function createWindow(showNow = true): void {
   flushed = 'no';
+  // The app's opening is timed only for the window it opens with, shown at once (services/timings.ts): one
+  // started hidden with Windows and opened hours later from the tray is no opening.
+  const timeOpening = firstWindow && showNow && !HIDDEN;
+  firstWindow = false;
   // Where it was left; filling the screen at the first opening (services/windowState.ts). The e2e run's hidden window keeps the default.
   const kept = HIDDEN ? { bounds: null, maximized: false } : readWindowState();
   maximizeOnShow = kept.maximized;
@@ -356,6 +363,7 @@ function createWindow(showNow = true): void {
   const showFirst = () => {
     if (firstShown || HIDDEN || !showNow || made.isDestroyed() || window !== made) return;
     reveal(made);
+    if (timeOpening) recordOpening();
   };
   made.once('ready-to-show', showFirst);
   const showAnyway = setTimeout(showFirst, SHOW_ANYWAY_MS);
