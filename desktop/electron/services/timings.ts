@@ -26,8 +26,9 @@ export function timingsFile(env: NodeJS.ProcessEnv = process.env, platform: Node
 /** Past this the file is kept as `.1` and begun anew (the engine's TIMES_MAX). */
 export const TIMINGS_MAX = 256 * 1024;
 
-/** The steps the app times; the engine's own are its (beyin_v3_ses.TIME_STEPS). */
-export type AppStep = 'acilis';
+/** The steps the app times; the engine's own are its (beyin_v3_ses.TIME_STEPS). Checked as it runs too: a type is gone by then. */
+export const APP_STEPS = ['acilis'] as const;
+export type AppStep = (typeof APP_STEPS)[number];
 
 /** A moment as the engine writes it: local time with its offset, to the second ("2026-11-24T10:12:03+03:00"). */
 export function localMoment(at: Date): string {
@@ -40,8 +41,9 @@ export function localMoment(at: Date): string {
   );
 }
 
-/** One step's line, or null for a time that could not be one (not a number, below zero, over a day). */
+/** One step's line, or null for a step not named in APP_STEPS or a time that could not be one (not a number, below zero, over a day). */
 export function timingLine(step: AppStep, ms: number, at: Date = new Date()): string | null {
+  if (!(APP_STEPS as readonly string[]).includes(step)) return null;
   if (!Number.isFinite(ms) || ms < 0 || ms > 24 * 3600_000) return null;
   return `${JSON.stringify({ at: localMoment(at), adim: step, ms: Math.round(ms) })}\n`;
 }

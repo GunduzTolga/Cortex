@@ -33,6 +33,17 @@ test('a line is when, the step and how long, as the engine writes it', () => {
   for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY, 25 * 3600_000]) assert.equal(timingLine('acilis', bad), null, String(bad));
 });
 
+test('a step not named is not written, whatever reached it past the type', () => {
+  const dir = folder();
+  const file = path.join(dir, 'sureler.jsonl');
+  for (const step of ['baska', 'Yarın toplantı var', '']) {
+    assert.equal(timingLine(step as unknown as 'acilis', 10), null, step);
+    assert.equal(recordTime(step as unknown as 'acilis', 10, file), false, step);
+  }
+  assert.equal(fs.existsSync(file), false);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('the opening is written once a run, and a full file is kept aside', () => {
   const dir = folder();
   const file = path.join(dir, 'beyin-v3', 'sureler.jsonl');

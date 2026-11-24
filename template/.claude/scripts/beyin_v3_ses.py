@@ -181,6 +181,9 @@ def _beside_others(state):
 # opening), yakala's listener and the voice helper into one file beside every vault's state:
 # {"at": "2026-11-24T10:12:03+03:00", "adim": "yazi", "ms": 840, "ses_sn": 3.2}. The step's name,
 # when, how long and the numbers named for it only: never what was said or written.
+# Read them apart, not added up: `uyandirma_pencere` (phrase heard → window drawn) holds
+# `uyandirma_dogrulama` (phrase heard → Whisper confirmed) inside it, and `yazi` (sound handed over
+# → words back) holds the wait behind sentences still being written, not only Whisper's own time.
 TIMES_FILE = 'sureler.jsonl'
 TIMES_ENV = 'BEYIN_SURELER'  # another file (the tests'); else Windows' own, where the voice runs
 TIMES_MAX = 256 * 1024  # then the file is kept as .1 and begun anew: a few thousand lines at most
@@ -215,8 +218,11 @@ def record_time(step, seconds, path=None, **numbers):
     try:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        if path.is_file() and path.stat().st_size > TIMES_MAX:
-            os.replace(path, path.with_name(path.name + '.1'))
+        try:
+            if path.is_file() and path.stat().st_size > TIMES_MAX:
+                os.replace(path, path.with_name(path.name + '.1'))
+        except OSError:
+            pass  # kept aside next time (the .1 held open, the file gone meanwhile): this line is not lost for it
         with open(path, 'a', encoding='utf-8', newline='\n') as out:
             out.write(json.dumps(line, ensure_ascii=False) + '\n')
     except OSError:
