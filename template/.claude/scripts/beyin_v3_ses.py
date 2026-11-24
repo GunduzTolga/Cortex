@@ -3530,9 +3530,13 @@ def serve(state, config, lines=None):
             warm(model, config, what, lock)  # ready means its first sentence does not pay for the load
             loaded['model'] = model
             # How long it took, for a slow machine to be seen in isci.log (never what is said).
-            log('süre: model hazır, %s, %.1f sn' % (what, now() - started))
-            ses.record_time('ses_modeli', now() - started)  # and in the steps' times (ses.TIMES_FILE)
+            took = now() - started
+            log('süre: model hazır, %s, %.1f sn' % (what, took))
             out(olay='hazir', aciklama=what)
+            # And in the steps' times (ses.TIMES_FILE), after `hazir`: written between the model kept
+            # and `hazir` said, a slow disk let the loop's own words about the wake check come first,
+            # and the listener heard them before it knew the model was there (macOS CI, PR #69).
+            ses.record_time('ses_modeli', took)
         except Exception as exc:
             # What the exception says is the library's English: the log's. The person is told what
             # kind of trouble it is and what to do (ses.load_trouble), by the listener and the tray.
