@@ -175,6 +175,70 @@ def _beside_others(state):
     return os.path.normcase(os.path.abspath(str(Path(state).parent))) == os.path.normcase(os.path.abspath(str(user_base())))
 
 
+# How long the steps a person waits for took, for a slow machine to be measured where it runs (the
+# first install on another computer: "Hey Pyn" took about a minute to show the window, 1 November,
+# and nothing said which part was slow). One JSON line a step, written by the desktop app (its
+# opening), yakala's listener and the voice helper into one file beside every vault's state:
+# {"at": "2026-11-24T10:12:03+03:00", "adim": "yazi", "ms": 840, "ses_sn": 3.2}. The step's name,
+# when, how long and the numbers named for it only: never what was said or written.
+# Read them apart, not added up: `uyandirma_pencere` (phrase heard → window drawn) holds
+# `uyandirma_dogrulama` (phrase heard → Whisper confirmed) inside it, and `yazi` (sound handed over
+# → words back) holds the wait behind sentences still being written, not only Whisper's own time.
+TIMES_FILE = 'sureler.jsonl'
+TIMES_ENV = 'BEYIN_SURELER'  # another file (the tests'); else Windows' own, where the voice runs
+TIMES_MAX = 256 * 1024  # then the file is kept as .1 and begun anew: a few thousand lines at most
+TIME_STEPS = ('acilis', 'ses_modeli', 'uyandirma_dogrulama', 'uyandirma_pencere', 'yazi')
+TIME_NUMBERS = ('ses_sn',)
+
+
+def times_file():
+    """Where the steps' times are written; None where nothing is (the voice is Windows' only, and a
+    test's helper on Linux or macOS is not to write into the person's own folder)."""
+    chosen = os.environ.get(TIMES_ENV)
+    if chosen:
+        return Path(chosen)
+    return user_base() / TIMES_FILE if sys.platform == 'win32' else None
+
+
+def record_time(step, seconds, path=None, **numbers):
+    """One step's time, as a line of times_file(); True when it was written. Only the names in
+    TIME_STEPS and TIME_NUMBERS, and numbers, are written: a word passed by mistake is dropped, not
+    kept. A full disk or a locked file is not the voice's trouble: nothing is said, nothing raised."""
+    import math
+    from datetime import datetime
+    path = path or times_file()
+    if path is None or step not in TIME_STEPS or isinstance(seconds, bool) or not isinstance(seconds, (int, float)) \
+            or not math.isfinite(seconds) or not 0 <= seconds <= 24 * 3600:
+        return False
+    line = {'at': datetime.now().astimezone().isoformat(timespec='seconds'), 'adim': step, 'ms': int(round(seconds * 1000))}
+    for name in TIME_NUMBERS:
+        value = numbers.get(name)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+            line[name] = round(float(value), 1)
+    try:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if path.is_file() and path.stat().st_size > TIMES_MAX:
+                os.replace(path, path.with_name(path.name + '.1'))
+        except OSError:
+            pass  # kept aside next time (the .1 held open, the file gone meanwhile): this line is not lost for it
+        with open(path, 'a', encoding='utf-8', newline='\n') as out:
+            out.write(json.dumps(line, ensure_ascii=False) + '\n')
+    except OSError:
+        return False
+    return True
+
+
+def seconds_since(moment, now):
+    """How long since `moment` (seconds since the epoch, as another process said it), or None when
+    it is not a moment this could be: not a number, in the future, or older than an hour."""
+    if isinstance(moment, bool) or not isinstance(moment, (int, float)):
+        return None
+    elapsed = now - moment
+    return elapsed if 0 <= elapsed <= 3600 else None
+
+
 def _shared_home(state):
     """The person's voice folder for this state, or None for a state kept somewhere of its own (a
     pinned one elsewhere, a test's): that one keeps its voice beside it, as every state did."""
@@ -3466,8 +3530,13 @@ def serve(state, config, lines=None):
             warm(model, config, what, lock)  # ready means its first sentence does not pay for the load
             loaded['model'] = model
             # How long it took, for a slow machine to be seen in isci.log (never what is said).
-            log('süre: model hazır, %s, %.1f sn' % (what, now() - started))
+            took = now() - started
+            log('süre: model hazır, %s, %.1f sn' % (what, took))
             out(olay='hazir', aciklama=what)
+            # And in the steps' times (ses.TIMES_FILE), after `hazir`: written between the model kept
+            # and `hazir` said, a slow disk let the loop's own words about the wake check come first,
+            # and the listener heard them before it knew the model was there (macOS CI, PR #69).
+            ses.record_time('ses_modeli', took)
         except Exception as exc:
             # What the exception says is the library's English: the log's. The person is told what
             # kind of trouble it is and what to do (ses.load_trouble), by the listener and the tray.
@@ -3551,6 +3620,8 @@ def serve(state, config, lines=None):
         the dictation (split_clip): words said straight after the phrase, in one breath, were lost
         between the two streams."""
         nonlocal mode, turn
+        if checking is not None:
+            checking.setdefault('duydu', now())  # the phrase heard: "Hey Pyn" is timed from here
         held = checking is not None and wake is not None
         refresh = inputs_changed(now())
         if wake is not None and wake.running and (refresh or not held):
@@ -3591,6 +3662,7 @@ def serve(state, config, lines=None):
         return True
 
     def confirmed():
+        heard = turns[turn]['checking'].get('duydu')
         turns[turn]['checking'] = None
         # Nothing said after the phrase yet (the window waited for): its own last word was cut as a
         # sentence at once and written on its own, ahead of the first one said, and "Pin." could be
@@ -3599,10 +3671,17 @@ def serve(state, config, lines=None):
             recorder.cut()
             log('uyandırma: sözün kendisi yazılmadı, söylenecek olan bekleniyor')
         out(olay='dinliyor', mikrofon=_device_name(config), tur=turn)
-        out(olay='uyandi', mikrofon=_device_name(config), tur=turn)
+        # When the phrase was heard (`duydu_at`, the epoch's seconds), for the listener to time the
+        # window it opens from it (uyandirma_pencere); how long Whisper's check took, here.
+        if heard is not None:
+            ses.record_time('uyandirma_dogrulama', now() - heard)
+        out(olay='uyandi', mikrofon=_device_name(config), tur=turn, **({'duydu_at': heard} if heard is not None else {}))
 
     def piece(audio, last):
-        jobs.put({'is': 'parca', 'turn': turn, 'audio': audio, 'son': last})
+        # When the sentence's sound was handed to Whisper, and how long it is: its text, when it comes,
+        # is timed from here (`yazi`: the microphone let go of it until the words are said back).
+        jobs.put({'is': 'parca', 'turn': turn, 'audio': audio, 'son': last, 'verildi': now(),
+                  'ses_sn': len(audio) / RATE if audio is not None else 0.0})
 
     def end(keep=True):
         """The microphone let go: what was said since the last sentence is written, if anything
@@ -3667,12 +3746,20 @@ def serve(state, config, lines=None):
             elif command not in ('kaydet', 'iptal'):
                 # Ended while another recording began: its words go in, its end is not news.
                 if text or command:
+                    timed(result, text)
                     out(olay='metin', metin=text, komut=command, son=False, tur=result['turn'])
                 return
         elif not (text or command):
             return
+        timed(result, text)
         # Each sentence names its recording (`tur`): a window takes only those of the one it began.
         out(olay='metin', metin=text, komut=command, son=last, tur=result['turn'])
+
+    def timed(result, text):
+        """A sentence's words said back: how long since its sound was handed over (`yazi`), and how
+        long the sound was. Only when it has words: a dictation's empty end is no sentence."""
+        if text and isinstance(result.get('verildi'), (int, float)):
+            ses.record_time('yazi', now() - result['verildi'], ses_sn=result.get('ses_sn'))
 
     while True:
         try:

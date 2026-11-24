@@ -34,6 +34,26 @@ import beyin_v3_yakala as yakala  # noqa: E402
 
 REAL_REACHES = ses._reaches  # the tests that install stand in for it (setUp): the real one is tried on a stand-in urlopen
 
+# The person's own LOCALAPPDATA as the run began, before any test moves it: what no test may time into.
+PERSON_LOCALAPPDATA = os.environ.get('LOCALAPPDATA')
+_TIMES_DIR = None
+
+
+def setUpModule():
+    """Every helper these tests start, in this process or as a child, times its steps into a file of the
+    tests' own (ses.TIMES_ENV): on Windows the default is the person's %LOCALAPPDATA%\\beyin-v3\\sureler.jsonl,
+    and a test run's `ses_modeli` and `yazi` lines would sit among a real machine's (the review of olcum/sure-gunlugu)."""
+    global _TIMES_DIR
+    _TIMES_DIR = tempfile.TemporaryDirectory(prefix='v3-sureler-modul-')
+    os.environ[ses.TIMES_ENV] = str(Path(_TIMES_DIR.name) / ses.TIMES_FILE)
+
+
+def tearDownModule():
+    os.environ.pop(ses.TIMES_ENV, None)
+    if _TIMES_DIR is not None:
+        _TIMES_DIR.cleanup()
+
+
 
 def popen_from(run):
     """A Popen stand-in made of a test's `run`: the command's output, there at once (pip's step)."""
@@ -1905,6 +1925,85 @@ for line in sys.stdin:
 '''
 
 
+class TimesTest(unittest.TestCase):
+    """The steps' times (ses.TIMES_FILE): a step's name, when and how long, and nothing that was said."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='v3-sureler-')
+        self.addCleanup(self.tmp.cleanup)
+        self.file = Path(self.tmp.name) / 'beyin-v3' / 'sureler.jsonl'
+
+    def lines(self):
+        return [json.loads(line) for line in self.file.read_text(encoding='utf-8').splitlines()]
+
+    def test_a_step_is_written_as_its_name_when_and_how_long_and_named_numbers_only(self):
+        self.assertTrue(ses.record_time('yazi', 1.2345, path=self.file, ses_sn=3.21, metin='Yarın toplantı var', ses_sn_yazi='x'))
+        (line,) = self.lines()
+        self.assertEqual(set(line), {'at', 'adim', 'ms', 'ses_sn'})
+        self.assertEqual((line['adim'], line['ms'], line['ses_sn']), ('yazi', 1234, 3.2))
+        self.assertRegex(line['at'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$')
+        self.assertNotIn('Yarın', self.file.read_text(encoding='utf-8'))
+
+    def test_what_is_not_a_step_or_not_a_time_is_not_written(self):
+        for step, seconds in (('baska', 1.0), ('yazi', -0.1), ('yazi', float('nan')), ('yazi', True), ('yazi', '1'), ('yazi', 90000)):
+            self.assertFalse(ses.record_time(step, seconds, path=self.file), (step, seconds))
+        self.assertFalse(self.file.exists())
+
+    def test_a_full_file_is_kept_aside_and_begun_anew(self):
+        self.file.parent.mkdir(parents=True)
+        self.file.write_text('x' * (ses.TIMES_MAX + 1), encoding='utf-8')
+        self.assertTrue(ses.record_time('acilis', 2.0, path=self.file))
+        self.assertEqual([line['adim'] for line in self.lines()], ['acilis'])
+        self.assertTrue(self.file.with_name('sureler.jsonl.1').is_file())
+
+    def test_a_file_that_cannot_be_kept_aside_still_takes_the_line(self):
+        self.file.parent.mkdir(parents=True)
+        self.file.write_text('x' * (ses.TIMES_MAX + 1), encoding='utf-8')
+        with mock.patch.object(ses.os, 'replace', side_effect=PermissionError(13, 'held open')):
+            self.assertTrue(ses.record_time('yazi', 1.0, path=self.file))
+        self.assertTrue(self.file.read_text(encoding='utf-8').endswith('"adim": "yazi", "ms": 1000}\n'))
+
+    def test_these_tests_time_into_a_file_of_their_own_never_the_persons(self):
+        # On Windows, with no file named, the helper times into the person's %LOCALAPPDATA%: these tests name theirs.
+        person = Path(PERSON_LOCALAPPDATA or Path.home() / 'AppData' / 'Local') / 'beyin-v3' / ses.TIMES_FILE
+        with mock.patch.object(sys, 'platform', 'win32'):
+            used = ses.times_file()
+        self.assertNotEqual(used, person)
+        self.assertEqual(used.parent, Path(_TIMES_DIR.name), 'the module\'s own file')
+        with mock.patch.dict(os.environ, {'LOCALAPPDATA': str(person.parent.parent)}), mock.patch.object(sys, 'platform', 'win32'):
+            self.assertNotEqual(ses.times_file(), person, 'not even with the person\'s LOCALAPPDATA in the environment')
+
+    def test_a_file_that_cannot_be_written_is_not_the_voices_trouble(self):
+        blocked = Path(self.tmp.name) / 'dosya'
+        blocked.write_text('', encoding='utf-8')
+        self.assertFalse(ses.record_time('yazi', 1.0, path=blocked / 'sureler.jsonl'))
+
+    def test_the_file_is_windows_own_or_the_one_named(self):
+        with mock.patch.dict(os.environ, {ses.TIMES_ENV: str(self.file)}):
+            self.assertEqual(ses.times_file(), self.file)
+        with mock.patch.dict(os.environ, {'LOCALAPPDATA': self.tmp.name}), mock.patch.object(sys, 'platform', 'win32'):
+            os.environ.pop(ses.TIMES_ENV, None)
+            self.assertEqual(ses.times_file(), Path(self.tmp.name) / 'beyin-v3' / 'sureler.jsonl')
+        with mock.patch.dict(os.environ, {}), mock.patch.object(sys, 'platform', 'linux'):
+            os.environ.pop(ses.TIMES_ENV, None)
+            self.assertIsNone(ses.times_file(), 'the voice is Windows\' only: a test\'s helper writes nothing of the person\'s')
+
+    def test_a_moment_from_another_process_is_taken_only_when_it_can_be_one(self):
+        self.assertEqual(ses.seconds_since(100.0, 102.5), 2.5)
+        for moment in (None, 'dün', True, 200.0, 100.0 - 7200):
+            self.assertIsNone(ses.seconds_since(moment, 102.5), moment)
+
+    def test_the_listener_times_the_window_the_wake_phrase_opened_once_it_is_drawn(self):
+        drawn, written = [], []
+        window = types.SimpleNamespace(update_idletasks=lambda: drawn.append(1))
+        fake = types.SimpleNamespace(seconds_since=ses.seconds_since, record_time=lambda step, seconds: written.append((step, seconds)))
+        self.assertEqual(yakala.time_wake_window({'olay': 'uyandi', 'duydu_at': 100.0}, window, fake, now=103.25), 3.25)
+        self.assertEqual((drawn, written), ([1], [('uyandirma_pencere', 3.25)]))
+        self.assertIsNone(yakala.time_wake_window({'olay': 'uyandi'}, window, fake, now=103.25), 'an older helper says no moment')
+        self.assertIsNone(yakala.time_wake_window({'olay': 'uyandi', 'duydu_at': 100.0}, None, fake, now=103.25))
+        self.assertEqual(len(written), 1)
+
+
 class TrialWakeTest(unittest.TestCase):
     def test_the_wake_trial_says_what_was_heard_and_whether_the_window_would_open(self):
         events = [{'olay': 'dinliyor', 'sn': 20, 'mikrofon': 'Mikrofon (USB)', 'model': 'large-v3-turbo', 'soz': 'pyn not al'},
@@ -3045,6 +3144,57 @@ class ServeTest(unittest.TestCase):
         self.pause()
         first = self.until('metin')
         self.assertEqual((first['metin'], first['son']), ('Yarın toplantı var.', False))
+
+    def test_a_helper_these_tests_start_times_into_the_tests_file(self):
+        # A test that names no file of its own (all of them but one) still never reaches the person's.
+        module_file = Path(os.environ[ses.TIMES_ENV])
+        before = module_file.read_text(encoding='utf-8') if module_file.is_file() else ''
+        self.serve()  # its model loads: `ses_modeli`
+        deadline = time.monotonic() + 5
+        while (module_file.read_text(encoding='utf-8') if module_file.is_file() else '') == before and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(module_file.parent, Path(_TIMES_DIR.name))
+        self.assertIn('"adim": "ses_modeli"', module_file.read_text(encoding='utf-8')[len(before):])
+
+    def test_the_wake_phrase_and_each_sentence_are_timed_never_what_was_said(self):
+        # 1 November: on another computer "Hey Pyn" took about a minute to show the window, and nothing said which
+        # part was slow. The helper writes how long Whisper's check took and how long each sentence took to come
+        # back (ses.TIMES_FILE), and tells the listener when the phrase was heard, for it to time its window.
+        times = Path(self.tmp.name) / 'sureler.jsonl'
+        environment = mock.patch.dict(os.environ, {ses.TIMES_ENV: str(times)})
+        environment.start()
+        self.addCleanup(environment.stop)
+        self.serve(uyandirma=True)
+        self.written.update({'once': 'Payn, not al.', 'once+al': 'Payn, not al.', 'al+yarin': 'Al. Yarın toplantı var.'})
+        self.wake.verdicts = ['aday']
+        self.until_recording()
+        heard = self.clock.t
+        self.recorder.speak('al')
+        self.quiet()
+        self.pause(ses.WAKE_AFTER_SN)
+        woke = self.until('uyandi')
+        self.assertEqual(woke['duydu_at'], heard, 'the listener is told when the phrase was heard')
+        self.hold.clear()  # Whisper takes its time with the sentence
+        self.recorder.speak('yarin')
+        self.pause()
+        given = self.clock.t
+        deadline = time.monotonic() + 5
+        while len(self.asked) < 2 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.clock.t += 2.5
+        self.hold.set()
+        self.until('metin')
+        lines = [json.loads(line) for line in times.read_text(encoding='utf-8').splitlines()]
+        steps = {line['adim']: line for line in lines}
+        self.assertEqual(steps['uyandirma_dogrulama']['ms'], round(ses.WAKE_AFTER_SN * 1000))
+        self.assertEqual(steps['yazi']['ms'], round((self.clock.t - given) * 1000), 'from the sound handed over to the words back')
+        self.assertEqual(steps['yazi']['ses_sn'], 1.0)
+        self.assertIn('ses_modeli', steps)
+        for line in lines:
+            self.assertLessEqual(set(line), {'at', 'adim', 'ms', 'ses_sn'}, line)
+        text = times.read_text(encoding='utf-8')
+        for said in ('Yarın', 'toplantı', 'Payn', 'not al', 'Mikrofon'):
+            self.assertNotIn(said, text, 'never what was said, nor the microphone')
 
     def test_on_the_processor_the_wake_phrase_is_checked_by_a_small_model_of_its_own(self):
         # 21 October: on an Intel laptop's processor the dictation's model took half a minute a

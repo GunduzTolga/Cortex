@@ -28,6 +28,26 @@ import beyin_v3_ses as ses  # noqa: E402
 import beyin_v3_telegram as telegram  # noqa: E402
 import beyin_v3_yakala as yakala  # noqa: E402
 
+# The person's own LOCALAPPDATA as the run began, before any test moves it: what no test may time into.
+PERSON_LOCALAPPDATA = os.environ.get('LOCALAPPDATA')
+_TIMES_DIR = None
+
+
+def setUpModule():
+    """Every helper these tests start, in this process or as a child, times its steps into a file of the
+    tests' own (ses.TIMES_ENV): on Windows the default is the person's %LOCALAPPDATA%\\beyin-v3\\sureler.jsonl,
+    and a test run's `ses_modeli` and `yazi` lines would sit among a real machine's (the review of olcum/sure-gunlugu)."""
+    global _TIMES_DIR
+    _TIMES_DIR = tempfile.TemporaryDirectory(prefix='v3-sureler-telegram-')
+    os.environ[ses.TIMES_ENV] = str(Path(_TIMES_DIR.name) / ses.TIMES_FILE)
+
+
+def tearDownModule():
+    os.environ.pop(ses.TIMES_ENV, None)
+    if _TIMES_DIR is not None:
+        _TIMES_DIR.cleanup()
+
+
 TOKEN = '123456789:' + 'A' * 35
 BOT = {'id': 900, 'is_bot': True, 'first_name': 'Pyn', 'username': 'pyn_cortex_bot'}
 PERSON = {'id': 42, 'is_bot': False, 'first_name': 'Tolga', 'last_name': 'Gündüz', 'username': 'tolga'}

@@ -10,7 +10,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from v3_package_helpers import inherited_env
+from v3_package_helpers import PINNED_CLOCK, inherited_env
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'template/.claude/scripts'
@@ -36,7 +36,10 @@ class ParallelSessionsTest(unittest.TestCase):
         self.vault.mkdir()
         self.markers = self.state / 'session-markers'
         self.count = 0
-        self.env = inherited_env(BEYIN_V3_NO_SPAWN='1', PYTHONDONTWRITEBYTECODE='1', PYTHONIOENCODING='utf-8')
+        # Hook outputs compared whole carry the `now=` stamp: pinned, or two runs either side of a minute differ
+        # (PR #69, ubuntu/3.13: '10:58' != '10:59').
+        self.env = inherited_env(BEYIN_V3_NO_SPAWN='1', PYTHONDONTWRITEBYTECODE='1', PYTHONIOENCODING='utf-8',
+                                 BEYIN_FAKE_NOW=PINNED_CLOCK)
         self.env.pop('BEYIN_V3_FILTER_HARNESS_TURNS', None)
         # A real install: the hook under test is the installed copy, not the template.
         result = subprocess.run([sys.executable, str(ROOT / 'scripts/install_v3.py'), '--vault', str(self.vault),

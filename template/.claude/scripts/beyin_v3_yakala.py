@@ -3871,6 +3871,8 @@ def listen_windows(vault, state, spec=None, mutex_name=LISTENER_MUTEX, stop_name
                     say_voice()
                 if kind == 'uyandi' and not windows:
                     open_window(windows_context(read_url=False), listening=True)  # "Pyn, not al": the window opens listening
+                    if windows:
+                        time_wake_window(event, windows[-1], ses)
                     if windows and hasattr(windows[-1], 'voice_event'):
                         tell(windows[-1], event)  # and says which microphone it listens to
                     continue
@@ -3975,6 +3977,23 @@ def stop_windows_listener(stop_name=LISTENER_STOP, mutex_name=LISTENER_MUTEX, wa
 def time_now():
     import time
     return round(time.time(), 3)
+
+
+def time_wake_window(event, window, ses, now=None):
+    """"Hey Pyn" until the window it opened is drawn (`uyandirma_pencere` in ses.TIMES_FILE), timed
+    from when the helper heard the phrase (`duydu_at`); the seconds, or None. The window is drawn
+    first (update_idletasks): built is not yet on the screen. Never the phrase or what follows it."""
+    import time
+    if window is None or ses is None:
+        return None
+    try:
+        window.update_idletasks()
+    except Exception:
+        pass
+    elapsed = ses.seconds_since(event.get('duydu_at'), time.time() if now is None else now)
+    if elapsed is not None:
+        ses.record_time('uyandirma_pencere', elapsed)
+    return elapsed
 
 
 # ---------------------------------------------------------------- install / remove
