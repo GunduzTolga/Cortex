@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from v3_package_helpers import inherited_env
+from v3_package_helpers import PINNED_CLOCK, inherited_env
 
 ROOT = Path(os.environ.get('BEYIN_TEST_REPO', Path(__file__).resolve().parents[1]))
 COMPANION = '🔮 850-Companion'
@@ -61,6 +61,10 @@ class SnapshotTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='issue374-snapshot-')
         self.addCleanup(self.tmp.cleanup)
+        # Two openings compared whole carry the `now=` stamp: pinned, or one either side of a minute differs.
+        clock = mock.patch.dict(os.environ, {'BEYIN_FAKE_NOW': PINNED_CLOCK})
+        clock.start()
+        self.addCleanup(clock.stop)
         root = Path(self.tmp.name)
         self.vault = root / 'vault'
         (self.vault / COMPANION).mkdir(parents=True)
