@@ -512,7 +512,20 @@ def rule_starts(text):
     return [start for start, line in unfenced_lines(text) if RULE.match(line)]
 
 
-def ends(text, budget):
+# The rule file's first line, for one whose newest rules are added at its end: an opening that cannot
+# hold every rule keeps the newest whole ones there, not the first and last few with the middle cut.
+LATEST_RULES = '<!-- beyin:rules-order=latest -->'
+
+
+def _rule_gap(head, tail, first, last, total, report):
+    """The opening's two kept parts with the rules between them named; which ones, in `report` too."""
+    count = last - first + 1
+    if report is not None:
+        report['omitted_rules'] = {'first': first, 'last': last, 'count': count, 'total': total}
+    return head + f'\n[truncated: rules {first}-{last} ({count} of {total}) omitted here; read source]\n' + tail
+
+
+def ends(text, budget, *, rules_report=None):
     """Opening plus closing lines of a rule set, with the omitted rules named.
 
     The first marker is sized with the widest form the final one can take, so the
@@ -528,6 +541,15 @@ def ends(text, budget):
         widest = f'\n[truncated: rules {total}-{total} ({total} of {total}) omitted here; read source]\n'
         gap = max(gap, widest, key=len)
     keep = budget - len(gap)
+    if total and text.startswith(LATEST_RULES + '\n'):
+        if keep < 0:
+            return None
+        # The newest whole rules from the file's end, within the same share.
+        first_kept = next((i for i, offset in enumerate(rules) if len(text) - offset <= keep), total)
+        tail = text[rules[first_kept]:] if first_kept < total else ''
+        if first_kept == 0:
+            return '\n[truncated: read source]\n' + tail  # only what came before the first rule was cut
+        return _rule_gap('', tail, 1, first_kept, total, rules_report)
     if keep < 80:
         return None
     # Cut on line boundaries so neither end is a half rule; the closing part also takes
@@ -550,15 +572,16 @@ def ends(text, budget):
             head, grown = text[:end], True
     first = sum(rule < len(head) for rule in rules) + 1
     omitted = sum(len(head) <= rule < start for rule in rules)
-    what = f'rules {first}-{first + omitted - 1} ({omitted} of {total})' if omitted > 0 else f'{start - len(head)} characters'
-    return head + f'\n[truncated: {what} omitted here; read source]\n' + closing
+    if omitted > 0:
+        return _rule_gap(head, closing, first, first + omitted - 1, total, rules_report)
+    return head + f'\n[truncated: {start - len(head)} characters omitted here; read source]\n' + closing
 
 
-def clip(text, budget, tail=False, both=False):
+def clip(text, budget, tail=False, both=False, *, rules_report=None):
     if len(text) <= budget:
         return text
     if both:
-        kept = ends(text, budget)
+        kept = ends(text, budget, rules_report=rules_report)
         if kept:
             return kept
     marker = '\n[truncated: read source]\n'
@@ -812,10 +835,12 @@ def context(store, budget, session, harness, query='', receipt='', warning='', p
             lengths = share(available, parts)
         rendered, rules = header + notice, None
         for i, (label, body, name) in enumerate(parts):
+            rules_report = None
             if name == 'Kurallar.md' and i < len(records):  # project rule files come after the records
                 rules = {'chars': len(sections[i][1]), 'share': lengths[i], 'clipped': lengths[i] < len(body),
                          'reasons_omitted': body != sections[i][1]}
-            rendered += label + clip(body, lengths[i], both=name == 'Kurallar.md',
+                rules_report = rules  # and which rules the opening leaves out (`omitted_rules`), by number
+            rendered += label + clip(body, lengths[i], both=name == 'Kurallar.md', rules_report=rules_report,
                                      tail=name == 'Kurallar.md' or (name == 'Journal.md' and not re.search(r'(?m)^## ', body)))
         return rendered, rules
 

@@ -244,14 +244,35 @@ class InstalledOpeningTest(unittest.TestCase):
         numbers = [int(n) for n in re.findall(r'(?m)^- R(\d{4}) ', shown)]
         self.assertEqual(numbers, list(range(1, first)) + list(range(last + 1, count + 1)))
 
+    def test_latest_rule_order_preserves_complete_newest_items(self):
+        # Rules added at the end of the file are the newest; the opening kept the first and last few and
+        # dropped the middle. Marked at the top, the newest whole rules are kept and the oldest are named as cut.
+        raw, count = rules_file(15600)
+        self.rules('<!-- beyin:rules-order=latest -->\n' + raw)
+        context = self.session_start()
+        self.assertLessEqual(len(context), 5000)
+        shown = section(context, 'Kurallar.md')
+        first, last, omitted, total = map(int, MARKER.search(shown).groups())
+        self.assertEqual((first, last, omitted, total), (1, omitted, omitted, count))
+        numbers = [int(n) for n in re.findall(r'(?m)^- R(\d{4}) ', shown)]
+        self.assertEqual(numbers, list(range(last + 1, count + 1)))
+        self.assertTrue(numbers)
+        self.assertNotIn('beyin:rules-order', shown)
+
     def test_doctor_names_the_opening_ceiling_and_writes_nothing(self):
         self.rules(rules_file(45600)[0])
-        self.session_start()
+        initial_context = self.session_start()
         before = self.tree()
         report = json.loads(self.run_cli(self.vault / 'beyin.py', 'doctor', '--json'))['companion_rules_opening']
         human = self.run_cli(self.vault / 'beyin.py', 'doctor', '--human')
         self.assertEqual(self.tree(), before, 'doctor must not write')
         self.assertEqual((report['status'], report['budget'], report['harness']), ('clipped', 5000, 'claude'))
+        # Which rules the opening leaves out, by number (never their text), for the person to see.
+        first, last, omitted, total = map(int, MARKER.search(section(initial_context, 'Kurallar.md')).groups())
+        self.assertEqual(report['omitted_rules'], {'first': first, 'last': last, 'count': omitted, 'total': total})
+        self.assertEqual(report['measurement'], 'reference_opening')
+        self.assertIn('Oturuma ozel bildirimler gercek acilista bu payi azaltabilir.', human)
+        self.assertIn(f'Gosterilmeyen kural siralari {first}-{last} ({omitted}/{total}).', human)
         self.assertIn(f'Kurallar.md acilista kirpiliyor (bilgi): kural metni {report["chars"]} karakter; '
                       f'Claude Code acilisi bu ayarlarla (5000 karakter) en fazla {report["share"]} karakterini tam gosterir',
                       human)
