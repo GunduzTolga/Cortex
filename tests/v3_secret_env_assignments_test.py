@@ -86,6 +86,33 @@ class SecretEnvAssignmentsTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(redact(name + '=' + VALUE, self.state), ('[REDACTED]', 1))
 
+    def test_markdown_assignment_label_and_provider_formats(self):
+        # A backtick closes an unquoted value: an empty assignment shown in Markdown is a label, not a secret.
+        self.assertEqual(redact("Use `SECRET_KEY=` in the example.", self.state),
+                         ("Use `SECRET_KEY=` in the example.", 0))
+        for text in (f"APP_API_KEY={VALUE}", f"SECRET_KEY={VALUE}",
+                     f"Authorization: Token {VALUE}", f"glpat-{VALUE}"):
+            with self.subTest(format=text.split()[0]):
+                self.assertEqual(redact(text, self.state), ("[REDACTED]", 1))
+
+    def test_a_private_key_without_its_end_line_hides_its_body(self):
+        # Only the BEGIN line was masked when the END line was missing (a key pasted cut short):
+        # the base64 body, the key itself, stayed in the note.
+        begin = "-----BEGIN RSA PRIVATE KEY-----"
+        body = "QUJD" * 16  # Synthetic base64, no private key.
+        masked, count = redact(f"{begin}\n{body}\n{body}\nsonraki satır kalır", self.state)
+        self.assertNotIn(body, masked)
+        self.assertEqual((masked, count), ("[REDACTED]\nsonraki satır kalır", 1))
+
+    def test_pem_body_is_masked_without_trailer_and_does_not_swallow_prose(self):
+        begin = "-----BEGIN PRIVATE KEY-----"
+        body = "QUJD" * 16  # Synthetic base64, no private key.
+        escaped = json.dumps(f'{begin}\n{body}\n-----END PRIVATE KEY-----')
+        self.assertEqual(redact(escaped, self.state), ('"[REDACTED]"', 1))
+        text = f"{begin}\r\n{body}\r\n{begin}\r\n{body}\r\nLabel: retained words"
+        self.assertEqual(redact(text, self.state),
+                         ("[REDACTED]\r\n[REDACTED]\r\nLabel: retained words", 2))
+
     def test_tokenizer_special_token_attributes_are_not_credentials(self):
         # Prefix support must not turn common model code into a secret: a masked note loses the
         # snippet, and Jev's _safe refuses every query that finds such a note.
