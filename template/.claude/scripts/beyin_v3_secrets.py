@@ -32,7 +32,9 @@ _SPECIAL_TOKEN = (r"""(?a:<\|?/?[a-z][a-z_./-]{0,60}(?:_?\d{1,4})?\|?>|\[(?-i:[A
 _CODE_REFERENCE = (r"""(?a:(?-i:[a-z_])[a-z_]*(?=[.(\[])(?:\.[a-z_]+|\([^()\n]*\)|\[[^\[\]\n]*\])+)""")
 _NOT_A_SECRET = (r"""(?!\\{0,8}["\'`]?""" + _SPECIAL_TOKEN + r"""\\{0,8}["\'`]?""" + _VALUE_END +
                  r"""|""" + _CODE_REFERENCE + _VALUE_END + r""")""")
-_SECRET_VALUE = _NOT_A_SECRET + r"""(?:\\{0,8}["\']\S{8,}\\{0,8}["\']|[^"\'\s,;][^\s,;]{7,})"""
+# A backtick quotes a value as " and ' do (TOKEN=`...` is masked whole); an unquoted value ends at one,
+# so `GITHUB_TOKEN=...` keeps its closing backtick and `SECRET_KEY=` shown in Markdown stays a label.
+_SECRET_VALUE = _NOT_A_SECRET + r"""(?:\\{0,8}["\'\x60]\S{8,}\\{0,8}["\'\x60]|[^"\'\x60\s,;][^\x60\s,;]{7,})"""
 _QUOTE = r"""\\{0,8}["\'`]"""
 # A string literal in code: an optional prefix (f, b, r, rb), then any quote kind, triple and typographic
 # quotes included. The value runs to the matching closing quote, so it may hold spaces or the other
@@ -62,8 +64,22 @@ BUILTIN_PATTERNS = (
     # or dash before the key, or a sentence-ending period after it, still redacts.
     re.compile(r"\bsk-[A-Za-z0-9_-]{20,255}(?![A-Za-z0-9_-])"),
     re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
-    re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"),
-    re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),
+    # A whole private key, also inside an escaped string (\\n) or with spaces in it: up to its own END line,
+    # never past the next BEGIN or END, so a cut key cannot make the scan run on through the text.
+    re.compile(r"-----BEGIN (?P<keytype>[A-Z0-9 ]*PRIVATE KEY)-----"
+               r"(?:(?!-----(?:BEGIN|END) )[\s\S])*"
+               r"-----END (?P=keytype)-----"),
+    # A key without its END line (pasted cut short): the BEGIN line was masked and the base64 body, the key
+    # itself, stayed. Its body lines go with it, line by line, up to the first line that is not base64:
+    # a second key or a sentence after it is not taken.
+    re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"
+               r"(?:[ \t]*\r?\n[ \t]*(?:Proc-Type:|DEK-Info:)[^\r\n]*){0,2}"
+               r"(?:[ \t]*\r?\n(?=[ \t]*\r?\n))?"
+               r"(?:[ \t]*\r?\n[ \t]*[A-Za-z0-9+/]{4,}={0,2}(?=[ \t]*(?:\r?\n|\Z)))*"
+               r"(?:[ \t]*\r?\n[ \t]*-----END [A-Z0-9 ]*PRIVATE KEY-----)?"),
+    # GitHub-style "Authorization: token …" (the bearer form below needs "bearer") and GitLab personal tokens.
+    re.compile(r"(?i)\bauthorization[ \t]*:[ \t]*token[ \t]+[A-Za-z0-9._~+/=-]{8,}"),
+    re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])"),
     re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{20,}"),
     # Provider formats with a fixed, distinctive prefix. Stripe keys use underscores,
     # so the dashed sk- pattern above never sees them (#151).

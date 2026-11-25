@@ -446,7 +446,13 @@ def human_result(result, command, installed_version=None):
                          ' karakter; Claude Code acilisi bu ayarlarla (' + str(rules_opening['budget']) +
                          ' karakter) en fazla ' + str(rules_opening['share']) + ' karakterini tam gosterir, aradaki kurallar atlanir' +
                          (' (gerekceler de cikarildi)' if rules_opening.get('reasons_omitted') else '') +
-                         '. Kurallari kisa tut; uzun gerekceyi ve ayrintiyi ayri bir nota (or. Kurallar-Detay.md) tasi.')
+                         '. Oturuma ozel bildirimler gercek acilista bu payi azaltabilir. '
+                         'Kurallari kisa tut; uzun gerekceyi ve ayrintiyi ayri bir nota (or. Kurallar-Detay.md) tasi; '
+                         'en yeni kurallari sona ekliyorsan dosyanin ilk satirina <!-- beyin:rules-order=latest --> koy.')
+            omitted = rules_opening.get('omitted_rules')
+            if omitted:
+                lines.append(f'Gosterilmeyen kural siralari {omitted["first"]}-{omitted["last"]} '
+                             f'({omitted["count"]}/{omitted["total"]}).')
         references = result.get('instruction_references') or {}
         if references.get('dead_count'):
             shown = ', '.join(entry['file'] + ':' + str(entry['line']) + ' -> ' + entry['target']
