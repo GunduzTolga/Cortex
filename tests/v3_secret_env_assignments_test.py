@@ -95,6 +95,18 @@ class SecretEnvAssignmentsTest(unittest.TestCase):
             with self.subTest(format=text.split()[0]):
                 self.assertEqual(redact(text, self.state), ("[REDACTED]", 1))
 
+    def test_a_value_inside_backticks_is_masked_and_an_empty_label_is_not(self):
+        # A backtick is a quote around a value (TOKEN=`...`), as " and ' are: masked whole. An empty
+        # assignment shown in Markdown (`SECRET_KEY=` then a space) has no value and is kept.
+        for text in ('TOKEN=`abcd1234efghij`', 'PASSWORD=`hunter2hunter2`'):
+            with self.subTest(text=text):
+                self.assertEqual(redact(text, self.state), ('[REDACTED]', 1))
+        self.assertEqual(redact('api_key = `Zq8vR2kLm9Xp4Tn7Wc` sonra', self.state), ('[REDACTED] sonra', 1))
+        self.assertEqual(redact('`GITHUB_TOKEN=abcd1234efgh5678`', self.state), ('`[REDACTED]`', 1))
+        for label in ('Use `SECRET_KEY=` in the example.', '`TOKEN=` ile başlayan satır'):
+            with self.subTest(label=label):
+                self.assertEqual(redact(label, self.state), (label, 0))
+
     def test_a_private_key_without_its_end_line_hides_its_body(self):
         # Only the BEGIN line was masked when the END line was missing (a key pasted cut short):
         # the base64 body, the key itself, stayed in the note.

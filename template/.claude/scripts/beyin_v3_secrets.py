@@ -32,8 +32,9 @@ _SPECIAL_TOKEN = (r"""(?a:<\|?/?[a-z][a-z_./-]{0,60}(?:_?\d{1,4})?\|?>|\[(?-i:[A
 _CODE_REFERENCE = (r"""(?a:(?-i:[a-z_])[a-z_]*(?=[.(\[])(?:\.[a-z_]+|\([^()\n]*\)|\[[^\[\]\n]*\])+)""")
 _NOT_A_SECRET = (r"""(?!\\{0,8}["\'`]?""" + _SPECIAL_TOKEN + r"""\\{0,8}["\'`]?""" + _VALUE_END +
                  r"""|""" + _CODE_REFERENCE + _VALUE_END + r""")""")
-# An unquoted value also ends at a backtick: `SECRET_KEY=` shown in Markdown is a label, not a value.
-_SECRET_VALUE = _NOT_A_SECRET + r"""(?:\\{0,8}["\']\S{8,}\\{0,8}["\']|[^"\'\x60\s,;][^\x60\s,;]{7,})"""
+# A backtick quotes a value as " and ' do (TOKEN=`...` is masked whole); an unquoted value ends at one,
+# so `GITHUB_TOKEN=...` keeps its closing backtick and `SECRET_KEY=` shown in Markdown stays a label.
+_SECRET_VALUE = _NOT_A_SECRET + r"""(?:\\{0,8}["\'\x60]\S{8,}\\{0,8}["\'\x60]|[^"\'\x60\s,;][^\x60\s,;]{7,})"""
 _QUOTE = r"""\\{0,8}["\'`]"""
 # A string literal in code: an optional prefix (f, b, r, rb), then any quote kind, triple and typographic
 # quotes included. The value runs to the matching closing quote, so it may hold spaces or the other
